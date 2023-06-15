@@ -21,16 +21,12 @@ use anyhow::Result;
 use itertools::Itertools;
 use madsim::time::sleep;
 use rand::seq::SliceRandom;
-use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 
-// TODO: rename cordon into schedulability
-
-// TODO: rename these structs
 struct ActorOnPu {
     actor_id: u32,
     parallel_units_id: u32,
@@ -47,9 +43,9 @@ struct FragmentsAndWorkers {
     workers: Vec<WorkerNode>,
 }
 
-// Get the ids of all parallel unit which are located on cordoned workers
-fn pu_ids_on_cordoned_nodes(all_workers: &Vec<WorkerNode>) -> HashSet<u32> {
-    let cordoned_nodes_ids = all_workers
+// Get the ids of all parallel unit which are located on unschedulable workers
+fn pu_ids_on_unschedulable_nodes(all_workers: &Vec<WorkerNode>) -> HashSet<u32> {
+    let unschedulable_nodes_ids = all_workers
         .iter()
         .filter(|w| {
             !w.get_property()
@@ -58,34 +54,38 @@ fn pu_ids_on_cordoned_nodes(all_workers: &Vec<WorkerNode>) -> HashSet<u32> {
         })
         .map(|n| n.id)
         .collect_vec();
-    let mut cordoned_pu_ids: Vec<Vec<ParallelUnit>> = vec![];
+    let mut unschedulable_pu_ids: Vec<Vec<ParallelUnit>> = vec![];
     for worker in all_workers {
-        if cordoned_nodes_ids.contains(&worker.id) {
-            cordoned_pu_ids.push(worker.parallel_units.clone());
+        if unschedulable_nodes_ids.contains(&worker.id) {
+            unschedulable_pu_ids.push(worker.parallel_units.clone());
         }
     }
-    cordoned_pu_ids.iter().flatten().map(|pu| pu.id).collect()
+    unschedulable_pu_ids
+        .iter()
+        .flatten()
+        .map(|pu| pu.id)
+        .collect()
 }
 
-// Get the ids of all actors which are located on cordoned workers
-fn actor_ids_on_cordoned_nodes(info: GetClusterInfoResponse) -> HashSet<u32> {
+// Get the ids of all actors which are located on unschedulable workers
+fn actor_ids_on_unschedulable_nodes(info: GetClusterInfoResponse) -> HashSet<u32> {
     let (fragments, workers) = get_schedule(info.clone());
-    let cordoned_pus_ids = pu_ids_on_cordoned_nodes(&workers);
-    let mut actor_ids_on_cordoned = HashSet::<u32>::new();
+    let unschedulable_pus_ids = pu_ids_on_unschedulable_nodes(&workers);
+    let mut actor_ids_on_unschedulable = HashSet::<u32>::new();
     for frag in fragments {
         for actor in frag.actor_list {
             let pu_id = actor.parallel_units_id;
-            if cordoned_pus_ids.contains(&pu_id) {
-                actor_ids_on_cordoned.insert(actor.actor_id);
+            if unschedulable_pus_ids.contains(&pu_id) {
+                actor_ids_on_unschedulable.insert(actor.actor_id);
             }
         }
     }
-    actor_ids_on_cordoned
+    actor_ids_on_unschedulable
 }
 
-/// create cluster, run query, cordon node, run other query.
-/// Cordoned node should NOT contain actors from other query
-async fn cordoned_nodes_do_not_get_new_actors(
+/// create cluster, run query, mark nodes as unschedulable, run other query.
+/// Unschedulable node should NOT contain actors from other query
+async fn unschedulable_nodes_do_not_get_new_actors(
     create: &str,
     select: &str,
     drop: &str,
@@ -104,18 +104,20 @@ async fn cordoned_nodes_do_not_get_new_actors(
     let expected = cluster.run(select).await?;
     // do not drop the query
 
-    // cordon random nodes
-    let cordoned_nodes = cluster.cordon_random_workers(number_of_nodes).await?;
+    // mark random nodes as unschedulable
+    let unschedulable_nodes = cluster
+        .mark_rand_nodes_unschedulable(number_of_nodes)
+        .await?;
 
-    let mut log_msg = "Cordoned the following nodes:\n".to_string();
-    for rand_node in &cordoned_nodes {
+    let mut log_msg = "Marked the following nodes as unschedulable:\n".to_string();
+    for rand_node in &unschedulable_nodes {
         log_msg = format!("{}{:?}\n", log_msg, rand_node);
     }
     tracing::info!(log_msg);
 
-    // check which actors are on cordoned nodes
+    // check which actors are on unschedulable nodes
     let info = cluster.get_cluster_info().await?;
-    let actors_on_cordoned1 = actor_ids_on_cordoned_nodes(info);
+    let actors_on_unschedulable1 = actor_ids_on_unschedulable_nodes(info);
 
     let dummy_create = "create table t (dummy date, v varchar);";
     let dummy_mv = "create materialized view mv as select v from t;";
@@ -128,14 +130,14 @@ async fn cordoned_nodes_do_not_get_new_actors(
     }
     assert_eq!(cluster.run(dummy_select).await?, "1z");
 
-    // No actors from other query on cordoned nodes
+    // No actors from other query on unschedulable nodes
     let info2 = cluster.get_cluster_info().await?;
-    let actors_on_cordoned2 = actor_ids_on_cordoned_nodes(info2);
+    let actors_on_unschedulable2 = actor_ids_on_unschedulable_nodes(info2);
 
-    // We allow that an actor moves from a cordoned node to a non-cordoned node
-    // We allow that an actor moves from a cordoned node to another cordoned node
-    // We disallow that an actor moves from a non-cordoned node to a cordoned node
-    assert!(actors_on_cordoned1.is_superset(&actors_on_cordoned2));
+    // We allow that an actor moves from a unschedulable node to a non-unschedulable node
+    // We allow that an actor moves from a unschedulable node to another unschedulable node
+    // We disallow that an actor moves from a non-unschedulable node to a unschedulable node
+    assert!(actors_on_unschedulable1.is_superset(&actors_on_unschedulable2));
 
     // compare results of original query
     cluster.run(dummy_drop).await?;
@@ -150,8 +152,9 @@ async fn cordoned_nodes_do_not_get_new_actors(
     Ok(())
 }
 
-/// create cluster, cordon node, run query. Cordoned node should NOT contain actors
-async fn cordoned_nodes_do_not_get_actors(
+/// create cluster, mark nodes as unschedulable, run query. unschedulable node should NOT contain
+/// actors
+async fn unschedulable_nodes_do_not_get_actors(
     create: &str,
     select: &str,
     drop: &str,
@@ -171,15 +174,17 @@ async fn cordoned_nodes_do_not_get_actors(
     cluster.run(drop).await?;
     sleep(Duration::from_secs(sleep_sec)).await;
 
-    // cordon random nodes
-    let cordoned_nodes = cluster.cordon_random_workers(number_of_nodes).await?;
-    let mut log_msg = "Cordoned the following nodes:\n".to_string();
-    for rand_node in &cordoned_nodes {
+    // mark rand nodes as unschedulable
+    let unschedulable_nodes = cluster
+        .mark_rand_nodes_unschedulable(number_of_nodes)
+        .await?;
+    let mut log_msg = "Mark the following nodes as unschedulable:\n".to_string();
+    for rand_node in &unschedulable_nodes {
         log_msg = format!("{}{:?}\n", log_msg, rand_node);
     }
     tracing::info!(log_msg);
 
-    let cordoned_nodes_ids = cordoned_nodes.iter().map(|n| n.id).collect_vec();
+    let unschedulable_nodes_ids = unschedulable_nodes.iter().map(|n| n.id).collect_vec();
 
     // compare results
     sleep(Duration::from_secs(sleep_sec)).await;
@@ -188,28 +193,28 @@ async fn cordoned_nodes_do_not_get_actors(
     let got = cluster.run(select).await?;
     assert_eq!(got, expected);
 
-    // no actors on cordoned nodes
+    // no actors on unschedulable nodes
     let info = cluster.get_cluster_info().await?;
     let (fragments, workers) = get_schedule(info);
 
-    let mut cordoned_pu_ids = HashSet::<u32>::new();
+    let mut unschedulable_pu_ids = HashSet::<u32>::new();
     for worker in workers {
-        if cordoned_nodes_ids.contains(&worker.id) {
+        if unschedulable_nodes_ids.contains(&worker.id) {
             for pu in worker.parallel_units {
-                cordoned_pu_ids.insert(pu.id);
+                unschedulable_pu_ids.insert(pu.id);
             }
         }
     }
     for frag in fragments {
         for actor in frag.actor_list {
             let pu_id = actor.parallel_units_id;
-            assert!(!cordoned_pu_ids.contains(&pu_id));
+            assert!(!unschedulable_pu_ids.contains(&pu_id));
         }
     }
     Ok(())
 }
 
-async fn cordon_is_idempotent(
+async fn mark_as_unschedulable_is_idempotent(
     create: &str,
     select: &str,
     drop: &str,
@@ -229,23 +234,23 @@ async fn cordon_is_idempotent(
     let expected = cluster.run(select).await?;
     cluster.run(drop).await?;
 
-    // cordon the same nodes multiple times times
+    // mark the same nodes as unschedulable multiple times
     for _ in 0..3 {
         for worker in &rand_workers {
             cluster
-                .cordon_node(&worker)
+                .mark_as_unschedulable(&worker)
                 .await
-                .expect("expect cordon to work");
+                .expect("expect mark_as_unschedulable to work");
         }
 
-        // expect the same result, independent of how many times we cordoned
+        // expect the same result, independent of how many times we marked as unschedulable
         cluster.run(create).await?;
         sleep(Duration::from_secs(sleep_sec)).await;
         let got = cluster.run(select).await?;
         assert_eq!(expected, got);
         cluster.run(drop).await?;
 
-        // we only ever expect the same workers to be cordoned
+        // we only ever expect the same workers to be unschedulable
         let (_, workers) = get_schedule(cluster.get_cluster_info().await?);
         let new_ids: HashSet<u32> = workers
             .iter()
@@ -262,7 +267,7 @@ async fn cordon_is_idempotent(
     Ok(())
 }
 
-/// a reschedule request moving an actor to a cordoned node should fail
+/// a reschedule request moving an actor to an unschedulable node should fail
 async fn invalid_reschedule(
     create: &str,
     select: &str,
@@ -278,8 +283,10 @@ async fn invalid_reschedule(
     let mut cluster =
         NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
 
-    let cordoned_nodes = cluster.cordon_random_workers(number_of_nodes).await?;
-    assert!(!cordoned_nodes.is_empty());
+    let unschedulable_nodes = cluster
+        .mark_rand_nodes_unschedulable(number_of_nodes)
+        .await?;
+    assert!(!unschedulable_nodes.is_empty());
 
     // create some actors which we can move
     cluster.run(create).await?;
@@ -287,14 +294,14 @@ async fn invalid_reschedule(
     sleep(Duration::from_secs(sleep_sec)).await;
 
     let (fragments, _) = get_schedule(cluster.get_cluster_info().await?);
-    let cordoned_pus: Vec<&ParallelUnit> = cordoned_nodes
+    let unschedulable_pus: Vec<&ParallelUnit> = unschedulable_nodes
         .iter()
         .map(|w| w.get_parallel_units())
         .flatten()
         .collect_vec();
-    assert!(!cordoned_pus.is_empty());
+    assert!(!unschedulable_pus.is_empty());
 
-    // for a mv fragment, try to move one actor from a non-cordoned PU to a cordoned PU
+    // for a mv fragment, try to move one actor from a unschedulable PU to a schedulable PU
     // using an mv fragment, because they can be moved
     let mv_frags = fragments
         .iter()
@@ -308,9 +315,9 @@ async fn invalid_reschedule(
         .choose(&mut rand::thread_rng())
         .expect("expect fragment to have at least 1 actor")
         .parallel_units_id;
-    let to = cordoned_pus
+    let to = unschedulable_pus
         .choose(&mut rand::thread_rng())
-        .expect("expected at least one cordoned PU")
+        .expect("expected at least one unschedulable PU")
         .id;
     let f_id = mv_frag.id;
     let result = cluster.reschedule(format!("{f_id}-[{from}]+[{to}]")).await;
@@ -359,55 +366,55 @@ fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<FragmentAndActors>
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {
-            // cordon on empty cluster
+            // unschedulable workers on idle cluster
             #[madsim::test]
-            async fn [< cordoned_nodes_do_not_get_actors_1_ $query >]() -> Result<()> {
+            async fn [< unschedulable_nodes_do_not_get_actors_1_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 1).await
+                unschedulable_nodes_do_not_get_actors(CREATE, SELECT, DROP, 1).await
             }
             #[madsim::test]
-            async fn [< cordoned_nodes_do_not_get_actors_2_ $query >]() -> Result<()> {
+            async fn [< unschedulable_nodes_do_not_get_actors_2_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 2).await
+                unschedulable_nodes_do_not_get_actors(CREATE, SELECT, DROP, 2).await
             }
 
-            // cordon on running cluster
+            // unschedulable workers on busy cluster
             #[madsim::test]
-            async fn [< cordoned_nodes_do_not_get_new_actors_1_ $query >]() -> Result<()> {
+            async fn [< unschedulable_nodes_do_not_get_new_actors_1_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 1).await
+                unschedulable_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 1).await
             }
             #[madsim::test]
-            async fn [< cordoned_nodes_do_not_get_new_actors_2_ $query >]() -> Result<()> {
+            async fn [< unschedulable_nodes_do_not_get_new_actors_2_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 2).await
+                unschedulable_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 2).await
             }
 
             // Idempotent
             #[madsim::test]
-            async fn [< cordon_is_idempotent_ $query >]() -> Result<()> {
+            async fn [< unschedulable_is_idempotent_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                cordon_is_idempotent(CREATE, SELECT, DROP, 1).await
+                mark_as_unschedulable_is_idempotent(CREATE, SELECT, DROP, 1).await
             }
             #[madsim::test]
-            async fn [< cordon_is_idempotent_2_ $query >]() -> Result<()> {
+            async fn [< unschedulable_is_idempotent_2_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                cordon_is_idempotent(CREATE, SELECT, DROP, 2).await
+                mark_as_unschedulable_is_idempotent(CREATE, SELECT, DROP, 2).await
             }
 
-            // cordon all nodes
+            // mark all nodes as unschedulable
             #[madsim::test]
-            async fn [< cordon_all_nodes_error_ $query >]() {
+            async fn [< unschedulable_all_nodes_error_ $query >]() {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                let result = cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 3)
+                let result = unschedulable_nodes_do_not_get_actors(CREATE, SELECT, DROP, 3)
                     .await;
                 assert!(result.is_err());
                 assert_eq!(result.err().unwrap().to_string(), "db error: ERROR: QueryError: internal error: Service unavailable: No available parallel units to schedule");
             }
             #[madsim::test]
-            async fn [< cordon_all_nodes_error_2_ $query >]() {
+            async fn [< unschedulable_all_nodes_error_2_ $query >]() {
                 use risingwave_simulation::nexmark::queries::q3::*;
-                let result = cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 3)
+                let result = unschedulable_nodes_do_not_get_actors(CREATE, SELECT, DROP, 3)
                     .await;
                 assert!(result.is_err());
                 assert_eq!(result.err().unwrap().to_string(), "db error: ERROR: QueryError: internal error: Service unavailable: No available parallel units to schedule");
