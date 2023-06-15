@@ -305,7 +305,9 @@ where
             }
         }
         if let Some(application_name) = msg.config.get("application_name") {
-            session.set_config("application_name", vec![application_name.clone()])?;
+            session
+                .set_config("application_name", vec![application_name.clone()])
+                .map_err(PsqlError::StartupError)?;
         }
 
         self.session = Some(session);
