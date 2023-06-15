@@ -25,7 +25,7 @@ use crate::sql_gen::{Column, Expr, SqlGenerator, Table};
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates time window functions.
-    pub(crate) fn gen_time_window_func(&mut self) -> (TableFactor, Vec<Column>, Table) {
+    pub(crate) fn gen_time_window_func(&mut self) -> (TableFactor, Table) {
         match self.flip_coin() {
             true => self.gen_hop(),
             false => self.gen_tumble(),
@@ -34,7 +34,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Generates `TUMBLE`.
     /// TUMBLE(data: TABLE, timecol: COLUMN, size: INTERVAL, offset?: INTERVAL)
-    fn gen_tumble(&mut self) -> (TableFactor, Vec<Column>, Table) {
+    fn gen_tumble(&mut self) -> (TableFactor, Table) {
         let tables = find_tables_with_timestamp_cols(self.tables.clone());
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
@@ -51,12 +51,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let table = Table::new(table_name, schema.clone());
 
-        (relation, schema.clone(), table)
+        (relation, table)
     }
 
     /// Generates `HOP`.
     /// HOP(data: TABLE, timecol: COLUMN, slide: INTERVAL, size: INTERVAL, offset?: INTERVAL)
-    fn gen_hop(&mut self) -> (TableFactor, Vec<Column>, Table) {
+    fn gen_hop(&mut self) -> (TableFactor, Table) {
         let tables = find_tables_with_timestamp_cols(self.tables.clone());
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
@@ -77,7 +77,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let table = Table::new(table_name, schema.clone());
 
-        (relation, schema.clone(), table)
+        (relation, table)
     }
 
     fn gen_secs(&mut self) -> u64 {
