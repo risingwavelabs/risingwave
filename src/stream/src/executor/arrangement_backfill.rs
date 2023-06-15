@@ -42,7 +42,8 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
-use crate::common::table::state_table::{collect_data_chunk, merge_sort, StateTable};
+use crate::common::table::iter_utils::merge_sort;
+use crate::common::table::state_table::{collect_data_chunk, StateTable};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{PkIndices, StreamExecutorResult, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};

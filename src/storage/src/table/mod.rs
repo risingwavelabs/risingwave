@@ -79,14 +79,14 @@ impl Distribution {
 
 // TODO: GAT-ify this trait or remove this trait
 #[async_trait::async_trait]
-pub trait TableIter: Send {
-    async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
+pub trait TableIter<E>: Send {
+    async fn next_row(&mut self) -> Result<Option<OwnedRow>, E>;
 
     async fn collect_data_chunk(
         &mut self,
         schema: &Schema,
         chunk_size: Option<usize>,
-    ) -> StorageResult<Option<DataChunk>> {
+    ) -> Result<Option<DataChunk>, E> {
         let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
 
         let mut row_count = 0;

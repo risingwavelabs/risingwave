@@ -402,7 +402,7 @@ pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, OwnedRow)>> + S
 pub type StorageTableInnerIter<S: StateStore, SD: ValueRowSerde> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
-impl<S: PkAndRowStream + Unpin> TableIter for S {
+impl<S: PkAndRowStream + Unpin> TableIter<StorageError> for S {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>> {
         self.next()
             .await
