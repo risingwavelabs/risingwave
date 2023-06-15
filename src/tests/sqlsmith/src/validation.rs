@@ -45,7 +45,7 @@ fn not_unique_error(db_error: &str) -> bool {
 
 fn is_window_error(db_error: &str) -> bool {
     db_error.contains("Bind error: The size arg of window table function should be an interval literal")
-        || db_error.contains("Bind error: The 2st arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround")
+        || db_error.contains("Bind error: The 2nd arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround")
 }
 
 // Streaming nested-loop join is not supported, as it is expensive.
