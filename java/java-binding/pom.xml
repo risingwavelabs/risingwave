@@ -18,6 +18,7 @@
         <maven.compiler.target>11</maven.compiler.target>
         <module.version>1.0-SNAPSHOT</module.version>
         <jni.loader.version>1.0.0</jni.loader.version>
+        <java.binding.release>false</java.binding.release>
     </properties>
 
     <dependencies>
@@ -83,7 +84,7 @@
                         </goals>
                         <configuration>
                             <path>../../src/java_binding</path>
-                            <release>false</release>
+                            <release>${java.binding.release}</release>
                             <copyTo>${project.build.directory}/classes/risingwave/jni</copyTo>
                             <copyWithPlatformDir>true</copyWithPlatformDir>
                         </configuration>

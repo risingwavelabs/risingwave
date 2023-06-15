@@ -38,7 +38,7 @@ RUN cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
   mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
   mkdir -p /risingwave/lib && cargo clean
 
-RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true && \
+RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true && \
     mkdir -p /risingwave/bin/connector-node && \
     tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
