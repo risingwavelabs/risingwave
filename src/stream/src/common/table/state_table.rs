@@ -974,55 +974,36 @@ where
             .map(get_second))
     }
 
-    #[try_stream(ok=OwnedRow, error=StreamExecutorError)]
-    pub async fn iter_ordered_with_pk_range(
-        // FIXME
-        &'_async0 self,
-        pk_range: &(Bound<OwnedRow>, Bound<OwnedRow>),
+    pub async fn iter_all_vnode_ranges(
+        &self,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) {
-        let stream = self
-            .iter_key_and_val_with_pk_range(pk_range, VirtualNode::ZERO, prefetch_options)
-            .await?;
-        #[for_await]
-        for value in stream {
-            let v = value?;
-            yield v.1;
+    ) -> StreamExecutorResult<Vec<RowStreamWithPk<'_, S, SD>>> {
+        let mut vec = Vec::with_capacity(self.vnodes.count_ones());
+        for vnode in self.vnodes.iter_vnodes() {
+            vec.push(
+                self.iter_key_and_val_with_pk_range(pk_range, vnode, prefetch_options)
+                    .await?,
+            )
         }
+        Ok(vec)
     }
 
-    pub async fn collect_heap<'a, R>(streams: Vec<R>) -> StreamExecutorResult<BinaryHeap<Node<R>>>
-    where
-        S: 'a,
-        SD: 'a,
-        R: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a + Unpin,
-    {
-        let mut heap = BinaryHeap::new();
-        for mut stream in streams {
-            if let Some(peeked) = stream.next().await.transpose()? {
-                heap.push(Node { stream, peeked });
-            }
-        }
-        Ok(heap)
-    }
-
-    #[try_stream(ok=(Bytes, OwnedRow), error=StreamExecutorError)]
-    pub async fn iter_heap<R>(mut heap: BinaryHeap<Node<R>>)
-    where
-        R: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + Unpin,
-    {
-        while let Some(mut node) = heap.peek_mut() {
-            // Note: If the `next` returns `Err`, we'll fail to yield the previous item.
-            // This is acceptable since we're not going to handle errors from cell-based table
-            // iteration, so where to fail does not matter. Or we need an `Option` for this.
-            yield match node.stream.next().await.transpose()? {
-                // There still remains data in the stream, take and update the peeked value.
-                Some(new_peeked) => std::mem::replace(&mut node.peeked, new_peeked),
-                // This stream is exhausted, remove it from the heap.
-                None => PeekMut::pop(node).peeked,
-            };
-        }
-    }
+    // #[try_stream(ok=OwnedRow, error=StreamExecutorError)]
+    // pub async fn iter_ordered_with_pk_ranges(
+    //     &self,
+    //     pk_range: &(Bound<impl Row>, Bound<impl Row>),
+    //     prefetch_options: PrefetchOptions,
+    // ) {
+    //     let iterators = self
+    //         .iter_all_vnode_ranges(pk_range, prefetch_options)
+    //         .await?;
+    //     let stream = Self::merge_sort(iterators);
+    //     #[for_await]
+    //     for row in stream {
+    //         yield row?;
+    //     }
+    // }
 
     pub async fn iter_key_and_val_with_pk_range(
         &self,
@@ -1168,11 +1149,14 @@ where
 }
 
 // FIXME: Try merge this with the impl in `src/table/mod.rs`.
-pub async fn collect_data_chunk(
-    mut stream: impl Stream<Item = StreamExecutorResult<OwnedRow>> + Unpin,
+pub async fn collect_data_chunk<S>(
+    mut stream: S,
     schema: &Schema,
     chunk_size: Option<usize>,
-) -> StreamExecutorResult<Option<DataChunk>> {
+) -> StreamExecutorResult<Option<DataChunk>>
+where
+    S: Stream<Item = StreamExecutorResult<OwnedRow>> + Unpin,
+{
     let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
 
     let mut row_count = 0;
@@ -1292,3 +1276,68 @@ fn to_memcomparable<R: Row>(
 //         };
 //     }
 // }
+//
+// pub async fn merge_sort<'a, R, V>(streams: Vec<R>) -> StreamExecutorResult<V>
+// where
+//     R: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a + Unpin,
+//     V: Stream<Item = StreamExecutorResult<OwnedRow>> + 'a + Unpin,
+// {
+//     let mut heap = collect_heap(streams).await?;
+//     let s = iter_heap(heap);
+//     Ok(s)
+// }
+//
+// pub async fn collect_heap<'a, R>(streams: Vec<R>) -> StreamExecutorResult<BinaryHeap<Node<R>>>
+// where
+//     R: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a + Unpin,
+// {
+//     let mut heap = BinaryHeap::new();
+//     for mut stream in streams {
+//         if let Some(peeked) = stream.next().await.transpose()? {
+//             heap.push(Node { stream, peeked });
+//         }
+//     }
+//     Ok(heap)
+// }
+//
+// #[try_stream(ok=OwnedRow, error=StreamExecutorError)]
+// pub async fn iter_heap<R>(mut heap: BinaryHeap<Node<R>>)
+// where
+//     R: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + Unpin,
+// {
+//     while let Some(mut node) = heap.peek_mut() {
+//         // Note: If the `next` returns `Err`, we'll fail to yield the previous item.
+//         // This is acceptable since we're not going to handle errors from cell-based table
+//         // iteration, so where to fail does not matter. Or we need an `Option` for this.
+//         yield match node.stream.next().await.transpose()? {
+//             // There still remains data in the stream, take and update the peeked value.
+//             Some(new_peeked) => std::mem::replace(&mut node.peeked, new_peeked).1,
+//             // This stream is exhausted, remove it from the heap.
+//             None => PeekMut::pop(node).peeked.1,
+//         };
+//     }
+// }
+
+#[try_stream(ok=OwnedRow, error=StreamExecutorError)]
+pub async fn merge_sort<'a, R>(streams: Vec<R>)
+where
+    R: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a + Unpin,
+{
+    let mut heap = BinaryHeap::new();
+    for mut stream in streams {
+        if let Some(peeked) = stream.next().await.transpose()? {
+            heap.push(Node { stream, peeked });
+        }
+    }
+    while let Some(mut node) = heap.peek_mut() {
+        // Note: If the `next` returns `Err`, we'll fail to yield the previous item.
+        // This is acceptable since we're not going to handle errors from cell-based table
+        // iteration, so where to fail does not matter. Or we need an `Option` for this.
+        yield match node.stream.next().await.transpose()? {
+            // There still remains data in the stream, take and update the peeked value.
+            Some(new_peeked) => std::mem::replace(&mut node.peeked, new_peeked).1,
+            // This stream is exhausted, remove it from the heap.
+            None => PeekMut::pop(node).peeked.1,
+        };
+    }
+}

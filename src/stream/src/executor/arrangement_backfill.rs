@@ -22,6 +22,7 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
@@ -41,7 +42,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
-use crate::common::table::state_table::{collect_data_chunk, StateTable};
+use crate::common::table::state_table::{collect_data_chunk, merge_sort, StateTable};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{PkIndices, StreamExecutorResult, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
@@ -441,7 +442,11 @@ where
             } else {
                 (Bound::Unbounded, Bound::Unbounded)
             };
-        let mut iter = upstream_table.iter_ordered_with_pk_range(&range_bounds, Default::default());
+        let iterators = upstream_table
+            .iter_all_vnode_ranges(&range_bounds, Default::default())
+            .await?;
+        let pinned_iter: Vec<_> = iterators.into_iter().map(Box::pin).collect_vec();
+        let iter = merge_sort(pinned_iter);
         pin_mut!(iter);
         for data_chunk in collect_data_chunk(iter, &schema, Some(CHUNK_SIZE))
             .instrument_await("arrangement_backfill_snapshot_read")
