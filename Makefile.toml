@@ -922,7 +922,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.14.8", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.15.0", crate_name = "typos-cli", binary = "typos", test_arg = [
   "--help",
 ], install_command = "binstall" }
 script = """
