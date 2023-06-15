@@ -56,12 +56,17 @@ struct SinkMetrics {
 
 async fn build_sink(
     config: SinkConfig,
-    schema: Schema,
+    columns: &[ColumnCatalog],
     pk_indices: PkIndices,
     connector_params: ConnectorParams,
     sink_type: SinkType,
     sink_id: u64,
 ) -> StreamExecutorResult<SinkImpl> {
+    // The downstream sink can only see the visible columns.
+    let schema: Schema = columns
+        .iter()
+        .filter_map(|column| (!column.is_hidden).then(|| column.column_desc.clone().into()))
+        .collect();
     Ok(SinkImpl::new(
         config,
         schema,
@@ -104,19 +109,19 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         log_store_factory: F,
     ) -> StreamExecutorResult<Self> {
         let (log_reader, log_writer) = log_store_factory.build().await;
-        let schema: Schema = columns
-            .iter()
-            .map(|column| column.column_desc.clone().into())
-            .collect();
         let sink = build_sink(
             config.clone(),
-            schema.clone(),
+            &columns,
             pk_indices.clone(),
             connector_params,
             sink_type,
             sink_id,
         )
         .await?;
+        let schema: Schema = columns
+            .iter()
+            .map(|column| column.column_desc.clone().into())
+            .collect();
         Ok(Self {
             input,
             metrics,
