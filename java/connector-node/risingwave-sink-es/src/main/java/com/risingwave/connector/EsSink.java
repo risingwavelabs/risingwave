@@ -38,11 +38,17 @@ import org.elasticsearch.core.TimeValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * Note: 1. TODO: If no primary key is defined on the DDL, the connector can only operate in append
- * mode for exchanging INSERT only messages with external system. 2. Currently, index is fixed. 3.
- * Possible settings from flink:
+/*
+ * Note:
+ *
+ * 1. TODO: If no primary key is defined on the DDL, the connector can only operate in append
+ * mode for exchanging INSERT only messages with external system.
+ *
+ * 2. Currently, index is fixed.
+ *
+ * 3. Possible settings from flink:
  * https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/connectors/table/elasticsearch/
+ *
  * 4. bulkprocessor and high-level-client are deprecated in es 8 java api.
  */
 public class EsSink extends SinkBase {
@@ -81,7 +87,7 @@ public class EsSink extends SinkBase {
         }
         this.bulkProcessor = createBulkProcessor();
 
-        primaryKeyIndexes = new ArrayList();
+        primaryKeyIndexes = new ArrayList<Integer>();
         for (String primaryKey : tableSchema.getPrimaryKeys()) {
             primaryKeyIndexes.add(tableSchema.getColumnIndex(primaryKey));
         }
