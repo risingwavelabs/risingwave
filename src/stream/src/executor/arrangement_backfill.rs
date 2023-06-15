@@ -27,17 +27,13 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::{VnodeBitmapExt};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum, OrderType};
-
-
-
-
-use risingwave_storage::table::{collect_data_chunk};
+use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -77,6 +73,7 @@ where
     S: StateStore,
 {
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     pub fn new(
         upstream_table: StateTable<S>,
         upstream: BoxedExecutor,
@@ -449,7 +446,7 @@ where
         let pinned_iter: Vec<_> = iterators.into_iter().map(Box::pin).collect_vec();
         let iter = merge_sort(pinned_iter);
         pin_mut!(iter);
-        for data_chunk in collect_data_chunk(&mut iter, &schema, Some(CHUNK_SIZE))
+        while let Some(data_chunk) = collect_data_chunk(&mut iter, &schema, Some(CHUNK_SIZE))
             .instrument_await("arrangement_backfill_snapshot_read")
             .await?
         {

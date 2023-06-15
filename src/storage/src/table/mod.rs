@@ -25,8 +25,6 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::iter_util::ZipEqFast;
 
-
-
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
 
@@ -84,10 +82,6 @@ pub trait TableIter<E>: Send {
     async fn next_row(&mut self) -> Result<Option<OwnedRow>, E>;
 }
 
-pub fn get_second<T, U, E>(arg: Result<(T, U), E>) -> Result<U, E> {
-    arg.map(|x| x.1)
-}
-
 pub async fn collect_data_chunk<E, S>(
     stream: &mut S,
     schema: &Schema,
@@ -125,6 +119,10 @@ where
     } else {
         Ok(Some(chunk))
     }
+}
+
+pub fn get_second<T, U, E>(arg: Result<(T, U), E>) -> Result<U, E> {
+    arg.map(|x| x.1)
 }
 
 /// Get vnode value with `indices` on the given `row`.

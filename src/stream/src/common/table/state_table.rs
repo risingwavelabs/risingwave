@@ -12,24 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use std::ops::Bound;
 use std::ops::Bound::*;
-
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{Stream, StreamExt};
-
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
-use risingwave_common::catalog::{
-    get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption,
-};
+use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
@@ -42,7 +36,7 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
 use risingwave_pb::catalog::Table;
-use risingwave_storage::error::{StorageError};
+use risingwave_storage::error::StorageError;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
@@ -51,9 +45,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
-use risingwave_storage::table::{
-    compute_chunk_vnode, compute_vnode, get_second, Distribution,
-};
+use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, get_second, Distribution};
 use risingwave_storage::StateStore;
 use tracing::trace;
 

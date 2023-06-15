@@ -25,41 +25,10 @@
 use std::collections::binary_heap::PeekMut;
 use std::collections::BinaryHeap;
 
-
-
-
-
-use bytes::{Bytes};
+use bytes::Bytes;
 use futures::{Stream, StreamExt};
-use futures_async_stream::{try_stream};
-
-
-
-
-
-
-
-use risingwave_common::row::{OwnedRow};
-
-
-
-
-
-
-
-
-
-
-
-
-use risingwave_storage::store::{
-    StateStoreIterItemStream,
-};
-
-
-
-
-
+use futures_async_stream::try_stream;
+use risingwave_common::row::OwnedRow;
 
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
