@@ -29,7 +29,7 @@ use madsim::net::ipvs::*;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::IteratorRandom;
 use rand::Rng;
-use risingwave_pb::common::{HostAddress, WorkerNode};
+use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
 
 use crate::client::RisingWave;

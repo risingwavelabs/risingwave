@@ -22,11 +22,30 @@ use itertools::Itertools;
 use madsim::time::sleep;
 use rand::seq::SliceRandom;
 use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::{Actor, Fragment, ParallelUnit, WorkerNode};
+use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
+
+// TODO: rename cordon into schedulability
+
+// TODO: rename these structs
+struct ActorOnPu {
+    actor_id: u32,
+    parallel_units_id: u32,
+}
+
+struct FragmentAndActors {
+    id: u32,
+    actor_list: Vec<ActorOnPu>,
+    type_flag: u32,
+}
+
+struct FragmentsAndWorkers {
+    fragments: Vec<FragmentAndActors>,
+    workers: Vec<WorkerNode>,
+}
 
 // Get the ids of all parallel unit which are located on cordoned workers
 fn pu_ids_on_cordoned_nodes(all_workers: &Vec<WorkerNode>) -> HashSet<u32> {
@@ -285,7 +304,7 @@ async fn invalid_reschedule(
     let mv_frag = mv_frags.first().unwrap();
 
     let from = mv_frag
-        .get_actor_list()
+        .actor_list
         .choose(&mut rand::thread_rng())
         .expect("expect fragment to have at least 1 actor")
         .parallel_units_id;
@@ -306,12 +325,12 @@ async fn invalid_reschedule(
     Ok(())
 }
 
-fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, Vec<WorkerNode>) {
+fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<FragmentAndActors>, Vec<WorkerNode>) {
     // Compile fragments
-    let mut fragment_list: Vec<Fragment> = vec![];
+    let mut fragment_list: Vec<FragmentAndActors> = vec![];
     for table_fragment in cluster_info.get_table_fragments() {
         for (_, fragment) in table_fragment.get_fragments() {
-            let mut actor_list: Vec<Actor> = vec![];
+            let mut actor_list: Vec<ActorOnPu> = vec![];
             for actor in fragment.get_actors() {
                 let id = actor.actor_id;
                 let pu_id = table_fragment
@@ -321,12 +340,12 @@ fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, Vec<Wor
                     .get_parallel_unit()
                     .expect("Failed to retrieve parallel units")
                     .get_id();
-                actor_list.push(Actor {
+                actor_list.push(ActorOnPu {
                     actor_id: actor.actor_id,
                     parallel_units_id: pu_id,
                 });
             }
-            fragment_list.push(Fragment {
+            fragment_list.push(FragmentAndActors {
                 id: fragment.get_fragment_id(),
                 actor_list,
                 type_flag: fragment.fragment_type_mask,
