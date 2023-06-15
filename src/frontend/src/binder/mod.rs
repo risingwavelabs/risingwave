@@ -55,7 +55,8 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::{TableId, ViewId};
+use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::{CatalogResult, TableId, ViewId};
 use crate::session::{AuthContext, SessionImpl};
 
 pub type ShareId = usize;
@@ -349,6 +350,14 @@ impl Binder {
         let id = self.next_share_id;
         self.next_share_id += 1;
         id
+    }
+
+    fn first_valid_schema(&self) -> CatalogResult<&SchemaCatalog> {
+        self.catalog.first_valid_schema(
+            &self.db_name,
+            &self.search_path,
+            &self.auth_context.user_name,
+        )
     }
 }
 

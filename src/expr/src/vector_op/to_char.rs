@@ -17,22 +17,23 @@ use std::sync::LazyLock;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
-use ouroboros::self_referencing;
 use risingwave_common::types::Timestamp;
 use static_assertions::const_assert_eq;
 
-#[self_referencing]
-pub struct ChronoPattern {
-    pub(crate) tmpl: String,
-    #[borrows(tmpl)]
-    #[covariant]
-    pub(crate) items: Vec<chrono::format::Item<'this>>,
+type Pattern<'a> = Vec<chrono::format::Item<'a>>;
+
+self_cell::self_cell! {
+    pub struct ChronoPattern {
+        owner: String,
+        #[covariant]
+        dependent: Pattern,
+    }
 }
 
 impl Debug for ChronoPattern {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ChronoPattern")
-            .field("tmpl", self.borrow_tmpl())
+            .field("tmpl", self.borrow_owner())
             .finish()
     }
 }
@@ -67,16 +68,14 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
         true
     });
     tracing::debug!(tmpl, chrono_tmpl, "compile_pattern_to_chrono");
-    ChronoPatternBuilder {
-        tmpl: chrono_tmpl,
-        items_builder: |tmpl| StrftimeItems::new(tmpl).collect::<Vec<_>>(),
-    }
-    .build()
+    ChronoPattern::new(chrono_tmpl, |tmpl| {
+        StrftimeItems::new(tmpl).collect::<Vec<_>>()
+    })
 }
 
 // #[function("to_char(timestamp, varchar) -> varchar")]
 pub fn to_char_timestamp(data: Timestamp, tmpl: &str, writer: &mut dyn Write) {
     let pattern = compile_pattern_to_chrono(tmpl);
-    let format = data.0.format_with_items(pattern.borrow_items().iter());
+    let format = data.0.format_with_items(pattern.borrow_dependent().iter());
     write!(writer, "{}", format).unwrap();
 }

@@ -669,7 +669,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                 .collect();
             for table_fragments in fragments {
                 for (fragment_id, fragment) in table_fragments.fragments {
-                    let frament_id_str = fragment_id.to_string();
+                    let fragment_id_str = fragment_id.to_string();
                     for actor in fragment.actors {
                         let actor_id_str = actor.actor_id.to_string();
                         // Report a dummay gauge metrics with (fragment id, actor id, node
@@ -683,7 +683,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                         .actor_info
                                         .with_label_values(&[
                                             &actor_id_str,
-                                            &frament_id_str,
+                                            &fragment_id_str,
                                             address,
                                         ])
                                         .set(1);
