@@ -164,16 +164,20 @@ impl DmlExecutor {
                         TxnMsg::Begin(txn_id) => {
                             active_txn_map
                                 .try_insert(txn_id, TxnBuffer::default())
-                                .expect("Transaction id collision.");
+                                .unwrap_or_else(|_| {
+                                    panic!("Transaction id collision txn_id = {}.", txn_id)
+                                });
                         }
                         TxnMsg::End(txn_id) => {
-                            let mut txn_buffer = active_txn_map.remove(&txn_id).expect(&format!("Receive an unexpected transaction end message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id));
+                            let mut txn_buffer = active_txn_map.remove(&txn_id)
+                                .unwrap_or_else(|| panic!("Receive an unexpected transaction end message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id));
                             for chunk in txn_buffer.vec.drain(..) {
                                 yield Message::Chunk(chunk);
                             }
                         }
                         TxnMsg::Rollback(txn_id) => {
-                            let txn_buffer = active_txn_map.remove(&txn_id).expect(&format!("Receive an unexpected transaction rollback message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id));
+                            let txn_buffer = active_txn_map.remove(&txn_id)
+                                .unwrap_or_else(|| panic!("Receive an unexpected transaction rollback message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id));
                             if txn_buffer.overflow {
                                 tracing::warn!("txn_id={} large transaction tries to rollback, but part of its data has already been sent to the downstream.", txn_id);
                             }
