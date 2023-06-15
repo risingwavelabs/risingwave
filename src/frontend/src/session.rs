@@ -937,7 +937,7 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
         })
     }
 
-    fn describe_portral(
+    fn describe_portal(
         self: Arc<Self>,
         portal: Portal,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
@@ -945,6 +945,10 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
             Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
+    }
+
+    fn set_config(&self, key: &str, value: Vec<String>) -> std::result::Result<(), BoxedError> {
+        Self::set_config(&self, key, value).map_err(Into::into)
     }
 
     fn take_notices(self: Arc<Self>) -> Vec<String> {

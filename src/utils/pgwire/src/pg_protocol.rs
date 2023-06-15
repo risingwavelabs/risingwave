@@ -304,6 +304,10 @@ where
                     .write_no_flush(&BeMessage::AuthenticationMd5Password(salt))?;
             }
         }
+        if let Some(application_name) = msg.config.get("application_name") {
+            session.set_config("application_name", vec![application_name.clone()])?;
+        }
+
         self.session = Some(session);
         self.state = PgProtocolState::Regular;
         Ok(())
@@ -639,7 +643,7 @@ where
             let portal = self.get_portal(&name)?;
 
             let row_descriptions = session
-                .describe_portral(portal)
+                .describe_portal(portal)
                 .map_err(PsqlError::Internal)?;
 
             if row_descriptions.is_empty() {

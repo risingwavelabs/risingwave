@@ -93,11 +93,13 @@ where
         prepare_statement: PS,
     ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError>;
 
-    fn describe_portral(self: Arc<Self>, portal: PO) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
+    fn describe_portal(self: Arc<Self>, portal: PO) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
 
     fn user_authenticator(&self) -> &UserAuthenticator;
 
     fn id(&self) -> SessionId;
+
+    fn set_config(&self, key: &str, value: Vec<String>) -> Result<(), BoxedError>;
 }
 
 #[derive(Debug, Clone)]
@@ -294,7 +296,7 @@ mod tests {
             ))
         }
 
-        fn describe_portral(
+        fn describe_portal(
             self: Arc<Self>,
             _portal: String,
         ) -> Result<Vec<PgFieldDescriptor>, BoxedError> {
@@ -307,6 +309,10 @@ mod tests {
 
         fn id(&self) -> SessionId {
             (0, 0)
+        }
+
+        fn set_config(&self, _key: &str, _value: Vec<String>) -> Result<(), BoxedError> {
+            Ok(())
         }
 
         fn take_notices(self: Arc<Self>) -> Vec<String> {
