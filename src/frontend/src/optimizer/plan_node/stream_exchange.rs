@@ -14,11 +14,12 @@
 
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
 use super::stream::StreamPlanRef;
-use super::utils::formatter_debug_plan_node;
+use super::utils::{formatter_debug_plan_node, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -78,6 +79,21 @@ impl StreamExchange {
     }
 }
 
+impl Distill for StreamExchange {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let distribution_display = DistributionDisplay {
+            distribution: &self.base.dist,
+            input_schema: self.input.schema(),
+        };
+        Pretty::childless_record(
+            plan_node_name!(
+                "StreamExchange",
+                { "no_shuffle", self.no_shuffle },
+            ),
+            vec![("dist", Pretty::display(&distribution_display))],
+        )
+    }
+}
 impl fmt::Display for StreamExchange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = formatter_debug_plan_node!(
@@ -85,15 +101,11 @@ impl fmt::Display for StreamExchange {
             { "no_shuffle", self.no_shuffle },
         );
 
-        builder
-            .field(
-                "dist",
-                &DistributionDisplay {
-                    distribution: &self.base.dist,
-                    input_schema: self.input.schema(),
-                },
-            )
-            .finish()
+        let distribution_display = DistributionDisplay {
+            distribution: &self.base.dist,
+            input_schema: self.input.schema(),
+        };
+        builder.field("dist", &distribution_display).finish()
     }
 }
 
