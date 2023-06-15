@@ -19,6 +19,7 @@ use tracing::Subscriber;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
+#[derive(Debug)]
 pub struct TrAdderAtomic(TrAdder<i64>);
 
 impl Atomic for TrAdderAtomic {

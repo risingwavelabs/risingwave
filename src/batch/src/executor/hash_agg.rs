@@ -209,6 +209,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             PrecomputedBuildHasher,
             self.mem_context.global_allocator(),
         );
+        // let mut groups =
+        //     hashbrown::HashMap::<K, Vec<BoxedAggState>, PrecomputedBuildHasher>::with_hasher(
+        //         PrecomputedBuildHasher,
+        //     );
 
         // consume all chunks to compute the agg result
         #[for_await]
@@ -217,17 +221,16 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             let mut memory_usage_diff = 0;
             for (row_id, key) in keys.into_iter().enumerate() {
-                let mut new_group = false;
-                let states = groups.entry(key).or_insert_with(|| {
-                    new_group = true;
-                    self.agg_init_states.clone()
-                });
+                let states = if !groups.contains_key(&key) {
+                    let key2 = key.clone();
+                    groups.insert(key, self.agg_init_states.clone());
+                    groups.get_mut(&key2).unwrap()
+                } else {
+                    groups.get_mut(&key).unwrap()
+                };
 
-                // TODO: currently not a vectorized implementation
                 for state in states {
-                    if !new_group {
-                        memory_usage_diff -= state.estimated_size() as i64;
-                    }
+                    memory_usage_diff -= state.estimated_size() as i64;
                     state.update_single(&chunk, row_id).await?;
                     memory_usage_diff += state.estimated_size() as i64;
                 }
@@ -281,6 +284,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
 #[cfg(test)]
 mod tests {
+    use std::alloc::{AllocError, Allocator, Global, Layout};
+    use std::ptr::NonNull;
+    use std::sync::Arc;
+
     use prometheus::IntGauge;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
@@ -424,5 +431,49 @@ mod tests {
             Schema::new(vec![Field::unnamed(DataType::Int64)]),
         );
         diff_executor_output(actual_exec, Box::new(expect_exec)).await;
+    }
+
+    #[test]
+    fn test_hash_allocator() {
+        struct MyAllocInner {}
+
+        #[derive(Clone)]
+        struct MyAlloc {
+            inner: Arc<MyAllocInner>,
+        }
+
+        impl Drop for MyAllocInner {
+            fn drop(&mut self) {
+                println!("MyAlloc freed.")
+            }
+        }
+
+        unsafe impl Allocator for MyAlloc {
+            fn allocate(&self, layout: Layout) -> std::result::Result<NonNull<[u8]>, AllocError> {
+                let g = Global;
+                g.allocate(layout)
+            }
+
+            unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+                let g = Global;
+                g.deallocate(ptr, layout)
+            }
+        }
+
+        let mut map = hashbrown::HashMap::with_capacity_in(
+            10,
+            MyAlloc {
+                inner: Arc::new(MyAllocInner {}),
+            },
+        );
+        for i in 0..100000 {
+            map.entry(i).or_insert_with(|| "i".to_string());
+        }
+
+        for i in 0..100000 {
+            map.entry(i).or_insert_with(|| "i".to_string());
+        }
+
+        println!("Map size: {}", map.len());
     }
 }
