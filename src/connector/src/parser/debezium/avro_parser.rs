@@ -220,9 +220,11 @@ impl DebeziumAvroParser {
             let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-            let resolver =
-                apache_avro::schema::ResolvedSchema::try_from(&*self.outer_schema).unwrap();
-            let schema = resolver.to_resolved(&self.outer_schema).unwrap();
+            let resolver = apache_avro::schema::ResolvedSchema::try_from(&*self.outer_schema)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+            let schema = resolver
+                .to_resolved(&self.outer_schema)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
             let row_op = DebeziumChangeEvent::with_value(AvroAccess::new(
                 &avro_value,

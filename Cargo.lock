@@ -144,7 +144,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.15.0"
-source = "git+https://github.com/risingwavelabs/avro?branch=idx0dev/resolved_schema#016b8f48980e52c1725fb14f8e8e4d8222230e2c"
+source = "git+https://github.com/risingwavelabs/avro?branch=idx0dev/resolved_schema#89c2c128de93586465a7ea85b0a1c1a53082bba2"
 dependencies = [
  "byteorder",
  "bzip2",
