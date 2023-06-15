@@ -78,7 +78,7 @@ impl CanalJsonParser {
             })
             .ok_or_else(|| {
                 RwError::from(ProtocolError(
-                    "data is missing for creating event".to_string(),
+                    "'data' is missing for creating event".to_string(),
                 ))
             })?;
         let mut errors = Vec::new();

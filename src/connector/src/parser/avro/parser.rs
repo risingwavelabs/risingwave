@@ -272,7 +272,7 @@ impl AvroParser {
         }
 
         if let Some(pk) = &self.upsert_primary_key_column_name {
-            accessor = accessor.with_primary_key_column_name(pk);
+            accessor = accessor.with_key_as_column_name(pk);
         }
 
         apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)

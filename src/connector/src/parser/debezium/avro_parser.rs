@@ -222,6 +222,7 @@ impl DebeziumAvroParser {
 
             let resolver = apache_avro::schema::ResolvedSchema::try_from(&*self.outer_schema)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+            // todo: to_resolved may cause stackoverflow if there's a loop in the schema
             let schema = resolver
                 .to_resolved(&self.outer_schema)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;

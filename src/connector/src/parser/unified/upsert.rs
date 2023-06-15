@@ -22,7 +22,7 @@ use crate::parser::unified::AccessError;
 pub struct UpsertChangeEvent<K, V> {
     key_accessor: Option<K>,
     value_accessor: Option<V>,
-    primary_key_column_name: Option<String>,
+    key_as_column_name: Option<String>,
 }
 
 impl<K, V> Default for UpsertChangeEvent<K, V> {
@@ -30,7 +30,7 @@ impl<K, V> Default for UpsertChangeEvent<K, V> {
         Self {
             key_accessor: None,
             value_accessor: None,
-            primary_key_column_name: None,
+            key_as_column_name: None,
         }
     }
 }
@@ -52,8 +52,8 @@ impl<K, V> UpsertChangeEvent<K, V> {
         self
     }
 
-    pub fn with_primary_key_column_name(mut self, name: impl ToString) -> Self {
-        self.primary_key_column_name = Some(name.to_string());
+    pub fn with_key_as_column_name(mut self, name: impl ToString) -> Self {
+        self.key_as_column_name = Some(name.to_string());
         self
     }
 }
@@ -114,7 +114,7 @@ where
             other => return other,
         };
 
-        if let Some(primary_key_column_name) = &self.primary_key_column_name && name == primary_key_column_name {
+        if let Some(key_as_column_name) = &self.key_as_column_name && name == key_as_column_name {
             return self.access(&["key"], Some(type_expected));
         }
 

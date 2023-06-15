@@ -261,7 +261,7 @@ pub(crate) fn from_avro_value(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::ScalarImpl;
+    use risingwave_common::types::{ScalarImpl, Timestamp};
 
     use super::*;
     #[test]
@@ -278,7 +278,6 @@ mod tests {
         let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 1).unwrap();
         assert_eq!(rust_decimal, rust_decimal::Decimal::try_from(28.1).unwrap());
     }
-    #[ignore]
     #[test]
     fn test_avro_timestamp_micros() {
         let v1 = Value::TimestampMicros(1620000000000);
@@ -287,7 +286,17 @@ mod tests {
         let value_schema2 = Schema::TimestampMillis;
         let datum1 = from_avro_value(v1, &value_schema1, &DataType::Timestamp).unwrap();
         let datum2 = from_avro_value(v2, &value_schema2, &DataType::Timestamp).unwrap();
-        assert_eq!(datum1, Some(ScalarImpl::Int64(1620000000000)));
-        assert_eq!(datum2, Some(ScalarImpl::Int64(1620000000000)));
+        assert_eq!(
+            datum1,
+            Some(ScalarImpl::Timestamp(Timestamp::new(
+                "2021-05-03T00:00:00".parse().unwrap()
+            )))
+        );
+        assert_eq!(
+            datum2,
+            Some(ScalarImpl::Timestamp(Timestamp::new(
+                "2021-05-03T00:00:00".parse().unwrap()
+            )))
+        );
     }
 }
