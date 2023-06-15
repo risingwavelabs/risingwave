@@ -27,17 +27,17 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::hash::{VnodeBitmapExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum, OrderType};
-use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_storage::error::StorageResult;
-use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::{StorageTable, StorageTableInnerIter};
-use risingwave_storage::table::{collect_data_chunk, TableIter};
+
+
+
+
+use risingwave_storage::table::{collect_data_chunk};
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -261,7 +261,7 @@ where
                                                 Self::mark_chunk(
                                                     chunk,
                                                     current_pos,
-                                                    &pk_in_output_indices,
+                                                    pk_in_output_indices,
                                                     pk_order,
                                                 ),
                                                 &self.output_indices,
@@ -343,7 +343,7 @@ where
                                     // Raise the current position.
                                     // As snapshot read streams are ordered by pk, so we can
                                     // just use the last row to update `current_pos`.
-                                    current_pos = Self::update_pos(&chunk, &pk_in_output_indices);
+                                    current_pos = Self::update_pos(&chunk, pk_in_output_indices);
 
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -422,9 +422,9 @@ where
     async fn snapshot_read(
         schema: Arc<Schema>,
         upstream_table: &StateTable<S>,
-        epoch: u64,
+        _epoch: u64,
         current_pos: Option<OwnedRow>,
-        ordered: bool,
+        _ordered: bool,
     ) {
         // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
         // scan. Otherwise, use Excluded.
@@ -447,7 +447,7 @@ where
             .iter_all_vnode_ranges(&range_bounds, Default::default())
             .await?;
         let pinned_iter: Vec<_> = iterators.into_iter().map(Box::pin).collect_vec();
-        let mut iter = merge_sort(pinned_iter);
+        let iter = merge_sort(pinned_iter);
         pin_mut!(iter);
         for data_chunk in collect_data_chunk(&mut iter, &schema, Some(CHUNK_SIZE))
             .instrument_await("arrangement_backfill_snapshot_read")

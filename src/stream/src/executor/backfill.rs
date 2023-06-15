@@ -35,7 +35,7 @@ use risingwave_common::util::sort_util::{cmp_datum, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, get_second, TableIter};
+use risingwave_storage::table::{collect_data_chunk, get_second};
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -450,7 +450,7 @@ where
         };
         // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
         // together with the upstream mv.
-        let mut iter = upstream_table
+        let iter = upstream_table
             .batch_iter_with_pk_bounds(
                 HummockReadEpoch::NoWait(epoch),
                 row::empty(),
