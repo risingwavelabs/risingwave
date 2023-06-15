@@ -105,13 +105,6 @@ where
         let property = self.parse_property(r#type, property);
         let mut core = self.core.write().await;
 
-        // TODO: remove this
-        let is_schedulable = match property.as_ref() {
-            None => true,
-            Some(p) => p.is_schedulable,
-        };
-        // assert!(is_schedulable);
-
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
             // TODO: update parallelism when the worker exists.
             worker.update_ttl(self.max_heartbeat_interval);
@@ -176,7 +169,6 @@ where
         if !is_schedulable
             && worker.worker_node.get_type().expect("did not have type") == WorkerType::ComputeNode
         {
-            // assert!(false); // TODO: remove this part. Debugging only
             tracing::warn!("activating cordoned worker. Ignoring request");
             return Ok(());
         }
@@ -220,11 +212,11 @@ where
         // We need to handle the deleting state once we introduce it
         // if worker_type == WorkerType::ComputeNode && worker.worker_node.state == State::DELETING
 
-        // TODO: write this with ok_else
-        let is_schedulable = match worker.worker_node.get_property() {
-            Ok(prop) => prop.is_schedulable,
-            Err(_) => true,
-        };
+        let is_schedulable = worker
+            .worker_node
+            .get_property()
+            .ok()
+            .map_or(true, |prop| prop.is_schedulable);
 
         if !is_schedulable {
             return Ok(worker_type);
@@ -233,7 +225,6 @@ where
         let old_prop = match worker.worker_node.get_property() {
             Ok(p) => p.clone(),
             Err(_) => {
-                //   assert!(false); // TODO: remove this
                 tracing::warn!("worker did not have property");
                 Property {
                     is_schedulable: true,
@@ -243,7 +234,7 @@ where
             }
         };
         let new_prop = Property {
-            is_schedulable: false, // TODO False, because we are cordoning the worker
+            is_schedulable: false, // False, because we are cordoning the worker
             is_serving: old_prop.is_serving,
             is_streaming: old_prop.is_streaming,
         };
@@ -430,7 +421,6 @@ where
         worker_property: AddNodeProperty,
     ) -> Option<Property> {
         if worker_type == WorkerType::ComputeNode {
-            // assert!(worker_property.is_schedulable); // TODO: remove this
             Some(Property {
                 is_streaming: worker_property.is_streaming,
                 is_serving: worker_property.is_serving,
@@ -529,31 +519,11 @@ impl ClusterManagerCore {
         self.parallel_units
             .extend(worker.worker_node.parallel_units.clone());
 
-        // TODO: remove debugging only
-        let is_schedulable = worker
-            .worker_node
-            .get_property()
-            .map_or(false, |p| p.is_schedulable);
-
-        // TODO: remove
-        if worker.worker_type() == WorkerType::ComputeNode {
-            //    assert!(is_schedulable); // TODO: remove
-        }
-
         self.workers
             .insert(WorkerKey(worker.key().unwrap()), worker);
     }
 
     fn update_worker_node(&mut self, worker: Worker) {
-        // TODO: remove debugging only
-        let is_schedulable = worker
-            .worker_node
-            .get_property()
-            .map_or(false, |p| p.is_schedulable);
-        if worker.worker_type() == WorkerType::ComputeNode {
-            //    assert!(is_schedulable); // TODO: remove
-        }
-
         self.workers
             .insert(WorkerKey(worker.key().unwrap()), worker);
     }
@@ -577,8 +547,7 @@ impl ClusterManagerCore {
     ) -> Vec<WorkerNode> {
         let worker_states =
             worker_states.map(|state| state.iter().map(|s| *s as i32).collect_vec());
-        let x = self
-            .workers
+        self.workers
             .values()
             .map(|worker| worker.to_protobuf())
             .filter(|w| w.r#type == worker_type as i32)
@@ -586,13 +555,6 @@ impl ClusterManagerCore {
                 None => true,
                 Some(state) => state.contains(&w.state), // TODO: can be == instead of contains
             })
-            .collect_vec();
-
-        // This did not help
-        // return x; // TODO: remove this. Debugging only
-
-        let y = x
-            .iter()
             .filter(|w| {
                 if list_cordoned {
                     true
@@ -600,12 +562,7 @@ impl ClusterManagerCore {
                     w.property.as_ref().map_or(true, |p| p.is_schedulable)
                 }
             })
-            .cloned()
-            .collect_vec();
-
-        // TODO: how can this never fire during the cordon tests?
-        //   assert!(x.len() == y.len()); // TODO: remove this
-        y
+            .collect_vec()
     }
 
     pub fn list_streaming_worker_node(
