@@ -354,7 +354,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_table_subquery(&mut self) -> (TableFactor, Table) {
         let (subquery, columns) = self.gen_local_query();
         let alias = self.gen_table_name_with_prefix("sq");
-        let table = Table::new(alias.clone(), columns.clone());
+        let table = Table::new(alias.clone(), columns);
         let factor = TableFactor::Derived {
             lateral: false,
             subquery: Box::new(subquery),
