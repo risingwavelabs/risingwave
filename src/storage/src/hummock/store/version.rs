@@ -740,9 +740,14 @@ impl HummockVersionReader {
                 Some(user_key_range.1.map(|key| key.cloned()));
         }
         let sst_read_options = Arc::new(sst_read_options);
+        let mut base_level = 0;
         for level in committed.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
                 continue;
+            }
+
+            if level.level_idx > 0 && !level.table_infos.is_empty() && base_level == 0 {
+                base_level = level.level_idx;
             }
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
@@ -804,6 +809,7 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
+                        base_level == level.level_idx,
                     ));
                     local_stats.non_overlapping_iter_count += 1;
                 }
@@ -841,6 +847,7 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
+                        false,
                     ));
                     local_stats.overlapping_iter_count += 1;
                 }

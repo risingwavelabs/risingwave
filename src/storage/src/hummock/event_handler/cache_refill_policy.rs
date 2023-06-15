@@ -64,7 +64,7 @@ impl CacheRefillPolicy {
                         ssts.extend(level_delta.inserted_table_infos.clone());
                     }
                 }
-                if hit_count * 2 > total_file_count {
+                if hit_count > 0 {
                     fill_count += ssts.len();
                     for sst in &ssts {
                         flatten_reqs.push(self.sstable_store.sstable(sst, &mut stats));

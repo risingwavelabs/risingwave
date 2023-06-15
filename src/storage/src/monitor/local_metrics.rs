@@ -34,6 +34,7 @@ pub struct StoreLocalStatistic {
     pub cache_data_block_total: u64,
     pub cache_meta_block_miss: u64,
     pub cache_meta_block_total: u64,
+    pub cache_base_level_data_block_miss: u64,
 
     // include multiple versions of one key.
     pub total_key_count: u64,
@@ -207,6 +208,7 @@ struct LocalStoreMetrics {
     cache_data_block_miss: GenericLocalCounter<prometheus::core::AtomicU64>,
     cache_meta_block_total: GenericLocalCounter<prometheus::core::AtomicU64>,
     cache_meta_block_miss: GenericLocalCounter<prometheus::core::AtomicU64>,
+    cache_base_level_data_block_miss: GenericLocalCounter<prometheus::core::AtomicU64>,
     remote_io_time: LocalHistogram,
     processed_key_count: GenericLocalCounter<prometheus::core::AtomicU64>,
     skip_multi_version_key_count: GenericLocalCounter<prometheus::core::AtomicU64>,
@@ -248,6 +250,12 @@ impl LocalStoreMetrics {
             .sst_store_block_request_counts
             .with_label_values(&[table_id_label, "meta_miss"])
             .local();
+
+        let cache_base_level_data_block_miss = metrics
+            .sst_store_block_request_counts
+            .with_label_values(&[table_id_label, "l0_miss"])
+            .local();
+
 
         let remote_io_time = metrics
             .remote_read_time
@@ -327,6 +335,7 @@ impl LocalStoreMetrics {
             get_filter_metrics,
             iter_filter_metrics,
             may_exist_filter_metrics,
+            cache_base_level_data_block_miss,
             collect_count: 0,
         }
     }
@@ -406,6 +415,7 @@ add_local_metrics_count!(
     cache_data_block_miss,
     cache_meta_block_total,
     cache_meta_block_miss,
+    cache_base_level_data_block_miss,
     skip_multi_version_key_count,
     skip_delete_key_count,
     get_shared_buffer_hit_counts,

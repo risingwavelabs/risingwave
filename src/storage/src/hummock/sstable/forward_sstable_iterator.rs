@@ -154,6 +154,7 @@ pub struct SstableIterator {
 
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
+    record_base_level_miss: bool,
     options: Arc<SstableIteratorReadOptions>,
 }
 
@@ -162,6 +163,7 @@ impl SstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
+        record_base_level_miss: bool,
     ) -> Self {
         Self {
             block_iter: None,
@@ -172,6 +174,7 @@ impl SstableIterator {
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
+            record_base_level_miss,
             options,
         }
     }
@@ -338,6 +341,9 @@ impl HummockIterator for SstableIterator {
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        if self.stats.cache_data_block_miss > 0 && self.record_base_level_miss {
+            stats.cache_base_level_data_block_miss += self.stats.cache_data_block_miss;
+        }
         stats.add(&self.stats);
     }
 }
@@ -348,7 +354,7 @@ impl SstableIteratorType for SstableIterator {
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
     ) -> Self {
-        SstableIterator::new(sstable, sstable_store, options)
+        SstableIterator::new(sstable, sstable_store, options, false)
     }
 }
 
