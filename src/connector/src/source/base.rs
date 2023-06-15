@@ -455,6 +455,7 @@ mod tests {
     use nexmark::event::EventType;
 
     use super::*;
+    use crate::source::cdc::MySqlCdcSplit;
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {

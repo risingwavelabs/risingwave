@@ -95,12 +95,12 @@ impl MySqlCdcSplit {
     pub fn copy_with_offset(&self, start_offset: String) -> Self {
         // deserialize the start_offset
         let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-            .expect(&format!("invalid cdc offset: {}", start_offset));
+            .unwrap_or_else(|_| panic!("invalid cdc offset: {}", start_offset));
 
         info!("dbz_offset: {:?}", dbz_offset);
 
         let snapshot_done = match dbz_offset.source_offset.snapshot {
-            Some(val) => val != true,
+            Some(val) => !val,
             None => true,
         };
 
@@ -129,13 +129,13 @@ impl PostgresCdcSplit {
     pub fn copy_with_offset(&self, start_offset: String) -> Self {
         // deserialize the start_offset
         let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-            .expect(&format!("invalid cdc offset: {}", start_offset));
+            .unwrap_or_else(|_| panic!("invalid cdc offset: {}", start_offset));
 
         info!("dbz_offset: {:?}", dbz_offset);
-        let snapshot_done = match dbz_offset.source_offset.last_snapshot_record {
-            Some(is_done) => is_done,
-            None => false,
-        };
+        let snapshot_done = dbz_offset
+            .source_offset
+            .last_snapshot_record
+            .unwrap_or(false);
 
         let split = CdcSplitBase {
             split_id: self.inner.split_id,
