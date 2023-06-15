@@ -19,6 +19,7 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{
     ParallelUnit, PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode,
 };
@@ -430,10 +431,16 @@ fn make_cluster_info() -> StreamingClusterInfo {
             )
         })
         .collect();
+
+    let p = Property {
+        is_schedulable: true,
+        ..Default::default()
+    };
     let worker_nodes = std::iter::once((
         0,
         WorkerNode {
             id: 0,
+            property: Some(p),
             ..Default::default()
         },
     ))

@@ -218,6 +218,9 @@ impl MetaClient {
             true,
         );
 
+        if !property.is_schedulable {
+            tracing::warn!("worker {:?} registered as cordoned", addr.clone());
+        }
         let init_result: Result<_> = tokio_retry::Retry::spawn(retry_strategy, || async {
             let grpc_meta_client = GrpcMetaClient::new(&addr_strategy, meta_config.clone()).await?;
 

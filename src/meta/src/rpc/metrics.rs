@@ -659,7 +659,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
             meta_metrics.table_info.reset();
             let fragments = fragment_manager.list_table_fragments().await;
             let workers: HashMap<u32, String> = cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(WorkerType::ComputeNode, None, false)
                 .await
                 .into_iter()
                 .map(|worker_node| match worker_node.host {
