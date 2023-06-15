@@ -34,7 +34,7 @@ use crate::catalog::{ConnectionId, SchemaId, SinkId, SourceId, ViewId};
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
-    id: SchemaId,
+    pub(crate) id: SchemaId,
     name: String,
     table_by_name: HashMap<String, Arc<TableCatalog>>,
     table_by_id: HashMap<TableId, Arc<TableCatalog>>,

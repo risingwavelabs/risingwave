@@ -33,8 +33,8 @@ pub struct DatabaseCatalog {
 
 impl DatabaseCatalog {
     pub fn create_schema(&mut self, proto: &PbSchema) {
-        if is_system_schema(&proto.name) {
-            return self.create_sys_schema_tmp(proto);
+        if is_system_schema(&proto.name) && self.schema_by_name.contains_key(&proto.name) {
+            return self.replace_sys_schema_id_tmp(proto);
         }
         let name = proto.name.clone();
         let id = proto.id;
@@ -48,11 +48,12 @@ impl DatabaseCatalog {
     // For backward compatibility, since we didn't reject some operations on `rw_catalog` and
     // `information_schema`: 1.drop schema, 2. create relations in them, here we have to replace
     // back these schemas in frontend.
-    fn create_sys_schema_tmp(&mut self, proto: &PbSchema) {
+    fn replace_sys_schema_id_tmp(&mut self, proto: &PbSchema) {
         let name = proto.name.clone();
         let id = proto.id;
-        let schema = proto.into();
-        self.schema_by_name.insert(name.clone(), schema);
+        let old_schema = self.schema_by_name.get_mut(&name).unwrap();
+        self.schema_name_by_id.remove(&old_schema.id).unwrap();
+        old_schema.id = id;
         self.schema_name_by_id.insert(id, name);
     }
 
