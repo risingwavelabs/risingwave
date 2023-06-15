@@ -34,8 +34,8 @@ use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::{CachePolicy, SstableStore, TieredCache};
 use risingwave_storage::monitor::HummockStateStoreMetrics;
-use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
+use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
 use tokio::sync::mpsc::unbounded_channel;
 
 type SelectAllIterStream = impl StateStoreReadIterStream + Unpin;

@@ -44,10 +44,10 @@ use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
+use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{PrefetchOptions, ReadOptions};
 use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
-use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::StateStore;
 
 /// [`StorageTableInner`] is the interface accessing relational data in KV(`StateStore`) with

@@ -42,11 +42,11 @@ use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
-use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::StateStore;
 use tracing::trace;
 

@@ -30,9 +30,9 @@ use crate::hummock::utils::{
     cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
     do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
 };
+use crate::row_serde::value_serde::ValueRowSerde;
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::row_serde::value_serde::ValueRowSerde;
 
 #[derive(Clone, Debug)]
 pub enum KeyOp {

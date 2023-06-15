@@ -377,7 +377,13 @@ fn print_table_column(
             ColumnAwareSerde::new(
                 Arc::from(table_catalog.value_indices.clone().into_boxed_slice()),
                 Arc::from(data_types.into_boxed_slice()),
-                Arc::from_iter(table_catalog.columns().iter().cloned().map(|c| c.column_desc)),
+                Arc::from_iter(
+                    table_catalog
+                        .columns()
+                        .iter()
+                        .cloned()
+                        .map(|c| c.column_desc),
+                ),
             )
             .into()
         } else {
