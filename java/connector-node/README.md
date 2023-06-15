@@ -25,6 +25,15 @@ cd assembly/target && tar xvf risingwave-connector-1.0.0.tar.gz
 java -classpath "./libs/*" com.risingwave.connector.ConnectorService
 ```
 
+Sometimes, you need to specify the shared library path. For example, when program want to run class related to java-binding, they need to call shared library file. If not, it will throw exception when running. You need:
+
+```
+RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
+CONNECTOR_ROOT=$JAVA_ROOT/connector-node
+cd ${CONNECTOR_ROOT}/assembly/target && java -classpath "./libs/*" com.risingwave.connector.ConnectorService
+```
+
+## Docker image
 Alternatively, to build and run the Docker image, run the following command from the project's root directory:
 
 ```

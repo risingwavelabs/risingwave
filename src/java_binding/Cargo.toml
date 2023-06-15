@@ -34,7 +34,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tracing = "0.1"
 
 [lib]
-crate_type = ["cdylib"]
+crate-type = ["cdylib"]
 
 [[bin]]
 name = "data-chunk-payload-generator"
