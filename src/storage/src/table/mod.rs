@@ -88,7 +88,6 @@ pub fn get_second<T, U, E>(arg: Result<(T, U), E>) -> Result<U, E> {
     arg.map(|x| x.1)
 }
 
-// FIXME: Try merge this with the impl in `src/table/mod.rs`.
 pub async fn collect_data_chunk<E, S>(
     stream: &mut S,
     schema: &Schema,
