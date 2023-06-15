@@ -17,16 +17,16 @@ use std::convert::TryFrom;
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
 use arrow_schema::{Field, Schema, SchemaRef};
+use await_tree::InstrumentAwait;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 use risingwave_udf::ArrowFlightUdfClient;
 
 use super::{build_from_prost, BoxedExpression};
 use crate::expr::Expression;
-use crate::{bail, ensure, ExprError, Result};
+use crate::{bail, ExprError, Result};
 
 #[derive(Debug)]
 pub struct UdfExpression {
@@ -36,6 +36,7 @@ pub struct UdfExpression {
     arg_schema: SchemaRef,
     client: Arc<ArrowFlightUdfClient>,
     identifier: String,
+    span: await_tree::Span,
 }
 
 #[cfg(not(madsim))]
@@ -81,7 +82,11 @@ impl UdfExpression {
         let input =
             arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
                 .expect("failed to build record batch");
-        let output = self.client.call(&self.identifier, input).await?;
+        let output = self
+            .client
+            .call(&self.identifier, input)
+            .instrument_await(self.span.clone())
+            .await?;
         if output.num_rows() != vis.len() {
             bail!(
                 "UDF returned {} rows, but expected {}",
@@ -103,11 +108,9 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::Udf);
         let return_type = DataType::from(prost.get_return_type().unwrap());
-        let RexNode::Udf(udf) = prost.get_rex_node().unwrap() else {
-            bail!("expect UDF");
-        };
+        let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
+
         let arg_schema = Arc::new(Schema::new(
             udf.arg_types
                 .iter()
@@ -124,6 +127,7 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
             arg_schema,
             client,
             identifier: udf.identifier.clone(),
+            span: format!("expr_udf_call ({})", udf.identifier).into(),
         })
     }
 }

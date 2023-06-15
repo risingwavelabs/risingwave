@@ -667,10 +667,17 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn reschedule(&self, reschedules: HashMap<u32, PbReschedule>) -> Result<bool> {
-        let request = RescheduleRequest { reschedules };
+    pub async fn reschedule(
+        &self,
+        reschedules: HashMap<u32, PbReschedule>,
+        revision: u64,
+    ) -> Result<(bool, u64)> {
+        let request = RescheduleRequest {
+            reschedules,
+            revision,
+        };
         let resp = self.inner.reschedule(request).await?;
-        Ok(resp.success)
+        Ok((resp.success, resp.revision))
     }
 
     pub async fn risectl_get_pinned_versions_summary(
@@ -689,6 +696,27 @@ impl MetaClient {
         self.inner
             .rise_ctl_get_pinned_snapshots_summary(request)
             .await
+    }
+
+    pub async fn risectl_get_checkpoint_hummock_version(
+        &self,
+    ) -> Result<RiseCtlGetCheckpointVersionResponse> {
+        let request = RiseCtlGetCheckpointVersionRequest {};
+        self.inner.rise_ctl_get_checkpoint_version(request).await
+    }
+
+    pub async fn risectl_pause_hummock_version_checkpoint(
+        &self,
+    ) -> Result<RiseCtlPauseVersionCheckpointResponse> {
+        let request = RiseCtlPauseVersionCheckpointRequest {};
+        self.inner.rise_ctl_pause_version_checkpoint(request).await
+    }
+
+    pub async fn risectl_resume_hummock_version_checkpoint(
+        &self,
+    ) -> Result<RiseCtlResumeVersionCheckpointResponse> {
+        let request = RiseCtlResumeVersionCheckpointRequest {};
+        self.inner.rise_ctl_resume_version_checkpoint(request).await
     }
 
     pub async fn init_metadata_for_replay(
@@ -1092,7 +1120,7 @@ impl GrpcMetaClientCore {
 /// It is a wrapper of tonic client. See [`rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
-    force_refresh_sender: mpsc::Sender<oneshot::Sender<Result<()>>>,
+    member_monitor_event_sender: mpsc::Sender<Sender<Result<()>>>,
     core: Arc<RwLock<GrpcMetaClientCore>>,
 }
 
@@ -1266,13 +1294,25 @@ impl GrpcMetaClient {
             let mut ticker = time::interval(MetaMemberManagement::META_MEMBER_REFRESH_PERIOD);
 
             loop {
-                let result_sender: Option<Sender<Result<()>>> = if enable_period_tick {
+                let event: Option<Sender<Result<()>>> = if enable_period_tick {
                     tokio::select! {
                         _ = ticker.tick() => None,
-                        result_sender = force_refresh_receiver.recv() => result_sender,
+                        result_sender = force_refresh_receiver.recv() => {
+                            if result_sender.is_none() {
+                                break;
+                            }
+
+                            result_sender
+                        },
                     }
                 } else {
-                    force_refresh_receiver.recv().await
+                    let result_sender = force_refresh_receiver.recv().await;
+
+                    if result_sender.is_none() {
+                        break;
+                    }
+
+                    result_sender
                 };
 
                 let tick_result = member_management.refresh_members().await;
@@ -1280,7 +1320,7 @@ impl GrpcMetaClient {
                     tracing::warn!("refresh meta member client failed {}", e);
                 }
 
-                if let Some(sender) = result_sender {
+                if let Some(sender) = event {
                     // ignore resp
                     let _resp = sender.send(tick_result);
                 }
@@ -1293,7 +1333,7 @@ impl GrpcMetaClient {
     async fn force_refresh_leader(&self) -> Result<()> {
         let (sender, receiver) = oneshot::channel();
 
-        self.force_refresh_sender
+        self.member_monitor_event_sender
             .send(sender)
             .await
             .map_err(|e| anyhow!(e))?;
@@ -1311,7 +1351,7 @@ impl GrpcMetaClient {
         }?;
         let (force_refresh_sender, force_refresh_receiver) = mpsc::channel(1);
         let client = GrpcMetaClient {
-            force_refresh_sender,
+            member_monitor_event_sender: force_refresh_sender,
             core: Arc::new(RwLock::new(GrpcMetaClientCore::new(channel))),
         };
 
@@ -1466,6 +1506,9 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_get_pinned_snapshots_summary, RiseCtlGetPinnedSnapshotsSummaryRequest, RiseCtlGetPinnedSnapshotsSummaryResponse }
             ,{ hummock_client, rise_ctl_list_compaction_group, RiseCtlListCompactionGroupRequest, RiseCtlListCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
+            ,{ hummock_client, rise_ctl_get_checkpoint_version, RiseCtlGetCheckpointVersionRequest, RiseCtlGetCheckpointVersionResponse }
+            ,{ hummock_client, rise_ctl_pause_version_checkpoint, RiseCtlPauseVersionCheckpointRequest, RiseCtlPauseVersionCheckpointResponse }
+            ,{ hummock_client, rise_ctl_resume_version_checkpoint, RiseCtlResumeVersionCheckpointRequest, RiseCtlResumeVersionCheckpointResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
@@ -1497,7 +1540,11 @@ impl GrpcMetaClient {
         ) {
             tracing::debug!("matching tonic code {}", code);
             let (result_sender, result_receiver) = oneshot::channel();
-            if self.force_refresh_sender.try_send(result_sender).is_ok() {
+            if self
+                .member_monitor_event_sender
+                .try_send(result_sender)
+                .is_ok()
+            {
                 if let Ok(Err(e)) = result_receiver.await {
                     tracing::warn!("force refresh meta client failed {}", e);
                 }

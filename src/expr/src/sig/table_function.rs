@@ -19,10 +19,10 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_pb::expr::table_function::PbType;
 
+use super::FuncSigDebug;
 use crate::error::Result;
 use crate::expr::BoxedExpression;
 use crate::table_function::BoxedTableFunction;
@@ -85,14 +85,13 @@ pub struct FuncSign {
 
 impl fmt::Debug for FuncSign {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = format!(
-            "{}({})->setof {:?}",
-            self.func.as_str_name(),
-            self.inputs_type.iter().map(|t| format!("{t:?}")).join(","),
-            self.ret_type
-        )
-        .to_lowercase();
-        f.write_str(&s)
+        FuncSigDebug {
+            func: self.func.as_str_name(),
+            inputs_type: self.inputs_type,
+            ret_type: self.ret_type,
+            set_returning: true,
+        }
+        .fmt(f)
     }
 }
 

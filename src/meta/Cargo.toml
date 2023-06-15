@@ -42,6 +42,7 @@ prometheus = "0.13"
 prometheus-http-query = "0.6"
 prost = "0.11"
 rand = "0.8"
+regex = "1"
 reqwest = "0.11"
 risingwave_backup = { path = "../storage/backup" }
 risingwave_common = { path = "../common" }

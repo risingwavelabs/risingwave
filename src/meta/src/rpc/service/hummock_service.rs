@@ -23,7 +23,7 @@ use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
-use crate::hummock::{CompactionResumeTrigger, HummockManagerRef, VacuumManagerRef};
+use crate::hummock::{HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
@@ -252,8 +252,6 @@ where
             self.hummock_manager
                 .try_send_compaction_request(cg_id, compact_task::TaskType::Dynamic);
         }
-        self.hummock_manager
-            .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
@@ -514,5 +512,31 @@ where
         let mut resp: GetScaleCompactorResponse = info.into();
         resp.suggest_cores = scale_out_cores;
         Ok(Response::new(resp))
+    }
+
+    async fn rise_ctl_pause_version_checkpoint(
+        &self,
+        _request: Request<RiseCtlPauseVersionCheckpointRequest>,
+    ) -> Result<Response<RiseCtlPauseVersionCheckpointResponse>, Status> {
+        self.hummock_manager.pause_version_checkpoint();
+        Ok(Response::new(RiseCtlPauseVersionCheckpointResponse {}))
+    }
+
+    async fn rise_ctl_resume_version_checkpoint(
+        &self,
+        _request: Request<RiseCtlResumeVersionCheckpointRequest>,
+    ) -> Result<Response<RiseCtlResumeVersionCheckpointResponse>, Status> {
+        self.hummock_manager.resume_version_checkpoint();
+        Ok(Response::new(RiseCtlResumeVersionCheckpointResponse {}))
+    }
+
+    async fn rise_ctl_get_checkpoint_version(
+        &self,
+        _request: Request<RiseCtlGetCheckpointVersionRequest>,
+    ) -> Result<Response<RiseCtlGetCheckpointVersionResponse>, Status> {
+        let checkpoint_version = self.hummock_manager.get_checkpoint_version().await;
+        Ok(Response::new(RiseCtlGetCheckpointVersionResponse {
+            checkpoint_version: Some(checkpoint_version),
+        }))
     }
 }

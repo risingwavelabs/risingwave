@@ -41,7 +41,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -165,15 +165,8 @@ impl Compactor {
             ])
             .start_timer();
 
-        let (need_quota, file_counts) = estimate_state_for_compaction(&compact_task);
-        tracing::info!(
-            "Ready to handle compaction task: {} need memory: {} input_file_counts {} target_level {} compression_algorithm {:?}",
-            compact_task.task_id,
-            need_quota,
-            file_counts,
-            compact_task.target_level,
-            compact_task.compression_algorithm,
-        );
+        let (need_quota, total_file_count, total_key_count) =
+            estimate_state_for_compaction(&compact_task);
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
@@ -208,7 +201,7 @@ impl Compactor {
         };
 
         if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
-            let found_tables = multi.get_exsting_table_ids();
+            let found_tables = multi.get_existing_table_ids();
             let removed_tables = compact_table_ids
                 .iter()
                 .filter(|table_id| !found_tables.contains(table_id))
@@ -281,6 +274,18 @@ impl Compactor {
 
         let task_memory_capacity_with_parallelism =
             estimate_task_memory_capacity(context.clone(), &compact_task) * parallelism;
+
+        tracing::info!(
+                "Ready to handle compaction task: {} need memory: {} input_file_counts {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+                compact_task.task_id,
+                need_quota,
+                total_file_count,
+                total_key_count,
+                compact_task.target_level,
+                compact_task.compression_algorithm,
+                parallelism,
+                task_memory_capacity_with_parallelism
+            );
 
         // If the task does not have enough memory, it should cancel the task and let the meta
         // reschedule it, so that it does not occupy the compactor's resources.
@@ -490,7 +495,7 @@ impl Compactor {
 
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
-                    let message = tokio::select! {
+                    let message: Option<Result<SubscribeCompactTasksResponse, _>> = tokio::select! {
                         _ = task_progress_interval.tick() => {
                             let mut progress_list = Vec::new();
                             for (&task_id, progress) in task_progress.lock().iter() {
@@ -498,6 +503,7 @@ impl Compactor {
                                     task_id,
                                     num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
                                     num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
+                                    num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
                                 });
                             }
 
@@ -623,6 +629,7 @@ impl Compactor {
         compactor_metrics: Arc<CompactorMetrics>,
         mut iter: impl HummockIterator<Direction = Forward>,
         mut compaction_filter: impl CompactionFilter,
+        task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<CompactionStatistics>
     where
         F: TableBuilderFactory,
@@ -655,7 +662,16 @@ impl Compactor {
         let mut last_table_stats = TableStats::default();
         let mut last_table_id = None;
         let mut compaction_statistics = CompactionStatistics::default();
+        let mut progress_key_num: u64 = 0;
+        const PROGRESS_KEY_INTERVAL: u64 = 100;
         while iter.is_valid() {
+            progress_key_num += 1;
+
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
+            }
+
             let mut iter_key = iter.key();
             compaction_statistics.iter_total_key_counts += 1;
 
@@ -760,6 +776,12 @@ impl Compactor {
 
             iter.next().await?;
         }
+
+        if let Some(task_progress) = task_progress.as_ref() && progress_key_num > 0 {
+            // Avoid losing the progress_key_num in the last Interval
+            task_progress.inc_progress_key(progress_key_num);
+        }
+
         if let Some(last_table_id) = last_table_id.take() {
             table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
         }
@@ -797,6 +819,8 @@ impl Compactor {
         del_agg: Arc<CompactionDeleteRanges>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
+        task_id: Option<HummockCompactionTaskId>,
+        split_index: Option<usize>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
@@ -908,6 +932,16 @@ impl Compactor {
         debug_assert!(ssts
             .iter()
             .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
+
+        if task_id.is_some() {
+            // skip shared buffer compaction
+            tracing::info!(
+                "Finish Task {:?} split_index {:?} sst count {}",
+                task_id,
+                split_index,
+                ssts.len()
+            );
+        }
         Ok((ssts, table_stats_map))
     }
 
@@ -934,7 +968,7 @@ impl Compactor {
         let mut sst_builder = CapacitySplitTableBuilder::new(
             builder_factory,
             self.context.compactor_metrics.clone(),
-            task_progress,
+            task_progress.clone(),
             del_agg,
             self.task_config.key_range.clone(),
             self.task_config.is_target_l0_or_lbase,
@@ -947,6 +981,7 @@ impl Compactor {
             self.context.compactor_metrics.clone(),
             iter,
             compaction_filter,
+            task_progress,
         )
         .await?;
 

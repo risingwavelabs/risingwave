@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HopWindowNode;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
@@ -58,12 +57,7 @@ impl BatchHopWindow {
         }
     }
 }
-
-impl fmt::Display for BatchHopWindow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchHopWindow")
-    }
-}
+impl_distill_by_unit!(BatchHopWindow, logical, "BatchHopWindow");
 
 impl PlanTreeNodeUnary for BatchHopWindow {
     fn input(&self) -> PlanRef {

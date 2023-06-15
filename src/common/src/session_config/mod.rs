@@ -29,12 +29,12 @@ use tracing::info;
 
 use crate::error::{ErrorCode, RwError};
 use crate::session_config::transaction_isolation_level::IsolationLevel;
-use crate::session_config::visibility_mode::VisibilityMode;
+pub use crate::session_config::visibility_mode::VisibilityMode;
 use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 22] = [
+const CONFIG_KEYS: [&str; 25] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -57,6 +57,9 @@ const CONFIG_KEYS: [&str; 22] = [
     "INTERVALSTYLE",
     "BATCH_PARALLELISM",
     "RW_STREAMING_ENABLE_BUSHY_JOIN",
+    "RW_ENABLE_JOIN_ORDERING",
+    "SERVER_VERSION",
+    "SERVER_VERSION_NUM",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -83,6 +86,9 @@ const RW_ENABLE_SHARE_PLAN: usize = 18;
 const INTERVAL_STYLE: usize = 19;
 const BATCH_PARALLELISM: usize = 20;
 const STREAMING_ENABLE_BUSHY_JOIN: usize = 21;
+const RW_ENABLE_JOIN_ORDERING: usize = 22;
+const SERVER_VERSION: usize = 23;
+const SERVER_VERSION_NUM: usize = 24;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -285,6 +291,9 @@ type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
 type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
 type IntervalStyle = ConfigString<INTERVAL_STYLE>;
 type BatchParallelism = ConfigU64<BATCH_PARALLELISM, 0>;
+type EnableJoinOrdering = ConfigBool<RW_ENABLE_JOIN_ORDERING, true>;
+type ServerVersion = ConfigString<SERVER_VERSION>;
+type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 80_300>;
 
 #[derive(Educe)]
 #[educe(Default)]
@@ -342,11 +351,14 @@ pub struct ConfigMap {
     /// streaming parallelism.
     streaming_parallelism: StreamingParallelism,
 
-    /// Enable delta join in streaming query. Defaults to false.
+    /// Enable delta join for streaming queries. Defaults to false.
     streaming_enable_delta_join: StreamingEnableDeltaJoin,
 
-    /// Enable bushy join in the streaming query. Defaults to false.
+    /// Enable bushy join for streaming queries. Defaults to true.
     streaming_enable_bushy_join: StreamingEnableBushyJoin,
+
+    /// Enable join ordering for streaming and batch queries. Defaults to true.
+    enable_join_ordering: EnableJoinOrdering,
 
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
@@ -366,6 +378,11 @@ pub struct ConfigMap {
     interval_style: IntervalStyle,
 
     batch_parallelism: BatchParallelism,
+
+    /// The version of PostgreSQL that Risingwave claims to be.
+    #[educe(Default(expression = "ConfigString::<SERVER_VERSION>(String::from(\"8.3.0\"))"))]
+    server_version: ServerVersion,
+    server_version_num: ServerVersionNum,
 }
 
 impl ConfigMap {
@@ -410,6 +427,8 @@ impl ConfigMap {
             self.streaming_enable_delta_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             self.streaming_enable_bushy_join = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
+            self.enable_join_ordering = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             self.enable_two_phase_agg = val.as_slice().try_into()?;
             if !*self.enable_two_phase_agg {
@@ -468,6 +487,8 @@ impl ConfigMap {
             Ok(self.streaming_enable_delta_join.to_string())
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             Ok(self.streaming_enable_bushy_join.to_string())
+        } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
+            Ok(self.enable_join_ordering.to_string())
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             Ok(self.enable_two_phase_agg.to_string())
         } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
@@ -478,6 +499,10 @@ impl ConfigMap {
             Ok(self.interval_style.to_string())
         } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
             Ok(self.batch_parallelism.to_string())
+        } else if key.eq_ignore_ascii_case(ServerVersion::entry_name()) {
+            Ok(self.server_version.clone())
+        } else if key.eq_ignore_ascii_case(ServerVersionNum::entry_name()) {
+            Ok(self.server_version_num.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -558,12 +583,17 @@ impl ConfigMap {
             VariableInfo{
                 name : StreamingEnableDeltaJoin::entry_name().to_lowercase(),
                 setting : self.streaming_enable_delta_join.to_string(),
-                description: String::from("Enable delta join in streaming query.")
+                description: String::from("Enable delta join in streaming queries.")
             },
             VariableInfo{
                 name : StreamingEnableBushyJoin::entry_name().to_lowercase(),
                 setting : self.streaming_enable_bushy_join.to_string(),
-                description: String::from("Enable bushy join in streaming query.")
+                description: String::from("Enable bushy join in streaming queries.")
+            },
+            VariableInfo{
+                name : EnableJoinOrdering::entry_name().to_lowercase(),
+                setting : self.enable_join_ordering.to_string(),
+                description: String::from("Enable join ordering for streaming and batch queries.")
             },
             VariableInfo{
                 name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
@@ -589,6 +619,16 @@ impl ConfigMap {
                 name : BatchParallelism::entry_name().to_lowercase(),
                 setting : self.batch_parallelism.to_string(),
                 description: String::from("Sets the parallelism for batch. If 0, use default value.")
+            },
+            VariableInfo{
+                name : ServerVersion::entry_name().to_lowercase(),
+                setting : self.server_version.to_string(),
+                description : String::from("The version of the server.")
+            },
+            VariableInfo{
+                name : ServerVersionNum::entry_name().to_lowercase(),
+                setting : self.server_version_num.to_string(),
+                description : String::from("The version number of the server.")
             },
         ]
     }
@@ -637,8 +677,8 @@ impl ConfigMap {
         self.search_path.clone()
     }
 
-    pub fn only_checkpoint_visible(&self) -> bool {
-        matches!(self.visibility_mode, VisibilityMode::Checkpoint)
+    pub fn get_visible_mode(&self) -> VisibilityMode {
+        self.visibility_mode
     }
 
     pub fn get_query_epoch(&self) -> Option<Epoch> {
@@ -665,6 +705,10 @@ impl ConfigMap {
 
     pub fn get_streaming_enable_bushy_join(&self) -> bool {
         *self.streaming_enable_bushy_join
+    }
+
+    pub fn get_enable_join_ordering(&self) -> bool {
+        *self.enable_join_ordering
     }
 
     pub fn get_enable_two_phase_agg(&self) -> bool {

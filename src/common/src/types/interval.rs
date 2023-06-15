@@ -1459,6 +1459,7 @@ mod tests {
 
     use super::*;
     use crate::types::ordered_float::OrderedFloat;
+    use crate::util::panic::rw_catch_unwind;
 
     #[test]
     fn test_parse() {
@@ -1559,7 +1560,7 @@ mod tests {
         for (lhs, rhs, expected) in cases {
             let lhs = Interval::from_month_day_usec(lhs.0, lhs.1, lhs.2 as i64);
             let rhs = Interval::from_month_day_usec(rhs.0, rhs.1, rhs.2 as i64);
-            let result = std::panic::catch_unwind(|| {
+            let result = rw_catch_unwind(|| {
                 let actual = lhs.exact_div(&rhs);
                 assert_eq!(actual, expected);
             });
@@ -1740,7 +1741,7 @@ mod tests {
         assert!(Interval::deserialize(&mut deserializer).is_err());
 
         let buf = i128::MIN.to_ne_bytes();
-        std::panic::catch_unwind(|| {
+        rw_catch_unwind(|| {
             <Interval as crate::hash::HashKeyDe>::deserialize(&DataType::Interval, &mut &buf[..])
         })
         .unwrap_err();

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::hash::BuildHasher;
-use std::sync::Arc;
 use std::{fmt, usize};
 
 use bytes::Bytes;
@@ -656,9 +655,8 @@ impl fmt::Debug for DataChunk {
 
 impl<'a> From<&'a StructArray> for DataChunk {
     fn from(array: &'a StructArray) -> Self {
-        let columns = array.fields().map(|array| array.clone().into()).collect();
         Self {
-            columns,
+            columns: array.fields().cloned().collect(),
             vis2: Vis::Compact(array.len()),
         }
     }
@@ -753,13 +751,12 @@ impl DataChunkTestExt for DataChunk {
                 "T" => DataType::Varchar,
                 "SRL" => DataType::Serial,
                 array if array.starts_with('{') && array.ends_with('}') => {
-                    DataType::Struct(Arc::new(StructType {
-                        fields: array[1..array.len() - 1]
+                    DataType::Struct(StructType::unnamed(
+                        array[1..array.len() - 1]
                             .split(',')
                             .map(parse_type)
-                            .collect_vec(),
-                        field_names: vec![],
-                    }))
+                            .collect(),
+                    ))
                 }
                 _ => todo!("unsupported type: {s:?}"),
             }

@@ -32,14 +32,9 @@
 
 // These modules define concrete expression structures.
 mod expr_array_concat;
-mod expr_array_distinct;
-mod expr_array_length;
-mod expr_array_positions;
-mod expr_array_remove;
 mod expr_array_to_string;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
-mod expr_cardinality;
 mod expr_case;
 mod expr_coalesce;
 mod expr_concat_ws;
@@ -55,7 +50,6 @@ pub mod expr_regexp;
 mod expr_some_all;
 mod expr_to_char_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
-mod expr_trim_array;
 pub(crate) mod expr_udf;
 mod expr_unary;
 mod expr_vnode;
@@ -73,6 +67,7 @@ use futures_util::TryFutureExt;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
+use risingwave_pb::expr::PbExprNode;
 use static_assertions::const_assert;
 
 pub use self::build::*;
@@ -138,6 +133,19 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
         Self: Sized + Send + 'static,
     {
         Box::new(self)
+    }
+}
+
+/// Extension trait to convert the protobuf representation to a boxed [`Expression`], with a
+/// concrete expression type.
+#[easy_ext::ext(TryFromExprNodeBoxed)]
+impl<'a, T> T
+where
+    T: TryFrom<&'a PbExprNode, Error = ExprError> + Expression + 'static,
+{
+    /// Performs the conversion.
+    fn try_from_boxed(expr: &'a PbExprNode) -> Result<BoxedExpression> {
+        T::try_from(expr).map(|e| e.boxed())
     }
 }
 

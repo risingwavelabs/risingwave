@@ -75,17 +75,19 @@ async fn create_executor<S: StateStore>(
 async fn test_over_window() {
     let store = MemoryStateStore::new();
     let calls = vec![
+        // lag(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Lag,
+            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
             args: AggArgs::Unary(DataType::Int32, 3),
             return_type: DataType::Int32,
-            frame: Frame::rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
+            frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
         },
+        // lead(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Lead,
+            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
             args: AggArgs::Unary(DataType::Int32, 3),
             return_type: DataType::Int32,
-            frame: Frame::rows(FrameBound::CurrentRow, FrameBound::Following(1)),
+            frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
         },
     ];
 
@@ -166,6 +168,7 @@ async fn test_over_window() {
               output:
               - !barrier 4
         "#]],
+        SnapshotOptions::default(),
     )
     .await;
 }
@@ -207,6 +210,7 @@ async fn test_over_window_aggregate() {
                 | + | 1 | p1 | 101 | 16 | 46 |
                 +---+---+----+-----+----+----+
         "#]],
+        SnapshotOptions::default(),
     )
     .await;
 }

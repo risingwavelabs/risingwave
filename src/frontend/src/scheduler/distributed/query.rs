@@ -636,6 +636,11 @@ pub(crate) mod tests {
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
         worker_node_manager
             .insert_streaming_fragment_mapping(0, ParallelUnitMapping::new_single(0));
+        worker_node_manager.set_serving_fragment_mapping(
+            vec![(0, ParallelUnitMapping::new_single(0))]
+                .into_iter()
+                .collect(),
+        );
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);

@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
-use super::generic::Limit;
+use super::generic::TopNLimit;
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ColumnPruningContext,
     ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
@@ -117,7 +116,7 @@ impl ToStream for LogicalDedup {
             // If the input is not append-only, we use a `StreamGroupTopN` with the limit being 1.
             let logical_top_n = generic::TopN::with_group(
                 input,
-                Limit::new(1, false),
+                TopNLimit::new(1, false),
                 0,
                 Order::default(),
                 self.dedup_cols().to_vec(),
@@ -132,7 +131,7 @@ impl ToBatch for LogicalDedup {
         let input = self.input().to_batch()?;
         let logical_top_n = generic::TopN::with_group(
             input,
-            Limit::new(1, false),
+            TopNLimit::new(1, false),
             0,
             Order::default(),
             self.dedup_cols().to_vec(),
@@ -183,8 +182,4 @@ impl ColPrunable for LogicalDedup {
     }
 }
 
-impl fmt::Display for LogicalDedup {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalDedup")
-    }
-}
+impl_distill_by_unit!(LogicalDedup, core, "LogicalDedup");

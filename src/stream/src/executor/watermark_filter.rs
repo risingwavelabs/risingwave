@@ -23,7 +23,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::{
-    build, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
+    build_func, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
 };
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
@@ -242,7 +242,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         event_time_col_idx: usize,
         watermark: ScalarImpl,
     ) -> ExprResult<BoxedExpression> {
-        build(
+        build_func(
             Type::GreaterThanOrEqual,
             DataType::Boolean,
             vec![
