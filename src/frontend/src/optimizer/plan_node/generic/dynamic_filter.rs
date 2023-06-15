@@ -122,18 +122,22 @@ impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
         watermark_columns
     }
 
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+    fn condition_display(&self) -> (Condition, Schema) {
         let mut concat_schema = self.left.schema().fields.clone();
         concat_schema.extend(self.right.schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
 
         let predicate = self.predicate();
+        (predicate, concat_schema)
+    }
 
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+        let (condition, input_schema) = &self.condition_display();
         builder.field(
             "predicate",
             &ConditionDisplay {
-                condition: &predicate,
-                input_schema: &concat_schema,
+                condition,
+                input_schema,
             },
         );
     }

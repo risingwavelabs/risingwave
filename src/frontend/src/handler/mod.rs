@@ -348,6 +348,7 @@ pub async fn handle(
         | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
         Statement::CreateView {
             materialized,
+            if_not_exists,
             name,
             columns,
             query,
@@ -363,9 +364,18 @@ pub async fn handle(
                 .into());
             }
             if materialized {
-                create_mv::handle_create_mv(handler_args, name, *query, columns, emit_mode).await
+                create_mv::handle_create_mv(
+                    handler_args,
+                    if_not_exists,
+                    name,
+                    *query,
+                    columns,
+                    emit_mode,
+                )
+                .await
             } else {
-                create_view::handle_create_view(handler_args, name, columns, *query).await
+                create_view::handle_create_view(handler_args, if_not_exists, name, columns, *query)
+                    .await
             }
         }
         Statement::Flush => flush::handle_flush(handler_args).await,

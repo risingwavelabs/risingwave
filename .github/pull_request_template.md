@@ -4,7 +4,7 @@ I hereby agree to the terms of the [RisingWave Labs, Inc. Contributor License Ag
 
 <!--
 
-**This section will be used as the commit message. Please do not leave this empty!**
+**Please do not leave this empty!**
 
 Please explain **IN DETAIL** what the changes are in this PR and why they are needed:
 
@@ -16,28 +16,25 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 -->
 
-## Checklist For Contributors
+## Checklist
 
 - [ ] I have written necessary rustdoc comments
 - [ ] I have added necessary unit tests and integration tests
 - [ ] I have added fuzzing tests or opened an issue to track them. (Optional, recommended for new SQL features #7934).
-- [ ] I have demonstrated that backward compatibility is not broken by breaking changes and created issues to track deprecated features to be removed in the future. (Please refer to the issue)
+- [ ] My PR contains breaking changes. (If it deprecates some features, please create a tracking issue to remove them in the future).
 - [ ] All checks passed in `./risedev check` (or alias, `./risedev c`)
-
-## Checklist For Reviewers
-
-- [ ] I have requested macro/micro-benchmarks as this PR can affect performance substantially, and the results are shown.
+- [ ] My PR changes performance-critical code. (Please run macro/micro-benchmarks and show the results.)
 <!-- To manually trigger a benchmark, please check out [Notion](https://www.notion.so/risingwave-labs/Manually-trigger-nexmark-performance-dashboard-test-b784f1eae1cf48889b2645d020b6b7d3). -->
 
 ## Documentation
 
-- [ ] My PR **DOES NOT** contain user-facing changes.
+- [ ] My PR contains user-facing changes.
 
 <!-- 
 
-You can ignore or delete the section below if you ticked the checkbox above.
+You can ignore or delete the section below if your PR does not contain user-facing changes.
 
-Otherwise, remove the checkbox above and write a release note below.
+Otherwise, please write a release note below.
 
 -->
 

@@ -62,7 +62,13 @@ impl BufferTracker {
         global_upload_task_size: GenericGauge<AtomicU64>,
     ) -> Self {
         let capacity = config.shared_buffer_capacity_mb * (1 << 20);
-        let flush_threshold = capacity * 4 / 5;
+        let flush_threshold = (capacity as f32 * config.shared_buffer_flush_ratio) as usize;
+        assert!(
+            flush_threshold < capacity,
+            "flush_threshold {} should be less or equal to capacity {}",
+            flush_threshold,
+            capacity
+        );
         Self::new(capacity, flush_threshold, global_upload_task_size)
     }
 

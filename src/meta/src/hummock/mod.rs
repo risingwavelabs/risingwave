@@ -41,7 +41,7 @@ use tokio::task::JoinHandle;
 pub use vacuum::*;
 
 pub use crate::hummock::compaction_scheduler::{
-    CompactionRequestChannelRef, CompactionSchedulerRef,
+    CompactionRequestChannelRef, CompactionRequestItem, CompactionSchedulerRef,
 };
 use crate::storage::MetaStore;
 use crate::MetaOpts;

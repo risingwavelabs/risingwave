@@ -98,7 +98,7 @@ impl<'a> TryFrom<&'a ExprNode> for NestedConstructExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!([Type::Array, Type::Row].contains(&prost.get_expr_type().unwrap()));
+        ensure!([Type::Array, Type::Row].contains(&prost.get_function_type().unwrap()));
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {

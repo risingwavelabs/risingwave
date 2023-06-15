@@ -124,6 +124,7 @@ impl MinMaxOnIndexRule {
                         filter: Condition {
                             conjunctions: vec![],
                         },
+                        direct_args: vec![],
                     }],
                     FixedBitSet::new(),
                     topn.into(),
@@ -193,6 +194,7 @@ impl MinMaxOnIndexRule {
                     filter: Condition {
                         conjunctions: vec![],
                     },
+                    direct_args: vec![],
                 }],
                 FixedBitSet::new(),
                 topn.into(),

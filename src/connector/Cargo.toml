@@ -22,7 +22,9 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "waruto
     "xz",
 ] }
 async-trait = "0.1"
+auto_enums = { version = "0.8", features = ["futures03"] }
 aws-config = { workspace = true }
+aws-credential-types = { workspace = true }
 aws-sdk-ec2 = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }

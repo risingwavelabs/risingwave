@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::Limit;
+use super::generic::TopNLimit;
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Order, OrderDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -68,7 +68,7 @@ impl StreamGroupTopN {
         }
     }
 
-    pub fn limit_attr(&self) -> Limit {
+    pub fn limit_attr(&self) -> TopNLimit {
         self.logical.limit_attr
     }
 

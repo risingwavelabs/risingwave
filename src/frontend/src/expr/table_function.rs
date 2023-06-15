@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
 use risingwave_expr::sig::table_function::FUNC_SIG_MAP;
-use risingwave_pb::expr::table_function::Type;
+pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::{
     TableFunction as TableFunctionPb, UserDefinedTableFunction as UserDefinedTableFunctionPb,
 };
@@ -41,57 +40,6 @@ pub struct TableFunction {
     pub udtf_catalog: Option<Arc<FunctionCatalog>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TableFunctionType {
-    GenerateSeries,
-    Range,
-    Unnest,
-    RegexpMatches,
-    Udtf,
-}
-
-impl TableFunctionType {
-    fn to_protobuf(self) -> Type {
-        match self {
-            TableFunctionType::GenerateSeries => Type::GenerateSeries,
-            TableFunctionType::Range => Type::Range,
-            TableFunctionType::Unnest => Type::Unnest,
-            TableFunctionType::RegexpMatches => Type::RegexpMatches,
-            TableFunctionType::Udtf => Type::Udtf,
-        }
-    }
-}
-
-impl TableFunction {
-    pub fn name(&self) -> &str {
-        match self.function_type {
-            TableFunctionType::GenerateSeries => "generate_series",
-            TableFunctionType::Range => "range",
-            TableFunctionType::Unnest => "unnest",
-            TableFunctionType::RegexpMatches => "regexp_matches",
-            TableFunctionType::Udtf => &self.udtf_catalog.as_ref().unwrap().name,
-        }
-    }
-}
-
-impl FromStr for TableFunctionType {
-    type Err = ();
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("generate_series") {
-            Ok(TableFunctionType::GenerateSeries)
-        } else if s.eq_ignore_ascii_case("range") {
-            Ok(TableFunctionType::Range)
-        } else if s.eq_ignore_ascii_case("unnest") {
-            Ok(TableFunctionType::Unnest)
-        } else if s.eq_ignore_ascii_case("regexp_matches") {
-            Ok(TableFunctionType::RegexpMatches)
-        } else {
-            Err(())
-        }
-    }
-}
-
 impl TableFunction {
     /// Create a `TableFunction` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
@@ -99,7 +47,7 @@ impl TableFunction {
         let arg_types = args.iter().map(|c| c.return_type()).collect_vec();
         let signature = FUNC_SIG_MAP
             .get(
-                func_type.to_protobuf(),
+                func_type,
                 &args.iter().map(|c| c.return_type().into()).collect_vec(),
             )
             .ok_or_else(|| {
@@ -133,7 +81,7 @@ impl TableFunction {
 
     pub fn to_protobuf(&self) -> TableFunctionPb {
         TableFunctionPb {
-            function_type: self.function_type.to_protobuf() as i32,
+            function_type: self.function_type as i32,
             args: self.args.iter().map(|c| c.to_expr_proto()).collect_vec(),
             return_type: Some(self.return_type.to_protobuf()),
             udtf: self
@@ -145,6 +93,14 @@ impl TableFunction {
                     link: c.link.clone(),
                     identifier: c.identifier.clone(),
                 }),
+        }
+    }
+
+    /// Get the name of the table function.
+    pub fn name(&self) -> String {
+        match self.function_type {
+            TableFunctionType::Udtf => self.udtf_catalog.as_ref().unwrap().name.clone(),
+            t => t.as_str_name().to_lowercase(),
         }
     }
 

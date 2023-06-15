@@ -247,6 +247,14 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::partition_vnode_count")]
     pub partition_vnode_count: u32,
+
+    #[serde(default = "default::meta::table_write_throughput_threshold")]
+    pub table_write_throughput_threshold: u64,
+
+    #[serde(default = "default::meta::min_table_split_write_throughput")]
+    /// If the size of one table is smaller than `min_table_split_write_throughput`, we would not
+    /// split it to an single group.
+    pub min_table_split_write_throughput: u64,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -285,6 +293,9 @@ pub struct BatchConfig {
 
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
+
+    #[serde(default = "default::batch::enable_barrier_read")]
+    pub enable_barrier_read: bool,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -337,6 +348,11 @@ pub struct StorageConfig {
     /// is enough space.
     #[serde(default)]
     pub shared_buffer_capacity_mb: Option<usize>,
+
+    /// The shared buffer will start flushing data to object when the ratio of memory usage to the
+    /// shared buffer capacity exceed such ratio.
+    #[serde(default = "default::storage::shared_buffer_flush_ratio")]
+    pub shared_buffer_flush_ratio: f32,
 
     /// The threshold for the number of immutable memtables to merge to a new imm.
     #[serde(default = "default::storage::imm_merge_threshold")]
@@ -420,12 +436,27 @@ pub struct FileCacheConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-#[derive(Debug, Default, Clone, ValueEnum, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
 pub enum AsyncStackTraceOption {
+    /// Disabled.
     Off,
-    #[default]
+    /// Enabled with basic instruments.
     On,
-    Verbose,
+    /// Enabled with extra verbose instruments in release build.
+    /// Behaves the same as `on` in debug build due to performance concern.
+    #[default]
+    #[clap(alias = "verbose")]
+    ReleaseVerbose,
+}
+
+impl AsyncStackTraceOption {
+    pub fn is_verbose(self) -> Option<bool> {
+        match self {
+            Self::Off => None,
+            Self::On => Some(false),
+            Self::ReleaseVerbose => Some(!cfg!(debug_assertions)),
+        }
+    }
 }
 
 serde_with::with_prefix!(streaming_prefix "stream_");
@@ -620,6 +651,14 @@ mod default {
         pub fn partition_vnode_count() -> u32 {
             64
         }
+
+        pub fn table_write_throughput_threshold() -> u64 {
+            128 * 1024 * 1024 // 128MB
+        }
+
+        pub fn min_table_split_write_throughput() -> u64 {
+            48 * 1024 * 1024 // 48MB
+        }
     }
 
     pub mod server {
@@ -653,6 +692,10 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> usize {
             1024
+        }
+
+        pub fn shared_buffer_flush_ratio() -> f32 {
+            0.8
         }
 
         pub fn imm_merge_threshold() -> usize {
@@ -723,7 +766,7 @@ mod default {
         }
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
-            AsyncStackTraceOption::On
+            AsyncStackTraceOption::default()
         }
 
         pub fn unique_user_stream_errors() -> usize {
@@ -838,6 +881,12 @@ mod default {
 
         pub fn telemetry_enabled() -> Option<bool> {
             system_param::default::telemetry_enabled()
+        }
+    }
+
+    pub mod batch {
+        pub fn enable_barrier_read() -> bool {
+            true
         }
     }
 }

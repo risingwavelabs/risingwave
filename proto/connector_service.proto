@@ -11,7 +11,7 @@ option java_package = "com.risingwave.proto";
 message TableSchema {
   message Column {
     string name = 1;
-    data.DataType.TypeName data_type = 2;
+    data.DataType data_type = 2;
   }
   repeated Column columns = 1;
   repeated uint32 pk_indices = 2;

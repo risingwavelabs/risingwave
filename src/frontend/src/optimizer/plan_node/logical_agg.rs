@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
@@ -22,6 +20,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::agg::AggKind;
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::utils::impl_distill_by_unit;
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
@@ -420,7 +419,8 @@ impl LogicalAggBuilder {
         agg_call: AggCall,
     ) -> std::result::Result<ExprImpl, ErrorCode> {
         let return_type = agg_call.return_type();
-        let (agg_kind, inputs, mut distinct, mut order_by, filter) = agg_call.decompose();
+        let (agg_kind, inputs, mut distinct, mut order_by, filter, direct_args) =
+            agg_call.decompose();
         match &agg_kind {
             AggKind::Min | AggKind::Max => {
                 distinct = false;
@@ -488,6 +488,7 @@ impl LogicalAggBuilder {
                     distinct,
                     order_by: order_by.clone(),
                     filter: filter.clone(),
+                    direct_args: direct_args.clone(),
                 });
                 let left = ExprImpl::from(left_ref).cast_explicit(return_type).unwrap();
 
@@ -500,6 +501,7 @@ impl LogicalAggBuilder {
                     distinct,
                     order_by,
                     filter,
+                    direct_args,
                 });
 
                 Ok(ExprImpl::from(
@@ -547,6 +549,7 @@ impl LogicalAggBuilder {
                     distinct,
                     order_by: order_by.clone(),
                     filter: filter.clone(),
+                    direct_args: direct_args.clone(),
                 }))
                 .cast_explicit(return_type.clone())
                 .unwrap();
@@ -562,6 +565,7 @@ impl LogicalAggBuilder {
                     distinct,
                     order_by: order_by.clone(),
                     filter: filter.clone(),
+                    direct_args: direct_args.clone(),
                 }))
                 .cast_explicit(return_type.clone())
                 .unwrap();
@@ -577,6 +581,7 @@ impl LogicalAggBuilder {
                     distinct,
                     order_by,
                     filter,
+                    direct_args,
                 }));
 
                 // we start with variance
@@ -676,6 +681,7 @@ impl LogicalAggBuilder {
                     distinct,
                     order_by,
                     filter,
+                    direct_args,
                 })
                 .into()),
         }
@@ -862,11 +868,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
 
 impl_plan_tree_node_for_unary! {LogicalAgg}
 
-impl fmt::Display for LogicalAgg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalAgg")
-    }
-}
+impl_distill_by_unit!(LogicalAgg, core, "LogicalAgg");
 
 impl ExprRewritable for LogicalAgg {
     fn has_rewritable_expr(&self) -> bool {
@@ -889,7 +891,7 @@ impl ColPrunable for LogicalAgg {
         let group_key_required_cols = self.group_key().clone();
 
         let (agg_call_required_cols, agg_calls) = {
-            let input_cnt = self.input().schema().fields().len();
+            let input_cnt = self.input().schema().len();
             let mut tmp = FixedBitSet::with_capacity(input_cnt);
             let group_key_cardinality = self.group_key().count_ones(..);
             let new_agg_calls = required_cols
@@ -1191,6 +1193,7 @@ mod tests {
                 false,
                 OrderBy::any(),
                 Condition::true_cond(),
+                vec![],
             )
             .unwrap();
             let select_exprs = vec![input_ref_1.clone().into(), min_v2.into()];
@@ -1216,6 +1219,7 @@ mod tests {
                 false,
                 OrderBy::any(),
                 Condition::true_cond(),
+                vec![],
             )
             .unwrap();
             let max_v3 = AggCall::new(
@@ -1224,6 +1228,7 @@ mod tests {
                 false,
                 OrderBy::any(),
                 Condition::true_cond(),
+                vec![],
             )
             .unwrap();
             let func_call =
@@ -1235,7 +1240,7 @@ mod tests {
 
             assert_eq_input_ref!(&exprs[0], 0);
             if let ExprImpl::FunctionCall(func_call) = &exprs[1] {
-                assert_eq!(func_call.get_expr_type(), ExprType::Add);
+                assert_eq!(func_call.func_type(), ExprType::Add);
                 let inputs = func_call.inputs();
                 assert_eq_input_ref!(&inputs[0], 1);
                 assert_eq_input_ref!(&inputs[1], 2);
@@ -1264,6 +1269,7 @@ mod tests {
                 false,
                 OrderBy::any(),
                 Condition::true_cond(),
+                vec![],
             )
             .unwrap();
             let select_exprs = vec![input_ref_2.clone().into(), agg_call.into()];
@@ -1298,6 +1304,7 @@ mod tests {
             distinct: false,
             order_by: vec![],
             filter: Condition::true_cond(),
+            direct_args: vec![],
         };
         Agg::new(
             vec![agg_call],
@@ -1422,6 +1429,7 @@ mod tests {
             distinct: false,
             order_by: vec![],
             filter: Condition::true_cond(),
+            direct_args: vec![],
         };
         let agg: PlanRef = Agg::new(
             vec![agg_call],
@@ -1492,6 +1500,7 @@ mod tests {
                 distinct: false,
                 order_by: vec![],
                 filter: Condition::true_cond(),
+                direct_args: vec![],
             },
             PlanAggCall {
                 agg_kind: AggKind::Max,
@@ -1500,6 +1509,7 @@ mod tests {
                 distinct: false,
                 order_by: vec![],
                 filter: Condition::true_cond(),
+                direct_args: vec![],
             },
         ];
         let agg: PlanRef =

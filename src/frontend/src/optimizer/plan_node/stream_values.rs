@@ -19,6 +19,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::values_node::ExprTuple;
 use risingwave_pb::stream_plan::ValuesNode;
 
+use super::utils::formatter_debug_plan_node;
 use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::Distribution;
@@ -64,9 +65,8 @@ impl StreamValues {
 
 impl fmt::Display for StreamValues {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StreamValues")
-            .field("rows", &self.logical.rows())
-            .finish()
+        let mut builder = formatter_debug_plan_node!(f, "StreamValues");
+        builder.field("rows", &self.logical.rows()).finish()
     }
 }
 

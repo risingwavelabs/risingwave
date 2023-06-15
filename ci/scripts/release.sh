@@ -13,16 +13,16 @@ fi
 echo "--- Install java and maven"
 yum install -y java-11-openjdk wget python3
 pip3 install toml-cli
-wget https://dlcdn.apache.org/maven/maven-3/3.9.1/binaries/apache-maven-3.9.1-bin.tar.gz && tar -zxvf apache-maven-3.9.1-bin.tar.gz
-export PATH="${REPO_ROOT}/apache-maven-3.9.1/bin:$PATH"
+wget https://dlcdn.apache.org/maven/maven-3/3.9.2/binaries/apache-maven-3.9.2-bin.tar.gz && tar -zxvf apache-maven-3.9.2-bin.tar.gz
+export PATH="${REPO_ROOT}/apache-maven-3.9.2/bin:$PATH"
 mvn -v
 
 echo "--- Install rust"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 source "$HOME/.cargo/env"
 rustup show
-cargo install sccache --locked # we use sccache as the rustc wrapper
 source ci/scripts/common.sh
+unset RUSTC_WRAPPER # disable sccache
 
 echo "--- Install protoc3"
 curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
@@ -39,9 +39,15 @@ echo "--- Install aws cli"
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
-echo "--- Update risingwave release version"
+echo "--- Check risingwave release version"
 if [[ -n "${BUILDKITE_TAG+x}" ]]; then
-  toml set --toml-path Cargo.toml workspace.package.version ${BUILDKITE_TAG#*v}
+  CARGO_PKG_VERSION="$(toml get --toml-path Cargo.toml workspace.package.version)"
+  if [[ "${CARGO_PKG_VERSION}" != "${BUILDKITE_TAG#*v}" ]]; then
+    echo "CARGO_PKG_VERSION: ${CARGO_PKG_VERSION}"
+    echo "BUILDKITE_TAG: ${BUILDKITE_TAG}"
+    echo "CARGO_PKG_VERSION and BUILDKITE_TAG are not equal"
+    exit 1
+  fi
 fi
 
 echo "--- Build risingwave release binary"
