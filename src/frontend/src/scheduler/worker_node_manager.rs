@@ -92,9 +92,6 @@ impl WorkerNodeManager {
     }
 
     pub fn add_worker_node(&self, node: WorkerNode) {
-        let is_schedulable = node.get_property().map_or(false, |x| x.is_schedulable);
-        // assert!(is_schedulable); // TODO: remove this. Debugging only
-
         let mut write_guard = self.inner.write().unwrap();
         // update
         for w in &mut write_guard.worker_nodes {

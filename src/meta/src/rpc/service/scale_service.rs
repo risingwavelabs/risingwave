@@ -97,7 +97,7 @@ where
 
         let worker_nodes = self
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None, false)
+            .list_worker_node(WorkerType::ComputeNode, None, true)
             .await;
 
         let actor_splits = self
