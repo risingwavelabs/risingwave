@@ -65,6 +65,18 @@ pub struct LocalHummockStorage {
     /// Read handle.
     read_version: Arc<RwLock<HummockReadVersion>>,
 
+    /// This indicates that this `LocalHummockStorage` replicates another `LocalHummockStorage`.
+    /// It's used by executors in different CNs to synchronize states.
+    ///
+    /// Within `LocalHummockStorage` we use this flag to avoid uploading local state to be
+    /// persisted, so we won't have duplicate data.
+    ///
+    /// This also handles a corner case where an executor doing replication
+    /// is scheduled to the same CN as its Upstream executor.
+    /// In that case, we use this flag to avoid reading the same data twice,
+    /// by ignoring the replicated ReadVersion.
+    is_replicated: bool,
+
     /// Event sender.
     event_sender: mpsc::UnboundedSender<HummockEvent>,
 
@@ -401,9 +413,11 @@ impl LocalHummockStorage {
         self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
         // insert imm to uploader
-        self.event_sender
-            .send(HummockEvent::ImmToUploader(imm))
-            .unwrap();
+        if !self.is_replicated {
+            self.event_sender
+                .send(HummockEvent::ImmToUploader(imm))
+                .unwrap();
+        }
 
         timer.observe_duration();
 
@@ -433,6 +447,7 @@ impl LocalHummockStorage {
             table_id: option.table_id,
             is_consistent_op: option.is_consistent_op,
             table_option: option.table_option,
+            is_replicated: option.is_replicated,
             instance_guard,
             read_version,
             event_sender,
