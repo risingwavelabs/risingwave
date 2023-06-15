@@ -87,7 +87,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
         match self.rng.gen_range(0..=2) {
             0 => self.gen_time_window_func(),
-            1 => self.gen_table_subquery(),
+            1 => {
+                if self.can_recurse() {
+                    self.gen_table_subquery()
+                } else {
+                    self.gen_simple_table_factor()
+                }
+            }
             2 => self.gen_simple_table_factor(),
             _ => unreachable!(),
         }
