@@ -504,7 +504,7 @@ impl LogicalMultiJoin {
     /// 2. Second, for every isolated node will create connection to every other nodes.
     /// 3. Third, select and merge one node for a iteration, and use a bfs policy for which node the
     ///    selected node merged with.
-    ///   i. The select node mentioned above is the node with least numer of relations and the
+    ///   i. The select node mentioned above is the node with least number of relations and the
     ///      lowerst join tree.
     ///   ii. nodes with a join tree higher than the temporal optimal join tree will be pruned.
     pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
