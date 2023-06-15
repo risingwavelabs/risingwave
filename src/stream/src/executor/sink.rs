@@ -182,7 +182,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let visible_columns = columns
             .iter()
             .enumerate()
-            .filter_map(|(idx, column)| (!column.is_hidden).then(|| idx))
+            .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
             .collect_vec();
 
         #[for_await]
@@ -199,19 +199,18 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         Some(chunk.clone().compact())
                     };
 
-                    if let Some(mut chunk) = visible_chunk {
-                        if visible_columns.len() != columns.len() {
+                    if let Some(chunk) = visible_chunk {
+                        let chunk_to_connector = if visible_columns.len() != columns.len() {
                             // Do projection here because we may have columns that aren't visible to
                             // the downstream.
-                            chunk = chunk.reorder_columns(&visible_columns);
-                        }
-                        // NOTE: We start the txn here because a force-append-only sink might
-                        // receive a data chunk full of DELETE messages and then drop all of them.
-                        // At this point (instead of the point above when we receive the upstream
-                        // data chunk), we make sure that we do have data to send out, and we can
-                        // thus mark the txn as started.
-                        log_writer.write_chunk(chunk.clone()).await?;
+                            chunk.clone().reorder_columns(&visible_columns)
+                        } else {
+                            chunk.clone()
+                        };
 
+                        log_writer.write_chunk(chunk_to_connector).await?;
+
+                        // Use original chunk instead of the reordered one as the executor output.
                         yield Message::Chunk(chunk);
                     }
                 }
@@ -438,8 +437,8 @@ mod test {
         assert_eq!(
             chunk_msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
-                " I I
-                + 3 2",
+                " I I I
+                + 3 2 1",
             )
         );
 
@@ -450,9 +449,9 @@ mod test {
         assert_eq!(
             chunk_msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
-                " I I
-                + 3 4
-                + 5 6",
+                " I I I
+                + 3 4 1
+                + 5 6 7",
             )
         );
 
