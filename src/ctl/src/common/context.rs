@@ -70,7 +70,7 @@ impl CtlContext {
                 port: addr.port as i32,
             };
 
-            if let Err(e) = meta_client.cordon_worker(addr).await {
+            if let Err(e) = meta_client.update_schedulability(addr, false).await {
                 tracing::warn!(
                     "failed to unregister ctl worker {}: {}",
                     meta_client.worker_id(),

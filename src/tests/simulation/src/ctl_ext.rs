@@ -301,13 +301,18 @@ impl Cluster {
     }
 
     // mark a worker node as unschedulable
-    pub async fn cordon_worker(&self, addr: HostAddress) -> Result<()> {
+    pub async fn update_worker_node_schedulability(
+        &self,
+        addr: HostAddress,
+        is_schedulable: bool,
+    ) -> Result<()> {
         let _ = self
             .ctl
             .spawn(async move {
-                risingwave_ctl::cmd_impl::meta::cordon_worker(
+                risingwave_ctl::cmd_impl::meta::update_schedulability(
                     &risingwave_ctl::common::CtlContext::default(),
                     addr,
+                    is_schedulable,
                 )
                 .await
             })

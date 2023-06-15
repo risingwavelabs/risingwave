@@ -29,7 +29,7 @@ use madsim::net::ipvs::*;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::IteratorRandom;
 use rand::Rng;
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{HostAddress, WorkerNode};
 use sqllogictest::AsyncDB;
 
 use crate::client::RisingWave;
@@ -388,10 +388,11 @@ impl Cluster {
         self.client.spawn(future).await.unwrap()
     }
 
-    // convenience function, wrapper for cordon_worker
+    // mark node as unschedulable
     pub async fn cordon_node(&self, worker_node: &WorkerNode) -> Result<()> {
-        let addr = worker_node.clone().host.expect("node does not have host");
-        self.cordon_worker(addr).await?;
+        let addr: risingwave_pb::common::HostAddress =
+            worker_node.clone().host.expect("node does not have host");
+        self.update_worker_node_schedulability(addr, false).await?;
         Ok(())
     }
 
@@ -407,11 +408,12 @@ impl Cluster {
         Ok(rand_nodes.iter().cloned().cloned().collect_vec())
     }
 
-    /// cordon n random nodes in this cluster.
+    /// mark n random compute nodes as unschedulable
     pub async fn cordon_random_workers(&self, n: usize) -> Result<Vec<WorkerNode>> {
         let rand_nodes = self.get_random_worker_nodes(n).await?;
         for rand_node in rand_nodes.clone() {
-            self.cordon_node(&rand_node).await?;
+            let addr = rand_node.host.expect("expected node to have host");
+            self.update_worker_node_schedulability(addr, false).await?;
         }
         Ok(rand_nodes)
     }

@@ -166,7 +166,7 @@ where
             .map_or(false, |p| p.is_schedulable);
         let worker_type = worker.worker_type();
         if !is_schedulable && worker_type == WorkerType::ComputeNode {
-            tracing::warn!("activating cordoned worker. Ignoring request");
+            tracing::warn!("activating unschedulable worker. Ignoring request");
             return Ok(());
         }
 
@@ -192,7 +192,7 @@ where
     }
 
     // mark a worker node as unschedulable
-    pub async fn cordon_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
+    pub async fn update_schedulability(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
         let worker = core
             .workers
@@ -201,7 +201,7 @@ where
         let worker_type = worker.worker_type();
 
         if worker_type != WorkerType::ComputeNode {
-            tracing::warn!("Cordoning non-compute node. Cordon should be used with compute nodes");
+            tracing::warn!("Marking non-compute node as unschedulable. Schedulability should be used with compute nodes");
         }
 
         // TODO
@@ -230,7 +230,7 @@ where
             }
         };
         let new_prop = Property {
-            is_schedulable: false, // False, because we are cordoning the worker
+            is_schedulable: false,
             is_serving: old_prop.is_serving,
             is_streaming: old_prop.is_streaming,
         };
@@ -380,14 +380,14 @@ where
         &self,
         worker_type: WorkerType,
         worker_state: Option<State>,
-        list_cordoned: bool,
+        list_unschedulable: bool,
     ) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_worker_node(worker_type, worker_state, list_cordoned)
+        core.list_worker_node(worker_type, worker_state, list_unschedulable)
     }
 
     /// A convenient method to get all running compute nodes that may have running actors on them
-    /// i.e. CNs which are running or cordoned
+    /// i.e. CNs which are running
     pub async fn list_active_streaming_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
         core.list_streaming_worker_node(Some(State::Running), true)
@@ -539,7 +539,7 @@ impl ClusterManagerCore {
         &self,
         worker_type: WorkerType,
         worker_state: Option<State>,
-        list_cordoned: bool,
+        list_unschedulable: bool,
     ) -> Vec<WorkerNode> {
         let worker_state = worker_state.map(|worker_state| worker_state as i32);
 
@@ -552,7 +552,7 @@ impl ClusterManagerCore {
                 Some(state) => state == w.state,
             })
             .filter(|w| {
-                if list_cordoned {
+                if list_unschedulable {
                     true
                 } else {
                     w.property.as_ref().map_or(true, |p| p.is_schedulable)
@@ -564,15 +564,15 @@ impl ClusterManagerCore {
     pub fn list_streaming_worker_node(
         &self,
         worker_state: Option<State>,
-        list_cordoned: bool,
+        list_unschedulable: bool,
     ) -> Vec<WorkerNode> {
-        self.list_worker_node(WorkerType::ComputeNode, worker_state, list_cordoned)
+        self.list_worker_node(WorkerType::ComputeNode, worker_state, list_unschedulable)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
             .collect()
     }
 
-    // List all parallel units on running or cordoned nodes
+    // List all parallel units on running nodes
     pub fn list_serving_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
         self.list_worker_node(WorkerType::ComputeNode, worker_state, false)
             .into_iter()

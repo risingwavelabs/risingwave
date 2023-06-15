@@ -299,7 +299,7 @@ async fn invalid_reschedule(
     let err_msg = result.err().unwrap().to_string();
     assert_eq!(
         err_msg,
-        "gRPC error (Internal error): unable to move actor to cordoned node"
+        "gRPC error (Internal error): unable to move actor to node marked as unschedulable"
     );
 
     cluster.run(drop).await?;

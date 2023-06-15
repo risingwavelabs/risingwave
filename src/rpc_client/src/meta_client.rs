@@ -219,7 +219,7 @@ impl MetaClient {
         );
 
         if !property.is_schedulable {
-            tracing::warn!("worker {:?} registered as cordoned", addr.clone());
+            tracing::warn!("worker {:?} registered as unschedulable", addr.clone());
         }
         let init_result: Result<_> = tokio_retry::Retry::spawn(retry_strategy, || async {
             let grpc_meta_client = GrpcMetaClient::new(&addr_strategy, meta_config.clone()).await?;
@@ -564,9 +564,19 @@ impl MetaClient {
     }
 
     /// Unregister the current node to the cluster.
-    pub async fn cordon_worker(&self, host: HostAddress) -> Result<CordonWorkerNodeResponse> {
-        let request = CordonWorkerNodeRequest { host: Some(host) };
-        let resp = self.inner.cordon_worker_node(request).await?;
+    pub async fn update_schedulability(
+        &self,
+        host: HostAddress,
+        set_is_schedulable: bool,
+    ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
+        let request = UpdateWorkerNodeSchedulabilityRequest {
+            host: Some(host),
+            set_is_schedulable: set_is_schedulable,
+        };
+        let resp = self
+            .inner
+            .update_worker_node_schedulability(request)
+            .await?;
         Ok(resp)
     }
 
@@ -1452,7 +1462,7 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             //(not used) ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
-            ,{ cluster_client, cordon_worker_node, CordonWorkerNodeRequest, CordonWorkerNodeResponse }
+            ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }

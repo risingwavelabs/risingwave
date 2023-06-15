@@ -16,8 +16,9 @@ use risingwave_pb::common::worker_node::State;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, CordonWorkerNodeRequest, CordonWorkerNodeResponse,
-    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest, ListAllNodesResponse,
+    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest,
+    ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
+    UpdateWorkerNodeSchedulabilityResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -64,19 +65,22 @@ where
         }))
     }
 
-    /// mark node as unschedulable. Will not affect actors which are already running on that node
-    async fn cordon_worker_node(
+    /// Update schedulability of a compute node. Will not affect actors which are already running on
+    /// that node, if marked as unschedulable
+    async fn update_worker_node_schedulability(
         &self,
-        req: Request<CordonWorkerNodeRequest>,
-    ) -> Result<Response<CordonWorkerNodeResponse>, Status> {
+        req: Request<UpdateWorkerNodeSchedulabilityRequest>,
+    ) -> Result<Response<UpdateWorkerNodeSchedulabilityResponse>, Status> {
         let host_address = match req.into_inner().host {
             None => return Err(Status::invalid_argument("request did not have host")),
             Some(ha) => ha,
         };
         self.cluster_manager
-            .cordon_worker_node(host_address)
+            .update_schedulability(host_address)
             .await?;
-        Ok(Response::new(CordonWorkerNodeResponse { status: None }))
+        Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
+            status: None,
+        }))
     }
 
     async fn activate_worker_node(
@@ -99,7 +103,6 @@ where
         Ok(Response::new(DeleteWorkerNodeResponse { status: None }))
     }
 
-    // returns running and cordoned nodes by default
     async fn list_all_nodes(
         &self,
         request: Request<ListAllNodesRequest>,

@@ -20,7 +20,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::table_fragments::State;
-use risingwave_pb::meta::{CordonWorkerNodeResponse, GetClusterInfoResponse};
+use risingwave_pb::meta::{GetClusterInfoResponse, UpdateWorkerNodeSchedulabilityResponse};
 use risingwave_pb::source::ConnectorSplits;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 
@@ -32,12 +32,15 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
     Ok(response)
 }
 
-pub async fn cordon_worker(
+pub async fn update_schedulability(
     context: &CtlContext,
     addr: HostAddress,
-) -> anyhow::Result<CordonWorkerNodeResponse> {
+    is_schedulable: bool,
+) -> anyhow::Result<UpdateWorkerNodeSchedulabilityResponse> {
     let meta_client = context.meta_client().await?;
-    let response = meta_client.cordon_worker(addr).await?;
+    let response = meta_client
+        .update_schedulability(addr, is_schedulable)
+        .await?;
     Ok(response)
 }
 

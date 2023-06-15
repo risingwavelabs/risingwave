@@ -220,12 +220,13 @@ message DeleteWorkerNodeResponse {
   common.Status status = 1;
 }
 
-// This request should NOT delete the node, but just cordon it aka. mark it as unschedulable
-message CordonWorkerNodeRequest {
+// Mark CN as schedulable or as unschedulable
+message UpdateWorkerNodeSchedulabilityRequest {
   common.HostAddress host = 1;
+  bool set_is_schedulable = 2;
 }
 
-message CordonWorkerNodeResponse {
+message UpdateWorkerNodeSchedulabilityResponse {
   common.Status status = 1;
 }
 
@@ -233,7 +234,7 @@ service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
-  rpc CordonWorkerNode(CordonWorkerNodeRequest) returns (CordonWorkerNodeResponse);
+  rpc UpdateWorkerNodeSchedulability(UpdateWorkerNodeSchedulabilityRequest) returns (UpdateWorkerNodeSchedulabilityResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 

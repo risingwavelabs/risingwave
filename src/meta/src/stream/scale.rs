@@ -364,8 +364,8 @@ where
             bail!("no available compute node in the cluster");
         }
 
-        // Check if we are trying to move a fragment to a cordoned node
-        let cordoned_nodes = worker_nodes
+        // Check if we are trying to move a fragment to a node marked as unschedulable
+        let unschedulable_nodes = worker_nodes
             .iter()
             .filter(|(_, w)| {
                 !w.get_property()
@@ -374,7 +374,7 @@ where
             })
             .map(|(_, w)| w)
             .collect_vec();
-        let cordoned_pu_ids: HashSet<u32> = cordoned_nodes
+        let unschedulable_pu_ids: HashSet<u32> = unschedulable_nodes
             .iter()
             .flat_map(|w| w.get_parallel_units())
             .map(|pu| pu.id)
@@ -384,11 +384,11 @@ where
             .flat_map(|(_, pu_r)| pu_r.added_parallel_units.clone())
             .collect();
         if !added_pu_ids
-            .intersection(&cordoned_pu_ids)
+            .intersection(&unschedulable_pu_ids)
             .collect::<HashSet<&u32>>()
             .is_empty()
         {
-            bail!("unable to move actor to cordoned node");
+            bail!("unable to move actor to node marked as unschedulable");
         }
 
         // Associating ParallelUnit with Worker
