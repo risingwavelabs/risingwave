@@ -199,7 +199,7 @@ async fn cordon_is_idempotent(
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    let sleep_sec = 5;
+    let sleep_sec = 15;
     let mut cluster =
         NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
     let rand_workers = cluster.get_random_worker_nodes(number_of_nodes).await?;
