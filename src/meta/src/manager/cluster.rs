@@ -383,18 +383,18 @@ where
     pub async fn list_worker_node(
         &self,
         worker_type: WorkerType,
-        worker_states: Option<Vec<State>>,
+        worker_state: Option<State>,
         list_cordoned: bool,
     ) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_worker_node(worker_type, worker_states, list_cordoned)
+        core.list_worker_node(worker_type, worker_state, list_cordoned)
     }
 
     /// A convenient method to get all running compute nodes that may have running actors on them
     /// i.e. CNs which are running or cordoned
     pub async fn list_active_streaming_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_streaming_worker_node(Some(vec![State::Running]), true)
+        core.list_streaming_worker_node(Some(State::Running), true)
     }
 
     pub async fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
@@ -406,7 +406,7 @@ where
     /// running and schedulable
     pub async fn list_active_serving_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_serving_worker_node(Some(vec![State::Running]))
+        core.list_serving_worker_node(Some(State::Running))
     }
 
     /// Get the cluster info used for scheduling a streaming job.
@@ -542,18 +542,21 @@ impl ClusterManagerCore {
     pub fn list_worker_node(
         &self,
         worker_type: WorkerType,
-        worker_states: Option<Vec<State>>, // TODO: should be state and not vec state
+        worker_state: Option<State>,
         list_cordoned: bool,
     ) -> Vec<WorkerNode> {
-        let worker_states =
-            worker_states.map(|state| state.iter().map(|s| *s as i32).collect_vec());
+        let worker_state = if worker_state.is_some() {
+            Some(worker_state.unwrap() as i32)
+        } else {
+            None
+        };
         self.workers
             .values()
             .map(|worker| worker.to_protobuf())
             .filter(|w| w.r#type == worker_type as i32)
-            .filter(|w| match worker_states.clone() {
+            .filter(|w| match worker_state.clone() {
                 None => true,
-                Some(state) => state.contains(&w.state), // TODO: can be == instead of contains
+                Some(state) => state == (&w.state).clone(),
             })
             .filter(|w| {
                 if list_cordoned {
@@ -567,7 +570,7 @@ impl ClusterManagerCore {
 
     pub fn list_streaming_worker_node(
         &self,
-        worker_state: Option<Vec<State>>, // TODO: This should be state and not vec state
+        worker_state: Option<State>, // TODO: This should be state and not vec state
         list_cordoned: bool,
     ) -> Vec<WorkerNode> {
         self.list_worker_node(WorkerType::ComputeNode, worker_state, list_cordoned)
@@ -577,7 +580,7 @@ impl ClusterManagerCore {
     }
 
     // List all parallel units on running or cordoned nodes
-    pub fn list_serving_worker_node(&self, worker_state: Option<Vec<State>>) -> Vec<WorkerNode> {
+    pub fn list_serving_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
         self.list_worker_node(WorkerType::ComputeNode, worker_state, false)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
@@ -586,7 +589,7 @@ impl ClusterManagerCore {
 
     fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
         let active_workers: HashSet<_> = self
-            .list_streaming_worker_node(Some(vec![State::Running]), true)
+            .list_streaming_worker_node(Some(State::Running), true)
             .into_iter()
             .map(|w| w.id)
             .collect();
@@ -601,7 +604,7 @@ impl ClusterManagerCore {
     // Lists active worker nodes
     fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let active_workers: HashMap<_, _> = self
-            .list_streaming_worker_node(Some(vec![State::Running]), false)
+            .list_streaming_worker_node(Some(State::Running), false)
             .into_iter()
             .map(|w| (w.id, w))
             .collect();

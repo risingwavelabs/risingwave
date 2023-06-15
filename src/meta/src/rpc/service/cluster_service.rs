@@ -51,6 +51,9 @@ where
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
         let host = req.get_host()?.clone();
+        let property = req
+            .property
+            .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
         let worker_node = self
             .cluster_manager
             .add_worker_node(worker_type, host, property)
@@ -106,7 +109,7 @@ where
         let worker_states = if req.include_starting_nodes {
             None
         } else {
-            Some(vec![State::Running]) // TODO: correct?
+            Some(State::Running)
         };
 
         let node_list = self
