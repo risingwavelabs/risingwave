@@ -35,7 +35,7 @@ use risingwave_common::util::sort_util::{cmp_datum, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::TableIter;
+use risingwave_storage::table::{collect_data_chunk, get_second, TableIter};
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -450,7 +450,7 @@ where
         };
         // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
         // together with the upstream mv.
-        let iter = upstream_table
+        let mut iter = upstream_table
             .batch_iter_with_pk_bounds(
                 HummockReadEpoch::NoWait(epoch),
                 row::empty(),
@@ -458,14 +458,15 @@ where
                 ordered,
                 PrefetchOptions::new_for_exhaust_iter(),
             )
-            .await?;
+            .await?
+            .map(get_second);
 
         pin_mut!(iter);
 
-        while let Some(data_chunk) = iter
-            .collect_data_chunk(upstream_table.schema(), Some(CHUNK_SIZE))
-            .instrument_await("backfill_snapshot_read")
-            .await?
+        while let Some(data_chunk) =
+            collect_data_chunk(&mut iter, upstream_table.schema(), Some(CHUNK_SIZE))
+                .instrument_await("backfill_snapshot_read")
+                .await?
         {
             if data_chunk.cardinality() != 0 {
                 let ops = vec![Op::Insert; data_chunk.capacity()];

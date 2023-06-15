@@ -16,6 +16,7 @@ pub mod batch_table;
 
 use std::sync::{Arc, LazyLock};
 
+use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -77,45 +78,87 @@ impl Distribution {
     }
 }
 
+pub fn get_second<T, U, E>(arg: Result<(T, U), E>) -> Result<U, E> {
+    arg.map(|x| x.1)
+}
+
+// FIXME: Try merge this with the impl in `src/table/mod.rs`.
+pub async fn collect_data_chunk<E, S>(
+    stream: &mut S,
+    schema: &Schema,
+    chunk_size: Option<usize>,
+) -> Result<Option<DataChunk>, E>
+where
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
+{
+    let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
+
+    let mut row_count = 0;
+    for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+        match stream.next().await.transpose()? {
+            Some(row) => {
+                for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
+                    builder.append(datum);
+                }
+            }
+            None => break,
+        }
+
+        row_count += 1;
+    }
+
+    let chunk = {
+        let columns: Vec<_> = builders
+            .into_iter()
+            .map(|builder| builder.finish().into())
+            .collect();
+        DataChunk::new(columns, row_count)
+    };
+
+    if chunk.cardinality() == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(chunk))
+    }
+}
 // TODO: GAT-ify this trait or remove this trait
 #[async_trait::async_trait]
 pub trait TableIter<E>: Send {
     async fn next_row(&mut self) -> Result<Option<OwnedRow>, E>;
-
-    async fn collect_data_chunk(
-        &mut self,
-        schema: &Schema,
-        chunk_size: Option<usize>,
-    ) -> Result<Option<DataChunk>, E> {
-        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
-
-        let mut row_count = 0;
-        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
-            match self.next_row().await? {
-                Some(row) => {
-                    for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
-                        builder.append(datum);
-                    }
-                    row_count += 1;
-                }
-                None => break,
-            }
-        }
-
-        let chunk = {
-            let columns: Vec<_> = builders
-                .into_iter()
-                .map(|builder| builder.finish().into())
-                .collect();
-            DataChunk::new(columns, row_count)
-        };
-
-        if chunk.cardinality() == 0 {
-            Ok(None)
-        } else {
-            Ok(Some(chunk))
-        }
-    }
+    // async fn collect_data_chunk(
+    //     &mut self,
+    //     schema: &Schema,
+    //     chunk_size: Option<usize>,
+    // ) -> Result<Option<DataChunk>, E> {
+    //     let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
+    //
+    //     let mut row_count = 0;
+    //     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+    //         match self.next_row().await? {
+    //             Some(row) => {
+    //                 for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
+    //                     builder.append(datum);
+    //                 }
+    //                 row_count += 1;
+    //             }
+    //             None => break,
+    //         }
+    //     }
+    //
+    //     let chunk = {
+    //         let columns: Vec<_> = builders
+    //             .into_iter()
+    //             .map(|builder| builder.finish().into())
+    //             .collect();
+    //         DataChunk::new(columns, row_count)
+    //     };
+    //
+    //     if chunk.cardinality() == 0 {
+    //         Ok(None)
+    //     } else {
+    //         Ok(Some(chunk))
+    //     }
+    // }
 }
 
 /// Get vnode value with `indices` on the given `row`.

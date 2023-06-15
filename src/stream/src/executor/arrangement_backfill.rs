@@ -37,13 +37,13 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::{StorageTable, StorageTableInnerIter};
-use risingwave_storage::table::TableIter;
+use risingwave_storage::table::{collect_data_chunk, TableIter};
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
 use crate::common::table::iter_utils::merge_sort;
-use crate::common::table::state_table::{collect_data_chunk, StateTable};
+use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{PkIndices, StreamExecutorResult, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
@@ -447,9 +447,9 @@ where
             .iter_all_vnode_ranges(&range_bounds, Default::default())
             .await?;
         let pinned_iter: Vec<_> = iterators.into_iter().map(Box::pin).collect_vec();
-        let iter = merge_sort(pinned_iter);
+        let mut iter = merge_sort(pinned_iter);
         pin_mut!(iter);
-        for data_chunk in collect_data_chunk(iter, &schema, Some(CHUNK_SIZE))
+        for data_chunk in collect_data_chunk(&mut iter, &schema, Some(CHUNK_SIZE))
             .instrument_await("arrangement_backfill_snapshot_read")
             .await?
         {
