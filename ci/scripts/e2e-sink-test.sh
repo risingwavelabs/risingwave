@@ -27,10 +27,6 @@ download_and_prepare_rw "$profile" source
 echo "--- os limits"
 ulimit -a
 
-# Change process number limit
-echo "--- os limits"
-ulimit -a
-
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
