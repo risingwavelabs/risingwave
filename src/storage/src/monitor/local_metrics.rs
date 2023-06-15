@@ -256,7 +256,6 @@ impl LocalStoreMetrics {
             .with_label_values(&[table_id_label, "l0_miss"])
             .local();
 
-
         let remote_io_time = metrics
             .remote_read_time
             .with_label_values(&[table_id_label])

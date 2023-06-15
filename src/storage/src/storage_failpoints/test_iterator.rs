@@ -282,6 +282,7 @@ async fn test_failpoints_user_read_err() {
                 .unwrap(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
+            false,
         ),
         SstableIterator::new(
             sstable_store
@@ -290,6 +291,7 @@ async fn test_failpoints_user_read_err() {
                 .unwrap(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
+            false,
         ),
     ];
 

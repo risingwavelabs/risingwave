@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevels
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{compact_task, CompactionConfig, LevelType};
+use tracing::info;
 
 use super::picker::{
     SpaceReclaimCompactionPicker, SpaceReclaimPickerState, TtlPickerState,
@@ -492,7 +493,13 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
             .entry(group.group_id)
             .or_insert_with(SpaceReclaimPickerState::default);
 
-        let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
+        let compaction_input = match picker.pick_compaction(levels, level_handlers, state) {
+            None => {
+                info!("SpaceReclaimCompactionSelector pick no task for group-{}, current member table ids: {:?}", group.group_id, levels.member_table_ids);
+                return None;
+            }
+            Some(input) => input,
+        };
         compaction_input.add_pending_task(task_id, level_handlers);
 
         Some(create_compaction_task(

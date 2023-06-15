@@ -62,6 +62,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
                 cache_policy: CachePolicy::NotFill,
                 must_iterated_end_user_key: None,
             }),
+            false,
         );
         let mut previous_key: Option<FullKey<Vec<u8>>> = None;
         if let Err(_err) = iter.rewind().await {

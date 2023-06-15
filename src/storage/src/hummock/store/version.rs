@@ -716,6 +716,7 @@ impl HummockVersionReader {
                 table_holder,
                 self.sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions::from_read_options(&read_options)),
+                false,
             )));
         }
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
@@ -812,7 +813,7 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
-                        base_level == level.level_idx,
+                        base_level == level.level_idx || level.level_idx == 0,
                     ));
                     local_stats.non_overlapping_iter_count += 1;
                 }

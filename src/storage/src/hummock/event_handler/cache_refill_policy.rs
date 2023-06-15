@@ -48,7 +48,6 @@ impl CacheRefillPolicy {
             for group_delta in delta.group_deltas.values() {
                 let mut ssts = vec![];
                 let mut hit_count = 0;
-                let mut total_file_count = 0;
                 for d in &group_delta.group_deltas {
                     if let Some(group_delta::DeltaType::IntraLevel(level_delta)) =
                         d.delta_type.as_ref()
