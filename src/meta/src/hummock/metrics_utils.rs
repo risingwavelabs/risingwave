@@ -264,6 +264,7 @@ pub fn remove_compaction_group_in_sst_stat(
         .ok();
 
     remove_compacting_task_stat(metrics, compaction_group_id, max_level);
+    remove_split_stat(metrics, compaction_group_id);
 }
 
 pub fn remove_compacting_task_stat(
@@ -283,6 +284,19 @@ pub fn remove_compacting_task_stat(
                 .ok();
         }
     }
+}
+
+pub fn remove_split_stat(metrics: &MetaMetrics, compaction_group_id: CompactionGroupId) {
+    let label_str = compaction_group_id.to_string();
+    metrics
+        .state_table_count
+        .remove_label_values(&[&label_str])
+        .unwrap();
+
+    metrics
+        .branched_sst_count
+        .remove_label_values(&[&label_str])
+        .unwrap();
 }
 
 pub fn trigger_pin_unpin_version_state(
