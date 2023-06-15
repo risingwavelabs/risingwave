@@ -145,15 +145,17 @@ message SourceNode {
 }
 
 message SinkDesc {
+  reserved 4;
+  reserved "columns";
   uint32 id = 1;
   string name = 2;
   string definition = 3;
-  repeated plan_common.ColumnDesc columns = 4;
   repeated common.ColumnOrder plan_pk = 5;
   repeated uint32 downstream_pk = 6;
   repeated uint32 distribution_key = 7;
   map<string, string> properties = 8;
   catalog.SinkType sink_type = 9;
+  repeated plan_common.ColumnCatalog column_catalogs = 10;
 }
 
 message SinkNode {
@@ -240,6 +242,7 @@ message HashAggNode {
   bool is_append_only = 5;
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
   uint32 row_count_index = 7;
+  bool emit_on_window_close = 8;
 }
 
 message TopNNode {

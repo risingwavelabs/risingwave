@@ -139,11 +139,15 @@ where
             state_table.init_epoch(first_barrier.epoch);
         }
 
-        // Maintain backwards compatibility with no state table.
         let is_finished = if let Some(state_table) = self.state_table.as_mut() {
-            Self::check_all_vnode_finished(state_table, state_len).await?
+            let is_finished = Self::check_all_vnode_finished(state_table, state_len).await?;
+            if is_finished {
+                assert!(!first_barrier.is_newly_added(self.actor_id));
+            }
+            is_finished
         } else {
-            first_barrier.is_newly_added(self.actor_id)
+            // Maintain backwards compatibility with no state table
+            !first_barrier.is_newly_added(self.actor_id)
         };
 
         // If the snapshot is empty, we don't need to backfill.
@@ -151,9 +155,14 @@ where
         // finished state to state store first.
         // As such we will wait for next barrier.
         let is_snapshot_empty: bool = {
-            let snapshot = Self::snapshot_read(&self.upstream_table, init_epoch, None, false);
-            pin_mut!(snapshot);
-            snapshot.try_next().await?.unwrap().is_none()
+            if is_finished {
+                // It is finished, so just assign a value to avoid accessing storage table again.
+                false
+            } else {
+                let snapshot = Self::snapshot_read(&self.upstream_table, init_epoch, None, false);
+                pin_mut!(snapshot);
+                snapshot.try_next().await?.unwrap().is_none()
+            }
         };
 
         // | backfill_is_finished | snapshot_empty | need_to_backfill |
@@ -251,10 +260,10 @@ where
                                     // upstream buffer chunk
 
                                     // Consume upstream buffer chunk
-                                    for chunk in upstream_chunk_buffer.drain(..) {
-                                        cur_barrier_upstream_processed_rows +=
-                                            chunk.cardinality() as u64;
-                                        if let Some(current_pos) = &current_pos {
+                                    if let Some(current_pos) = &current_pos {
+                                        for chunk in upstream_chunk_buffer.drain(..) {
+                                            cur_barrier_upstream_processed_rows +=
+                                                chunk.cardinality() as u64;
                                             yield Message::Chunk(Self::mapping_chunk(
                                                 Self::mark_chunk(
                                                     chunk,

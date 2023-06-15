@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{SinkConfig, DOWNSTREAM_SINK_KEY};
@@ -44,7 +45,12 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .iter()
             .map(|i| *i as usize)
             .collect_vec();
-        let schema = sink_desc.columns.iter().map(Into::into).collect();
+        let columns = sink_desc
+            .column_catalogs
+            .clone()
+            .into_iter()
+            .map(ColumnCatalog::from)
+            .collect_vec();
         // This field can be used to distinguish a specific actor in parallelism to prevent
         // transaction execution errors
         if let Some(connector) = properties.get(DOWNSTREAM_SINK_KEY) && connector == KAFKA_SINK {
@@ -65,7 +71,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 config,
                 params.executor_id,
                 params.env.connector_params(),
-                schema,
+                columns,
                 pk_indices,
                 sink_type,
                 sink_id,

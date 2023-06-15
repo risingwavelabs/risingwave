@@ -15,10 +15,12 @@
 use std::fmt;
 use std::rc::Rc;
 
+use pretty_xmlish::Pretty;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
+use super::utils::{column_names_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
@@ -45,11 +47,7 @@ impl BatchSource {
     }
 
     pub fn column_names(&self) -> Vec<&str> {
-        self.schema()
-            .fields()
-            .iter()
-            .map(|f| f.name.as_str())
-            .collect()
+        self.schema().names_str()
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
@@ -80,6 +78,18 @@ impl fmt::Display for BatchSource {
             .field("columns", &self.column_names())
             .field("filter", &self.kafka_timestamp_range_value())
             .finish()
+    }
+}
+
+impl Distill for BatchSource {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let src = Pretty::from(self.source_catalog().unwrap().name.clone());
+        let fields = vec![
+            ("source", src),
+            ("columns", column_names_pretty(self.schema())),
+            ("filter", Pretty::debug(&self.kafka_timestamp_range_value())),
+        ];
+        Pretty::childless_record("BatchSource", fields)
     }
 }
 

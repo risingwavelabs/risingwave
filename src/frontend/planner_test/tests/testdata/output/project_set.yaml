@@ -166,3 +166,28 @@
           └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
             └─StreamProjectSet { select_list: [Unnest($0), $1] }
               └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: issue-10080
+  sql: |
+    with cte as (SELECT 1 as v1, unnest(array[1,2,3,4,5]) AS v2) select v1 from cte;
+  batch_plan: |
+    BatchProject { exprs: [1:Int32] }
+    └─BatchProjectSet { select_list: [1:Int32, Unnest(ARRAY[1, 2, 3, 4, 5]:List(Int32))] }
+      └─BatchValues { rows: [[]] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, _row_id(hidden), projected_row_id(hidden)], stream_key: [_row_id, projected_row_id], pk_columns: [_row_id, projected_row_id], pk_conflict: "NoCheck" }
+    └─StreamProject { exprs: [1:Int32, _row_id, projected_row_id] }
+      └─StreamProjectSet { select_list: [1:Int32, Unnest(ARRAY[1, 2, 3, 4, 5]:List(Int32)), $0] }
+        └─StreamValues { rows: [[0:Int64]] }
+- sql: |
+    create table t(x int[]);
+    with cte as (SELECT 1 as v1, unnest(x) AS v2 FROM t) select v1 from cte;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [1:Int32] }
+      └─BatchProjectSet { select_list: [1:Int32, Unnest($0)] }
+        └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, t._row_id(hidden), projected_row_id(hidden)], stream_key: [t._row_id, projected_row_id], pk_columns: [t._row_id, projected_row_id], pk_conflict: "NoCheck" }
+    └─StreamProject { exprs: [1:Int32, t._row_id, projected_row_id] }
+      └─StreamProjectSet { select_list: [1:Int32, Unnest($0), $1] }
+        └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

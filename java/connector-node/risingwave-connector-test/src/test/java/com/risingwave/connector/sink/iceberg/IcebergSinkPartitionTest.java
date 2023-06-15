@@ -24,7 +24,6 @@ import com.google.common.collect.Sets;
 import com.risingwave.connector.IcebergSink;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
-import com.risingwave.proto.Data;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -62,9 +61,9 @@ public class IcebergSinkPartitionTest {
             new TableSchema(
                     Lists.newArrayList("id", "name", "part"),
                     Lists.newArrayList(
-                            Data.DataType.TypeName.INT32,
-                            Data.DataType.TypeName.VARCHAR,
-                            Data.DataType.TypeName.VARCHAR),
+                            DataType.newBuilder().setTypeName(DataType.TypeName.INT32).build(),
+                            DataType.newBuilder().setTypeName(DataType.TypeName.VARCHAR).build(),
+                            DataType.newBuilder().setTypeName(DataType.TypeName.VARCHAR).build()),
                     Lists.newArrayList("id"));
 
     private void createMockTable() throws IOException {

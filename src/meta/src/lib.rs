@@ -37,6 +37,7 @@
 
 pub mod backup_restore;
 mod barrier;
+pub(crate) mod batch;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
 mod error;
@@ -265,6 +266,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 max_compactor_task_multiplier: config.meta.max_compactor_task_multiplier,
                 split_group_size_limit: config.meta.split_group_size_limit,
                 move_table_size_limit: config.meta.move_table_size_limit,
+                partition_vnode_count: config.meta.partition_vnode_count,
                 do_not_config_object_storage_lifecycle: config
                     .meta
                     .do_not_config_object_storage_lifecycle,

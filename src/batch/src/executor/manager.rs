@@ -14,7 +14,6 @@
 
 use async_stream::stream;
 use futures::stream::StreamExt;
-use minitrace::prelude::*;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode;
 use tokio::select;
@@ -22,6 +21,7 @@ use tokio::sync::watch::Receiver;
 
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, Executor};
 use crate::task::ShutdownMsg;
+use crate::tracing::Instrument;
 
 /// `ManagerExecutor` build on top of the underlying executor. For now, it do two things:
 /// 1. the duration of performance-critical operations will be traced, such as open/next/close.
@@ -62,13 +62,6 @@ impl Executor for ManagedExecutor {
             let span_name = format!("{input_desc}_next");
             let mut child_stream = self.child.execute();
 
-            let span = || {
-                let mut span = Span::enter_with_local_parent("next");
-                span.add_property(|| ("otel.name", span_name.to_string()));
-                span.add_property(|| ("next", input_desc.to_string()));
-                span
-            };
-
             loop {
                 select! {
                     // We prioritize abort signal over normal data chunks.
@@ -94,7 +87,7 @@ impl Executor for ManagedExecutor {
                             }
                         }
                     }
-                    res = child_stream.next().in_span(span()) => {
+                    res = child_stream.next().instrument(tracing::trace_span!("next", otel.name = span_name.as_str(), next = input_desc)) => {
                         if let Some(chunk) = res {
                             match chunk {
                                 Ok(chunk) => {

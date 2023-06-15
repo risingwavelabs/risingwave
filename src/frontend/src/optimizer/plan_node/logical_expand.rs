@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
@@ -62,10 +61,6 @@ impl LogicalExpand {
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         &self.core.column_subsets
     }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
-    }
 }
 
 impl PlanTreeNodeUnary for LogicalExpand {
@@ -110,12 +105,7 @@ impl PlanTreeNodeUnary for LogicalExpand {
 }
 
 impl_plan_tree_node_for_unary! {LogicalExpand}
-
-impl fmt::Display for LogicalExpand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalExpand")
-    }
-}
+impl_distill_by_unit!(LogicalExpand, core, "LogicalExpand");
 
 impl ColPrunable for LogicalExpand {
     fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {

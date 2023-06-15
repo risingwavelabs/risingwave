@@ -35,7 +35,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
-use super::utils::{IndicesDisplay, TableCatalogBuilder};
+use super::utils::{formatter_debug_plan_node, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -247,6 +247,8 @@ impl StreamSink {
         }
     }
 
+    /// The table schema is: | epoch | seq_id | row_op | sink columns |
+    /// Pk is: | epoch | seq_id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
         let mut table_catalog_builder =
             TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
@@ -294,7 +296,7 @@ impl_plan_tree_node_for_unary! { StreamSink }
 
 impl fmt::Display for StreamSink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamSink");
+        let mut builder = formatter_debug_plan_node!(f, "StreamSink");
 
         let sink_type = if self.sink_desc.sink_type.is_append_only() {
             "append-only"
@@ -305,7 +307,7 @@ impl fmt::Display for StreamSink {
             .sink_desc
             .columns
             .iter()
-            .map(|col| col.column_desc.name.clone())
+            .map(|col| col.name_with_hidden())
             .collect_vec()
             .join(", ");
         builder

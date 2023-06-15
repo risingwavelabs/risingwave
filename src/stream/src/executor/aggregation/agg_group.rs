@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::stream_record::{Record, RecordType};
@@ -113,10 +114,51 @@ impl Strategy for OnlyOutputIfHasInput {
     }
 }
 
+/// [`GroupKey`] wraps a concrete group key and handle its mapping to state table pk.
+#[derive(Clone, Debug)]
+pub struct GroupKey {
+    row_prefix: OwnedRow,
+    table_pk_projection: Arc<[usize]>,
+}
+
+impl GroupKey {
+    pub fn new(row_prefix: OwnedRow, table_pk_projection: Option<Arc<[usize]>>) -> Self {
+        let table_pk_projection =
+            table_pk_projection.unwrap_or_else(|| (0..row_prefix.len()).collect());
+        Self {
+            row_prefix,
+            table_pk_projection,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.row_prefix.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.row_prefix.is_empty()
+    }
+
+    /// Get the group key for state table row prefix.
+    pub fn table_row(&self) -> &OwnedRow {
+        &self.row_prefix
+    }
+
+    /// Get the group key for state table pk prefix.
+    pub fn table_pk(&self) -> impl Row + '_ {
+        (&self.row_prefix).project(&self.table_pk_projection)
+    }
+
+    /// Get the group key for LRU cache key prefix.
+    pub fn cache_key(&self) -> impl Row + '_ {
+        self.table_row()
+    }
+}
+
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
 pub struct AggGroup<S: StateStore, Strtg: Strategy> {
     /// Group key.
-    group_key: Option<OwnedRow>,
+    group_key: Option<GroupKey>,
 
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState<S>>,
@@ -153,7 +195,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// For [`crate::executor::SimpleAggExecutor`], the `group_key` should be `None`.
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
-        group_key: Option<OwnedRow>,
+        group_key: Option<GroupKey>,
         agg_calls: &[AggCall],
         storages: &[AggStateStorage<S>],
         result_table: &StateTable<S>,
@@ -162,7 +204,9 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<AggGroup<S, Strtg>> {
-        let prev_outputs: Option<OwnedRow> = result_table.get_row(&group_key).await?;
+        let prev_outputs: Option<OwnedRow> = result_table
+            .get_row(group_key.as_ref().map(GroupKey::table_pk))
+            .await?;
         if let Some(prev_outputs) = &prev_outputs {
             assert_eq!(prev_outputs.len(), agg_calls.len());
         }
@@ -190,7 +234,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         })
     }
 
-    pub fn group_key(&self) -> Option<&OwnedRow> {
+    pub fn group_key(&self) -> Option<&GroupKey> {
         self.group_key.as_ref()
     }
 
@@ -312,19 +356,35 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 
         change_type.map(|change_type| match change_type {
             RecordType::Insert => {
-                let new_row = self.group_key().chain(&curr_outputs).into_owned_row();
+                let new_row = self
+                    .group_key()
+                    .map(GroupKey::table_row)
+                    .chain(&curr_outputs)
+                    .into_owned_row();
                 self.prev_outputs = Some(curr_outputs);
                 Record::Insert { new_row }
             }
             RecordType::Delete => {
                 let prev_outputs = self.prev_outputs.take();
-                let old_row = self.group_key().chain(prev_outputs).into_owned_row();
+                let old_row = self
+                    .group_key()
+                    .map(GroupKey::table_row)
+                    .chain(prev_outputs)
+                    .into_owned_row();
                 Record::Delete { old_row }
             }
             RecordType::Update => {
-                let new_row = self.group_key().chain(&curr_outputs).into_owned_row();
+                let new_row = self
+                    .group_key()
+                    .map(GroupKey::table_row)
+                    .chain(&curr_outputs)
+                    .into_owned_row();
                 let prev_outputs = self.prev_outputs.replace(curr_outputs);
-                let old_row = self.group_key().chain(prev_outputs).into_owned_row();
+                let old_row = self
+                    .group_key()
+                    .map(GroupKey::table_row)
+                    .chain(prev_outputs)
+                    .into_owned_row();
                 Record::Update { old_row, new_row }
             }
         })
