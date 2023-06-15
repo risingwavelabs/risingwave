@@ -316,8 +316,8 @@ pub async fn compute_node_serve(
     let connector_params = risingwave_connector::ConnectorParams {
         connector_rpc_endpoint: opts.connector_rpc_endpoint,
         sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
-            None | Some("json") => SinkPayloadFormat::Json,
-            Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
+            None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
+            Some("json") => SinkPayloadFormat::Json,
             _ => {
                 unreachable!(
                     "invalid sink payload format: {:?}. Should be either json or stream_chunk",
