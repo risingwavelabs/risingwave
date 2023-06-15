@@ -1,5 +1,7 @@
 # Before running this test:
 #   python3 e2e_test/udf/test.py
+# or:
+#   cd java/udf-example && mvn package && java -jar target/risingwave-udf-example.jar
 
 # Create a function.
 statement ok
@@ -35,7 +37,7 @@ create function series(int) returns table (x int) language python as series usin
 
 # Create a table function that returns multiple columns.
 statement ok
-create function series2(int) returns table (x int, y varchar) language python as series2 using link 'http://localhost:8815';
+create function split(varchar) returns table (word varchar, length int) language python as split using link 'http://localhost:8815';
 
 statement ok
 create function hex_to_dec(varchar) returns decimal language python as hex_to_dec using link 'http://localhost:8815';
@@ -70,7 +72,7 @@ jsonb_array_identity jsonb[] jsonb[] python http://localhost:8815
 jsonb_array_struct_identity struct<v jsonb[],len integer> struct<v jsonb[],len integer> python http://localhost:8815
 jsonb_concat jsonb[] jsonb python http://localhost:8815
 series integer integer python http://localhost:8815
-series2 integer struct<x integer,y varchar> python http://localhost:8815
+split varchar struct<word varchar,length integer> python http://localhost:8815
 
 query I
 select int_42();
@@ -111,12 +113,12 @@ select jsonb_concat(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb
 [null, 1, "str", {}]
 
 query T
-select jsonb_array_identity(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
+select jsonb_array_identity(ARRAY[null, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
 ----
 {NULL,1,"\"str\"","{}"}
 
 query T
-select jsonb_array_struct_identity(ROW(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb], 4)::struct<v jsonb[], len int>);
+select jsonb_array_struct_identity(ROW(ARRAY[null, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb], 4)::struct<v jsonb[], len int>);
 ----
 ({NULL,1,"\"str\"","{}"},4)
 
@@ -130,18 +132,16 @@ select series(5);
 4
 
 query IT
-select * from series2(3);
+select * from split('rising wave');
 ----
-0 #0
-1 #1
-2 #2
+rising 6
+wave   4
 
 query T
-select series2(3);
+select split('rising wave');
 ----
-(0,#0)
-(1,#1)
-(2,#2)
+(rising,6)
+(wave,4)
 
 query II
 select x, series(x) from series(4) t(x);
@@ -152,16 +152,6 @@ select x, series(x) from series(4) t(x);
 3 0
 3 1
 3 2
-
-query IT
-select x, series2(x) from series(4) t(x);
-----
-1 (0,#0)
-2 (0,#0)
-2 (1,#1)
-3 (0,#0)
-3 (1,#1)
-3 (2,#2)
 
 # test large output for table function
 query I
@@ -229,3 +219,30 @@ drop function gcd();
 # Drop a function without arguments. Now the function name is unique.
 statement ok
 drop function gcd;
+
+statement ok
+drop function extract_tcp_info;
+
+statement ok
+drop function series;
+
+statement ok
+drop function split;
+
+statement ok
+drop function hex_to_dec;
+
+statement ok
+drop function array_access;
+
+statement ok
+drop function jsonb_access;
+
+statement ok
+drop function jsonb_concat;
+
+statement ok
+drop function jsonb_array_identity;
+
+statement ok
+drop function jsonb_array_struct_identity;

@@ -7,6 +7,7 @@ REDIS_RELEASE = "redis-${REDIS_VERSION}"
 REDIS_DOWNLOAD_URL = "https://github.com/redis/redis/archive/${REDIS_VERSION}.tar.gz"
 
 [tasks.download-redis]
+private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_REDIS" ] }

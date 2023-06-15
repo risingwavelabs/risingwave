@@ -81,6 +81,7 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
+    registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config.clone()));
@@ -161,7 +162,7 @@ pub async fn compute_node_serve(
 
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
-    let registry = prometheus::Registry::new();
+
     monitor_process(&registry).unwrap();
     let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
@@ -191,16 +192,6 @@ pub async fn compute_node_serve(
         state_store_metrics.clone(),
         object_store_metrics,
         TieredCacheMetricsBuilder::new(registry.clone()),
-        if config.streaming.enable_jaeger_tracing {
-            Arc::new(
-                risingwave_tracing::RwTracingService::new(risingwave_tracing::TracingConfig::new(
-                    "127.0.0.1:6831".to_string(),
-                ))
-                .unwrap(),
-            )
-        } else {
-            Arc::new(risingwave_tracing::RwTracingService::disabled())
-        },
         storage_metrics.clone(),
         compactor_metrics.clone(),
     )
@@ -323,8 +314,8 @@ pub async fn compute_node_serve(
     let connector_params = risingwave_connector::ConnectorParams {
         connector_rpc_endpoint: opts.connector_rpc_endpoint,
         sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
-            None | Some("json") => SinkPayloadFormat::Json,
-            Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
+            None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
+            Some("json") => SinkPayloadFormat::Json,
             _ => {
                 unreachable!(
                     "invalid sink payload format: {:?}. Should be either json or stream_chunk",

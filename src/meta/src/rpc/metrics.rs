@@ -93,6 +93,14 @@ pub struct MetaMetrics {
     pub min_safepoint_version_id: IntGauge,
     /// Compaction groups that is in write stop state.
     pub write_stop_compaction_groups: IntGaugeVec,
+    /// The object id watermark used in last full GC.
+    pub full_gc_last_object_id_watermark: IntGauge,
+    /// The number of attempts to trigger full GC.
+    pub full_gc_trigger_count: IntGauge,
+    /// The number of candidate object to delete after scanning object store.
+    pub full_gc_candidate_object_count: Histogram,
+    /// The number of object to delete after filtering by meta node.
+    pub full_gc_selected_object_count: Histogram,
     /// Hummock version stats
     pub version_stats: IntGaugeVec,
     /// Total number of objects that is no longer referenced by versions.
@@ -272,6 +280,36 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+
+        let full_gc_last_object_id_watermark = register_int_gauge_with_registry!(
+            "storage_full_gc_last_object_id_watermark",
+            "the object id watermark used in last full GC",
+            registry
+        )
+        .unwrap();
+
+        let full_gc_trigger_count = register_int_gauge_with_registry!(
+            "storage_full_gc_trigger_count",
+            "the number of attempts to trigger full GC",
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "storage_full_gc_candidate_object_count",
+            "the number of candidate object to delete after scanning object store",
+            exponential_buckets(1.0, 10.0, 6).unwrap()
+        );
+        let full_gc_candidate_object_count =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "storage_full_gc_selected_object_count",
+            "the number of object to delete after filtering by meta node",
+            exponential_buckets(1.0, 10.0, 6).unwrap()
+        );
+        let full_gc_selected_object_count =
+            register_histogram_with_registry!(opts, registry).unwrap();
 
         let min_safepoint_version_id = register_int_gauge_with_registry!(
             "storage_min_safepoint_version_id",
@@ -511,6 +549,10 @@ impl MetaMetrics {
             min_pinned_version_id,
             min_safepoint_version_id,
             write_stop_compaction_groups,
+            full_gc_last_object_id_watermark,
+            full_gc_trigger_count,
+            full_gc_candidate_object_count,
+            full_gc_selected_object_count,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
@@ -615,13 +657,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
             // report full info on each interval.
             meta_metrics.actor_info.reset();
             meta_metrics.table_info.reset();
-            let fragments = match fragment_manager.list_table_fragments().await {
-                Ok(f) => f,
-                Err(e) => {
-                    tracing::error!("Error when in list_table_fragments: {:?}", e);
-                    continue;
-                }
-            };
+            let fragments = fragment_manager.list_table_fragments().await;
             let workers: HashMap<u32, String> = cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, None)
                 .await
@@ -633,7 +669,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                 .collect();
             for table_fragments in fragments {
                 for (fragment_id, fragment) in table_fragments.fragments {
-                    let frament_id_str = fragment_id.to_string();
+                    let fragment_id_str = fragment_id.to_string();
                     for actor in fragment.actors {
                         let actor_id_str = actor.actor_id.to_string();
                         // Report a dummay gauge metrics with (fragment id, actor id, node
@@ -647,7 +683,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                         .actor_info
                                         .with_label_values(&[
                                             &actor_id_str,
-                                            &frament_id_str,
+                                            &fragment_id_str,
                                             address,
                                         ])
                                         .set(1);

@@ -26,7 +26,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::{AggCall, GroupKey};
-use crate::cache::{new_unbounded_with_metrics, ManagedLruCache};
+use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
@@ -45,7 +45,7 @@ struct ColumnDeduplicater<S: StateStore> {
 impl<S: StateStore> ColumnDeduplicater<S> {
     fn new(watermark_epoch: &Arc<AtomicU64>, metrics_info: MetricsInfo) -> Self {
         Self {
-            cache: new_unbounded_with_metrics(watermark_epoch.clone(), metrics_info.clone()),
+            cache: new_unbounded(watermark_epoch.clone(), metrics_info.clone()),
             metrics_info,
             _phantom: PhantomData,
         }
@@ -383,7 +383,7 @@ mod tests {
             let n_columns = columns.len();
             let table = StateTable::new_without_distribution_with_value_indices(
                 store.clone(),
-                TableId::new(2333),
+                TableId::new(2333 + distinct_col as u32),
                 columns,
                 order_types,
                 (0..(group_key_types.len() + 1)).collect(),

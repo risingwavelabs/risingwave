@@ -1,6 +1,5 @@
 [meta]
 disable_recovery = true
-enable_committed_sst_sanity_check = true
 max_heartbeat_interval_secs = 600
 
 [streaming]

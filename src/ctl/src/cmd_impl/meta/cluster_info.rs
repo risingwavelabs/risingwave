@@ -37,6 +37,7 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
         source_infos: _,
         table_fragments,
         mut actor_splits,
+        revision: _,
     } = get_cluster_info(context).await?;
 
     for table_fragment in &table_fragments {
@@ -79,6 +80,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
         table_fragments,
         actor_splits: _,
         source_infos: _,
+        revision,
     } = get_cluster_info(context).await?;
 
     // Fragment ID -> [Parallel Unit ID -> (Parallel Unit, Actor)]
@@ -167,6 +169,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
     }
 
     println!("{table}");
+    println!("Revision: {}", revision);
 
     Ok(())
 }

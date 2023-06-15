@@ -56,7 +56,7 @@ impl Expression for ExprToCharConstTmpl {
                 let mut writer = output.writer().begin();
                 let fmt = data
                     .0
-                    .format_with_items(self.ctx.chrono_pattern.borrow_items().iter());
+                    .format_with_items(self.ctx.chrono_pattern.borrow_dependent().iter());
                 write!(writer, "{fmt}").unwrap();
                 writer.finish();
             } else {
@@ -72,7 +72,7 @@ impl Expression for ExprToCharConstTmpl {
         Ok(if let Some(ScalarImpl::Timestamp(data)) = data {
             Some(
                 data.0
-                    .format_with_items(self.ctx.chrono_pattern.borrow_items().iter())
+                    .format_with_items(self.ctx.chrono_pattern.borrow_dependent().iter())
                     .to_string()
                     .into(),
             )

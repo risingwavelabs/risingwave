@@ -555,6 +555,21 @@ def section_object_storage(outer_panels):
                         )
                     ],
                 ),
+                panels.timeseries_ops(
+                    "Operation Retry Rate",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(irate({metric('aws_sdk_retry_counts')}[$__rate_interval])) by (instance, job, type)",
+                            "{{type}} - {{job}} @ {{instance}}",
+                        ),
+
+                        panels.target(
+                            f"sum(irate({metric('s3_read_request_retry_count')}[$__rate_interval])) by (instance, job, type)",
+                            "{{type}} - {{job}} @ {{instance}}",
+                        )
+                    ],
+                ),
                 panels.timeseries_dollar(
                     "Estimated S3 Cost (Realtime)",
                     "There are two types of operations: 1. GET, SELECT, and DELETE, they cost 0.0004 USD per 1000 "
@@ -1792,7 +1807,7 @@ def section_hummock(panels):
             "False-Positive / Positive",
             [
                 panels.target(
-                    f"1 - (((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
+                    f"(((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
                     "read req bloom filter false positive rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
@@ -2246,6 +2261,22 @@ Objects are classified into 3 groups:
                     [
                         panels.target(f"{metric('storage_write_stop_compaction_groups')}",
                                       "compaction_group_{{compaction_group_id}}"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Full GC Trigger Count",
+                    "total number of attempts to trigger full GC",
+                    [
+                        panels.target(f"{metric('storage_full_gc_trigger_count')}",
+                                      "full_gc_trigger_count"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Full GC Last Watermark",
+                    "the object id watermark used in last full GC",
+                    [
+                        panels.target(f"{metric('storage_full_gc_last_object_id_watermark')}",
+                                      "full_gc_last_object_id_watermark"),
                     ],
                 ),
             ],

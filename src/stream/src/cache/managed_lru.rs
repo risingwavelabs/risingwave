@@ -39,9 +39,23 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     /// The heap size of keys/values
     kv_heap_size: usize,
     /// The metrics of memory usage
-    memory_usage_metrics: Option<IntGauge>,
+    memory_usage_metrics: IntGauge,
+    // Metrics info
+    metrics_info: MetricsInfo,
     /// The size reported last time
     last_reported_size_bytes: usize,
+}
+
+impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
+    fn drop(&mut self) {
+        let info = &self.metrics_info;
+        self.memory_usage_metrics.set(0.into());
+
+        info.metrics
+            .stream_memory_usage
+            .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
+            .unwrap();
+    }
 }
 
 impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
@@ -50,21 +64,23 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     pub fn new_inner(
         inner: LruCache<K, V, S, A>,
         watermark_epoch: Arc<AtomicU64>,
-        metrics_info: Option<MetricsInfo>,
+        metrics_info: MetricsInfo,
     ) -> Self {
-        let memory_usage_metrics = metrics_info.map(|info| {
-            info.metrics.stream_memory_usage.with_label_values(&[
-                &info.table_id,
-                &info.actor_id,
-                &info.desc,
-            ])
-        });
+        let memory_usage_metrics = metrics_info
+            .metrics
+            .stream_memory_usage
+            .with_label_values(&[
+                &metrics_info.table_id,
+                &metrics_info.actor_id,
+                &metrics_info.desc,
+            ]);
 
         Self {
             inner,
             watermark_epoch,
             kv_heap_size: 0,
             memory_usage_metrics,
+            metrics_info,
             last_reported_size_bytes: 0,
         }
     }
@@ -202,9 +218,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         if self.kv_heap_size.abs_diff(self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
-            if let Some(metrics) = self.memory_usage_metrics.as_ref() {
-                metrics.set(self.kv_heap_size as _);
-            }
+            self.memory_usage_metrics.set(self.kv_heap_size as _);
             self.last_reported_size_bytes = self.kv_heap_size;
             true
         } else {
@@ -215,15 +229,9 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
 pub fn new_unbounded<K: Hash + Eq + EstimateSize, V: EstimateSize>(
     watermark_epoch: Arc<AtomicU64>,
-) -> ManagedLruCache<K, V> {
-    ManagedLruCache::new_inner(LruCache::unbounded(), watermark_epoch, None)
-}
-
-pub fn new_unbounded_with_metrics<K: Hash + Eq + EstimateSize, V: EstimateSize>(
-    watermark_epoch: Arc<AtomicU64>,
     metrics_info: MetricsInfo,
 ) -> ManagedLruCache<K, V> {
-    ManagedLruCache::new_inner(LruCache::unbounded(), watermark_epoch, Some(metrics_info))
+    ManagedLruCache::new_inner(LruCache::unbounded(), watermark_epoch, metrics_info)
 }
 
 pub fn new_with_hasher_in<
@@ -240,7 +248,7 @@ pub fn new_with_hasher_in<
     ManagedLruCache::new_inner(
         LruCache::unbounded_with_hasher_in(hasher, alloc),
         watermark_epoch,
-        Some(metrics_info),
+        metrics_info,
     )
 }
 
@@ -252,7 +260,7 @@ pub fn new_with_hasher<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHas
     ManagedLruCache::new_inner(
         LruCache::unbounded_with_hasher(hasher),
         watermark_epoch,
-        Some(metrics_info),
+        metrics_info,
     )
 }
 
@@ -263,7 +271,7 @@ pub struct MutGuard<'a, V: EstimateSize> {
     // The total size of a collection
     total_size: &'a mut usize,
     last_reported_size_bytes: &'a mut usize,
-    memory_usage_metrics: &'a mut Option<IntGauge>,
+    memory_usage_metrics: &'a mut IntGauge,
 }
 
 impl<'a, V: EstimateSize> MutGuard<'a, V> {
@@ -271,7 +279,7 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
         inner: &'a mut V,
         total_size: &'a mut usize,
         last_reported_size_bytes: &'a mut usize,
-        memory_usage_metrics: &'a mut Option<IntGauge>,
+        memory_usage_metrics: &'a mut IntGauge,
     ) -> Self {
         let original_val_size = inner.estimated_size();
         Self {
@@ -287,9 +295,7 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
         if self.total_size.abs_diff(*self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
-            if let Some(metrics) = self.memory_usage_metrics.as_ref() {
-                metrics.set(*self.total_size as _);
-            }
+            self.memory_usage_metrics.set(*self.total_size as _);
             *self.last_reported_size_bytes = *self.total_size;
             true
         } else {
@@ -329,7 +335,7 @@ pub struct UnsafeMutGuard<V: EstimateSize> {
     // The total size of a collection
     total_size: NonNull<usize>,
     last_reported_size_bytes: NonNull<usize>,
-    memory_usage_metrics: NonNull<Option<IntGauge>>,
+    memory_usage_metrics: NonNull<IntGauge>,
 }
 
 impl<V: EstimateSize> UnsafeMutGuard<V> {
@@ -337,7 +343,7 @@ impl<V: EstimateSize> UnsafeMutGuard<V> {
         inner: &mut V,
         total_size: &mut usize,
         last_reported_size_bytes: &mut usize,
-        memory_usage_metrics: &mut Option<IntGauge>,
+        memory_usage_metrics: &mut IntGauge,
     ) -> Self {
         let original_val_size = inner.estimated_size();
         Self {
