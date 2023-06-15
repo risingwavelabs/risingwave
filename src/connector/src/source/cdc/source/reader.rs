@@ -61,8 +61,8 @@ impl SplitReader for CdcSplitReader {
         let split_id = split.id();
         match split {
             SplitImpl::MySqlCdc(split) | SplitImpl::PostgresCdc(split) => Ok(Self {
-                source_id: split.split_id as u64,
-                start_offset: split.start_offset,
+                source_id: split.split_id() as u64,
+                start_offset: split.start_offset().clone(),
                 server_addr: None,
                 conn_props,
                 split_id,
@@ -70,9 +70,9 @@ impl SplitReader for CdcSplitReader {
                 source_ctx,
             }),
             SplitImpl::CitusCdc(split) => Ok(Self {
-                source_id: split.split_id as u64,
-                start_offset: split.start_offset,
-                server_addr: split.server_addr,
+                source_id: split.split_id() as u64,
+                start_offset: split.start_offset().clone(),
+                server_addr: split.server_addr().clone(),
                 conn_props,
                 split_id,
                 parser_config,

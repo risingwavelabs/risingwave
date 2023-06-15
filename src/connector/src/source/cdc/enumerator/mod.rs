@@ -21,7 +21,9 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::SourceType as PbSourceType;
 use risingwave_rpc_client::ConnectorClient;
 
-use crate::source::cdc::{CdcProperties, CdcSplit};
+use crate::source::cdc::{
+    CdcProperties, CdcSplitBase, DebeziumCdcSplit, MySqlCdcSplit, PostgresCdcSplit,
+};
 use crate::source::SplitEnumerator;
 
 pub const DATABASE_SERVERS_KEY: &str = "database.servers";
@@ -37,7 +39,7 @@ pub struct DebeziumSplitEnumerator {
 #[async_trait]
 impl SplitEnumerator for DebeziumSplitEnumerator {
     type Properties = CdcProperties;
-    type Split = CdcSplit;
+    type Split = DebeziumCdcSplit;
 
     async fn new(props: CdcProperties) -> anyhow::Result<DebeziumSplitEnumerator> {
         tracing::debug!("start validate cdc properties");
@@ -77,26 +79,44 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<CdcSplit>> {
+    async fn list_splits(&mut self) -> anyhow::Result<Vec<DebeziumCdcSplit>> {
         match self.source_type {
-            PbSourceType::Mysql | PbSourceType::Postgres => {
+            PbSourceType::Mysql => {
                 // CDC source only supports single split
-                let splits = vec![CdcSplit {
-                    split_id: self.source_id,
+                let split = MySqlCdcSplit {
+                    inner: CdcSplitBase::new(self.source_id, None),
+                };
+                let dbz_split = DebeziumCdcSplit {
+                    mysql_split: Some(split),
+                    pg_split: None,
+                };
+                Ok(vec![dbz_split])
+            }
+            PbSourceType::Postgres => {
+                let split = PostgresCdcSplit {
+                    inner: CdcSplitBase::new(self.source_id, None),
                     server_addr: None,
-                    start_offset: None,
-                }];
-                Ok(splits)
+                };
+                let dbz_split = DebeziumCdcSplit {
+                    mysql_split: None,
+                    pg_split: Some(split),
+                };
+                Ok(vec![dbz_split])
             }
             PbSourceType::Citus => {
                 let splits = self
                     .worker_node_addrs
                     .iter()
                     .enumerate()
-                    .map(|(id, addr)| CdcSplit {
-                        split_id: id as u32,
-                        server_addr: Some(addr.to_string()),
-                        start_offset: None,
+                    .map(|(id, addr)| {
+                        let split = PostgresCdcSplit {
+                            inner: CdcSplitBase::new(id as u32, None),
+                            server_addr: Some(addr.to_string()),
+                        };
+                        DebeziumCdcSplit {
+                            mysql_split: None,
+                            pg_split: Some(split),
+                        }
                     })
                     .collect_vec();
                 Ok(splits)
