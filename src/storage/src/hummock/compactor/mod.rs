@@ -201,7 +201,7 @@ impl Compactor {
         };
 
         if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
-            let found_tables = multi.get_exsting_table_ids();
+            let found_tables = multi.get_existing_table_ids();
             let removed_tables = compact_table_ids
                 .iter()
                 .filter(|table_id| !found_tables.contains(table_id))
