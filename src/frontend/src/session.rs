@@ -187,8 +187,10 @@ impl FrontendEnv {
         info!("advertise addr is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
-        let mut p = Property::default();
-        p.is_schedulable = true;
+        let p = Property {
+            is_schedulable: true,
+            ..Default::default()
+        };
 
         let (meta_client, system_params_reader) = MetaClient::register_new(
             opts.meta_addr.clone().as_str(),

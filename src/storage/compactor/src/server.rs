@@ -68,8 +68,10 @@ pub async fn compactor_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Register to the cluster.
-    let mut p = Property::default();
-    p.is_schedulable = true;
+    let p = Property {
+        is_schedulable: true,
+        ..Default::default()
+    };
 
     let (meta_client, system_params_reader) = MetaClient::register_new(
         &opts.meta_address,

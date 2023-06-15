@@ -541,18 +541,15 @@ impl ClusterManagerCore {
         worker_state: Option<State>,
         list_cordoned: bool,
     ) -> Vec<WorkerNode> {
-        let worker_state = if worker_state.is_some() {
-            Some(worker_state.unwrap() as i32)
-        } else {
-            None
-        };
+        let worker_state = worker_state.map(|worker_state| worker_state as i32);
+
         self.workers
             .values()
             .map(|worker| worker.to_protobuf())
             .filter(|w| w.r#type == worker_type as i32)
-            .filter(|w| match worker_state.clone() {
+            .filter(|w| match worker_state {
                 None => true,
-                Some(state) => state == (&w.state).clone(),
+                Some(state) => state == w.state,
             })
             .filter(|w| {
                 if list_cordoned {
