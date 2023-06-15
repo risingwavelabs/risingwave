@@ -485,7 +485,10 @@ where
         // Wait for a compactor to become available.
         let compactor = match self.hummock_manager.get_idle_compactor().await {
             Some(compactor) => compactor,
-            None => return false,
+            None => {
+                let _ = sched_channel.try_sched_compaction(compaction_group, task_type);
+                return false;
+            }
         };
         let selector = compaction_selectors.get_mut(&task_type).unwrap();
         self.pick_and_assign(compaction_group, compactor, sched_channel, selector)

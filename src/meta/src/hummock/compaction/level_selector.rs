@@ -217,6 +217,12 @@ impl DynamicLevelSelectorCore {
                     .push((std::cmp::max(l0_overlapping_score, SCORE_BASE + 1), 0, 0));
             }
 
+            let big_group_multiplier = if levels.member_table_ids.len() == 1 {
+                2
+            } else {
+                1
+            };
+
             // The read query at the non-overlapping level only selects ssts that match the query
             // range at each level, so the number of levels is the most important factor affecting
             // the read performance. At the same time, the size factor is also added to the score
@@ -224,11 +230,23 @@ impl DynamicLevelSelectorCore {
             let non_overlapping_score = {
                 let total_size = levels.l0.as_ref().unwrap().total_file_size
                     - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
+                let non_overlapping_size = levels
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .filter(|level| level.level_type() == LevelType::Nonoverlapping)
+                    .map(|level| level.total_file_size)
+                    .sum::<u64>();
+
                 let base_level_size = levels.get_level(ctx.base_level).total_file_size;
 
                 // size limit
-                let non_overlapping_size_score = total_size * SCORE_BASE
-                    / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
+                let non_overlapping_size_score = std::cmp::min(total_size, non_overlapping_size)
+                    * SCORE_BASE
+                    / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size)
+                    / big_group_multiplier;
 
                 // level count limit
                 let non_overlapping_level_count = levels

@@ -91,15 +91,24 @@ impl LevelCompactionPicker {
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
+        let max_compaction_bytes = std::cmp::min(
+            self.config.max_bytes_for_level_base,
+            self.config.max_compaction_bytes / 2,
+        );
+        let level0_sub_level_compact_level_count =
+            self.config.level0_sub_level_compact_level_count as usize;
+        let min_depth = if l0.sub_levels.len() > level0_sub_level_compact_level_count * 2 {
+            1
+        } else {
+            level0_sub_level_compact_level_count
+        };
+
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
             min_compaction_bytes,
             // divide by 2 because we need to select files of base level and it need use the other
             // half quota.
-            std::cmp::min(
-                self.config.max_bytes_for_level_base,
-                self.config.max_compaction_bytes / 2,
-            ),
-            1,
+            max_compaction_bytes,
+            min_depth,
             // The maximum number of sub_level compact level per task
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
