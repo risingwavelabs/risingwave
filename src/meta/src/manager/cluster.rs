@@ -200,10 +200,6 @@ where
             .ok_or_else(|| anyhow!("Worker node does not exist!"))?;
         let worker_type = worker.worker_type();
 
-        if worker_type != WorkerType::ComputeNode {
-            tracing::warn!("Marking non-compute node as unschedulable. Schedulability should be used with compute nodes");
-        }
-
         // TODO
         // We need to handle the deleting state once we introduce it
         // if worker_type == WorkerType::ComputeNode && worker.worker_node.state == State::DELETING
