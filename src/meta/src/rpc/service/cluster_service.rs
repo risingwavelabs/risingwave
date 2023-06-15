@@ -71,12 +71,13 @@ where
         &self,
         req: Request<UpdateWorkerNodeSchedulabilityRequest>,
     ) -> Result<Response<UpdateWorkerNodeSchedulabilityResponse>, Status> {
-        let host_address = match req.into_inner().host {
+        let inner = req.into_inner();
+        let host_address = match inner.host {
             None => return Err(Status::invalid_argument("request did not have host")),
             Some(ha) => ha,
         };
         self.cluster_manager
-            .update_schedulability(host_address)
+            .update_schedulability(host_address, inner.set_is_schedulable)
             .await?;
         Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
             status: None,

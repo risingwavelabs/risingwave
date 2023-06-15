@@ -160,16 +160,6 @@ where
             core.update_worker_node(worker.clone());
         }
 
-        let is_schedulable = worker
-            .worker_node
-            .get_property()
-            .map_or(false, |p| p.is_schedulable);
-        let worker_type = worker.worker_type();
-        if !is_schedulable && worker_type == WorkerType::ComputeNode {
-            tracing::warn!("activating unschedulable worker. Ignoring request");
-            return Ok(());
-        }
-
         worker.worker_node.state = State::Running as i32;
         worker.insert(self.env.meta_store()).await?;
 
@@ -177,7 +167,7 @@ where
 
         // Notify frontends of new compute node.
         // Always notify because a running worker's property may have been changed.
-        if worker_type == WorkerType::ComputeNode {
+        if worker.worker_type() == WorkerType::ComputeNode {
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Node(worker.worker_node.clone()))
@@ -191,8 +181,11 @@ where
         Ok(())
     }
 
-    // mark a worker node as unschedulable
-    pub async fn update_schedulability(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
+    pub async fn update_schedulability(
+        &self,
+        host_address: HostAddress,
+        is_schedulable: bool,
+    ) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
         let worker = core
             .workers
@@ -203,16 +196,6 @@ where
         // TODO
         // We need to handle the deleting state once we introduce it
         // if worker_type == WorkerType::ComputeNode && worker.worker_node.state == State::DELETING
-
-        let is_schedulable = worker
-            .worker_node
-            .get_property()
-            .ok()
-            .map_or(true, |prop| prop.is_schedulable);
-
-        if !is_schedulable {
-            return Ok(worker_type);
-        }
 
         let old_prop = match worker.worker_node.get_property() {
             Ok(p) => p.clone(),
@@ -226,7 +209,7 @@ where
             }
         };
         let new_prop = Property {
-            is_schedulable: false,
+            is_schedulable,
             is_serving: old_prop.is_serving,
             is_streaming: old_prop.is_streaming,
         };

@@ -571,7 +571,7 @@ impl MetaClient {
     ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
         let request = UpdateWorkerNodeSchedulabilityRequest {
             host: Some(host),
-            set_is_schedulable: set_is_schedulable,
+            set_is_schedulable,
         };
         let resp = self
             .inner
