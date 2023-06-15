@@ -291,12 +291,12 @@ pub fn remove_split_stat(metrics: &MetaMetrics, compaction_group_id: CompactionG
     metrics
         .state_table_count
         .remove_label_values(&[&label_str])
-        .unwrap();
+        .ok();
 
     metrics
         .branched_sst_count
         .remove_label_values(&[&label_str])
-        .unwrap();
+        .ok();
 }
 
 pub fn trigger_pin_unpin_version_state(
