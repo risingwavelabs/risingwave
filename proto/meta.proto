@@ -201,17 +201,6 @@ message ActivateWorkerNodeResponse {
   common.Status status = 1;
 }
 
-message ListAllNodesRequest {
-  common.WorkerType worker_type = 1;
-  // Whether to include nodes still starting
-  bool include_starting_nodes = 2;
-}
-
-message ListAllNodesResponse {
-  common.Status status = 1;
-  repeated common.WorkerNode nodes = 2;
-}
-
 message DeleteWorkerNodeRequest {
   common.HostAddress host = 1;
 }
@@ -228,6 +217,17 @@ message UpdateWorkerNodeSchedulabilityRequest {
 
 message UpdateWorkerNodeSchedulabilityResponse {
   common.Status status = 1;
+}
+
+message ListAllNodesRequest {
+  common.WorkerType worker_type = 1;
+  // Whether to include nodes still starting
+  bool include_starting_nodes = 2;
+}
+
+message ListAllNodesResponse {
+  common.Status status = 1;
+  repeated common.WorkerNode nodes = 2;
 }
 
 service ClusterService {
