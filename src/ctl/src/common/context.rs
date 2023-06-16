@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
@@ -64,13 +63,10 @@ impl CtlContext {
     pub async fn try_close(mut self) {
         tracing::info!("clean up context");
         if let Some(meta_client) = self.meta_client.take() {
-            let addr = meta_client.host_addr().clone();
-            let addr = HostAddress {
-                host: addr.host,
-                port: addr.port as i32,
-            };
-
-            if let Err(e) = meta_client.update_schedulability(addr, false).await {
+            if let Err(e) = meta_client
+                .unregister(meta_client.host_addr().clone())
+                .await
+            {
                 tracing::warn!(
                     "failed to unregister ctl worker {}: {}",
                     meta_client.worker_id(),

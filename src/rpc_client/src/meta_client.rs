@@ -585,6 +585,14 @@ impl MetaClient {
     }
 
     /// Unregister the current node to the cluster.
+    pub async fn unregister(&self, addr: HostAddr) -> Result<()> {
+        let request = DeleteWorkerNodeRequest {
+            host: Some(addr.to_protobuf()),
+        };
+        self.inner.delete_worker_node(request).await?;
+        Ok(())
+    }
+
     pub async fn update_schedulability(
         &self,
         host: HostAddress,
