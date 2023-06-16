@@ -60,6 +60,31 @@ public class SourceDropHandler {
         String password = getPropNotNull(userProps, DbzConnectorConfig.PASSWORD);
         String slotName = getPropNotNull(userProps, DbzConnectorConfig.PG_SLOT_NAME);
         Connection jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
+        // check if replication slot used by active process
+        try (var stmt0 =
+                jdbcConnection.prepareStatement(
+                        "select active_pid from pg_replication_slots where slot_name = ?")) {
+            stmt0.setString(1, slotName);
+            var res = stmt0.executeQuery();
+            if (res.next()) {
+                int pid = res.getInt(1);
+                if (res.next()) {
+                    // replication slot used by multiple process, cannot drop
+                    throw ValidatorUtils.internalError(
+                            "cannot drop replication slot "
+                                    + slotName
+                                    + "because it is used by multiple active postgres processes");
+                }
+                // replication slot is used by only one process, as expected
+                // terminate this process
+                try (var stmt1 =
+                        jdbcConnection.prepareStatement("select pg_terminate_backend(?)")) {
+                    stmt1.setInt(1, pid);
+                    stmt1.executeQuery();
+                }
+            }
+        }
+        // drop the replication slot, which should now be inactive
         try (var stmt = jdbcConnection.prepareStatement("select pg_drop_replication_slot(?)")) {
             stmt.setString(1, slotName);
             stmt.executeQuery();
