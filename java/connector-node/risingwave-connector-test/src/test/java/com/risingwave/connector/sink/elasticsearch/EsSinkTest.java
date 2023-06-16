@@ -63,7 +63,7 @@ public class EsSinkTest {
         // container is slow here, but our default flush time is 5s,
         // so 2s is enough for sync test
         try {
-            Thread.sleep(2000);
+            Thread.sleep(3000);
         } catch (InterruptedException e) {
             fail(e.getMessage());
         }
