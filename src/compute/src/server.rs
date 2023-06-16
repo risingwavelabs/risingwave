@@ -108,7 +108,6 @@ pub async fn compute_node_serve(
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
             is_schedulable: true,
-            // TODO: Discussion. Do we want to support starting unschedulable CNs?
         },
         &config.meta,
     )
