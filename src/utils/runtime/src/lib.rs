@@ -23,7 +23,7 @@ use std::time::Duration;
 use futures::Future;
 use opentelemetry_otlp::WithExportConfig;
 use risingwave_common::metrics::MetricsLayer;
-use tracing::Level;
+use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{Directive, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
@@ -179,7 +179,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
                 filter.with_target(target, level)
             });
 
-        move || to_env_filter(filter.clone())
+        move |additional_targets: Vec<(&str, Level)>| {
+            to_env_filter(filter.clone().with_targets(additional_targets))
+        }
     };
 
     let mut layers = vec![];
@@ -195,7 +197,13 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
             fmt_layer.boxed()
         };
 
-        layers.push(fmt_layer.with_filter(filter()).boxed());
+        layers.push(
+            fmt_layer
+                .with_filter(filter(vec![
+                    ("rw_tracing", Level::OFF), // filter out tracing-only events
+                ]))
+                .boxed(),
+        );
     };
 
     let default_query_log_path = "./".to_string();
@@ -286,7 +294,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
                 .build()
                 .unwrap()
                 .block_on(async move {
-                    tracing::info!("serving console subscriber");
+                    println!("serving console subscriber");
                     server.serve().await.unwrap();
                 });
         });
@@ -294,6 +302,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
     // Tracing layer
     if let Ok(endpoint) = std::env::var("RW_TRACING_ENDPOINT") {
+        println!("tracing enabled, exported to `{endpoint}`");
+
         use opentelemetry::{sdk, KeyValue};
         use opentelemetry_semantic_conventions::resource;
 
@@ -315,6 +325,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
                 .unwrap();
             let runtime = Box::leak(Box::new(runtime));
 
+            // Installing the exporter requires a tokio runtime.
             let _entered = runtime.enter();
 
             opentelemetry_otlp::new_pipeline()
@@ -341,7 +352,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
         let layer = tracing_opentelemetry::layer()
             .with_tracer(otel_tracer)
-            .with_filter(filter());
+            .with_filter(filter(vec![]));
 
         layers.push(layer.boxed());
     }
