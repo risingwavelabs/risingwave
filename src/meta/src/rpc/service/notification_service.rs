@@ -29,12 +29,12 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::backup_restore::BackupManagerRef;
-use crate::batch::ServingVnodeMappingRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
     Catalog, CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification,
     NotificationVersion, WorkerKey,
 };
+use crate::serving::ServingVnodeMappingRef;
 use crate::storage::MetaStore;
 
 pub struct NotificationServiceImpl<S: MetaStore> {
