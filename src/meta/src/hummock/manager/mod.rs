@@ -2391,7 +2391,6 @@ where
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
         let group_size_limit = self.env.opts.split_group_size_limit;
-        let table_split_limit = self.env.opts.move_table_size_limit;
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let mut partition_vnode_count = self.env.opts.partition_vnode_count;
@@ -2427,7 +2426,9 @@ where
                     // of small table.
                     if parent_group_id != default_group_id && parent_group_id != mv_group_id {
                         let rest_group_size = group.group_size - *table_size;
-                        if rest_group_size < *table_size && rest_group_size < table_split_limit {
+                        if rest_group_size < *table_size
+                            && rest_group_size < self.env.opts.move_table_size_limit
+                        {
                             continue;
                         }
                     } else {
