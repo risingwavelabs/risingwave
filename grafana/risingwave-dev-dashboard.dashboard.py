@@ -2263,6 +2263,22 @@ Objects are classified into 3 groups:
                                       "compaction_group_{{compaction_group_id}}"),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Full GC Trigger Count",
+                    "total number of attempts to trigger full GC",
+                    [
+                        panels.target(f"{metric('storage_full_gc_trigger_count')}",
+                                      "full_gc_trigger_count"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Full GC Last Watermark",
+                    "the object id watermark used in last full GC",
+                    [
+                        panels.target(f"{metric('storage_full_gc_last_object_id_watermark')}",
+                                      "full_gc_last_object_id_watermark"),
+                    ],
+                ),
             ],
         )
     ]

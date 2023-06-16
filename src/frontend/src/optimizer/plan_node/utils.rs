@@ -185,6 +185,14 @@ macro_rules! impl_distill_by_unit {
 }
 pub(crate) use impl_distill_by_unit;
 
+pub fn column_names_pretty<'a>(schema: &Schema) -> Pretty<'a> {
+    let columns = (schema.fields.iter())
+        .map(|f| f.name.clone())
+        .map(Pretty::from)
+        .collect();
+    Pretty::Array(columns)
+}
+
 #[derive(Clone, Copy)]
 pub struct IndicesDisplay<'a> {
     pub indices: &'a [usize],

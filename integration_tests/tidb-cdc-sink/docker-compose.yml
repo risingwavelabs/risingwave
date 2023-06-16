@@ -156,7 +156,7 @@ services:
       - "tikv2"
     restart: on-failure
 
-  #=================== Kakfa ==================
+  #=================== Kafka ==================
 
   # Adapted from https://github.com/confluentinc/demo-scene/blob/master/connect-jdbc/docker-compose.yml
   zookeeper:

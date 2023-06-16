@@ -8,15 +8,15 @@ type SinkRecord interface {
 	// Convert the event to an INSERT INTO command.
 	ToPostgresSql() string
 
-	// Convert the event to a Kakfa message in JSON format.
+	// Convert the event to a Kafka message in JSON format.
 	// This interface will also be used for Pulsar and Kinesis.
 	ToJson() (topic string, key string, data []byte)
 
-	// Convert the event to a Kakfa message in Protobuf format.
+	// Convert the event to a Kafka message in Protobuf format.
 	// This interface will also be used for Pulsar and Kinesis.
 	ToProtobuf() (topic string, key string, data []byte)
 
-	// Convert the event to a Kakfa message in Avro format.
+	// Convert the event to a Kafka message in Avro format.
 	// This interface will also be used for Pulsar and Kinesis.
 	ToAvro() (topic string, key string, data []byte)
 }
@@ -40,7 +40,7 @@ func (r BaseSinkRecord) ToAvro() (topic string, key string, data []byte) {
 	panic("not implemented")
 }
 
-// Convert the event to a Kakfa message in the given format.
+// Convert the event to a Kafka message in the given format.
 // This interface will also be used for Pulsar and Kinesis.
 func RecordToKafka(r SinkRecord, format string) (topic string, key string, data []byte) {
 	if format == "json" {
