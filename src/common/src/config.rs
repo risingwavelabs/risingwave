@@ -653,7 +653,7 @@ mod default {
         }
 
         pub fn table_write_throughput_threshold() -> u64 {
-            128 * 1024 * 1024 // 128MB
+            96 * 1024 * 1024 // 96MB
         }
 
         pub fn min_table_split_write_throughput() -> u64 {
