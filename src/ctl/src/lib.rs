@@ -189,6 +189,23 @@ enum TableCommands {
 }
 
 #[derive(Subcommand)]
+enum ScaleCommands {
+    /// mark a compute node as unschedulable
+    #[clap(verbatim_doc_comment)]
+    Cordon {
+        /// IP of compute node to cordon e.g. 123.0.0.1:1234
+        #[clap(long)]
+        worker: String,
+    },
+    /// mark a compute node as schedulable. Nodes are schedulable unless they are cordoned
+    Uncordon {
+        /// IP of compute node to uncordon e.g. 123.0.0.1:1234
+        #[clap(long)]
+        worker: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum MetaCommands {
     /// pause the stream graph
     Pause,
@@ -224,6 +241,9 @@ enum MetaCommands {
         #[clap(long)]
         revision: u64,
     },
+    #[clap(subcommand)]
+    Scale(ScaleCommands),
+
     /// backup meta by taking a meta snapshot
     BackupMeta,
     /// delete meta snapshots
@@ -361,6 +381,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             dry_run,
             revision,
         }) => cmd_impl::meta::reschedule(context, plan, dry_run, revision).await?,
+        Commands::Meta(MetaCommands::Scale(ScaleCommands::Cordon { worker: ip })) => {
+            cmd_impl::meta::update_schedulability_str(context, ip.as_str(), false).await?
+        }
+        Commands::Meta(MetaCommands::Scale(ScaleCommands::Uncordon { worker: ip })) => {
+            cmd_impl::meta::update_schedulability_str(context, ip.as_str(), true).await?
+        }
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?

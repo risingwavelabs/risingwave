@@ -14,8 +14,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use anyhow::anyhow;
 use comfy_table::{Attribute, Cell, Row, Table};
 use itertools::Itertools;
+use regex::Regex;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_pb::common::HostAddress;
@@ -30,6 +32,28 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
     let meta_client = context.meta_client().await?;
     let response = meta_client.get_cluster_info().await?;
     Ok(response)
+}
+
+fn str_to_addr(addr: &str) -> anyhow::Result<HostAddress> {
+    let ip_addr_regex = r"(\b25[0-5]|\b2[0-4][0-9]|\b[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}:\d+";
+    let re = Regex::new(ip_addr_regex).unwrap();
+    if !re.is_match(addr) {
+        return Err(anyhow!("Please provide a valid IP, e.g. 127.0.0.1:1234"));
+    }
+    let splits = addr.split(':').map(|s| s.to_owned()).collect_vec();
+    let host = splits[0].clone();
+    let port = splits[1].clone().parse::<i32>()?;
+    Ok(HostAddress { host, port })
+}
+
+// convenient wrapper for update_schedulability
+pub async fn update_schedulability_str(
+    context: &CtlContext,
+    addr: &str,
+    is_schedulable: bool,
+) -> anyhow::Result<()> {
+    let _ = update_schedulability(context, str_to_addr(addr)?, is_schedulable).await?;
+    Ok(())
 }
 
 pub async fn update_schedulability(
@@ -161,10 +185,16 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
             "".into()
         } else {
             last_worker_id = Some(worker.id);
+            let cordoned = if !worker.get_property().map_or(true, |p| p.is_schedulable) {
+                " (cordoned)"
+            } else {
+                ""
+            };
             Cell::new(format!(
-                "{}@{}",
+                "{}@{}{}",
                 worker.id,
-                HostAddr::from(worker.get_host().unwrap())
+                HostAddr::from(worker.get_host().unwrap()),
+                cordoned,
             ))
             .add_attribute(Attribute::Bold)
         });
