@@ -37,7 +37,6 @@
 
 pub mod backup_restore;
 mod barrier;
-pub(crate) mod batch;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
 mod error;
@@ -45,6 +44,7 @@ pub mod hummock;
 pub mod manager;
 mod model;
 mod rpc;
+pub(crate) mod serving;
 pub mod storage;
 mod stream;
 pub(crate) mod telemetry;
