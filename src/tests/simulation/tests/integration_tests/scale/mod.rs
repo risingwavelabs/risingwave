@@ -19,6 +19,7 @@ mod nexmark_q4;
 mod nexmark_source;
 mod no_shuffle;
 mod schedulability;
+mod plan;
 mod singleton_migration;
 mod streaming_parallelism;
 mod table;
