@@ -540,7 +540,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let backup_srv = BackupServiceImpl::new(backup_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone());
     let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
-    let serving_srv = ServingServiceImpl::new(serving_vnode_mapping.clone());
+    let serving_srv =
+        ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(

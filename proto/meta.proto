@@ -416,6 +416,7 @@ message GetServingVnodeMappingsRequest {}
 
 message GetServingVnodeMappingsResponse {
   repeated FragmentParallelUnitMapping mappings = 1;
+  map<uint32, uint32> fragment_to_table = 2;
 }
 
 service ServingService {
