@@ -1374,6 +1374,15 @@ where
         }
     }
 
+    pub async fn get_source_by_id(&self, source_id: SourceId) -> MetaResult<Source> {
+        let core = &mut self.core.lock().await;
+        let database_core = &core.database;
+        database_core
+            .get_source(source_id)
+            .cloned()
+            .ok_or_else(|| anyhow!(format!("could not find source {}", source_id)).into())
+    }
+
     pub async fn get_connection_by_id(
         &self,
         connection_id: ConnectionId,

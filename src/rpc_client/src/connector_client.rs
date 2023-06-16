@@ -80,6 +80,38 @@ impl ConnectorClient {
             .into_inner())
     }
 
+    /// Drop source event stream
+    pub async fn drop_event_stream(
+        &self,
+        source_id: u64,
+        source_type: SourceType,
+        properties: HashMap<String, String>,
+    ) -> Result<()> {
+        let response = self
+            .0
+            .to_owned()
+            .drop_event_stream(DropEventStreamRequest {
+                source_id,
+                source_type: source_type.into(),
+                properties,
+            })
+            .await
+            .inspect_err(|err| {
+                tracing::error!(
+                    "failed to drop stream for CDC source {}: {}",
+                    source_id,
+                    err.message()
+                )
+            })?
+            .into_inner();
+        response.error.map_or(Ok(()), |err| {
+            Err(RpcError::Internal(anyhow!(format!(
+                "failed to drop postgres slot for CDC source {}: {}",
+                source_id, err.error_message
+            ))))
+        })
+    }
+
     /// Validate source properties
     pub async fn validate_source_properties(
         &self,

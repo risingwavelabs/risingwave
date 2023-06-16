@@ -14,6 +14,7 @@
 
 package com.risingwave.connector;
 
+import com.risingwave.connector.source.SourceDropHandler;
 import com.risingwave.connector.source.SourceRequestHandler;
 import com.risingwave.connector.source.SourceValidateHandler;
 import com.risingwave.proto.ConnectorServiceGrpc;
@@ -47,5 +48,12 @@ public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceI
             ConnectorServiceProto.ValidateSourceRequest request,
             StreamObserver<ConnectorServiceProto.ValidateSourceResponse> responseObserver) {
         new SourceValidateHandler(responseObserver).handle(request);
+    }
+
+    @Override
+    public void dropEventStream(
+            ConnectorServiceProto.DropEventStreamRequest request,
+            StreamObserver<ConnectorServiceProto.DropEventStreamResponse> responseObserver) {
+        new SourceDropHandler(responseObserver).handle(request);
     }
 }

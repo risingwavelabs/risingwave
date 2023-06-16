@@ -46,7 +46,7 @@ use tokio::sync::Mutex;
 pub mod error;
 use error::{Result, RpcError};
 mod compute_client;
-mod connector_client;
+pub mod connector_client;
 mod hummock_meta_client;
 mod meta_client;
 // mod sink_client;

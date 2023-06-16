@@ -12,12 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
+
 use itertools::Itertools;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_connector::source::cdc::POSTGRES_CDC_CONNECTOR;
 use risingwave_pb::catalog::{Connection, Database, Function, Schema, Source, Table, View};
+use risingwave_pb::connector_service::SourceType;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
+use risingwave_rpc_client::connector_client::ConnectorClient;
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
@@ -548,6 +554,38 @@ where
             self.source_manager
                 .unregister_sources(vec![source_id])
                 .await;
+            // for postgres sources, drop replication slot
+            let source = self.catalog_manager.get_source_by_id(source_id).await?;
+            if source.get_properties().get("connector") == Some(&POSTGRES_CDC_CONNECTOR.to_string())
+            {
+                // create connector client
+                let connector_address =
+                    self.env
+                        .opts
+                        .connector_rpc_endpoint
+                        .as_ref()
+                        .ok_or_else(|| {
+                            MetaError::invalid_parameter("connector endpoint not specified")
+                        })?;
+                let connector_client = ConnectorClient::new(
+                    HostAddr::from_str(connector_address.as_str()).map_err(|e| {
+                        MetaError::invalid_parameter(format!(
+                            "parse connector node endpoint fail: {}",
+                            e
+                        ))
+                    })?,
+                )
+                .await?;
+                // send rpc
+                connector_client
+                    .drop_event_stream(
+                        source.get_id().into(),
+                        SourceType::Postgres,
+                        source.get_properties().clone(),
+                    )
+                    .await
+                    .map_err(MetaError::from)?;
+            }
             Ok((version, delete_jobs))
         } else {
             self.catalog_manager
