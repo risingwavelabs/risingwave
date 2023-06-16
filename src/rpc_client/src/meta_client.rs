@@ -275,27 +275,6 @@ impl MetaClient {
         Ok(())
     }
 
-    // Tell meta that this worker node is deleted
-    // TODO: Please be careful when using this function. It is subject to change.
-    // Ask @CAJan93 or @ALeitert
-    pub async fn delete_worker_node(&self, addr: &HostAddr) -> Result<()> {
-        let request = DeleteWorkerNodeRequest {
-            host: Some(addr.to_protobuf()),
-        };
-
-        let retry_strategy = GrpcMetaClient::retry_strategy_to_bound(
-            Duration::from_secs(self.meta_config.max_heartbeat_interval_secs as u64),
-            true,
-        );
-        tokio_retry::Retry::spawn(retry_strategy, || async {
-            let request = request.clone();
-            self.inner.delete_worker_node(request).await
-        })
-        .await?;
-
-        Ok(())
-    }
-
     /// Send heartbeat signal to meta service.
     pub async fn send_heartbeat(&self, node_id: u32, info: Vec<extra_info::Info>) -> Result<()> {
         let request = HeartbeatRequest {
