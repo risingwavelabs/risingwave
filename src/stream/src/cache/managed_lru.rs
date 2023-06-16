@@ -41,7 +41,7 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     kv_heap_size: usize,
     /// The metrics of memory usage
     memory_usage_metrics: IntGauge,
-    // The metrics of memory usage
+    // The metrics of evicted watermark time
     lru_evicted_watermark_time_diff_ms: IntGauge,
     // Metrics info
     metrics_info: MetricsInfo,
