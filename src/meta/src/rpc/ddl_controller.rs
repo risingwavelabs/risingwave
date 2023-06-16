@@ -539,6 +539,8 @@ where
         Vec<risingwave_common::catalog::TableId>,
     )> {
         if let Some(source_id) = source_id {
+            // store source information before removal
+            let source = self.catalog_manager.get_source_by_id(source_id).await?;
             // Drop table and source in catalog. Check `source_id` if it is the table's
             // `associated_source_id`. Indexes also need to be dropped atomically.
             let (version, delete_jobs) = self
@@ -555,7 +557,6 @@ where
                 .unregister_sources(vec![source_id])
                 .await;
             // for postgres sources, drop replication slot
-            let source = self.catalog_manager.get_source_by_id(source_id).await?;
             if source.get_properties().get("connector") == Some(&POSTGRES_CDC_CONNECTOR.to_string())
             {
                 // create connector client
