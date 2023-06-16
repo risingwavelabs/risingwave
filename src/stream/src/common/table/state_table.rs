@@ -1089,45 +1089,6 @@ where
             .map_err(Into::into)
     }
 }
-// // FIXME: Try merge this with the impl in `src/table/mod.rs`.
-// pub async fn collect_data_chunk<S>(
-//     mut stream: S,
-//     schema: &Schema,
-//     chunk_size: Option<usize>,
-// ) -> StreamExecutorResult<Option<DataChunk>>
-// where
-//     S: Stream<Item = StreamExecutorResult<OwnedRow>> + Unpin,
-// {
-//     let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
-//
-//     let mut row_count = 0;
-//     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
-//         match stream.next().await.transpose()? {
-//             Some(row) => {
-//                 for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
-//                     builder.append(datum);
-//                 }
-//             }
-//             None => break,
-//         }
-//
-//         row_count += 1;
-//     }
-//
-//     let chunk = {
-//         let columns: Vec<_> = builders
-//             .into_iter()
-//             .map(|builder| builder.finish().into())
-//             .collect();
-//         DataChunk::new(columns, row_count)
-//     };
-//
-//     if chunk.cardinality() == 0 {
-//         Ok(None)
-//     } else {
-//         Ok(Some(chunk))
-//     }
-// }
 
 pub type RowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
