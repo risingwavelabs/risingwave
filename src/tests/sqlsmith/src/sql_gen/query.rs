@@ -135,10 +135,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             from,
         };
 
-        let with_tables = vec![Table {
-            name: alias.name.real_value(),
-            columns: query_schema,
-        }];
+        let with_tables = vec![Table::new(alias.name.real_value(), query_schema)];
         (
             With {
                 recursive: false,
@@ -231,7 +228,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
 
         // We short-circuit here for mview to avoid streaming nested loop join,
-        // since CROSS JOIN below maybe correlated.
+        // since CROSS JOIN below could be correlated.
         if self.is_mview {
             assert!(!self.tables.is_empty());
             return from;

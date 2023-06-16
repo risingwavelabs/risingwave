@@ -44,13 +44,13 @@ use risingwave_sqlparser::ast::{
     SourceWatermark,
 };
 
-use super::create_table::bind_sql_table_column_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
-    bind_sql_column_constraints, bind_sql_columns, ColumnIdGenerator,
+    bind_pk_names, bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns,
+    ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
@@ -262,17 +262,22 @@ pub(crate) async fn resolve_source_schema(
                 }
                 let pk_name = columns[0].column_desc.name.clone();
 
-                *columns = extract_avro_table_schema(avro_schema, with_properties).await?;
-                let pk_col = columns
+                let value_columns = extract_avro_table_schema(avro_schema, with_properties).await?;
+                if let Some(pk_col) = value_columns
                     .iter()
                     .find(|col| col.column_desc.name == pk_name)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(format!(
-                            "Primary key {pk_name} is not found."
-                        )))
-                    })?;
+                {
+                    *pk_column_ids = vec![pk_col.column_id()];
+                    *columns = value_columns;
+                } else {
+                    columns_extend(columns, value_columns);
+                    *pk_column_ids = vec![columns
+                        .iter()
+                        .find(|c| c.column_desc.name == pk_name)
+                        .unwrap()
+                        .column_id()];
+                }
 
-                *pk_column_ids = vec![pk_col.column_id()];
                 upsert_avro_primary_key = pk_name;
             } else {
                 // contains row_id, user specify some columns without pk
@@ -286,6 +291,7 @@ pub(crate) async fn resolve_source_schema(
 
                 *columns = columns_extracted;
                 *pk_column_ids = pks_extracted;
+                row_id_index.take();
             }
 
             StreamSourceInfo {
@@ -533,19 +539,22 @@ pub(crate) async fn resolve_source_schema(
 // Add a hidden column `_rw_kafka_timestamp` to each message from Kafka source.
 fn check_and_add_timestamp_column(
     with_properties: &HashMap<String, String>,
-    column_descs: &mut Vec<ColumnDesc>,
-    col_id_gen: &mut ColumnIdGenerator,
+    columns: &mut Vec<ColumnCatalog>,
 ) {
     if is_kafka_connector(with_properties) {
-        let kafka_timestamp_column = ColumnDesc {
-            data_type: DataType::Timestamptz,
-            column_id: col_id_gen.generate(KAFKA_TIMESTAMP_COLUMN_NAME),
-            name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-            generated_or_default_column: None,
+        let kafka_timestamp_column = ColumnCatalog {
+            column_desc: ColumnDesc {
+                data_type: DataType::Timestamptz,
+                column_id: ColumnId::placeholder(),
+                name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
+                field_descs: vec![],
+                type_name: "".to_string(),
+                generated_or_default_column: None,
+            },
+
+            is_hidden: true,
         };
-        column_descs.push(kafka_timestamp_column);
+        columns.push(kafka_timestamp_column);
     }
 }
 
@@ -753,22 +762,28 @@ pub async fn handle_create_source(
 
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
 
+    let mut columns = bind_sql_columns(&stmt.columns)?;
+
+    check_and_add_timestamp_column(&with_properties, &mut columns);
+
     let mut col_id_gen = ColumnIdGenerator::new_initial();
+    for c in &mut columns {
+        c.column_desc.column_id = col_id_gen.generate(c.name())
+    }
+    ensure_table_constraints_supported(&stmt.constraints)?;
 
-    let mut column_descs = bind_sql_columns(stmt.columns.clone(), &mut col_id_gen)?;
+    let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    check_and_add_timestamp_column(&with_properties, &mut column_descs, &mut col_id_gen);
-
-    let (mut columns, mut pk_column_ids, mut row_id_index) =
-        bind_sql_table_column_constraints(column_descs, stmt.columns.clone(), stmt.constraints)?;
-
-    if row_id_index.is_none() {
+    if !pk_names.is_empty() {
         return Err(ErrorCode::InvalidInputSyntax(
             "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
                 .to_owned(),
         )
         .into());
     }
+
+    let (mut columns, mut pk_column_ids, mut row_id_index) =
+        bind_pk_on_relation(columns, pk_names)?;
 
     let source_info = resolve_source_schema(
         stmt.source_schema,

@@ -16,33 +16,28 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use reqwest::Url;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::operators::*;
-use crate::impl_common_parser_logic;
-use crate::parser::avro::util::{
-    avro_field_to_column_desc, extract_inner_field_schema, from_avro_value,
-    get_field_from_avro_value,
-};
+use crate::common::UpsertMessage;
+use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
+use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
-use crate::parser::schema_resolver::ConfluentSchemaResolver;
+use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
+use crate::parser::unified::debezium::DebeziumChangeEvent;
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
 const OP: &str = "op";
 const PAYLOAD: &str = "payload";
-
-impl_common_parser_logic!(DebeziumAvroParser);
 
 // TODO: avoid duplicated codes with `AvroParser`
 #[derive(Debug)]
@@ -192,78 +187,71 @@ impl DebeziumAvroParser {
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
-        let writer_schema = self.schema_resolver.get(schema_id).await?;
+        // https://debezium.io/documentation/reference/stable/transformations/event-flattening.html#event-flattening-behavior:
+        //
+        // A database DELETE operation causes Debezium to generate two Kafka records:
+        // - A record that contains "op": "d", the before row data, and some other fields.
+        // - A tombstone record that has the same key as the deleted row and a value of null. This
+        // record is a marker for Apache Kafka. It indicates that log compaction can remove
+        // all records that have this key.
 
-        let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let UpsertMessage {
+            primary_key: key,
+            record: payload,
+        } = bincode::deserialize(&payload[..]).unwrap();
 
-        let op = get_field_from_avro_value(&avro_value, OP)?;
-        if let Value::String(op_str) = op {
-            match op_str.as_str() {
-                DEBEZIUM_UPDATE_OP => {
-                    let before = get_field_from_avro_value(&avro_value, BEFORE)
-                        .map_err(|_| {
-                            RwError::from(ProtocolError(
-                                "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
-                            ))
-                        })?;
-                    let after = get_field_from_avro_value(&avro_value, AFTER)?;
+        // If message value == null, it must be a tombstone message. Emit DELETE to downstream using
+        // message key as the DELETE row. Throw an error if message key is empty.
+        if payload.is_empty() {
+            let (schema_id, mut raw_payload) = extract_schema_id(&key)?;
+            let key_schema = self.schema_resolver.get(schema_id).await?;
+            let key = from_avro_datum(key_schema.as_ref(), &mut raw_payload, None)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-                    writer.update(|column| {
-                        let field_schema =
-                            extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
-                        let before = from_avro_value(
-                            get_field_from_avro_value(before, column.name.as_str())?.clone(),
-                            field_schema,
-                        )?;
-                        let after = from_avro_value(
-                            get_field_from_avro_value(after, column.name.as_str())?.clone(),
-                            field_schema,
-                        )?;
+            let row_op = DebeziumChangeEvent::with_key(AvroAccess::new(
+                &key,
+                AvroParseOptions::default().with_schema(&key_schema),
+            ));
 
-                        Ok((before, after))
-                    })
-                }
-                DEBEZIUM_CREATE_OP | DEBEZIUM_READ_OP => {
-                    let after = get_field_from_avro_value(&avro_value, AFTER)?;
-
-                    writer.insert(|column| {
-                        let field_schema =
-                            extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
-                        from_avro_value(
-                            get_field_from_avro_value(after, column.name.as_str())?.clone(),
-                            field_schema,
-                        )
-                    })
-                }
-                DEBEZIUM_DELETE_OP => {
-                    let before = get_field_from_avro_value(&avro_value, BEFORE)
-                        .map_err(|_| {
-                            RwError::from(ProtocolError(
-                                "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
-                            ))
-                        })?;
-
-                    writer.delete(|column| {
-                        let field_schema =
-                            extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
-                        from_avro_value(
-                            get_field_from_avro_value(before, column.name.as_str())?.clone(),
-                            field_schema,
-                        )
-                    })
-                }
-                _ => Err(RwError::from(ProtocolError(format!(
-                    "unknown debezium op: {}",
-                    op_str
-                )))),
-            }
+            apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
         } else {
-            Err(RwError::from(ProtocolError(
-                "payload op is not a string ".to_owned(),
-            )))
+            let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
+            let writer_schema = self.schema_resolver.get(schema_id).await?;
+            let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+            let resolver = apache_avro::schema::ResolvedSchema::try_from(&*self.outer_schema)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+            // todo: to_resolved may cause stackoverflow if there's a loop in the schema
+            let schema = resolver
+                .to_resolved(&self.outer_schema)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+            let row_op = DebeziumChangeEvent::with_value(AvroAccess::new(
+                &avro_value,
+                AvroParseOptions::default().with_schema(&schema),
+            ));
+
+            apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
         }
+    }
+}
+
+impl ByteStreamSourceParser for DebeziumAvroParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 

@@ -45,7 +45,7 @@ fn not_unique_error(db_error: &str) -> bool {
 
 fn is_window_error(db_error: &str) -> bool {
     db_error.contains("Bind error: The size arg of window table function should be an interval literal")
-        || db_error.contains("Bind error: The 2st arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround")
+        || db_error.contains("Bind error: The 2nd arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround")
 }
 
 // Streaming nested-loop join is not supported, as it is expensive.
@@ -78,6 +78,28 @@ fn is_broken_channel_error(db_error: &str) -> bool {
     db_error.contains("failed to finish command: channel closed")
 }
 
+/// Permit recovery error
+/// Suppose Out Of Range Error happens in the following query:
+/// ```sql
+/// SELECT sum0(v1) FROM t;
+/// ```
+/// It would be a valid scenario from Sqlsmith.
+/// In that case we would trigger recovery for the materialized view.
+/// We could encounter this error on subsequent queries:
+/// ```text
+/// Barrier read is unavailable for now. Likely the cluster is recovering
+/// ```
+/// Recovery should be successful after a while.
+/// Hence we should retry for some bound.
+pub fn is_recovery_in_progress_error(db_error: &str) -> bool {
+    db_error.contains("Barrier read is unavailable for now. Likely the cluster is recovering")
+        || db_error.contains("Service unavailable: The cluster is starting or recovering")
+}
+
+pub fn is_neg_exp_error(db_error: &str) -> bool {
+    db_error.contains("zero raised to a negative power is undefined")
+}
+
 /// Certain errors are permitted to occur. This is because:
 /// 1. It is more complex to generate queries without these errors.
 /// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
@@ -93,4 +115,5 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_neg_substr_error(db_error)
         || is_overlay_start_error(db_error)
         || is_broken_channel_error(db_error)
+        || is_neg_exp_error(db_error)
 }

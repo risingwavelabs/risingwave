@@ -33,7 +33,7 @@ use risingwave_storage::StateStore;
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, ChunkBuilder, DistinctDeduplicater,
-    OnlyOutputIfHasInput,
+    GroupKey, OnlyOutputIfHasInput,
 };
 use super::sort_buffer::SortBuffer;
 use super::{
@@ -41,6 +41,7 @@ use super::{
     Watermark,
 };
 use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggGroup as GenericAggGroup};
@@ -82,6 +83,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     group_key_indices: Vec<usize>,
+
+    // The projection from group key in table schema to table pk.
+    group_key_table_pk_projection: Arc<[usize]>,
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
@@ -198,6 +202,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             &args.agg_calls,
             Some(&args.extra.group_key_indices),
         );
+
+        let group_key_len = args.extra.group_key_indices.len();
+        // NOTE: we assume the prefix of table pk is exactly the group key
+        let group_key_table_pk_projection = &args.result_table.pk_indices()[..group_key_len];
+        assert!(group_key_table_pk_projection
+            .iter()
+            .sorted()
+            .copied()
+            .eq(0..group_key_len));
+
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
@@ -211,6 +225,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
+                group_key_table_pk_projection: group_key_table_pk_projection.to_vec().into(),
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
@@ -269,7 +284,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         // Create `AggGroup` for the current group if not exists. This will
                         // fetch previous agg result from the result table.
                         let agg_group = AggGroup::create(
-                            Some(key.deserialize(group_key_types)?),
+                            Some(GroupKey::new(
+                                key.deserialize(group_key_types)?,
+                                Some(this.group_key_table_pk_projection.clone()),
+                            )),
                             &this.agg_calls,
                             &this.storages,
                             &this.result_table,
@@ -532,19 +550,35 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             inner: mut this,
         } = self;
 
+        let window_col_idx_in_group_key = this.result_table.pk_indices()[0];
+        let window_col_idx = this.group_key_indices[window_col_idx_in_group_key];
+
+        let agg_group_cache_metrics_info = MetricsInfo::new(
+            this.metrics.clone(),
+            this.result_table.table_id(),
+            this.actor_ctx.id,
+            "agg result table",
+        );
+
         let mut vars = ExecutionVars {
             stats: ExecutionStats::new(),
-            agg_group_cache: new_with_hasher(this.watermark_epoch.clone(), PrecomputedBuildHasher),
+            agg_group_cache: new_with_hasher(
+                this.watermark_epoch.clone(),
+                agg_group_cache_metrics_info,
+                PrecomputedBuildHasher,
+            ),
             group_change_set: HashSet::new(),
             distinct_dedup: DistinctDeduplicater::new(
                 &this.agg_calls,
                 &this.watermark_epoch,
+                &this.distinct_dedup_tables,
+                this.actor_ctx.id,
                 this.metrics.clone(),
             ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
-            buffer: SortBuffer::new(0, &this.result_table),
+            buffer: SortBuffer::new(window_col_idx_in_group_key, &this.result_table),
         };
 
         // TODO(rc): use something like a `ColumnMapping` type
@@ -577,7 +611,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 Message::Watermark(watermark) => {
                     let group_key_seq = group_key_invert_idx[watermark.col_idx];
                     if let Some(group_key_seq) = group_key_seq {
-                        if group_key_seq == 0 {
+                        if watermark.col_idx == window_col_idx {
                             vars.window_watermark = Some(watermark.val.clone());
                         }
                         vars.buffered_watermarks[group_key_seq] =
@@ -595,7 +629,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     if this.emit_on_window_close {
                         // ignore watermarks on other columns
-                        if let Some(watermark) = vars.buffered_watermarks[0].take() {
+                        if let Some(watermark) =
+                            vars.buffered_watermarks[window_col_idx_in_group_key].take()
+                        {
                             yield Message::Watermark(watermark);
                         }
                     } else {
@@ -631,583 +667,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     yield Message::Barrier(barrier);
                 }
             }
-        }
-    }
-}
-
-#[cfg(test)]
-pub mod tests {
-    use assert_matches::assert_matches;
-    use futures::StreamExt;
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
-    use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::StateStore;
-
-    use crate::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
-    use crate::executor::test_utils::*;
-    use crate::executor::{Message, PkIndices, Watermark};
-
-    // --- Test HashAgg with in-memory StateStore ---
-
-    #[tokio::test]
-    async fn test_local_hash_aggregation_count_in_memory() {
-        test_local_hash_aggregation_count(MemoryStateStore::new()).await
-    }
-
-    #[tokio::test]
-    async fn test_global_hash_aggregation_count_in_memory() {
-        test_global_hash_aggregation_count(MemoryStateStore::new()).await
-    }
-
-    #[tokio::test]
-    async fn test_local_hash_aggregation_min_in_memory() {
-        test_local_hash_aggregation_min(MemoryStateStore::new()).await
-    }
-
-    #[tokio::test]
-    async fn test_local_hash_aggregation_min_append_only_in_memory() {
-        test_local_hash_aggregation_min_append_only(MemoryStateStore::new()).await
-    }
-
-    async fn test_local_hash_aggregation_count<S: StateStore>(store: S) {
-        let schema = Schema {
-            fields: vec![Field::unnamed(DataType::Int64)],
-        };
-        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
-        tx.push_barrier(1, false);
-        tx.push_chunk(StreamChunk::from_pretty(
-            " I
-            + 1
-            + 2
-            + 2",
-        ));
-        tx.push_barrier(2, false);
-        tx.push_chunk(StreamChunk::from_pretty(
-            " I
-            - 1
-            - 2 D
-            - 2",
-        ));
-        tx.push_barrier(3, false);
-
-        // This is local hash aggregation, so we add another row count state
-        let keys = vec![0];
-        let agg_calls = vec![
-            AggCall {
-                kind: AggKind::Count, // as row count, index: 0
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Count,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Count,
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-        ];
-
-        let hash_agg = new_boxed_hash_agg_executor(
-            store,
-            Box::new(source),
-            false,
-            agg_calls,
-            0,
-            keys,
-            vec![],
-            1 << 10,
-            false,
-            1,
-        )
-        .await;
-        let mut hash_agg = hash_agg.execute();
-
-        // Consume the init barrier
-        hash_agg.next().await.unwrap().unwrap();
-        // Consume stream chunk
-        let msg = hash_agg.next().await.unwrap().unwrap();
-        assert_eq!(
-            msg.into_chunk().unwrap().sort_rows(),
-            StreamChunk::from_pretty(
-                " I I I I
-                + 1 1 1 1
-                + 2 2 2 2"
-            )
-            .sort_rows(),
-        );
-
-        assert_matches!(
-            hash_agg.next().await.unwrap().unwrap(),
-            Message::Barrier { .. }
-        );
-
-        let msg = hash_agg.next().await.unwrap().unwrap();
-        assert_eq!(
-            msg.into_chunk().unwrap().sort_rows(),
-            StreamChunk::from_pretty(
-                "  I I I I
-                -  1 1 1 1
-                U- 2 2 2 2
-                U+ 2 1 1 1"
-            )
-            .sort_rows(),
-        );
-    }
-
-    async fn test_global_hash_aggregation_count<S: StateStore>(store: S) {
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        };
-
-        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
-        tx.push_barrier(1, false);
-        tx.push_chunk(StreamChunk::from_pretty(
-            " I I I
-            + 1 1 1
-            + 2 2 2
-            + 2 2 2",
-        ));
-        tx.push_barrier(2, false);
-        tx.push_chunk(StreamChunk::from_pretty(
-            " I I I
-            - 1 1 1
-            - 2 2 2 D
-            - 2 2 2
-            + 3 3 3",
-        ));
-        tx.push_barrier(3, false);
-
-        // This is local hash aggregation, so we add another sum state
-        let key_indices = vec![0];
-        let agg_calls = vec![
-            AggCall {
-                kind: AggKind::Count, // as row count, index: 0
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 1),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            // This is local hash aggregation, so we add another sum state
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 2),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-        ];
-
-        let hash_agg = new_boxed_hash_agg_executor(
-            store,
-            Box::new(source),
-            false,
-            agg_calls,
-            0,
-            key_indices,
-            vec![],
-            1 << 10,
-            false,
-            1,
-        )
-        .await;
-        let mut hash_agg = hash_agg.execute();
-
-        // Consume the init barrier
-        hash_agg.next().await.unwrap().unwrap();
-        // Consume stream chunk
-        let msg = hash_agg.next().await.unwrap().unwrap();
-        assert_eq!(
-            msg.into_chunk().unwrap().sort_rows(),
-            StreamChunk::from_pretty(
-                " I I I I
-                + 1 1 1 1
-                + 2 2 4 4"
-            )
-            .sort_rows(),
-        );
-
-        assert_matches!(
-            hash_agg.next().await.unwrap().unwrap(),
-            Message::Barrier { .. }
-        );
-
-        let msg = hash_agg.next().await.unwrap().unwrap();
-        assert_eq!(
-            msg.into_chunk().unwrap().sort_rows(),
-            StreamChunk::from_pretty(
-                "  I I I I
-                -  1 1 1 1
-                U- 2 2 4 4
-                U+ 2 1 2 2
-                +  3 1 3 3"
-            )
-            .sort_rows(),
-        );
-    }
-
-    async fn test_local_hash_aggregation_min<S: StateStore>(store: S) {
-        let schema = Schema {
-            fields: vec![
-                // group key column
-                Field::unnamed(DataType::Int64),
-                // data column to get minimum
-                Field::unnamed(DataType::Int64),
-                // primary key column
-                Field::unnamed(DataType::Int64),
-            ],
-        };
-        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
-        tx.push_barrier(1, false);
-        tx.push_chunk(StreamChunk::from_pretty(
-            " I     I    I
-            + 1   233 1001
-            + 1 23333 1002
-            + 2  2333 1003",
-        ));
-        tx.push_barrier(2, false);
-        tx.push_chunk(StreamChunk::from_pretty(
-            " I     I    I
-            - 1   233 1001
-            - 1 23333 1002 D
-            - 2  2333 1003",
-        ));
-        tx.push_barrier(3, false);
-
-        // This is local hash aggregation, so we add another row count state
-        let keys = vec![0];
-        let agg_calls = vec![
-            AggCall {
-                kind: AggKind::Count, // as row count, index: 0
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Min,
-                args: AggArgs::Unary(DataType::Int64, 1),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-        ];
-
-        let hash_agg = new_boxed_hash_agg_executor(
-            store,
-            Box::new(source),
-            false,
-            agg_calls,
-            0,
-            keys,
-            vec![2],
-            1 << 10,
-            false,
-            1,
-        )
-        .await;
-        let mut hash_agg = hash_agg.execute();
-
-        // Consume the init barrier
-        hash_agg.next().await.unwrap().unwrap();
-        // Consume stream chunk
-        let msg = hash_agg.next().await.unwrap().unwrap();
-        assert_eq!(
-            msg.into_chunk().unwrap().sort_rows(),
-            StreamChunk::from_pretty(
-                " I I    I
-                + 1 2  233
-                + 2 1 2333"
-            )
-            .sort_rows(),
-        );
-
-        assert_matches!(
-            hash_agg.next().await.unwrap().unwrap(),
-            Message::Barrier { .. }
-        );
-
-        let msg = hash_agg.next().await.unwrap().unwrap();
-        assert_eq!(
-            msg.into_chunk().unwrap().sort_rows(),
-            StreamChunk::from_pretty(
-                "  I I     I
-                -  2 1  2333
-                U- 1 2   233
-                U+ 1 1 23333"
-            )
-            .sort_rows(),
-        );
-    }
-
-    async fn test_local_hash_aggregation_min_append_only<S: StateStore>(store: S) {
-        let schema = Schema {
-            fields: vec![
-                // group key column
-                Field::unnamed(DataType::Int64),
-                // data column to get minimum
-                Field::unnamed(DataType::Int64),
-                // primary key column
-                Field::unnamed(DataType::Int64),
-            ],
-        };
-        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
-        tx.push_barrier(1, false);
-        tx.push_chunk(StreamChunk::from_pretty(
-            " I  I  I
-            + 2 5  1000
-            + 1 15 1001
-            + 1 8  1002
-            + 2 5  1003
-            + 2 10 1004
-            ",
-        ));
-        tx.push_barrier(2, false);
-        tx.push_chunk(StreamChunk::from_pretty(
-            " I  I  I
-            + 1 20 1005
-            + 1 1  1006
-            + 2 10 1007
-            + 2 20 1008
-            ",
-        ));
-        tx.push_barrier(3, false);
-
-        // This is local hash aggregation, so we add another row count state
-        let keys = vec![0];
-        let agg_calls = vec![
-            AggCall {
-                kind: AggKind::Count, // as row count, index: 0
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Min,
-                args: AggArgs::Unary(DataType::Int64, 1),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-        ];
-
-        let hash_agg = new_boxed_hash_agg_executor(
-            store,
-            Box::new(source),
-            true, // is append only
-            agg_calls,
-            0,
-            keys,
-            vec![2],
-            1 << 10,
-            false,
-            1,
-        )
-        .await;
-        let mut hash_agg = hash_agg.execute();
-
-        // Consume the init barrier
-        hash_agg.next().await.unwrap().unwrap();
-        // Consume stream chunk
-        let msg = hash_agg.next().await.unwrap().unwrap();
-        assert_eq!(
-            msg.into_chunk().unwrap().sort_rows(),
-            StreamChunk::from_pretty(
-                " I I    I
-                + 1 2 8
-                + 2 3 5"
-            )
-            .sort_rows(),
-        );
-
-        assert_matches!(
-            hash_agg.next().await.unwrap().unwrap(),
-            Message::Barrier { .. }
-        );
-
-        let msg = hash_agg.next().await.unwrap().unwrap();
-        assert_eq!(
-            msg.into_chunk().unwrap().sort_rows(),
-            StreamChunk::from_pretty(
-                "  I I  I
-                U- 1 2 8
-                U+ 1 4 1
-                U- 2 3 5
-                U+ 2 5 5
-                "
-            )
-            .sort_rows(),
-        );
-    }
-
-    #[tokio::test]
-    async fn test_hash_agg_emit_on_window_close_in_memory() {
-        test_hash_agg_emit_on_window_close(MemoryStateStore::new()).await
-    }
-
-    async fn test_hash_agg_emit_on_window_close<S: StateStore>(store: S) {
-        let input_schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Varchar), // to ensure correct group key column mapping
-                Field::unnamed(DataType::Int64),   // window group key column
-            ],
-        };
-        let input_window_col = 1;
-        let group_key_indices = vec![input_window_col];
-        let agg_calls = vec![AggCall {
-            kind: AggKind::Count, // as row count, index: 0
-            args: AggArgs::None,
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        }];
-
-        let (mut tx, source) = MockSource::channel(input_schema, PkIndices::new());
-        let hash_agg = new_boxed_hash_agg_executor(
-            store,
-            Box::new(source),
-            false,
-            agg_calls,
-            0,
-            group_key_indices,
-            vec![],
-            1 << 10,
-            true, // enable emit-on-window-close
-            1,
-        )
-        .await;
-        let mut hash_agg = hash_agg.execute();
-
-        let mut epoch = 1;
-        let mut get_epoch = || {
-            let e = epoch;
-            epoch += 1;
-            e
-        };
-
-        {
-            // init barrier
-            tx.push_barrier(get_epoch(), false);
-            hash_agg.expect_barrier().await;
-        }
-
-        {
-            tx.push_chunk(StreamChunk::from_pretty(
-                " T I
-                + _ 1
-                + _ 2
-                + _ 3",
-            ));
-            tx.push_barrier(get_epoch(), false);
-
-            // no window is closed, nothing is expected to be emitted
-            hash_agg.expect_barrier().await;
-        }
-
-        {
-            tx.push_chunk(StreamChunk::from_pretty(
-                " T I
-                - _ 2
-                + _ 4",
-            ));
-            tx.push_int64_watermark(input_window_col, 3); // windows < 3 are closed
-            tx.push_barrier(get_epoch(), false);
-
-            let chunk = hash_agg.expect_chunk().await;
-            assert_eq!(
-                chunk.sort_rows(),
-                StreamChunk::from_pretty(
-                    " I I
-                    + 1 1" // 1 row for group (1,)
-                )
-                .sort_rows()
-            );
-
-            let wtmk = hash_agg.expect_watermark().await;
-            assert_eq!(wtmk, Watermark::new(0, DataType::Int64, 3i64.into()));
-
-            hash_agg.expect_barrier().await;
-        }
-
-        {
-            tx.push_int64_watermark(input_window_col, 4); // windows < 4 are closed
-            tx.push_barrier(get_epoch(), false);
-
-            let chunk = hash_agg.expect_chunk().await;
-            assert_eq!(
-                chunk.sort_rows(),
-                StreamChunk::from_pretty(
-                    " I I
-                    + 3 1" // 1 rows for group (3,)
-                )
-                .sort_rows()
-            );
-
-            let wtmk = hash_agg.expect_watermark().await;
-            assert_eq!(wtmk, Watermark::new(0, DataType::Int64, 4i64.into()));
-
-            hash_agg.expect_barrier().await;
-        }
-
-        {
-            tx.push_int64_watermark(input_window_col, 10); // windows < 10 are closed
-            tx.push_barrier(get_epoch(), false);
-
-            let chunk = hash_agg.expect_chunk().await;
-            assert_eq!(
-                chunk.sort_rows(),
-                StreamChunk::from_pretty(
-                    " I I
-                    + 4 1" // 1 rows for group (4,)
-                )
-                .sort_rows()
-            );
-
-            hash_agg.expect_watermark().await;
-            hash_agg.expect_barrier().await;
-        }
-
-        {
-            tx.push_int64_watermark(input_window_col, 20); // windows < 20 are closed
-            tx.push_barrier(get_epoch(), false);
-
-            hash_agg.expect_watermark().await;
-            hash_agg.expect_barrier().await;
         }
     }
 }

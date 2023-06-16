@@ -26,7 +26,6 @@ futures-async-stream = { workspace = true }
 hashbrown = { workspace = true }
 hytra = "0.1.2"
 itertools = "0.10"
-minitrace = "0.4"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
@@ -40,6 +39,7 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
+scopeguard = "1"
 serde_json = "1"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [

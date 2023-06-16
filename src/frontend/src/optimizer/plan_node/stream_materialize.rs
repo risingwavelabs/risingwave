@@ -24,6 +24,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
+use super::utils::formatter_debug_plan_node;
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
@@ -248,7 +249,7 @@ impl fmt::Display for StreamMaterialize {
             .map(|o| table.columns()[o.column_index].column_desc.name.clone())
             .join(", ");
 
-        let mut builder = f.debug_struct("StreamMaterialize");
+        let mut builder = formatter_debug_plan_node!(f, "StreamMaterialize");
         builder
             .field("columns", &format_args!("[{}]", column_names))
             .field("stream_key", &format_args!("[{}]", stream_key))

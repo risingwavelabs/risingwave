@@ -14,12 +14,10 @@ set -u
 
 export RUST_LOG="info"
 export OUTDIR=$SNAPSHOT_DIR
-export TEST_NUM=100
 export RW_HOME="../../../.."
 export LOGDIR=".risingwave/log"
 export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
-export MADSIM_BIN="target/sim/ci-sim/risingwave_simulation"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
 
 set +u
@@ -41,14 +39,19 @@ echo_err() {
 
 # Get reason for generation crash.
 get_failure_reason() {
-  tac | grep -B 10000 -m1 "\[EXECUTING" | tac | tail -n+2
+  cat $1 | tac | grep -B 10000 -m1 "\[EXECUTING" | tac | tail -n+2
+}
+
+check_if_failed() {
+  grep -B 2 "$CRASH_MESSAGE" || true
 }
 
 # Extract queries from file $1, write to file $2
 extract_queries() {
   QUERIES=$(grep "\[EXECUTING .*\]: " < "$1" | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/')
-  FAIL_REASON=$(get_failure_reason < "$1")
-  if [[ -n "$FAIL_REASON" ]]; then
+  FAILED=$(check_if_failed < "$1")
+  if [[ -n "$FAILED" ]]; then
+    FAIL_REASON=$(get_failure_reason < "$1")
     echo_err "[WARN] Cluster crashed while generating queries. see $1 for more information."
     QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
@@ -59,8 +62,12 @@ extract_ddl() {
   grep "\[EXECUTING CREATE .*\]: " | sed -E 's/^.*\[EXECUTING CREATE .*\]: (.*)$/\1;/' | pg_format || true
 }
 
-extract_dml() {
+extract_inserts() {
   grep "\[EXECUTING INSERT\]: " | sed -E 's/^.*\[EXECUTING INSERT\]: (.*)$/\1;/' || true
+}
+
+extract_updates() {
+  grep "\[EXECUTING UPDATES\]: " | sed -E 's/^.*\[EXECUTING UPDATES\]: (.*)$/\1;/' || true
 }
 
 extract_last_session() {
@@ -82,20 +89,32 @@ extract_fail_info_from_logs() {
   for LOGFILENAME in $(ls "$LOGDIR" | grep "$LOGFILE_PREFIX")
   do
     LOGFILE="$LOGDIR/$LOGFILENAME"
-    REASON=$(get_failure_reason < "$LOGFILE")
-    if [[ -n "$REASON" ]]; then
-      echo_err "[INFO] $LOGFILE Encountered bug."
+    echo_err "[INFO] Checking $LOGFILE for bugs"
+    FAILED=$(check_if_failed < "$LOGFILE")
+    echo_err "[INFO] Checked $LOGFILE for bugs"
+    if [[ -n "$FAILED" ]]; then
+      echo_err "[WARN] $LOGFILE Encountered bug."
 
-      # TODO(Noel): Perhaps add verbose logs here, if any part is missing.
+      REASON=$(get_failure_reason "$LOGFILE")
       SEED=$(echo "$LOGFILENAME" | sed -E "s/${LOGFILE_PREFIX}\-(.*)\.log/\1/")
+
       DDL=$(extract_ddl < "$LOGFILE")
       GLOBAL_SESSION=$(extract_global_session < "$LOGFILE")
-      DML=$(extract_dml < "$LOGFILE")
+      # FIXME(kwannoel): Extract dml for updates too.
+      INSERTS=$(extract_inserts < "$LOGFILE")
+      UPDATES=$(extract_updates < "$LOGFILE")
       TEST_SESSION=$(extract_last_session < "$LOGFILE")
       QUERY=$(extract_failing_query < "$LOGFILE")
+
       FAIL_DIR="$OUTDIR/failed/$SEED"
       mkdir -p "$FAIL_DIR"
-      echo -e "$DDL" "\n\n$GLOBAL_SESSION" "\n\n$DML" "\n\n$TEST_SESSION" "\n\n$QUERY" > "$FAIL_DIR/queries.sql"
+
+      echo -e "$DDL" \
+       "\n\n$GLOBAL_SESSION" \
+       "\n\n$INSERTS" \
+       "\n\n$UPDATES" \
+       "\n\n$TEST_SESSION" \
+       "\n\n$QUERY" > "$FAIL_DIR/queries.sql"
       echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.sql"
       echo -e "$REASON" > "$FAIL_DIR/fail.log"
       echo_err "[INFO] WROTE FAIL REASON to $FAIL_DIR/fail.log"
@@ -107,6 +126,16 @@ extract_fail_info_from_logs() {
 
 ################# Generate
 
+# Generate $TEST_NUM number of seeds.
+# if `ENABLE_RANDOM_SEED=1`, we will generate random seeds.
+gen_seed() {
+  if [[ $ENABLE_RANDOM_SEED -eq 1 ]]; then
+    seq 1 32768 | shuf | tail -n "$TEST_NUM"
+  else
+    seq 1 32678 | tail -n "$TEST_NUM"
+  fi
+}
+
 # Prefer to use [`generate_deterministic`], it is faster since
 # runs with all-in-one binary.
 generate_deterministic() {
@@ -115,15 +144,19 @@ generate_deterministic() {
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
   echo "" > $LOGDIR/generate_deterministic.stdout.log
-  seq "$TEST_NUM" | env_parallel "
-    mkdir -p $OUTDIR/{}; \
-    MADSIM_TEST_SEED={} ./$MADSIM_BIN \
+  gen_seed | env_parallel "
+    mkdir -p $OUTDIR/{%}
+    echo '[INFO] Generating For Seed {}'
+    MADSIM_TEST_SEED={} $MADSIM_BIN \
       --sqlsmith 100 \
-      --generate-sqlsmith-queries $OUTDIR/{} \
+      --generate-sqlsmith-queries $OUTDIR/{%} \
       $TESTDATA \
       1>>$LOGDIR/generate_deterministic.stdout.log \
-      2>$LOGDIR/generate-{}.log; \
-    extract_queries $LOGDIR/generate-{}.log $OUTDIR/{}/queries.sql; \
+      2>$LOGDIR/generate-{%}.log
+    echo '[INFO] Finished Generating For Seed {}, Query set {%}'
+    echo '[INFO] Extracting Queries For Seed {}, Query set {%}'
+    extract_queries $LOGDIR/generate-{%}.log $OUTDIR/{%}/queries.sql
+    echo '[INFO] Extracted Queries For Seed {}, Query set {%}.'
     "
   set -e
 }
@@ -147,6 +180,23 @@ check_different_queries() {
   fi
 }
 
+# Check that no queries are empty
+check_queries_have_at_least_create_table() {
+  for QUERY_FILE in "$OUTDIR"/*/queries.sql
+  do
+    set +e
+    N_CREATE_TABLE="$(grep -c "CREATE TABLE" "$QUERY_FILE")"
+    set -e
+    if [[ $N_CREATE_TABLE -ge 1 ]]; then
+      continue;
+    else
+      echo_err "[ERROR] Empty Query for $QUERY_FILE"
+      cat "$QUERY_FILE"
+      exit 1
+    fi
+  done
+}
+
 # Check if any query generation step failed, and any query file not generated.
 check_failed_to_generate_queries() {
   if [[ "$(ls "$OUTDIR"/* | grep -c queries.sql)" -lt "$TEST_NUM" ]]; then
@@ -161,7 +211,7 @@ check_failed_to_generate_queries() {
 run_queries() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
   seq $TEST_NUM | parallel "MADSIM_TEST_SEED={} \
-    ./$MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
+    $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
       && rm $LOGDIR/fuzzing-{}.log"
@@ -179,20 +229,32 @@ check_failed_to_run_queries() {
 
 setup() {
   set -euo pipefail
+  if [[ -z "$TEST_NUM" ]]; then
+    echo "TEST_NUM unset, default to TEST_NUM=100"
+    TEST_NUM=100
+  fi
+  if [[ -z "$ENABLE_RANDOM_SEED" ]]; then
+    echo "ENABLE_RANDOM_SEED unset, default ENABLE_RANDOM_SEED=false (0)"
+    ENABLE_RANDOM_SEED=0
+  fi
   # -x is too verbose, selectively enable it if needed.
   pushd $RW_HOME
+  mkdir -p $LOGDIR
 }
 
-build_madsim() {
-  cargo make sslt-build-all --profile ci-sim
+setup_madsim() {
+  download-and-decompress-artifact risingwave_simulation .
+  chmod +x ./risingwave_simulation
+  export MADSIM_BIN="$PWD/risingwave_simulation"
 }
 
 build() {
-  build_madsim
-  echo_err "[INFO] Finished build"
+  setup_madsim
+  echo_err "[INFO] Finished setting up madsim"
 }
 
 generate() {
+  echo_err "[INFO] Generating"
   generate_deterministic
   echo_err "[INFO] Finished generation"
 }
@@ -202,6 +264,8 @@ validate() {
   echo_err "[CHECK PASSED] Generated queries should be different"
   check_failed_to_generate_queries
   echo_err "[CHECK PASSED] No seeds failed to generate queries"
+  check_queries_have_at_least_create_table
+  echo_err "[CHECK PASSED] All queries at least have CREATE TABLE"
   extract_fail_info_from_logs "generate"
   echo_err "[INFO] Recorded new bugs from  generated queries"
   run_queries
@@ -214,37 +278,40 @@ validate() {
 # sync step
 # Some queries maybe be added
 sync_queries() {
-  set +x
   pushd $OUTDIR
+  git stash
   git checkout main
   git pull
   set +e
-  git branch -D stage
+  git branch -D old-main
   set -e
-  git checkout -b stage
+  git checkout -b old-main
+  git push -f --set-upstream origin old-main
+  git checkout -
   popd
-  set -x
 }
 
 sync() {
+  echo_err "[INFO] Syncing"
   sync_queries
   echo_err "[INFO] Synced"
 }
 
 # Upload step
 upload_queries() {
+  git config --global user.email "buildkite-ci@risingwave-labs.com"
+  git config --global user.name "Buildkite CI"
   set +x
   pushd "$OUTDIR"
   git add .
   git commit -m 'update queries'
-  git push -f origin stage
-  git checkout -
-  git branch -D stage
+  git push origin main
   popd
   set -x
 }
 
 upload() {
+  echo_err "[INFO] Uploading Queries"
   upload_queries
   echo_err "[INFO] Uploaded"
 }
@@ -256,19 +323,30 @@ cleanup() {
 
 ################### ENTRY POINTS
 
-generate() {
+run_generate() {
+  echo "--- Running setup"
   setup
 
+  echo "--- Running build"
   build
+
+  echo "--- Running synchronizing with upstream snapshot"
   sync
+
+  echo "--- Generating"
   generate
+
+  echo "--- Validating"
   validate
+
+  echo "--- Uploading"
   upload
 
+  echo "--- Cleanup"
   cleanup
 }
 
-extract() {
+run_extract() {
   LOGDIR="$PWD" OUTDIR="$PWD" extract_fail_info_from_logs "fuzzing"
   for QUERY_FOLDER in failed/*
   do
@@ -287,9 +365,9 @@ extract() {
 main() {
   if [[ $1 == "extract" ]]; then
     echo "[INFO] Extracting queries"
-    extract
+    run_extract
   elif [[ $1 == "generate" ]]; then
-    generate
+    run_generate
   else
     echo "
 ================================================================

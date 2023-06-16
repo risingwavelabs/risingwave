@@ -122,7 +122,7 @@ async fn do_handle_explain(
                     .map(|x| x.0),
 
                     Statement::CreateSink { stmt } => {
-                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.0)
+                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.1)
                     }
 
                     Statement::CreateIndex {
@@ -181,7 +181,7 @@ async fn do_handle_explain(
                         Convention::Batch => {
                             let worker_node_manager_reader = WorkerNodeSelector::new(
                                 session.env().worker_node_manager_ref(),
-                                !session.config().only_checkpoint_visible(),
+                                session.is_barrier_read(),
                             );
                             batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
                                 worker_node_manager_reader,

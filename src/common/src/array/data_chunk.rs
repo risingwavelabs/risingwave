@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::hash::BuildHasher;
-use std::sync::Arc;
 use std::{fmt, usize};
 
 use bytes::Bytes;
@@ -92,7 +91,7 @@ impl DataChunk {
 
         for row in rows {
             for (datum, builder) in row.iter().zip_eq_debug(array_builders.iter_mut()) {
-                builder.append_datum(datum);
+                builder.append(datum);
             }
         }
 
@@ -301,7 +300,7 @@ impl DataChunk {
                 .for_each(|(builder, column)| {
                     let mut array_builder = column.create_builder(end_row_idx - start_row_idx + 1);
                     for row_idx in start_row_idx..=end_row_idx {
-                        array_builder.append_datum(column.value_at(row_idx));
+                        array_builder.append(column.value_at(row_idx));
                     }
                     builder.append_array(&array_builder.finish());
                 });
@@ -412,7 +411,7 @@ impl DataChunk {
                     column.clone()
                 } else {
                     let mut builder = column.create_builder(capacity);
-                    builder.append_datum_n(capacity, None as DatumRef<'_>);
+                    builder.append_n(capacity, None as DatumRef<'_>);
                     builder.finish().into()
                 }
             })
@@ -450,7 +449,7 @@ impl DataChunk {
             .collect();
         for &i in indexes {
             for (builder, col) in array_builders.iter_mut().zip_eq_fast(&self.columns) {
-                builder.append_datum(col.value_at(i));
+                builder.append(col.value_at(i));
             }
         }
         let columns = array_builders
@@ -656,9 +655,8 @@ impl fmt::Debug for DataChunk {
 
 impl<'a> From<&'a StructArray> for DataChunk {
     fn from(array: &'a StructArray) -> Self {
-        let columns = array.fields().map(|array| array.clone().into()).collect();
         Self {
-            columns,
+            columns: array.fields().cloned().collect(),
             vis2: Vis::Compact(array.len()),
         }
     }
@@ -753,13 +751,12 @@ impl DataChunkTestExt for DataChunk {
                 "T" => DataType::Varchar,
                 "SRL" => DataType::Serial,
                 array if array.starts_with('{') && array.ends_with('}') => {
-                    DataType::Struct(Arc::new(StructType {
-                        fields: array[1..array.len() - 1]
+                    DataType::Struct(StructType::unnamed(
+                        array[1..array.len() - 1]
                             .split(',')
                             .map(parse_type)
-                            .collect_vec(),
-                        field_names: vec![],
-                    }))
+                            .collect(),
+                    ))
                 }
                 _ => todo!("unsupported type: {s:?}"),
             }
@@ -791,7 +788,7 @@ impl DataChunkTestExt for DataChunk {
                     "f" => Some(false.into()),
                     _ => Some(ScalarImpl::from_text(val_str.as_bytes(), ty).unwrap()),
                 };
-                builder.append_datum(datum);
+                builder.append(datum);
             }
             let visible = match token.next() {
                 None | Some("//") => true,
@@ -831,7 +828,7 @@ impl DataChunkTestExt for DataChunk {
                 let arr = col;
                 let mut builder = arr.create_builder(n * 2);
                 for v in arr.iter() {
-                    builder.append_datum(&v.to_owned_datum());
+                    builder.append(&v.to_owned_datum());
                     builder.append_null();
                 }
 
@@ -867,7 +864,7 @@ impl DataChunkTestExt for DataChunk {
                 if *data_type == DataType::Varchar {
                     let datum = FieldGeneratorImpl::with_varchar(varchar_properties, Self::SEED)
                         .generate_datum(offset);
-                    array_builder.append_datum(&datum);
+                    array_builder.append(&datum);
                 } else {
                     let mut data_gen = FieldGeneratorImpl::with_number_random(
                         data_type.clone(),
@@ -877,7 +874,7 @@ impl DataChunkTestExt for DataChunk {
                     )
                     .unwrap();
                     let datum = data_gen.generate_datum(offset);
-                    array_builder.append_datum(datum);
+                    array_builder.append(datum);
                 }
                 // FIXME(kwannoel): This misses the case where it is neither Varchar or numeric.
             }

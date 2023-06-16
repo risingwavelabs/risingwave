@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(let_chains)]
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
@@ -158,6 +160,12 @@ enum HummockCommands {
         #[clap(long)]
         table_ids: Vec<u32>,
     },
+    /// Pause version checkpoint, which subsequently pauses GC of delta log and SST object.
+    PauseVersionCheckpoint,
+    /// Resume version checkpoint, which subsequently resumes GC of delta log and SST object.
+    ResumeVersionCheckpoint,
+    /// Replay version from the checkpoint one to the latest one.
+    ReplayVersion,
 }
 
 #[derive(Subcommand)]
@@ -212,6 +220,9 @@ enum MetaCommands {
         /// Show the plan only, no actual operation
         #[clap(long)]
         dry_run: bool,
+        /// Revision of the plan
+        #[clap(long)]
+        revision: u64,
     },
     /// backup meta by taking a meta snapshot
     BackupMeta,
@@ -220,6 +231,9 @@ enum MetaCommands {
 
     /// List all existing connections in the catalog
     ListConnections,
+
+    /// List fragment to parallel units mapping for serving
+    ListServingFragmentMapping,
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -319,6 +333,15 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
                 .await?;
         }
+        Commands::Hummock(HummockCommands::PauseVersionCheckpoint) => {
+            cmd_impl::hummock::pause_version_checkpoint(context).await?;
+        }
+        Commands::Hummock(HummockCommands::ResumeVersionCheckpoint) => {
+            cmd_impl::hummock::resume_version_checkpoint(context).await?;
+        }
+        Commands::Hummock(HummockCommands::ReplayVersion) => {
+            cmd_impl::hummock::replay_version(context).await?;
+        }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?
         }
@@ -333,15 +356,20 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::SourceSplitInfo) => {
             cmd_impl::meta::source_split_info(context).await?
         }
-        Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
-            cmd_impl::meta::reschedule(context, plan, dry_run).await?
-        }
+        Commands::Meta(MetaCommands::Reschedule {
+            plan,
+            dry_run,
+            revision,
+        }) => cmd_impl::meta::reschedule(context, plan, dry_run, revision).await?,
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
         }
         Commands::Meta(MetaCommands::ListConnections) => {
             cmd_impl::meta::list_connections(context).await?
+        }
+        Commands::Meta(MetaCommands::ListServingFragmentMapping) => {
+            cmd_impl::meta::list_serving_fragment_mappings(context).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,

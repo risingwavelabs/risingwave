@@ -21,6 +21,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::stream::StreamPlanRef;
+use super::utils::formatter_debug_plan_node;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -77,7 +78,7 @@ impl StreamHopWindow {
 
 impl fmt::Display for StreamHopWindow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamHopWindow");
+        let mut builder = formatter_debug_plan_node!(f, "StreamHopWindow");
         self.logical.fmt_fields_with_builder(&mut builder);
 
         let watermark_columns = &self.base.watermark_columns;

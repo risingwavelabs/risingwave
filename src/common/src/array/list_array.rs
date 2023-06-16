@@ -113,7 +113,7 @@ impl ArrayBuilder for ListArrayBuilder {
                             .expect("offset overflow"),
                     );
                     for elem in elems {
-                        self.value.append_datum(elem);
+                        self.value.append(elem);
                     }
                 }
             }
@@ -163,7 +163,7 @@ impl ListArrayBuilder {
             .push(last.checked_add(row.len() as u32).expect("offset overflow"));
         self.len += 1;
         for v in row.iter() {
-            self.value.append_datum(v);
+            self.value.append(v);
         }
     }
 }
@@ -280,7 +280,7 @@ impl ListArray {
 
         let mut offsets = vec![0u32];
         offsets.reserve(size_hint);
-        let mut builder = ArrayBuilderImpl::from_type(&value_type, size_hint);
+        let mut builder = ArrayBuilderImpl::with_type(size_hint, value_type.clone());
         let mut bitmap = BitmapBuilder::with_capacity(size_hint);
         for v in values {
             bitmap.append(v.is_some());
@@ -435,6 +435,7 @@ impl<'a> ListRef<'a> {
     }
 
     pub fn flatten(self) -> Vec<DatumRef<'a>> {
+        // XXX: avoid using vector
         iter_elems_ref!(self, it, {
             it.flat_map(|datum_ref| {
                 if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {

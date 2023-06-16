@@ -41,7 +41,7 @@ pub enum ConfigPath {
 }
 
 impl ConfigPath {
-    fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         match self {
             ConfigPath::Regular(s) => s,
             ConfigPath::Temp(p) => p.as_os_str().to_str().unwrap(),
@@ -150,6 +150,7 @@ impl Cluster {
         }
 
         net.add_dns_record("frontend", "192.168.2.0".parse().unwrap());
+        net.add_dns_record("message_queue", "192.168.11.1".parse().unwrap());
         net.global_ipvs().add_service(
             ServiceAddr::Tcp("192.168.2.0:4566".into()),
             Scheduler::RoundRobin,
@@ -284,7 +285,7 @@ impl Cluster {
                 .name(format!("compute-{i}"))
                 .ip([192, 168, 3, i as u8].into())
                 .cores(conf.compute_node_cores)
-                .init(move || risingwave_compute::start(opts.clone()))
+                .init(move || risingwave_compute::start(opts.clone(), prometheus::Registry::new()))
                 .build();
         }
 
@@ -523,6 +524,10 @@ impl Cluster {
 
     pub fn config(&self) -> Configuration {
         self.config.clone()
+    }
+
+    pub fn handle(&self) -> &Handle {
+        &self.handle
     }
 
     /// Graceful shutdown all RisingWave nodes.

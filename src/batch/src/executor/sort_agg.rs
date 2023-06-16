@@ -145,7 +145,7 @@ impl SortAggExecutor {
                             .iter_mut()
                             .zip_eq_fast(group.into_iter())
                             .for_each(|(builder, datum)| {
-                                builder.append_datum(datum);
+                                builder.append(datum);
                             });
                         Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
                         left_capacity -= 1;
@@ -177,7 +177,7 @@ impl SortAggExecutor {
                 .iter_mut()
                 .zip_eq_fast(group.into_iter())
                 .for_each(|(builder, datum)| {
-                    builder.append_datum(datum);
+                    builder.append(datum);
                 });
             Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
             left_capacity -= 1;
@@ -412,6 +412,7 @@ mod tests {
             distinct: false,
             order_by: vec![],
             filter: None,
+            direct_args: vec![],
         };
 
         let count_star = build_agg(AggCall::from_protobuf(&prost)?)?;
@@ -504,6 +505,7 @@ mod tests {
             distinct: false,
             order_by: vec![],
             filter: None,
+            direct_args: vec![],
         };
 
         let count_star = build_agg(AggCall::from_protobuf(&prost)?)?;
@@ -618,6 +620,7 @@ mod tests {
             distinct: false,
             order_by: vec![],
             filter: None,
+            direct_args: vec![],
         };
 
         let sum_agg = build_agg(AggCall::from_protobuf(&prost)?)?;
@@ -701,6 +704,7 @@ mod tests {
             distinct: false,
             order_by: vec![],
             filter: None,
+            direct_args: vec![],
         };
 
         let sum_agg = build_agg(AggCall::from_protobuf(&prost)?)?;
@@ -810,6 +814,7 @@ mod tests {
             distinct: false,
             order_by: vec![],
             filter: None,
+            direct_args: vec![],
         };
 
         let sum_agg = build_agg(AggCall::from_protobuf(&prost)?)?;

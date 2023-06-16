@@ -21,16 +21,16 @@ use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{PbDataType, PbDatum};
-use risingwave_pb::expr::expr_node::Type::{Field, InputRef};
+use risingwave_pb::expr::expr_node::Type::Field;
 use risingwave_pb::expr::expr_node::{self, RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 
 use super::{build_from_prost, BoxedExpression, Result};
 use crate::ExprError;
 
-pub fn make_expression(kind: Type, ret: TypeName, children: Vec<ExprNode>) -> ExprNode {
+pub fn make_func_call(kind: Type, ret: TypeName, children: Vec<ExprNode>) -> ExprNode {
     ExprNode {
-        expr_type: kind as i32,
+        function_type: kind as i32,
         return_type: Some(PbDataType {
             type_name: ret as i32,
             ..Default::default()
@@ -41,7 +41,7 @@ pub fn make_expression(kind: Type, ret: TypeName, children: Vec<ExprNode>) -> Ex
 
 pub fn make_input_ref(idx: usize, ret: TypeName) -> ExprNode {
     ExprNode {
-        expr_type: InputRef as i32,
+        function_type: Type::Unspecified as i32,
         return_type: Some(PbDataType {
             type_name: ret as i32,
             ..Default::default()
@@ -52,7 +52,7 @@ pub fn make_input_ref(idx: usize, ret: TypeName) -> ExprNode {
 
 pub fn make_i32_literal(data: i32) -> ExprNode {
     ExprNode {
-        expr_type: Type::ConstantValue as i32,
+        function_type: Type::Unspecified as i32,
         return_type: Some(PbDataType {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
@@ -65,7 +65,7 @@ pub fn make_i32_literal(data: i32) -> ExprNode {
 
 fn make_interval_literal(data: Interval) -> ExprNode {
     ExprNode {
-        expr_type: Type::ConstantValue as i32,
+        function_type: Type::Unspecified as i32,
         return_type: Some(PbDataType {
             type_name: TypeName::Interval as i32,
             ..Default::default()
@@ -78,7 +78,7 @@ fn make_interval_literal(data: Interval) -> ExprNode {
 
 pub fn make_field_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
     ExprNode {
-        expr_type: Field as i32,
+        function_type: Field as i32,
         return_type: Some(PbDataType {
             type_name: ret as i32,
             ..Default::default()
@@ -127,11 +127,11 @@ pub fn make_hop_window_expression(
         })
         .unwrap();
 
-    let hop_window_start = make_expression(
+    let hop_window_start = make_func_call(
         expr_node::Type::TumbleStart,
         output_type,
         vec![
-            make_expression(
+            make_func_call(
                 expr_node::Type::Subtract,
                 output_type,
                 vec![time_col_ref, make_interval_literal(window_size_sub_slide)],
@@ -164,7 +164,7 @@ pub fn make_hop_window_expression(
                         window_slide, i
                     ),
                 })?;
-        let window_start_expr = make_expression(
+        let window_start_expr = make_func_call(
             expr_node::Type::Add,
             output_type,
             vec![
@@ -173,7 +173,7 @@ pub fn make_hop_window_expression(
             ],
         );
         window_start_exprs.push(build_from_prost(&window_start_expr).unwrap());
-        let window_end_expr = make_expression(
+        let window_end_expr = make_func_call(
             expr_node::Type::Add,
             output_type,
             vec![

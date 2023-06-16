@@ -48,6 +48,8 @@ def section_actor_info(panels):
 
 
 def section_overview(panels):
+    mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
+    sink_filter = "executor_identity=~\".*SinkExecutor.*\""
     return [
         panels.row("Overview"),
         panels.timeseries_rowsps(
@@ -75,8 +77,18 @@ def section_overview(panels):
             "The figure shows the number of rows output by each sink per second.",
             [
                 panels.target(
-                    f"sum(rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])) by (sink_name)",
-                    "{{sink_name}}",
+                    f"sum(rate({metric('stream_executor_row_count', filter=sink_filter)}[$__rate_interval])) by (executor_identity)",
+                    "{{executor_identity}}",
+                ),
+            ],
+        ),
+        panels.timeseries_rowsps(
+            "Aggregated Materialized View Throughput(rows/s)",
+            "The figure shows the number of rows output by each materialized view per second.",
+            [
+                panels.target(
+                    f"sum(rate({metric('stream_executor_row_count', filter=mv_filter)}[$__rate_interval])) by (executor_identity)",
+                    "{{executor_identity}}",
                 ),
             ],
         ),
@@ -108,6 +120,9 @@ def section_overview(panels):
             - Lagging Epoch: the pinned or safe epoch is lagging behind the current max committed epoch. Check 'Hummock Manager' section in dev dashboard.
             - Lagging Compaction: there are too many files in L0. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.
             - Lagging Vacuum: there are too many stale files waiting to be cleaned. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.
+            - Abnormal Meta Cache Memory: the meta cache memory usage is too large, exceeding the expected 10 percent.
+            - Abnormal Block Cache Memory: the block cache memory usage is too large, exceeding the expected 10 percent.
+            - Abnormal Uploading Memory Usage: uploading memory is more than 70 percent of the expected, and is about to spill.
             """,
             [
                 panels.target(
@@ -136,6 +151,18 @@ def section_overview(panels):
                 panels.target(
                     f"{metric('storage_stale_object_count')} >= bool 200",
                     "Lagging Vacuum",
+                ),
+                panels.target(
+                    f"{metric('state_store_meta_cache_usage_ratio')} >= bool 1.1",
+                    "Abnormal Meta Cache Memory",
+                ),
+                panels.target(
+                    f"{metric('state_store_block_cache_usage_ratio')} >= bool 1.1",
+                    "Abnormal Block Cache Memory",
+                ),
+                panels.target(
+                    f"{metric('state_store_uploading_memory_usage_ratio')} >= bool 0.7",
+                    "Abnormal Uploading Memory Usage",
                 ),
             ],
             ["last"],
@@ -244,7 +271,7 @@ def section_memory(outer_panels):
                         panels.target(
                             f"sum({metric('state_store_meta_cache_size')}) by (instance) + "
                             + f"sum({metric('state_store_block_cache_size')}) by (instance) + "
-                            + f"sum({metric('state_store_limit_memory_size')}) by (instance)",
+                            + f"sum({metric('uploading_memory_size')}) by (instance)",
                             "storage @ {{instance}}",
                         ),
                     ],
@@ -266,7 +293,7 @@ def section_memory(outer_panels):
                             "storage block cache - {{job}} @ {{instance}}",
                         ),
                         panels.target(
-                            f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
+                            f"sum({metric('uploading_memory_size')}) by (job,instance)",
                             "storage write buffer - {{job}} @ {{instance}}",
                         ),
                     ],
@@ -579,7 +606,7 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_source_output_rows_counts')}[$__rate_interval])",
-                            "source={{source_name}} {{source_id}} @ {{instance}}",
+                            "source={{source_name}} actor={{actor_id}} @ {{instance}}",
                         ),
                     ],
                 ),

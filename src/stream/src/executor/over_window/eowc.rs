@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
-
 use std::marker::PhantomData;
 
 use futures::StreamExt;
@@ -26,7 +24,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
-use risingwave_common::util::memcmp_encoding;
+use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{must_match, row};
 use risingwave_expr::function::window::WindowFuncCall;
@@ -34,8 +32,8 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::state::{create_window_state, EstimatedVecDeque, WindowState};
-use super::MemcmpEncoded;
 use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::over_window::state::{StateEvictHint, StateKey};
 use crate::executor::{
@@ -72,13 +70,6 @@ impl Partition {
     fn is_ready(&self) -> bool {
         debug_assert!(self.is_aligned());
         self.states.iter().all(|state| state.curr_window().is_ready)
-    }
-
-    fn curr_window_key(&self) -> Option<&StateKey> {
-        debug_assert!(self.is_aligned());
-        self.states
-            .first()
-            .and_then(|state| state.curr_window().key)
     }
 }
 
@@ -250,8 +241,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             let encoded_pk = memcmp_encoding::encode_row(
                 (&row).project(&this.input_pk_indices),
                 &vec![OrderType::ascending(); this.input_pk_indices.len()],
-            )?
-            .into_boxed_slice();
+            )?;
             let key = StateKey {
                 order_key: order_key.into(),
                 encoded_pk,
@@ -275,7 +265,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         // Ignore ready windows (all ready windows were outputted before).
         while partition.is_ready() {
             for state in &mut partition.states {
-                state.output()?;
+                state.slide_forward();
             }
             partition.curr_row_buffer.pop_front();
         }
@@ -301,8 +291,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             let encoded_partition_key = memcmp_encoding::encode_row(
                 &partition_key,
                 &vec![OrderType::ascending(); this.partition_key_indices.len()],
-            )?
-            .into_boxed_slice();
+            )?;
 
             // Get the partition.
             Self::ensure_key_in_cache(
@@ -325,8 +314,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             let encoded_pk = memcmp_encoding::encode_row(
                 input_row.project(&this.input_pk_indices),
                 &vec![OrderType::ascending(); this.input_pk_indices.len()],
-            )?
-            .into_boxed_slice();
+            )?;
             let key = StateKey {
                 order_key: order_key.into(),
                 encoded_pk,
@@ -353,7 +341,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     let tmp: Vec<_> = partition
                         .states
                         .iter_mut()
-                        .map(|state| state.output().map(|o| (o.return_value, o.evict_hint)))
+                        .map(|state| -> StreamExecutorResult<_> {
+                            let ret_val = state.curr_output()?;
+                            let evict_hint = state.slide_forward();
+                            Ok((ret_val, evict_hint))
+                        })
                         .try_collect()?;
                     tmp.into_iter().unzip()
                 };
@@ -368,7 +360,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         .iter()
                         .chain(ret_values.iter().map(|v| v.to_datum_ref())),
                 ) {
-                    builder.append_datum(datum);
+                    builder.append(datum);
                 }
 
                 // Evict unneeded rows from state table.
@@ -422,8 +414,15 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             inner: mut this,
         } = self;
 
+        let metrics_info = MetricsInfo::new(
+            this.actor_ctx.streaming_metrics.clone(),
+            this.state_table.table_id(),
+            this.actor_ctx.id,
+            "EowcOverWindow",
+        );
+
         let mut vars = ExecutionVars {
-            partitions: new_unbounded(this.watermark_epoch.clone()),
+            partitions: new_unbounded(this.watermark_epoch.clone(), metrics_info),
             _phantom: PhantomData::<S>,
         };
 

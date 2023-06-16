@@ -14,31 +14,15 @@
 
 use std::fmt::Debug;
 
-use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use simd_json::{BorrowedValue, StaticNode, ValueAccess};
+use simd_json::{BorrowedValue, Mutable};
 
-use super::operators::*;
-use crate::impl_common_parser_logic;
-use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
-
-const BEFORE: &str = "before";
-const AFTER: &str = "after";
-const OP: &str = "op";
-
-#[inline]
-fn ensure_not_null<'a, 'b: 'a>(value: &'a BorrowedValue<'b>) -> Option<&'a BorrowedValue<'b>> {
-    if let BorrowedValue::Static(StaticNode::Null) = value {
-        None
-    } else {
-        Some(value)
-    }
-}
-
-impl_common_parser_logic!(DebeziumJsonParser);
+use crate::parser::unified::debezium::DebeziumChangeEvent;
+use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct DebeziumJsonParser {
@@ -60,106 +44,44 @@ impl DebeziumJsonParser {
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
+        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        let payload = event
-            .get("payload")
-            .and_then(ensure_not_null)
-            .ok_or_else(|| {
-                RwError::from(ProtocolError("no payload in debezium event".to_owned()))
-            })?;
+        let payload = if let Some(payload) = event.get_mut("payload") {
+            std::mem::take(payload)
+        } else {
+            event
+        };
 
-        let op = payload.get(OP).and_then(|v| v.as_str()).ok_or_else(|| {
-            RwError::from(ProtocolError(
-                "op field not found in debezium json".to_owned(),
-            ))
-        })?;
+        let accessor = JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM);
 
-        let format = SourceFormat::DebeziumJson;
-        match op {
-            DEBEZIUM_UPDATE_OP => {
-                let before = payload.get(BEFORE).and_then(ensure_not_null).ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
-                    ))
-                })?;
+        let row_op = DebeziumChangeEvent::with_value(accessor);
 
-                let after = payload
-                    .get(AFTER)
-                    .and_then(ensure_not_null)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "after is missing for updating event".to_string(),
-                        ))
-                    })?;
+        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
+    }
+}
 
-                writer.update(|column| {
-                    let before = simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(before, (&column.name).into()),
-                    )?;
-                    let after = simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(after, (&column.name).into()),
-                    )?;
+impl ByteStreamSourceParser for DebeziumJsonParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
 
-                    Ok((before, after))
-                })
-            }
-            DEBEZIUM_CREATE_OP | DEBEZIUM_READ_OP => {
-                let after = payload
-                    .get(AFTER)
-                    .and_then(ensure_not_null)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "after is missing for creating event".to_string(),
-                        ))
-                    })?;
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
 
-                writer.insert(|column| {
-                    simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(after, (&column.name).into()),
-                    )
-                    .map_err(Into::into)
-                })
-            }
-            DEBEZIUM_DELETE_OP => {
-                let before = payload
-                    .get(BEFORE)
-                    .and_then(ensure_not_null)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "before is missing for delete event".to_string(),
-                        ))
-                    })?;
-
-                writer.delete(|column| {
-                    simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(before, (&column.name).into()),
-                    )
-                    .map_err(Into::into)
-                })
-            }
-            _ => Err(RwError::from(ProtocolError(format!(
-                "unknown debezium op: {}",
-                op
-            )))),
-        }
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use std::convert::TryInto;
-    use std::sync::Arc;
 
     use chrono::{NaiveDate, NaiveTime};
     use risingwave_common::array::{Op, StructValue};
@@ -224,21 +146,26 @@ mod tests {
             //       "description": "Small 2-wheel scooter",
             //       "weight": 1.234
             //     },
-            let data = br#"{"payload":{"before":null,"after":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639547113601,"snapshot":"true","db":"inventory","sequence":null,"table":"products","server_id":0,"gtid":null,"file":"mysql-bin.000003","pos":156,"row":0,"thread":null,"query":null},"op":"r","ts_ms":1639547113602,"transaction":null}}"#;
+            let input = vec![
+                // data with payload field
+                br#"{"payload":{"before":null,"after":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639547113601,"snapshot":"true","db":"inventory","sequence":null,"table":"products","server_id":0,"gtid":null,"file":"mysql-bin.000003","pos":156,"row":0,"thread":null,"query":null},"op":"r","ts_ms":1639547113602,"transaction":null}}"#.to_vec(),
+                // data without payload field
+                br#"{"before":null,"after":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639547113601,"snapshot":"true","db":"inventory","sequence":null,"table":"products","server_id":0,"gtid":null,"file":"mysql-bin.000003","pos":156,"row":0,"thread":null,"query":null},"op":"r","ts_ms":1639547113602,"transaction":null}"#.to_vec()];
 
             let columns = get_test1_columns();
 
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            for data in input {
+                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let [(_op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
+                    .await
+                    .try_into()
+                    .unwrap();
 
-            let [(_op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
-                .await
-                .try_into()
-                .unwrap();
-
-            assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
-            assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
-            assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
-            assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
+                assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
+                assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
+                assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
+                assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
+            }
         }
 
         #[tokio::test]
@@ -250,20 +177,27 @@ mod tests {
             //       "description": "12V car battery",
             //       "weight": 8.1
             //     },
-            let data = br#"{"payload":{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"c","ts_ms":1639551564960,"transaction":null}}"#;
+            let input = vec![
+                // data with payload field
+                br#"{"payload":{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"c","ts_ms":1639551564960,"transaction":null}}"#.to_vec(),
+                // data without payload field
+                br#"{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"c","ts_ms":1639551564960,"transaction":null}"#.to_vec()];
 
             let columns = get_test1_columns();
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-            let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
-                .await
-                .try_into()
-                .unwrap();
-            assert_eq!(op, Op::Insert);
 
-            assert!(row[0].eq(&Some(ScalarImpl::Int32(102))));
-            assert!(row[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
-            assert!(row[2].eq(&Some(ScalarImpl::Utf8("12V car battery".into()))));
-            assert!(row[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
+            for data in input {
+                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
+                    .await
+                    .try_into()
+                    .unwrap();
+                assert_eq!(op, Op::Insert);
+
+                assert!(row[0].eq(&Some(ScalarImpl::Int32(102))));
+                assert!(row[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
+                assert!(row[2].eq(&Some(ScalarImpl::Utf8("12V car battery".into()))));
+                assert!(row[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
+            }
         }
 
         #[tokio::test]
@@ -275,21 +209,27 @@ mod tests {
             //       "weight": 1.234
             //     },
             //     "after": null,
-            let data = br#"{"payload":{"before":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"after":null,"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551767000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1045,"row":0,"thread":null,"query":null},"op":"d","ts_ms":1639551767775,"transaction":null}}"#;
+            let input = vec![
+                // data with payload field
+                br#"{"payload":{"before":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"after":null,"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551767000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1045,"row":0,"thread":null,"query":null},"op":"d","ts_ms":1639551767775,"transaction":null}}"#.to_vec(),
+                // data without payload field
+                br#"{"before":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"after":null,"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551767000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1045,"row":0,"thread":null,"query":null},"op":"d","ts_ms":1639551767775,"transaction":null}"#.to_vec()];
 
-            let columns = get_test1_columns();
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-            let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
-                .await
-                .try_into()
-                .unwrap();
+            for data in input {
+                let columns = get_test1_columns();
+                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
+                    .await
+                    .try_into()
+                    .unwrap();
 
-            assert_eq!(op, Op::Delete);
+                assert_eq!(op, Op::Delete);
 
-            assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
-            assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
-            assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
-            assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
+                assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
+                assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
+                assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
+                assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
+            }
         }
 
         #[tokio::test]
@@ -306,55 +246,30 @@ mod tests {
             //       "description": "24V car battery",
             //       "weight": 9.1
             //     },
-            let data = br#"{"payload":{"before":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"after":{"id":102,"name":"car battery","description":"24V car battery","weight":9.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551901000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1382,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551901165,"transaction":null}}"#;
+            let input = vec![
+                // data with payload field
+                br#"{"payload":{"before":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"after":{"id":102,"name":"car battery","description":"24V car battery","weight":9.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551901000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1382,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551901165,"transaction":null}}"#.to_vec(),
+                // data without payload field
+                br#"{"before":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"after":{"id":102,"name":"car battery","description":"24V car battery","weight":9.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551901000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1382,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551901165,"transaction":null}"#.to_vec()];
 
             let columns = get_test1_columns();
 
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-            let [(op1, row1), (op2, row2)]: [_; 2] = parse_one(parser, columns, data.to_vec())
-                .await
-                .try_into()
-                .unwrap();
+            for data in input {
+                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
+                    .await
+                    .try_into()
+                    .unwrap();
 
-            assert_eq!(op1, Op::UpdateDelete);
-            assert_eq!(op2, Op::UpdateInsert);
+                assert_eq!(op, Op::Insert);
 
-            assert!(row1[0].eq(&Some(ScalarImpl::Int32(102))));
-            assert!(row1[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
-            assert!(row1[2].eq(&Some(ScalarImpl::Utf8("12V car battery".into()))));
-            assert!(row1[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
-
-            assert!(row2[0].eq(&Some(ScalarImpl::Int32(102))));
-            assert!(row2[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
-            assert!(row2[2].eq(&Some(ScalarImpl::Utf8("24V car battery".into()))));
-            assert!(row2[3].eq(&Some(ScalarImpl::Float64(9.1.into()))));
-        }
-
-        #[tokio::test]
-        async fn test1_update_with_before_null() {
-            // the test case it identical with test_debezium_json_parser_insert but op is 'u'
-            //     "before": null,
-            //     "after": {
-            //       "id": 102,
-            //       "name": "car battery",
-            //       "description": "12V car battery",
-            //       "weight": 8.1
-            //     },
-            let data = br#"{"payload":{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551564960,"transaction":null}}"#;
-
-            let columns = get_test1_columns();
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-
-            let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
-            let writer = builder.row_writer();
-            if let Err(e) = parser.parse_inner(data.to_vec(), writer).await {
-                println!("{:?}", e.to_string());
-            } else {
-                panic!("the test case is expected to be failed");
+                assert!(row[0].eq(&Some(ScalarImpl::Int32(102))));
+                assert!(row[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
+                assert!(row[2].eq(&Some(ScalarImpl::Utf8("24V car battery".into()))));
+                assert!(row[3].eq(&Some(ScalarImpl::Float64(9.1.into()))));
             }
         }
     }
-
     // test2 covers read/insert/update/delete event on the following MySQL table for debezium json:
     // CREATE TABLE IF NOT EXISTS orders (
     //     O_KEY BIGINT NOT NULL,
@@ -507,57 +422,34 @@ mod tests {
             let columns = get_test2_columns();
 
             let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-            let [(op1, row1), (op2, row2)]: [_; 2] = parse_one(parser, columns, data.to_vec())
+            let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
                 .unwrap();
 
-            assert_eq!(op1, Op::UpdateDelete);
-            assert_eq!(op2, Op::UpdateInsert);
+            assert_eq!(op, Op::Insert);
 
-            assert!(row1[0].eq(&Some(ScalarImpl::Int64(111))));
-            assert!(row1[1].eq(&Some(ScalarImpl::Bool(true))));
-            assert!(row1[2].eq(&Some(ScalarImpl::Int16(-1))));
-            assert!(row1[3].eq(&Some(ScalarImpl::Int32(-1111))));
-            assert!(row1[4].eq(&Some(ScalarImpl::Float32((-11.11).into()))));
-            assert!(row1[5].eq(&Some(ScalarImpl::Float64((-111.11111).into()))));
-            assert!(row1[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
-            assert!(row1[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
-            assert!(row1[8].eq(&Some(ScalarImpl::Date(Date::new(
-                NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
-            )))));
-            assert!(row1[9].eq(&Some(ScalarImpl::Time(Time::new(
-                NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
-            )))));
-            assert!(row1[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "1970-01-01T00:00:00".parse().unwrap()
-            )))));
-            assert!(row1[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "1970-01-01T00:00:01".parse().unwrap()
-            )))));
-            assert_json_eq(&row1[12], "{\"k1\": \"v1\", \"k2\": 11}");
-
-            assert!(row2[0].eq(&Some(ScalarImpl::Int64(111))));
-            assert!(row2[1].eq(&Some(ScalarImpl::Bool(false))));
-            assert!(row2[2].eq(&Some(ScalarImpl::Int16(3))));
-            assert!(row2[3].eq(&Some(ScalarImpl::Int32(3333))));
-            assert!(row2[4].eq(&Some(ScalarImpl::Float32((33.33).into()))));
-            assert!(row2[5].eq(&Some(ScalarImpl::Float64((333.33333).into()))));
-            assert!(row2[6].eq(&Some(ScalarImpl::Decimal("333.33".parse().unwrap()))));
-            assert!(row2[7].eq(&Some(ScalarImpl::Utf8("no thanks".into()))));
-            assert!(row2[8].eq(&Some(ScalarImpl::Date(Date::new(
+            assert!(row[0].eq(&Some(ScalarImpl::Int64(111))));
+            assert!(row[1].eq(&Some(ScalarImpl::Bool(false))));
+            assert!(row[2].eq(&Some(ScalarImpl::Int16(3))));
+            assert!(row[3].eq(&Some(ScalarImpl::Int32(3333))));
+            assert!(row[4].eq(&Some(ScalarImpl::Float32((33.33).into()))));
+            assert!(row[5].eq(&Some(ScalarImpl::Float64((333.33333).into()))));
+            assert!(row[6].eq(&Some(ScalarImpl::Decimal("333.33".parse().unwrap()))));
+            assert!(row[7].eq(&Some(ScalarImpl::Utf8("no thanks".into()))));
+            assert!(row[8].eq(&Some(ScalarImpl::Date(Date::new(
                 NaiveDate::from_ymd_opt(9999, 12, 31).unwrap()
             )))));
-            assert!(row2[9].eq(&Some(ScalarImpl::Time(Time::new(
+            assert!(row[9].eq(&Some(ScalarImpl::Time(Time::new(
                 NaiveTime::from_hms_micro_opt(23, 59, 59, 0).unwrap()
             )))));
-            assert!(row2[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "5138-11-16T09:46:39".parse().unwrap()
             )))));
-            assert!(row2[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "2038-01-09T03:14:07".parse().unwrap()
             )))));
-            assert_json_eq(&row2[12], "{\"k1\": \"v1_updated\", \"k2\": 33}");
+            assert_json_eq(&row[12], "{\"k1\": \"v1_updated\", \"k2\": 33}");
         }
 
         #[tokio::test]
@@ -695,10 +587,6 @@ mod tests {
 
         // schema for the remaining types
         fn get_other_types_test_columns() -> Vec<SourceColumnDesc> {
-            let point_type = Arc::new(StructType {
-                fields: vec![DataType::Float32, DataType::Float32],
-                field_names: vec![String::from('x'), String::from('y')],
-            });
             vec![
                 SourceColumnDesc::simple("o_key", DataType::Int32, ColumnId::from(0)),
                 SourceColumnDesc::simple("o_boolean", DataType::Boolean, ColumnId::from(1)),
@@ -709,7 +597,10 @@ mod tests {
                 SourceColumnDesc::simple("o_uuid", DataType::Varchar, ColumnId::from(6)),
                 SourceColumnDesc {
                     name: "o_point".to_string(),
-                    data_type: DataType::Struct(point_type),
+                    data_type: DataType::Struct(StructType::new(vec![
+                        ("x", DataType::Float32),
+                        ("y", DataType::Float32),
+                    ])),
                     column_id: 7.into(),
                     fields: vec![],
                     is_row_id: false,

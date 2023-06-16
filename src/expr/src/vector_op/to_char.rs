@@ -17,21 +17,23 @@ use std::sync::LazyLock;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
-use ouroboros::self_referencing;
 use risingwave_common::types::Timestamp;
+use static_assertions::const_assert_eq;
 
-#[self_referencing]
-pub struct ChronoPattern {
-    pub(crate) tmpl: String,
-    #[borrows(tmpl)]
-    #[covariant]
-    pub(crate) items: Vec<chrono::format::Item<'this>>,
+type Pattern<'a> = Vec<chrono::format::Item<'a>>;
+
+self_cell::self_cell! {
+    pub struct ChronoPattern {
+        owner: String,
+        #[covariant]
+        dependent: Pattern,
+    }
 }
 
 impl Debug for ChronoPattern {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ChronoPattern")
-            .field("tmpl", self.borrow_tmpl())
+            .field("tmpl", self.borrow_owner())
             .finish()
     }
 }
@@ -40,16 +42,18 @@ impl Debug for ChronoPattern {
 // TODO: Chrono can not fully support the pg format, so consider using other implementations later.
 pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
     // https://www.postgresql.org/docs/current/functions-formatting.html
-    static PG_PATTERNS: &[&str] = &[
+    const PG_PATTERNS: &[&str] = &[
         "HH24", "hh24", "HH12", "hh12", "HH", "hh", "MI", "mi", "SS", "ss", "YYYY", "yyyy", "YY",
         "yy", "IYYY", "iyyy", "IY", "iy", "MM", "mm", "Month", "Mon", "DD", "dd", "US", "us", "MS",
-        "ms",
+        "ms", "TZH:TZM", "tzh:tzm", "TZHTZM", "tzhtzm", "TZH", "tzh",
     ];
     // https://docs.rs/chrono/latest/chrono/format/strftime/index.html
-    static CHRONO_PATTERNS: &[&str] = &[
+    const CHRONO_PATTERNS: &[&str] = &[
         "%H", "%H", "%I", "%I", "%I", "%I", "%M", "%M", "%S", "%S", "%Y", "%Y", "%y", "%y", "%G",
-        "%G", "%g", "%g", "%m", "%m", "%B", "%b", "%d", "%d", "%6f", "%6f", "%3f", "%3f",
+        "%G", "%g", "%g", "%m", "%m", "%B", "%b", "%d", "%d", "%6f", "%6f", "%3f", "%3f", "%:z",
+        "%:z", "%z", "%z", "%#z", "%#z",
     ];
+    const_assert_eq!(PG_PATTERNS.len(), CHRONO_PATTERNS.len());
     static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
         AhoCorasickBuilder::new()
             .ascii_case_insensitive(false)
@@ -63,16 +67,15 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
         dst.push_str(CHRONO_PATTERNS[mat.pattern()]);
         true
     });
-    ChronoPatternBuilder {
-        tmpl: chrono_tmpl,
-        items_builder: |tmpl| StrftimeItems::new(tmpl).collect::<Vec<_>>(),
-    }
-    .build()
+    tracing::debug!(tmpl, chrono_tmpl, "compile_pattern_to_chrono");
+    ChronoPattern::new(chrono_tmpl, |tmpl| {
+        StrftimeItems::new(tmpl).collect::<Vec<_>>()
+    })
 }
 
 // #[function("to_char(timestamp, varchar) -> varchar")]
 pub fn to_char_timestamp(data: Timestamp, tmpl: &str, writer: &mut dyn Write) {
     let pattern = compile_pattern_to_chrono(tmpl);
-    let format = data.0.format_with_items(pattern.borrow_items().iter());
+    let format = data.0.format_with_items(pattern.borrow_dependent().iter());
     write!(writer, "{}", format).unwrap();
 }

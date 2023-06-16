@@ -15,12 +15,14 @@
 use std::fmt;
 use std::ops::BitAnd;
 
-use risingwave_common::catalog::{ColumnDesc, Schema};
+use pretty_xmlish::Pretty;
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
-use super::generic::{self, GenericPlanRef};
+use super::generic::{self};
+use super::utils::{formatter_debug_plan_node, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -91,12 +93,10 @@ impl StreamDeltaJoin {
 impl fmt::Display for StreamDeltaJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("StreamDeltaJoin");
+        let mut builder = formatter_debug_plan_node!(f, "StreamDeltaJoin");
         builder.field("type", &self.logical.join_type);
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
+        let concat_schema = self.logical.concat_schema();
         builder.field(
             "predicate",
             &EqJoinPredicateDisplay {
@@ -106,26 +106,37 @@ impl fmt::Display for StreamDeltaJoin {
         );
 
         if verbose {
-            if self
-                .logical
-                .output_indices
-                .iter()
-                .copied()
-                .eq(0..self.logical.internal_column_num())
-            {
-                builder.field("output", &format_args!("all"));
-            } else {
-                builder.field(
-                    "output",
-                    &IndicesDisplay {
-                        indices: &self.logical.output_indices,
-                        input_schema: &concat_schema,
-                    },
-                );
-            }
+            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
+                None => builder.field("output", &format_args!("all")),
+                Some(id) => builder.field("output", &id),
+            };
         }
 
         builder.finish()
+    }
+}
+impl Distill for StreamDeltaJoin {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.logical.join_type)));
+
+        let concat_schema = self.logical.concat_schema();
+        vec.push((
+            "predicate",
+            Pretty::debug(&EqJoinPredicateDisplay {
+                eq_join_predicate: self.eq_join_predicate(),
+                input_schema: &concat_schema,
+            }),
+        ));
+
+        if verbose {
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema)
+                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            vec.push(("output", data));
+        }
+
+        Pretty::childless_record("StreamDeltaJoin", vec)
     }
 }
 
@@ -168,22 +179,20 @@ impl StreamNode for StreamDeltaJoin {
 
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
+        let eq_join_predicate = &self.eq_join_predicate;
         NodeBody::DeltaIndexJoin(DeltaIndexJoinNode {
             join_type: self.logical.join_type as i32,
-            left_key: self
-                .eq_join_predicate
+            left_key: eq_join_predicate
                 .left_eq_indexes()
                 .iter()
                 .map(|v| *v as i32)
                 .collect(),
-            right_key: self
-                .eq_join_predicate
+            right_key: eq_join_predicate
                 .right_eq_indexes()
                 .iter()
                 .map(|v| *v as i32)
                 .collect(),
-            condition: self
-                .eq_join_predicate
+            condition: eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),

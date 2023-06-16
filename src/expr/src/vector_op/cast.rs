@@ -35,7 +35,7 @@ use risingwave_expr_macro::{build_function, function};
 use risingwave_pb::expr::expr_node::PbType;
 
 use crate::expr::template::UnaryExpression;
-use crate::expr::{build, BoxedExpression, Expression, InputRefExpression};
+use crate::expr::{build_func, BoxedExpression, Expression, InputRefExpression};
 use crate::{ExprError, Result};
 
 /// String literals for bool type.
@@ -263,7 +263,7 @@ pub fn literal_parsing(
         DataType::Decimal => str_parse::<Decimal>(s)?.into(),
         DataType::Float32 => str_parse::<F32>(s)?.into(),
         DataType::Float64 => str_parse::<F64>(s)?.into(),
-        DataType::Varchar => return Err(None),
+        DataType::Varchar => s.into(),
         DataType::Date => str_to_date(s)?.into(),
         DataType::Timestamp => str_to_timestamp(s)?.into(),
         // We only handle the case with timezone here, and leave the implicit session timezone case
@@ -341,7 +341,7 @@ fn build_cast_str_to_list(
 }
 
 fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
-    let cast = build(
+    let cast = build_func(
         PbType::Cast,
         target_elem_type.clone(),
         vec![InputRefExpression::new(DataType::Varchar, 0).boxed()],
@@ -385,7 +385,7 @@ fn list_cast(
     source_elem_type: &DataType,
     target_elem_type: &DataType,
 ) -> Result<ListValue> {
-    let cast = build(
+    let cast = build_func(
         PbType::Cast,
         target_elem_type.clone(),
         vec![InputRefExpression::new(source_elem_type.clone(), 0).boxed()],
@@ -409,14 +409,8 @@ fn build_cast_struct_to_struct(
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedExpression> {
     let child = children.into_iter().next().unwrap();
-    let source_elem_type = match child.return_type() {
-        DataType::Struct(s) => (*s).clone(),
-        _ => panic!("expected struct type"),
-    };
-    let target_elem_type = match &return_type {
-        DataType::Struct(s) => (**s).clone(),
-        _ => panic!("expected struct type"),
-    };
+    let source_elem_type = child.return_type().as_struct().clone();
+    let target_elem_type = return_type.as_struct().clone();
     Ok(Box::new(
         UnaryExpression::<StructArray, StructArray, _>::new(child, return_type, move |x| {
             struct_cast(x, &source_elem_type, &target_elem_type)
@@ -431,13 +425,13 @@ fn struct_cast(
     target_elem_type: &StructType,
 ) -> Result<StructValue> {
     let fields = (input.iter_fields_ref())
-        .zip_eq_fast(source_elem_type.fields.iter())
-        .zip_eq_fast(target_elem_type.fields.iter())
+        .zip_eq_fast(source_elem_type.types())
+        .zip_eq_fast(target_elem_type.types())
         .map(|((datum_ref, source_field_type), target_field_type)| {
             if source_field_type == target_field_type {
                 return Ok(datum_ref.map(|scalar_ref| scalar_ref.into_scalar_impl()));
             }
-            let cast = build(
+            let cast = build_func(
                 PbType::Cast,
                 target_field_type.clone(),
                 vec![InputRefExpression::new(source_field_type.clone(), 0).boxed()],
@@ -652,14 +646,8 @@ mod tests {
                     Some(F32::from(0.0).to_scalar_value()),
                 ])
                 .as_scalar_ref(),
-                &StructType::new(vec![
-                    (DataType::Varchar, "a".to_string()),
-                    (DataType::Float32, "b".to_string()),
-                ]),
-                &StructType::new(vec![
-                    (DataType::Int32, "a".to_string()),
-                    (DataType::Int32, "b".to_string()),
-                ])
+                &StructType::new(vec![("a", DataType::Varchar), ("b", DataType::Float32),]),
+                &StructType::new(vec![("a", DataType::Int32), ("b", DataType::Int32),])
             )
             .unwrap(),
             StructValue::new(vec![

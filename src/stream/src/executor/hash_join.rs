@@ -31,6 +31,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
 use risingwave_storage::StateStore;
+use tokio::time::Instant;
 
 use self::JoinType::{FullOuter, LeftOuter, LeftSemi, RightAnti, RightOuter, RightSemi};
 use super::barrier_align::*;
@@ -206,7 +207,6 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         unimplemented!()
     }
 
-    #[expect(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -708,7 +708,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
         let actor_id_str = self.ctx.id.to_string();
-        let mut start_time = minstant::Instant::now();
+        let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
             .next()
@@ -736,7 +736,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 }
                 AlignedMessage::Left(chunk) => {
                     let mut left_time = Duration::from_nanos(0);
-                    let mut left_start_time = minstant::Instant::now();
+                    let mut left_start_time = Instant::now();
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Left }>(
                         &self.ctx,
@@ -753,7 +753,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     ) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
-                        left_start_time = minstant::Instant::now();
+                        left_start_time = Instant::now();
                     }
                     left_time += left_start_time.elapsed();
                     self.metrics
@@ -763,7 +763,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 }
                 AlignedMessage::Right(chunk) => {
                     let mut right_time = Duration::from_nanos(0);
-                    let mut right_start_time = minstant::Instant::now();
+                    let mut right_start_time = Instant::now();
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Right }>(
                         &self.ctx,
@@ -780,7 +780,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     ) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
-                        right_start_time = minstant::Instant::now();
+                        right_start_time = Instant::now();
                     }
                     right_time += right_start_time.elapsed();
                     self.metrics
@@ -789,7 +789,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         .inc_by(right_time.as_nanos() as u64);
                 }
                 AlignedMessage::Barrier(barrier) => {
-                    let barrier_start_time = minstant::Instant::now();
+                    let barrier_start_time = Instant::now();
                     self.flush_data(barrier.epoch).await?;
 
                     // Update the vnode bitmap for state tables of both sides if asked.
@@ -821,10 +821,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             .join_cached_entries
                             .with_label_values(&[&actor_id_str, side])
                             .set(ht.entry_count() as i64);
-                        // self.metrics
-                        //     .join_cached_estimated_size
-                        //     .with_label_values(&[&actor_id_str, side])
-                        //     .set(ht.estimated_size() as i64);
                     }
 
                     self.metrics
@@ -834,7 +830,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     yield Message::Barrier(barrier);
                 }
             }
-            start_time = minstant::Instant::now();
+            start_time = Instant::now();
         }
     }
 

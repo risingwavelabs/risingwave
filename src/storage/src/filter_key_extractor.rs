@@ -50,7 +50,7 @@ impl FilterKeyExtractorImpl {
         if read_prefix_len == 0 || read_prefix_len > table_catalog.get_pk().len() {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
-            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor::default())
+            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)
         } else {
             FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(table_catalog))
         }
@@ -200,7 +200,7 @@ impl MultiFilterKeyExtractor {
         self.id_to_filter_key_extractor.len()
     }
 
-    pub fn get_exsting_table_ids(&self) -> HashSet<u32> {
+    pub fn get_existing_table_ids(&self) -> HashSet<u32> {
         self.id_to_filter_key_extractor.keys().cloned().collect()
     }
 }
@@ -292,9 +292,7 @@ impl FilterKeyExtractorManagerInner {
             // the table in sst has been deleted
 
             // use full key as default
-            return Ok(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            ));
+            return Ok(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
         }
 
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
@@ -422,13 +420,13 @@ mod tests {
 
     #[test]
     fn test_default_filter_key_extractor() {
-        let dummy_filter_key_extractor = DummyFilterKeyExtractor::default();
+        let dummy_filter_key_extractor = DummyFilterKeyExtractor;
         let full_key = "full_key".as_bytes();
         let output_key = dummy_filter_key_extractor.extract(full_key);
 
         assert_eq!("".as_bytes(), output_key);
 
-        let full_key_filter_key_extractor = FullKeyFilterKeyExtractor::default();
+        let full_key_filter_key_extractor = FullKeyFilterKeyExtractor;
         let output_key = full_key_filter_key_extractor.extract(full_key);
 
         assert_eq!(full_key, output_key);
@@ -619,9 +617,7 @@ mod tests {
 
         filter_key_extractor_manager.update(
             1,
-            Arc::new(FilterKeyExtractorImpl::Dummy(
-                DummyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
         );
 
         let remaining_table_id_set = HashSet::from([1]);

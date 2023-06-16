@@ -58,15 +58,17 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-aws-config = { version = "0.51", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-kinesis = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.21", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-ec2 = { version = "0.21", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-sqs = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.51"
-aws-smithy-types = "0.51"
-aws-endpoint = "0.51"
-aws-types = { version = "0.51", features = ["hardcoded-credentials"] }
+await-tree = "0.1.1"
+aws-config = { version = "0.55", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
+aws-sdk-kinesis = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
+aws-sdk-ec2 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
+aws-sdk-sqs = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.55"
+aws-smithy-types = "0.55"
+aws-endpoint = "0.55"
+aws-types = "0.55"
 futures-async-stream = "0.2"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
@@ -76,7 +78,7 @@ hashbrown = { version = "0.13.2", features = ["ahash", "inline-more", "nightly"]
 lto = 'off'
 
 [profile.release]
-debug = 1 # line tables only
+debug = 1
 lto = 'thin'
 
 # The profile used for CI in main branch.
@@ -84,6 +86,8 @@ lto = 'thin'
 # better catch bugs in CI.
 [profile.ci-release]
 inherits = "release"
+incremental = false
+debug = "line-tables-only"
 debug-assertions = true
 overflow-checks = true
 
@@ -93,7 +97,7 @@ overflow-checks = true
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
-debug = 1 # line tables only
+debug = "line-tables-only"
 [profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
 [profile.ci-dev.package."tokio"]
@@ -112,7 +116,7 @@ opt-level = 3
 inherits = "dev"
 opt-level = 2
 incremental = false
-debug = 1 # line tables only
+debug = "line-tables-only"
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]

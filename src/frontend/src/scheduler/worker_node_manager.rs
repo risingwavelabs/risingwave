@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, LinkedList};
-use std::sync::{Arc, RwLock};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
+use std::time::Duration;
 
-use anyhow::anyhow;
-use itertools::Itertools;
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
-use risingwave_pb::common::{ParallelUnit, WorkerNode, WorkerType};
+use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
+use risingwave_pb::common::{WorkerNode, WorkerType};
 
 use crate::catalog::FragmentId;
 use crate::scheduler::{SchedulerError, SchedulerResult};
@@ -29,13 +29,15 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 /// `WorkerNodeManager` manages live worker nodes and table vnode mapping information.
 pub struct WorkerNodeManager {
     inner: RwLock<WorkerNodeManagerInner>,
+    /// Temporarily make worker invisible from serving cluster.
+    worker_node_mask: Arc<RwLock<HashSet<u32>>>,
 }
 
 struct WorkerNodeManagerInner {
     worker_nodes: Vec<WorkerNode>,
-    /// fragment vnode mapping info for streaming. It's from meta node.
+    /// fragment vnode mapping info for streaming
     streaming_fragment_vnode_mapping: HashMap<FragmentId, ParallelUnitMapping>,
-    /// fragment vnode mapping info for serving. It's calculated locally.
+    /// fragment vnode mapping info for serving
     serving_fragment_vnode_mapping: HashMap<FragmentId, ParallelUnitMapping>,
 }
 
@@ -55,6 +57,7 @@ impl WorkerNodeManager {
                 streaming_fragment_vnode_mapping: Default::default(),
                 serving_fragment_vnode_mapping: Default::default(),
             }),
+            worker_node_mask: Arc::new(Default::default()),
         }
     }
 
@@ -65,7 +68,10 @@ impl WorkerNodeManager {
             streaming_fragment_vnode_mapping: HashMap::new(),
             serving_fragment_vnode_mapping: HashMap::new(),
         });
-        Self { inner }
+        Self {
+            inner,
+            worker_node_mask: Arc::new(Default::default()),
+        }
     }
 
     pub fn list_worker_nodes(&self) -> Vec<WorkerNode> {
@@ -95,29 +101,41 @@ impl WorkerNodeManager {
 
     pub fn add_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
-        if node.property.as_ref().map_or(false, |p| p.is_serving) {
-            write_guard.serving_fragment_vnode_mapping.clear();
+        // update
+        for w in &mut write_guard.worker_nodes {
+            if w.id == node.id {
+                *w = node;
+                return;
+            }
         }
+        // insert
         write_guard.worker_nodes.push(node);
     }
 
     pub fn remove_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
-        if node.property.as_ref().map_or(false, |p| p.is_serving) {
-            write_guard.serving_fragment_vnode_mapping.clear();
-        }
-        write_guard.worker_nodes.retain(|x| *x != node);
+        write_guard.worker_nodes.retain(|x| x.id != node.id);
     }
 
     pub fn refresh(
         &self,
         nodes: Vec<WorkerNode>,
-        mapping: HashMap<FragmentId, ParallelUnitMapping>,
+        streaming_mapping: HashMap<FragmentId, ParallelUnitMapping>,
+        serving_mapping: HashMap<FragmentId, ParallelUnitMapping>,
     ) {
         let mut write_guard = self.inner.write().unwrap();
+        tracing::debug!("Refresh worker nodes {:?}.", nodes);
+        tracing::debug!(
+            "Refresh streaming vnode mapping for fragments {:?}.",
+            streaming_mapping.keys()
+        );
+        tracing::debug!(
+            "Refresh serving vnode mapping for fragments {:?}.",
+            serving_mapping.keys()
+        );
         write_guard.worker_nodes = nodes;
-        write_guard.streaming_fragment_vnode_mapping = mapping;
-        write_guard.serving_fragment_vnode_mapping.clear();
+        write_guard.streaming_fragment_vnode_mapping = streaming_mapping;
+        write_guard.serving_fragment_vnode_mapping = serving_mapping;
     }
 
     /// If parallel unit ids is empty, the scheduler may fail to schedule any task and stuck at
@@ -148,13 +166,14 @@ impl WorkerNodeManager {
     pub fn get_streaming_fragment_mapping(
         &self,
         fragment_id: &FragmentId,
-    ) -> Option<ParallelUnitMapping> {
+    ) -> SchedulerResult<ParallelUnitMapping> {
         self.inner
             .read()
             .unwrap()
             .streaming_fragment_vnode_mapping
             .get(fragment_id)
             .cloned()
+            .ok_or_else(|| SchedulerError::StreamingVnodeMappingNotFound(*fragment_id))
     }
 
     pub fn insert_streaming_fragment_mapping(
@@ -180,7 +199,6 @@ impl WorkerNodeManager {
             .streaming_fragment_vnode_mapping
             .insert(fragment_id, vnode_mapping)
             .unwrap();
-        guard.serving_fragment_vnode_mapping.remove(&fragment_id);
     }
 
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
@@ -189,28 +207,74 @@ impl WorkerNodeManager {
             .streaming_fragment_vnode_mapping
             .remove(fragment_id)
             .unwrap();
-        guard.serving_fragment_vnode_mapping.remove(fragment_id);
     }
 
     /// Returns fragment's vnode mapping for serving.
-    fn get_serving_fragment_mapping(
+    fn serving_fragment_mapping(
         &self,
         fragment_id: FragmentId,
     ) -> SchedulerResult<ParallelUnitMapping> {
-        if let Some(pu_mapping) = self
-            .inner
+        self.inner
             .read()
             .unwrap()
             .get_serving_fragment_mapping(fragment_id)
-        {
-            return Ok(pu_mapping);
-        }
+            .ok_or_else(|| SchedulerError::ServingVnodeMappingNotFound(fragment_id))
+    }
+
+    pub fn set_serving_fragment_mapping(&self, mappings: HashMap<FragmentId, ParallelUnitMapping>) {
         let mut guard = self.inner.write().unwrap();
-        if let Some(pu_mapping) = guard.get_serving_fragment_mapping(fragment_id) {
-            return Ok(pu_mapping);
+        tracing::debug!(
+            "Set serving vnode mapping for fragments {:?}",
+            mappings.keys()
+        );
+        guard.serving_fragment_vnode_mapping = mappings;
+    }
+
+    pub fn upsert_serving_fragment_mapping(
+        &self,
+        mappings: HashMap<FragmentId, ParallelUnitMapping>,
+    ) {
+        let mut guard = self.inner.write().unwrap();
+        tracing::debug!(
+            "Upsert serving vnode mapping for fragments {:?}",
+            mappings.keys()
+        );
+        for (fragment_id, mapping) in mappings {
+            guard
+                .serving_fragment_vnode_mapping
+                .insert(fragment_id, mapping);
         }
-        let pu_mapping = guard.reschedule_serving(fragment_id)?;
-        Ok(pu_mapping)
+    }
+
+    pub fn remove_serving_fragment_mapping(&self, fragment_ids: &[FragmentId]) {
+        let mut guard = self.inner.write().unwrap();
+        tracing::debug!(
+            "Delete serving vnode mapping for fragments {:?}",
+            fragment_ids
+        );
+        for fragment_id in fragment_ids {
+            guard.serving_fragment_vnode_mapping.remove(fragment_id);
+        }
+    }
+
+    fn worker_node_mask(&self) -> RwLockReadGuard<'_, HashSet<u32>> {
+        self.worker_node_mask.read().unwrap()
+    }
+
+    pub fn mask_worker_node(&self, worker_node_id: u32, duration: Duration) {
+        let mut worker_node_mask = self.worker_node_mask.write().unwrap();
+        if worker_node_mask.contains(&worker_node_id) {
+            return;
+        }
+        worker_node_mask.insert(worker_node_id);
+        let worker_node_mask_ref = self.worker_node_mask.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(duration).await;
+            worker_node_mask_ref
+                .write()
+                .unwrap()
+                .remove(&worker_node_id);
+        });
     }
 }
 
@@ -219,60 +283,6 @@ impl WorkerNodeManagerInner {
         self.serving_fragment_vnode_mapping
             .get(&fragment_id)
             .cloned()
-    }
-
-    /// Calculates serving vnode mappings for `fragment_id`.
-    /// The `serving_parallelism` is set to min(`all_serving_pus`, `streaming_parallelism`).
-    fn reschedule_serving(
-        &mut self,
-        fragment_id: FragmentId,
-    ) -> SchedulerResult<ParallelUnitMapping> {
-        let all_serving_pus: BTreeMap<u32, Vec<ParallelUnit>> = self
-            .worker_nodes
-            .iter()
-            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
-            .map(|w| (w.id, w.parallel_units.clone()))
-            .collect();
-        let serving_pus_total_num = all_serving_pus.values().map(|p| p.len()).sum::<usize>();
-        if serving_pus_total_num == 0 {
-            return Err(SchedulerError::EmptyWorkerNodes);
-        }
-        let streaming_vnode_mapping = self
-            .streaming_fragment_vnode_mapping
-            .get(&fragment_id)
-            .ok_or_else(|| {
-                anyhow!(
-                    "streaming vnode mapping for fragment {} not found",
-                    fragment_id
-                )
-            })?;
-        let serving_parallelism = std::cmp::min(
-            serving_pus_total_num,
-            streaming_vnode_mapping.iter_unique().count(),
-        );
-        assert!(serving_parallelism > 0);
-        // round-robin similar to `Scheduler` in meta node.
-        let mut parallel_units: LinkedList<_> = all_serving_pus
-            .into_values()
-            .map(|v| v.into_iter().sorted_by_key(|p| p.id))
-            .collect();
-        let mut round_robin = Vec::new();
-        while !parallel_units.is_empty() {
-            parallel_units.drain_filter(|ps| {
-                if let Some(p) = ps.next() {
-                    round_robin.push(p);
-                    false
-                } else {
-                    true
-                }
-            });
-        }
-        round_robin.truncate(serving_parallelism);
-        round_robin.sort_unstable_by_key(|p| p.id);
-        let selected_serving_pus = ParallelUnitMapping::build(&round_robin);
-        self.serving_fragment_vnode_mapping
-            .insert(fragment_id, selected_serving_pus.clone());
-        Ok(selected_serving_pus)
     }
 }
 
@@ -295,7 +305,8 @@ impl WorkerNodeSelector {
         if self.enable_barrier_read {
             self.manager.list_streaming_worker_nodes().len()
         } else {
-            self.manager.list_serving_worker_nodes().len()
+            self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
+                .len()
         }
     }
 
@@ -303,7 +314,7 @@ impl WorkerNodeSelector {
         let worker_nodes = if self.enable_barrier_read {
             self.manager.list_streaming_worker_nodes()
         } else {
-            self.manager.list_serving_worker_nodes()
+            self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
         };
         worker_nodes
             .iter()
@@ -316,16 +327,16 @@ impl WorkerNodeSelector {
         fragment_id: FragmentId,
     ) -> SchedulerResult<ParallelUnitMapping> {
         if self.enable_barrier_read {
-            self.manager
-                .get_streaming_fragment_mapping(&fragment_id)
-                .ok_or_else(|| {
-                    SchedulerError::Internal(anyhow!(
-                        "vnode mapping for fragment {} not found",
-                        fragment_id
-                    ))
-                })
+            self.manager.get_streaming_fragment_mapping(&fragment_id)
         } else {
-            self.manager.get_serving_fragment_mapping(fragment_id)
+            let origin = self.manager.serving_fragment_mapping(fragment_id)?;
+            if self.manager.worker_node_mask().is_empty() {
+                return Ok(origin);
+            }
+            let new_workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
+            let masked_mapping =
+                place_vnode(Some(&origin), &new_workers, origin.iter_unique().count());
+            masked_mapping.ok_or_else(|| SchedulerError::EmptyWorkerNodes)
         }
     }
 
@@ -333,12 +344,24 @@ impl WorkerNodeSelector {
         let worker_nodes = if self.enable_barrier_read {
             self.manager.list_streaming_worker_nodes()
         } else {
-            self.manager.list_serving_worker_nodes()
+            self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
         };
         worker_nodes
             .choose(&mut rand::thread_rng())
             .ok_or_else(|| SchedulerError::EmptyWorkerNodes)
             .map(|w| (*w).clone())
+    }
+
+    fn apply_worker_node_mask(&self, origin: Vec<WorkerNode>) -> Vec<WorkerNode> {
+        if origin.len() <= 1 {
+            // If there is at most one worker, don't apply mask.
+            return origin;
+        }
+        let mask = self.manager.worker_node_mask();
+        origin
+            .into_iter()
+            .filter(|w| !mask.contains(&w.id))
+            .collect()
     }
 }
 
