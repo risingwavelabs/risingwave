@@ -209,14 +209,17 @@ where
             .policy
             .ok_or_else(|| Status::invalid_argument("policy is required"))?;
 
-        let map = self.stream_manager.get_reschedule_plan(policy).await?;
+        let plan = self.stream_manager.get_reschedule_plan(policy).await?;
 
         let next_revision = self.fragment_manager.get_revision().await;
+
+        // generate reschedule plan will not change the revision
+        assert_eq!(current_revision, next_revision);
 
         Ok(Response::new(GetReschedulePlanResponse {
             success: true,
             revision: next_revision.into(),
-            reschedules: map
+            reschedules: plan
                 .into_iter()
                 .map(|(fragment_id, reschedule)| {
                     (

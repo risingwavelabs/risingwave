@@ -44,7 +44,7 @@ use crate::storage::{MetaStore, MetaStoreError, Transaction, DEFAULT_COLUMN_FAMI
 use crate::stream::GlobalStreamManager;
 use crate::{MetaError, MetaResult};
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct TableRevision(u64);
 
 const TABLE_REVISION_KEY: &[u8] = b"table_revision";
@@ -89,21 +89,11 @@ impl TableRevision {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ParallelUnitReschedule {
     pub added_parallel_units: Vec<ParallelUnitId>,
     pub removed_parallel_units: Vec<ParallelUnitId>,
 }
-
-// impl PartialEq<Self> for ParallelUnitReschedule {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.added_parallel_units.
-//     }
-// }
-//
-// impl Eq for ParallelUnitReschedule {
-//
-// }
 
 pub(crate) struct RescheduleContext {
     /// Index used to map `ParallelUnitId` to `WorkerId`
@@ -428,7 +418,7 @@ where
 
         let mut fragment_dispatcher_map = HashMap::new();
 
-        Self::fulfill_no_shuffle_index(
+        Self::build_no_shuffle_index(
             &actor_map,
             &mut no_shuffle_source_fragment_ids,
             &mut no_shuffle_target_fragment_ids,
@@ -610,7 +600,7 @@ where
         })
     }
 
-    fn fulfill_no_shuffle_index(
+    fn build_no_shuffle_index(
         actor_map: &HashMap<ActorId, StreamActor>,
         no_shuffle_source_fragment_ids: &mut HashSet<u32>,
         no_shuffle_target_fragment_ids: &mut HashSet<u32>,
@@ -1642,15 +1632,19 @@ where
 
         let mut fragment_dispatcher_map = HashMap::new();
 
-        Self::fulfill_no_shuffle_index(
+        Self::build_no_shuffle_index(
             actor_map,
             &mut no_shuffle_source_fragment_ids,
             &mut no_shuffle_target_fragment_ids,
             &mut fragment_dispatcher_map,
         );
 
-        let mut queue: VecDeque<_> = fragment_ids.iter().cloned().collect();
+        let mut queue: VecDeque<FragmentId> = fragment_ids.iter().cloned().collect();
 
+        // Here we use `target_plan` to determine whether the fragment_id should be added to the
+        // queue. However, this may cause a problem if the user provides two no_shuffle fragment IDs
+        // that are far apart but related in the DAG. We might generate a plan for each of them, but
+        // these plans should be exactly the same.
         while let Some(fragment_id) = queue.pop_front() {
             if !no_shuffle_target_fragment_ids.contains(&fragment_id)
                 && !no_shuffle_source_fragment_ids.contains(&fragment_id)
@@ -1668,11 +1662,13 @@ where
                     continue;
                 }
 
-                if let Some(_plan) = target_plan.get(upstream_fragment_id) {
+                let plan = target_plan.get(&fragment_id).unwrap();
+
+                if let Some(upstream_plan) = target_plan.get(upstream_fragment_id) {
+                    assert_eq!(upstream_plan, plan);
                     continue;
                 }
 
-                let plan = target_plan.get(&fragment_id).unwrap();
                 target_plan.insert(*upstream_fragment_id, plan.clone());
 
                 queue.push_back(*upstream_fragment_id);
@@ -1687,11 +1683,13 @@ where
                         continue;
                     }
 
-                    if let Some(_plan) = target_plan.get(downstream_fragment_id) {
+                    let plan = target_plan.get(&fragment_id).unwrap();
+
+                    if let Some(downstream_plan) = target_plan.get(downstream_fragment_id) {
+                        assert_eq!(downstream_plan, plan);
                         continue;
                     }
 
-                    let plan = target_plan.get(&fragment_id).unwrap();
                     target_plan.insert(*downstream_fragment_id, plan.clone());
 
                     queue.push_back(*downstream_fragment_id);
