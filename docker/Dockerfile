@@ -1,8 +1,13 @@
-FROM ubuntu:22.04 as builder
+FROM ubuntu:22.04 AS base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl bash lld maven unzip libsasl2-dev
+RUN apt-get update \
+  && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk
+
+FROM base AS builder
+
+RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld maven unzip
 
 SHELL ["/bin/bash", "-c"]
 
@@ -30,9 +35,8 @@ RUN rustup self update \
   && rustup show \
   && rustup component add rustfmt
 
-RUN cargo fetch
-
-RUN cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
+RUN cargo fetch && \
+  cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
   mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
   cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
   mkdir -p /risingwave/lib && cargo clean
@@ -41,11 +45,12 @@ RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true -Djava.binding.
     mkdir -p /risingwave/bin/connector-node && \
     tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
-FROM ubuntu:22.04 as risingwave
+FROM base AS risingwave
+
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
 
 RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates openjdk-11-jdk libsasl2-dev build-essential gdb \
+  && apt-get -y install gdb \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
