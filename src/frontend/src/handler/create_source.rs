@@ -377,7 +377,7 @@ pub(crate) async fn try_bind_columns_from_source(
                 None,
                 sql_defined_pk_names,
                 StreamSourceInfo {
-                    row_format: RowFormatType::Maxwell as i32,
+                    row_format: RowFormatType::CanalJson as i32,
                     ..Default::default()
                 },
             )
