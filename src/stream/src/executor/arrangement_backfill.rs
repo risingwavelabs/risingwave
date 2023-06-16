@@ -104,12 +104,11 @@ where
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         // let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
-        let pk_in_output_indices = self.upstream_table.pk_indices();
+        let pk_in_output_indices = self.upstream_table.pk_indices().to_vec();
         let state_len = pk_in_output_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
-
-        let pk_order = self.upstream_table.pk_serde().get_order_types();
-
+        let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
+        let mut upstream_table = self.upstream_table;
 
         let schema = Arc::new(self.upstream.schema().clone());
 
@@ -142,13 +141,8 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                let snapshot = Self::snapshot_read(
-                    schema.clone(),
-                    &self.upstream_table,
-                    init_epoch,
-                    None,
-                    false,
-                );
+                let snapshot =
+                    Self::snapshot_read(schema.clone(), &upstream_table, init_epoch, None, false);
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
             }
@@ -215,14 +209,20 @@ where
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
         if to_backfill {
+            let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             'backfill_loop: loop {
-                let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+                // Each time we break out of the backfill loop, we need to flush
+                if let Some(_current_pos) = &current_pos {
+                    for chunk in upstream_chunk_buffer.drain(..) {
+                        upstream_table.write_chunk(chunk);
+                    }
+                }
 
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
                 let right_snapshot = pin!(Self::snapshot_read(
                     schema.clone(),
-                    &self.upstream_table,
+                    &upstream_table,
                     snapshot_read_epoch,
                     current_pos.clone(),
                     true
@@ -258,8 +258,8 @@ where
                                                 Self::mark_chunk(
                                                     &chunk,
                                                     current_pos,
-                                                    pk_in_output_indices,
-                                                    pk_order,
+                                                    &pk_in_output_indices,
+                                                    &pk_order,
                                                 ),
                                                 &self.output_indices,
                                             ));
@@ -340,7 +340,7 @@ where
                                     // Raise the current position.
                                     // As snapshot read streams are ordered by pk, so we can
                                     // just use the last row to update `current_pos`.
-                                    current_pos = Self::update_pos(&chunk, pk_in_output_indices);
+                                    current_pos = Self::update_pos(&chunk, &pk_in_output_indices);
 
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
