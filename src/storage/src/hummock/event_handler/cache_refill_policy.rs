@@ -44,33 +44,35 @@ impl CacheRefillPolicy {
         if self.max_preload_wait_time_mill > 0 {
             let mut flatten_reqs = vec![];
             let mut stats = StoreLocalStatistic::default();
-            let mut fill_count = 0;
             for group_delta in delta.group_deltas.values() {
                 let mut ssts = vec![];
                 let mut hit_count = 0;
+                let mut is_l0_compact = false;
                 for d in &group_delta.group_deltas {
                     if let Some(group_delta::DeltaType::IntraLevel(level_delta)) =
                         d.delta_type.as_ref()
                     {
-                        if level_delta.level_idx != 0 {
-                            for sst_id in &level_delta.removed_table_ids {
-                                if self.sstable_store.is_hot_sstable(sst_id) {
-                                    hit_count += 1;
-                                }
+                        if level_delta.level_idx == 0 {
+                            is_l0_compact = true;
+                        }
+                        for sst_id in &level_delta.removed_table_ids {
+                            if self.sstable_store.is_hot_sstable(sst_id) {
+                                hit_count += 1;
                             }
                         }
                         ssts.extend(level_delta.inserted_table_infos.clone());
                     }
                 }
-                if hit_count > 0 {
-                    fill_count += ssts.len();
+                if hit_count > 0 || is_l0_compact {
                     for sst in &ssts {
                         flatten_reqs.push(self.sstable_store.sstable(sst, &mut stats));
                     }
                 }
             }
 
-            self.metrics.preload_io_count.inc_by(fill_count as u64);
+            self.metrics
+                .preload_io_count
+                .inc_by(flatten_reqs.len() as u64);
             let handle = try_join_all(flatten_reqs);
             let _ = tokio::time::timeout(
                 Duration::from_millis(self.max_preload_wait_time_mill),
