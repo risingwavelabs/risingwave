@@ -166,6 +166,7 @@ impl WriteHandle {
     }
 
     pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+        assert_eq!(self.txn_state, TxnState::Begin);
         self.write_txn_msg(TxnMsg::Data(self.txn_id, chunk))
     }
 
