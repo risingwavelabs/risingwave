@@ -197,7 +197,6 @@ async fn compaction_test(
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
         Arc::new(FilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
         compactor_metrics.clone(),
     )
     .await?;

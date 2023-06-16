@@ -19,12 +19,12 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use hytra::TrAdder;
-use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorSuppressor;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
+use tracing::Instrument;
 
 use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
@@ -163,15 +163,13 @@ where
         let id = self.actor_context.id;
 
         let span_name = format!("actor_poll_{:03}", id);
-        let mut span = {
-            let mut span = Span::enter_with_local_parent("actor_poll");
-            span.add_property(|| ("otel.name", span_name.to_string()));
-            span.add_property(|| ("next", id.to_string()));
-            span.add_property(|| ("next", "Outbound".to_string()));
-            span.add_property(|| ("epoch", (-1).to_string()));
-            span
-        };
-
+        let mut span = tracing::trace_span!(
+            "actor_poll",
+            otel.name = span_name.as_str(),
+            next = id,
+            next = "Outbound",
+            epoch = -1
+        );
         let mut last_epoch: Option<EpochPair> = None;
         let mut stream = Box::pin(Box::new(self.consumer).execute());
 
@@ -179,7 +177,7 @@ where
         let result = loop {
             let barrier = match stream
                 .try_next()
-                .in_span(span)
+                .instrument(span)
                 .instrument_await(
                     last_epoch.map_or("Epoch <initial>".into(), |e| format!("Epoch {}", e.curr)),
                 )
@@ -200,14 +198,14 @@ where
 
             // Tracing related work
             last_epoch = Some(barrier.epoch);
-            span = {
-                let mut span = Span::enter_with_local_parent("actor_poll");
-                span.add_property(|| ("otel.name", span_name.to_string()));
-                span.add_property(|| ("next", id.to_string()));
-                span.add_property(|| ("next", "Outbound".to_string()));
-                span.add_property(|| ("epoch", barrier.epoch.curr.to_string()));
-                span
-            };
+
+            span = tracing::trace_span!(
+                "actor_poll",
+                otel.name = span_name.as_str(),
+                next = id,
+                next = "Outbound",
+                epoch = barrier.epoch.curr
+            );
         };
 
         spawn_blocking_drop_stream(stream).await;

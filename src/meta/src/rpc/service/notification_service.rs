@@ -29,6 +29,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::backup_restore::BackupManagerRef;
+use crate::batch::ServingVnodeMappingRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
     Catalog, CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification,
@@ -44,6 +45,7 @@ pub struct NotificationServiceImpl<S: MetaStore> {
     hummock_manager: HummockManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
     backup_manager: BackupManagerRef<S>,
+    serving_vnode_mapping: ServingVnodeMappingRef,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -57,6 +59,7 @@ where
         hummock_manager: HummockManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         backup_manager: BackupManagerRef<S>,
+        serving_vnode_mapping: ServingVnodeMappingRef,
     ) -> Self {
         Self {
             env,
@@ -65,6 +68,7 @@ where
             hummock_manager,
             fragment_manager,
             backup_manager,
+            serving_vnode_mapping,
         }
     }
 
@@ -98,6 +102,17 @@ where
         let parallel_unit_mappings = fragment_guard.all_running_fragment_mappings().collect_vec();
         let notification_version = self.env.notification_manager().current_version().await;
         (parallel_unit_mappings, notification_version)
+    }
+
+    fn get_serving_vnode_mappings(&self) -> Vec<FragmentParallelUnitMapping> {
+        self.serving_vnode_mapping
+            .all()
+            .iter()
+            .map(|(fragment_id, mapping)| FragmentParallelUnitMapping {
+                fragment_id: *fragment_id,
+                mapping: Some(mapping.to_protobuf()),
+            })
+            .collect()
     }
 
     async fn get_worker_node_snapshot(&self) -> (Vec<WorkerNode>, NotificationVersion) {
@@ -136,6 +151,7 @@ where
         ) = self.get_catalog_snapshot().await;
         let (parallel_unit_mappings, parallel_unit_mapping_version) =
             self.get_parallel_unit_mapping_snapshot().await;
+        let serving_parallel_unit_mappings = self.get_serving_vnode_mappings();
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await;
 
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
@@ -154,6 +170,7 @@ where
             parallel_unit_mappings,
             nodes,
             hummock_snapshot,
+            serving_parallel_unit_mappings,
             version: Some(SnapshotVersion {
                 catalog_version,
                 parallel_unit_mapping_version,

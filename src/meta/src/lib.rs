@@ -37,6 +37,7 @@
 
 pub mod backup_restore;
 mod barrier;
+pub(crate) mod batch;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
 mod error;
