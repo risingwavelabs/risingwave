@@ -209,10 +209,6 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             PrecomputedBuildHasher,
             self.mem_context.global_allocator(),
         );
-        // let mut groups =
-        //     hashbrown::HashMap::<K, Vec<BoxedAggState>, PrecomputedBuildHasher>::with_hasher(
-        //         PrecomputedBuildHasher,
-        //     );
 
         // consume all chunks to compute the agg result
         #[for_await]
@@ -221,16 +217,17 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             let mut memory_usage_diff = 0;
             for (row_id, key) in keys.into_iter().enumerate() {
-                let states = if !groups.contains_key(&key) {
-                    let key2 = key.clone();
-                    groups.insert(key, self.agg_init_states.clone());
-                    groups.get_mut(&key2).unwrap()
-                } else {
-                    groups.get_mut(&key).unwrap()
-                };
+                let mut new_group = false;
+                let states = groups.entry(key).or_insert_with(|| {
+                    new_group = true;
+                    self.agg_init_states.clone()
+                });
 
+                // TODO: currently not a vectorized implementation
                 for state in states {
-                    memory_usage_diff -= state.estimated_size() as i64;
+                    if !new_group {
+                        memory_usage_diff -= state.estimated_size() as i64;
+                    }
                     state.update_single(&chunk, row_id).await?;
                     memory_usage_diff += state.estimated_size() as i64;
                 }
@@ -239,8 +236,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             self.mem_context.add(memory_usage_diff);
         }
 
-        // generate output data chunks
-        let mut result = groups.into_iter();
+        // Don't use `into_iter` here, it may cause memory leak.
+        let mut result = groups.iter_mut();
         let cardinality = self.chunk_size;
         loop {
             let mut group_builders: Vec<_> = self
@@ -264,7 +261,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 states
                     .into_iter()
                     .zip_eq_fast(&mut agg_builders)
-                    .try_for_each(|(mut aggregator, builder)| aggregator.output(builder))?;
+                    .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
             }
             if !has_next {
                 break; // exit loop
@@ -284,10 +281,6 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
 #[cfg(test)]
 mod tests {
-    use std::alloc::{AllocError, Allocator, Global, Layout};
-    use std::ptr::NonNull;
-    use std::sync::Arc;
-
     use prometheus::IntGauge;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
@@ -303,9 +296,11 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let src_exec = Box::new(MockExecutor::with_chunk(
-            DataChunk::from_pretty(
-                "i i i
+        let parent_mem = MemoryContext::root(IntGauge::new("root_memory_usage", " ").unwrap());
+        {
+            let src_exec = Box::new(MockExecutor::with_chunk(
+                DataChunk::from_pretty(
+                    "i i i
                  0 1 1
                  1 1 1
                  0 0 1
@@ -314,68 +309,75 @@ mod tests {
                  0 0 2
                  1 1 3
                  0 1 2",
-            ),
-            Schema::new(vec![
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int64),
-            ]),
-        ));
+                ),
+                Schema::new(vec![
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Int64),
+                ]),
+            ));
 
-        let agg_call = AggCall {
-            r#type: Type::Sum as i32,
-            args: vec![InputRef {
-                index: 2,
-                r#type: Some(PbDataType {
-                    type_name: TypeName::Int32 as i32,
+            let agg_call = AggCall {
+                r#type: Type::Sum as i32,
+                args: vec![InputRef {
+                    index: 2,
+                    r#type: Some(PbDataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                }],
+                return_type: Some(PbDataType {
+                    type_name: TypeName::Int64 as i32,
                     ..Default::default()
                 }),
-            }],
-            return_type: Some(PbDataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            distinct: false,
-            order_by: vec![],
-            filter: None,
-            direct_args: vec![],
-        };
+                distinct: false,
+                order_by: vec![],
+                filter: None,
+                direct_args: vec![],
+            };
 
-        let agg_prost = HashAggNode {
-            group_key: vec![0, 1],
-            agg_calls: vec![agg_call],
-        };
+            let agg_prost = HashAggNode {
+                group_key: vec![0, 1],
+                agg_calls: vec![agg_call],
+            };
 
-        let mem_context = MemoryContext::root(IntGauge::new("memory_usage", " ").unwrap());
-        let actual_exec = HashAggExecutorBuilder::deserialize(
-            &agg_prost,
-            src_exec,
-            TaskId::default(),
-            "HashAggExecutor".to_string(),
-            CHUNK_SIZE,
-            mem_context.clone(),
-        )
-        .unwrap();
+            let mem_context = MemoryContext::new(
+                Some(parent_mem.clone()),
+                IntGauge::new("memory_usage", " ").unwrap(),
+            );
+            let actual_exec = HashAggExecutorBuilder::deserialize(
+                &agg_prost,
+                src_exec,
+                TaskId::default(),
+                "HashAggExecutor".to_string(),
+                CHUNK_SIZE,
+                mem_context.clone(),
+            )
+            .unwrap();
 
-        // TODO: currently the order is fixed unless the hasher is changed
-        let expect_exec = Box::new(MockExecutor::with_chunk(
-            DataChunk::from_pretty(
-                "i i I
+            // TODO: currently the order is fixed unless the hasher is changed
+            let expect_exec = Box::new(MockExecutor::with_chunk(
+                DataChunk::from_pretty(
+                    "i i I
                  1 0 1
                  0 0 3
                  0 1 3
                  1 1 6",
-            ),
-            Schema::new(vec![
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int64),
-            ]),
-        ));
-        diff_executor_output(actual_exec, expect_exec).await;
+                ),
+                Schema::new(vec![
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Int64),
+                ]),
+            ));
+            diff_executor_output(actual_exec, expect_exec).await;
 
-        // check estimated memory usage = 4 groups x state size
-        assert_eq!(mem_context.get_bytes_used() as usize, 4 * 72);
+            // check estimated memory usage = 4 groups x state size
+            assert_eq!(mem_context.get_bytes_used() as usize, 4 * 72);
+        }
+
+        // Ensure that agg memory counter has been dropped.
+        assert_eq!(0, parent_mem.get_bytes_used());
     }
 
     #[tokio::test]
@@ -431,49 +433,5 @@ mod tests {
             Schema::new(vec![Field::unnamed(DataType::Int64)]),
         );
         diff_executor_output(actual_exec, Box::new(expect_exec)).await;
-    }
-
-    #[test]
-    fn test_hash_allocator() {
-        struct MyAllocInner {}
-
-        #[derive(Clone)]
-        struct MyAlloc {
-            inner: Arc<MyAllocInner>,
-        }
-
-        impl Drop for MyAllocInner {
-            fn drop(&mut self) {
-                println!("MyAlloc freed.")
-            }
-        }
-
-        unsafe impl Allocator for MyAlloc {
-            fn allocate(&self, layout: Layout) -> std::result::Result<NonNull<[u8]>, AllocError> {
-                let g = Global;
-                g.allocate(layout)
-            }
-
-            unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-                let g = Global;
-                g.deallocate(ptr, layout)
-            }
-        }
-
-        let mut map = hashbrown::HashMap::with_capacity_in(
-            10,
-            MyAlloc {
-                inner: Arc::new(MyAllocInner {}),
-            },
-        );
-        for i in 0..100000 {
-            map.entry(i).or_insert_with(|| "i".to_string());
-        }
-
-        for i in 0..100000 {
-            map.entry(i).or_insert_with(|| "i".to_string());
-        }
-
-        println!("Map size: {}", map.len());
     }
 }
