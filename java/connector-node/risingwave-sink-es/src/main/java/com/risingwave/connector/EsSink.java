@@ -20,6 +20,7 @@ import com.risingwave.connector.api.sink.SinkRow;
 import io.grpc.Status;
 import java.io.IOException;
 import java.util.*;
+import java.util.stream.Collectors;
 import org.apache.http.HttpHost;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.bulk.BackoffPolicy;
@@ -52,12 +53,12 @@ import org.slf4j.LoggerFactory;
  * 4. bulkprocessor and high-level-client are deprecated in es 8 java api.
  */
 public class EsSink extends SinkBase {
+    private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
     private final EsSinkConfig config;
     private final BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
-    private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     // For bulk listener
     private final List<Integer> primaryKeyIndexes;
 
@@ -189,12 +190,11 @@ public class EsSink extends SinkBase {
         if (primaryKeyIndexes.isEmpty()) {
             id = row.get(0).toString();
         } else {
-            id = row.get(primaryKeyIndexes.get(0)).toString();
-            for (int i = 1; i < primaryKeyIndexes.size(); i++) {
-                id =
-                        id.concat(config.getDelimiter())
-                                .concat(row.get(primaryKeyIndexes.get(i)).toString());
-            }
+            List<String> keys =
+                    primaryKeyIndexes.stream()
+                            .map(index -> row.get(primaryKeyIndexes.get(index)).toString())
+                            .collect(Collectors.toList());
+            id = String.join(config.getDelimiter(), keys);
         }
         return id;
     }
