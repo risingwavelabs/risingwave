@@ -104,7 +104,13 @@ where
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         // let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
-        let pk_in_output_indices = self.upstream_table.pk_indices().to_vec();
+        let pk_in_output_indices = self
+            .upstream_table
+            .pk_indices()
+            .iter()
+            .map(|&i| self.output_indices.iter().position(|&j| i == j))
+            .collect::<Option<Vec<_>>>()
+            .unwrap();
         let state_len = pk_in_output_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
