@@ -21,5 +21,6 @@
 #![cfg(madsim)]
 #![feature(lazy_cell)]
 
+mod batch;
 mod recovery;
 mod scale;
