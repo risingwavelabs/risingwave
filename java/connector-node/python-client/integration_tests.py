@@ -158,8 +158,8 @@ def validate_jdbc_sink(input_file):
 
 def test_elasticsearch_sink(input_file):
     test_sink("elasticsearch",
-              {"es.url": "http://127.0.0.1:9200",
-               "es.index": "test"},
+              {"url": "http://127.0.0.1:9200",
+               "index": "test"},
               input_file)
 
 def test_iceberg_sink(input_file):

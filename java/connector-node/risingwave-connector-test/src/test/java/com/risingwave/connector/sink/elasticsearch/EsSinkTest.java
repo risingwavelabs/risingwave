@@ -47,13 +47,13 @@ public class EsSinkTest {
                 Lists.newArrayList(
                         Data.DataType.newBuilder().setTypeName(TypeName.INT32).build(),
                         Data.DataType.newBuilder().setTypeName(TypeName.VARCHAR).build()),
-                Lists.newArrayList("id"));
+                Lists.newArrayList("id", "name"));
     }
 
     public void testEsSink(ElasticsearchContainer container) throws IOException {
         EsSink sink =
                 new EsSink(
-                        new EsSinkConfig(container.getHttpHostAddress(), "test"),
+                        new EsSinkConfig(container.getHttpHostAddress(), "test", "$"),
                         getTestTableSchema());
         sink.write(
                 Iterators.forArray(
@@ -82,11 +82,13 @@ public class EsSinkTest {
         Map<String, Object> sourceAsMap = hit.getSourceAsMap();
         assertEquals(1, sourceAsMap.get("id"));
         assertEquals("Alice", sourceAsMap.get("name"));
+        assertEquals("1$Alice", hit.getId());
 
         hit = hits.getAt(1);
         sourceAsMap = hit.getSourceAsMap();
         assertEquals(2, sourceAsMap.get("id"));
         assertEquals("Bob", sourceAsMap.get("name"));
+        assertEquals("2$Bob", hit.getId());
 
         sink.drop();
     }

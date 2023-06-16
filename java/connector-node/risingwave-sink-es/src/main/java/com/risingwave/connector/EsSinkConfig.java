@@ -21,23 +21,34 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.risingwave.connector.api.sink.CommonSinkConfig;
 
 public class EsSinkConfig extends CommonSinkConfig {
-    private String esUrl;
+    /** Required */
+    private String url;
 
+    /** Required */
     private String index;
+
+    /** Optional, delimeter for generating id */
+    private String delimeter;
 
     @JsonCreator
     public EsSinkConfig(
-            @JsonProperty(value = "es.url") String esUrl,
-            @JsonProperty(value = "es.index") String index) {
-        this.esUrl = esUrl;
+            @JsonProperty(value = "url") String url,
+            @JsonProperty(value = "index") String index,
+            @JsonProperty(value = "delimeter") String delimeter) {
+        this.url = url;
         this.index = index;
+        this.delimeter = delimeter == null ? "_" : delimeter;
     }
 
-    public String getEsUrl() {
-        return esUrl;
+    public String getUrl() {
+        return url;
     }
 
     public String getIndex() {
         return index;
+    }
+
+    public String getDelimeter() {
+        return delimeter;
     }
 }

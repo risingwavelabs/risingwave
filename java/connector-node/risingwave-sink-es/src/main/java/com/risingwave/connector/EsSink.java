@@ -65,7 +65,7 @@ public class EsSink extends SinkBase {
         super(tableSchema);
         HttpHost host;
         try {
-            host = HttpHost.create(config.getEsUrl());
+            host = HttpHost.create(config.getUrl());
         } catch (IllegalArgumentException e) {
             throw Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException();
         }
@@ -79,7 +79,7 @@ public class EsSink extends SinkBase {
             boolean isConnected = this.client.ping(RequestOptions.DEFAULT);
             if (!isConnected) {
                 throw Status.INVALID_ARGUMENT
-                        .withDescription("Cannot connect to " + config.getEsUrl())
+                        .withDescription("Cannot connect to " + config.getUrl())
                         .asRuntimeException();
             }
         } catch (Exception e) {
@@ -164,7 +164,7 @@ public class EsSink extends SinkBase {
      * @return Map from Field name to Value
      */
     private Map<String, Object> buildDoc(SinkRow row) {
-        Map<String, Object> doc = new HashMap<String, Object>();
+        Map<String, Object> doc = new HashMap();
         for (int i = 0; i < getTableSchema().getNumColumns(); i++) {
             doc.put(getTableSchema().getColumnDesc(i).getName(), row.get(i));
         }
@@ -184,7 +184,9 @@ public class EsSink extends SinkBase {
         } else {
             id = row.get(primaryKeyIndexes.get(0)).toString();
             for (int i = 1; i < primaryKeyIndexes.size(); i++) {
-                id.concat("_").concat(row.get(primaryKeyIndexes.get(i)).toString());
+                id =
+                        id.concat(config.getDelimeter())
+                                .concat(row.get(primaryKeyIndexes.get(i)).toString());
             }
         }
         return id;

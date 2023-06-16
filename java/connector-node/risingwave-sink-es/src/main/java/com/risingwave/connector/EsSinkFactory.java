@@ -48,12 +48,10 @@ public class EsSinkFactory implements SinkFactory {
         mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
         EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
 
-        String esUrl = config.getEsUrl();
-
         // 1. check url
         HttpHost host;
         try {
-            host = HttpHost.create(config.getEsUrl());
+            host = HttpHost.create(config.getUrl());
         } catch (IllegalArgumentException e) {
             throw Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException();
         }
@@ -65,7 +63,7 @@ public class EsSinkFactory implements SinkFactory {
             boolean isConnected = client.ping(RequestOptions.DEFAULT);
             if (!isConnected) {
                 throw Status.INVALID_ARGUMENT
-                        .withDescription("Cannot connect to " + config.getEsUrl())
+                        .withDescription("Cannot connect to " + config.getUrl())
                         .asRuntimeException();
             }
         } catch (Exception e) {
