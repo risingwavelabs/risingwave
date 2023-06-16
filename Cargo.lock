@@ -9004,8 +9004,6 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
- "opentelemetry 0.19.0",
- "opentelemetry_sdk",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.7",
  "petgraph",

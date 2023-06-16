@@ -20,7 +20,6 @@ console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.3"
-opentelemetry = { version = "0.19", default-features = false, features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.12" }
 opentelemetry-semantic-conventions = "0.11"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
@@ -41,4 +40,5 @@ tracing-opentelemetry = "0.19"
 tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std", "time", "local-time"] }
 
 [target.'cfg(not(madsim))'.dependencies]
+opentelemetry = { version = "0.19", default-features = false, features = ["rt-tokio"] }
 workspace-hack = { path = "../../workspace-hack" }

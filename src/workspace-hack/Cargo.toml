@@ -63,8 +63,6 @@ num = { version = "0.4" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
-opentelemetry = { version = "0.19", default-features = false, features = ["metrics", "rt-tokio", "trace"] }
-opentelemetry_sdk = { version = "0.19", features = ["metrics", "rt-tokio"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 petgraph = { version = "0.6" }
@@ -150,8 +148,6 @@ num = { version = "0.4" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
-opentelemetry = { version = "0.19", default-features = false, features = ["metrics", "rt-tokio", "trace"] }
-opentelemetry_sdk = { version = "0.19", features = ["metrics", "rt-tokio"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 petgraph = { version = "0.6" }

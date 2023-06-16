@@ -21,7 +21,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
-use opentelemetry_otlp::WithExportConfig;
 use risingwave_common::metrics::MetricsLayer;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{Directive, Targets};
@@ -301,10 +300,12 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
     };
 
     // Tracing layer
+    #[cfg(not(madsim))]
     if let Ok(endpoint) = std::env::var("RW_TRACING_ENDPOINT") {
         println!("tracing enabled, exported to `{endpoint}`");
 
         use opentelemetry::{sdk, KeyValue};
+        use opentelemetry_otlp::WithExportConfig;
         use opentelemetry_semantic_conventions::resource;
 
         let id = format!(
