@@ -18,6 +18,7 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.jdbc.JdbcDialect;
+import com.risingwave.connector.jdbc.JdbcDialectFactory;
 import com.risingwave.connector.jdbc.PostgresDialect;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
@@ -25,7 +26,6 @@ import java.sql.*;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Optional;
 import org.apache.commons.lang3.StringUtils;
 import org.postgresql.util.PGInterval;
 import org.postgresql.util.PGobject;
@@ -52,12 +52,13 @@ public class JDBCSink extends SinkBase {
 
         var jdbcUrl = config.getJdbcUrl().toLowerCase();
         var factory = JdbcUtils.getDialectFactory(jdbcUrl);
-        if (factory.isEmpty()) {
-            throw Status.INVALID_ARGUMENT
-                    .withDescription("Unsupported jdbc url: " + jdbcUrl)
-                    .asRuntimeException();
-        }
-        this.jdbcDialect = factory.get().create();
+        this.jdbcDialect =
+                factory.map(JdbcDialectFactory::create)
+                        .orElseThrow(
+                                () ->
+                                        Status.INVALID_ARGUMENT
+                                                .withDescription("Unsupported jdbc url: " + jdbcUrl)
+                                                .asRuntimeException());
         this.config = config;
         try {
             this.conn = DriverManager.getConnection(config.getJdbcUrl());
@@ -67,14 +68,6 @@ public class JDBCSink extends SinkBase {
             throw Status.INTERNAL
                     .withDescription(
                             String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                    .asRuntimeException();
-        }
-
-        // Upsert sink must have primary key
-        if (config.isUpsertSink() && pkColumnNames.isEmpty()) {
-            throw Status.FAILED_PRECONDITION
-                    .withDescription(
-                            "No primary key in downstream for table " + config.getTableName())
                     .asRuntimeException();
         }
 
@@ -120,15 +113,12 @@ public class JDBCSink extends SinkBase {
         return pkColumnNames;
     }
 
-    private Optional<PreparedStatement> prepareUpsertStatement(SinkRow row) {
+    private PreparedStatement prepareUpsertStatement(SinkRow row) {
         try {
             switch (row.getOp()) {
                 case INSERT:
                     bindUpsertStatementValues(upsertPreparedStmt, row);
-                    return Optional.of(upsertPreparedStmt);
-                case UPDATE_DELETE:
-                    updateFlag = true;
-                    return Optional.empty();
+                    return upsertPreparedStmt;
                 case UPDATE_INSERT:
                     if (!updateFlag) {
                         throw Status.FAILED_PRECONDITION
@@ -137,9 +127,11 @@ public class JDBCSink extends SinkBase {
                     }
                     bindUpsertStatementValues(upsertPreparedStmt, row);
                     updateFlag = false;
-                    return Optional.of(upsertPreparedStmt);
+                    return upsertPreparedStmt;
                 default:
-                    return Optional.empty();
+                    throw Status.FAILED_PRECONDITION
+                            .withDescription("unexpected op type: " + row.getOp())
+                            .asRuntimeException();
             }
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL
@@ -150,7 +142,7 @@ public class JDBCSink extends SinkBase {
         }
     }
 
-    private Optional<PreparedStatement> prepareDeleteStatement(SinkRow row) {
+    private PreparedStatement prepareDeleteStatement(SinkRow row) {
         assert row.getOp() == Data.Op.DELETE;
         if (!config.isUpsertSink()) {
             throw Status.FAILED_PRECONDITION
@@ -170,7 +162,7 @@ public class JDBCSink extends SinkBase {
                 Object fromRow = getTableSchema().getFromRow(primaryKey, row);
                 deletePreparedStmt.setObject(placeholderIdx++, fromRow);
             }
-            return Optional.of(deletePreparedStmt);
+            return deletePreparedStmt;
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -247,30 +239,26 @@ public class JDBCSink extends SinkBase {
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
             try (SinkRow row = rows.next()) {
-                Optional<PreparedStatement> stmt;
-                if (row.getOp() != Data.Op.DELETE) {
-                    stmt = prepareUpsertStatement(row);
-                } else {
-                    stmt = prepareDeleteStatement(row);
-                }
+                PreparedStatement stmt;
                 if (row.getOp() == Data.Op.UPDATE_DELETE) {
+                    updateFlag = true;
                     continue;
                 }
-                if (stmt.isPresent()) {
-                    try {
-                        LOG.debug("Executing statement: {}", stmt.get());
-                        stmt.get().executeUpdate();
-                        stmt.get().clearParameters();
-                    } catch (SQLException e) {
-                        throw Status.INTERNAL
-                                .withDescription(
-                                        String.format(
-                                                ERROR_REPORT_TEMPLATE, stmt.get(), e.getMessage()))
-                                .asRuntimeException();
-                    }
+
+                if (row.getOp() == Data.Op.DELETE) {
+                    stmt = prepareDeleteStatement(row);
                 } else {
+                    stmt = prepareUpsertStatement(row);
+                }
+
+                try {
+                    LOG.debug("Executing statement: {}", stmt);
+                    stmt.executeUpdate();
+                    stmt.clearParameters();
+                } catch (SQLException e) {
                     throw Status.INTERNAL
-                            .withDescription("empty statement encoded")
+                            .withDescription(
+                                    String.format(ERROR_REPORT_TEMPLATE, stmt, e.getMessage()))
                             .asRuntimeException();
                 }
             } catch (Exception e) {
