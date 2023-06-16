@@ -83,7 +83,7 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
   echo "--- Release build and upload risingwave connector node jar asset"
-  cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true
+  cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true
   cd connector-node/assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
   gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 fi

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.functions.example;
+package com.example;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -35,7 +35,6 @@ public class UdfExample {
             server.addFunction("int_42", new Int42());
             server.addFunction("gcd", new Gcd());
             server.addFunction("gcd3", new Gcd3());
-            server.addFunction("to_string", new ToString());
             server.addFunction("extract_tcp_info", new ExtractTcpInfo());
             server.addFunction("hex_to_dec", new HexToDec());
             server.addFunction("array_access", new ArrayAccess());
@@ -74,12 +73,6 @@ public class UdfExample {
         public int eval(int a, int b, int c) {
             var gcd = new Gcd();
             return gcd.eval(gcd.eval(a, b), c);
-        }
-    }
-
-    public static class ToString implements ScalarFunction {
-        public String eval(String s) {
-            return s;
         }
     }
 

@@ -219,6 +219,9 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<AggFuncSig>>> =
                         AggKind::BitOr,
                         AggKind::BoolAnd,
                         AggKind::BoolOr,
+                        AggKind::PercentileCont,
+                        AggKind::PercentileDisc,
+                        AggKind::Mode,
                     ]
                     .contains(&func.func)
             })
