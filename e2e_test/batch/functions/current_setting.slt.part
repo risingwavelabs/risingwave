@@ -1,0 +1,9 @@
+query T
+SELECT current_setting('server_version');
+----
+8.3.0
+
+query I
+SELECT CAST(current_setting('server_version_num') AS INT) / 100 AS version;
+----
+803

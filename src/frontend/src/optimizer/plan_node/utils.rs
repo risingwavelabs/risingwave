@@ -185,10 +185,48 @@ macro_rules! impl_distill_by_unit {
 }
 pub(crate) use impl_distill_by_unit;
 
+pub fn column_names_pretty<'a>(schema: &Schema) -> Pretty<'a> {
+    let columns = (schema.fields.iter())
+        .map(|f| f.name.clone())
+        .map(Pretty::from)
+        .collect();
+    Pretty::Array(columns)
+}
+
 #[derive(Clone, Copy)]
 pub struct IndicesDisplay<'a> {
     pub indices: &'a [usize],
     pub input_schema: &'a Schema,
+}
+
+impl<'a> IndicesDisplay<'a> {
+    /// Returns `None` means all
+    pub fn from_join<PlanRef: GenericPlanRef>(
+        join: &'a generic::Join<PlanRef>,
+        input_schema: &'a Schema,
+    ) -> Option<Self> {
+        Self::from(
+            &join.output_indices,
+            join.internal_column_num(),
+            input_schema,
+        )
+    }
+
+    /// Returns `None` means all
+    pub fn from(
+        indices: &'a [usize],
+        internal_column_num: usize,
+        input_schema: &'a Schema,
+    ) -> Option<Self> {
+        if indices.iter().copied().eq(0..internal_column_num) {
+            None
+        } else {
+            Some(Self {
+                indices,
+                input_schema,
+            })
+        }
+    }
 }
 
 impl fmt::Display for IndicesDisplay<'_> {
@@ -228,3 +266,5 @@ macro_rules! formatter_debug_plan_node {
     };
 }
 pub(crate) use formatter_debug_plan_node;
+
+use super::generic::{self, GenericPlanRef};

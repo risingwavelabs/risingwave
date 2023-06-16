@@ -39,7 +39,7 @@ pub struct Insert<PlanRef: Eq + Hash> {
     pub returning: bool,
 }
 
-impl<PlanRef: GenericPlanRef + Eq + Hash> Insert<PlanRef> {
+impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
     pub fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
     }

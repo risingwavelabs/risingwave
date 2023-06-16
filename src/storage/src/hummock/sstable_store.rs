@@ -20,13 +20,16 @@ use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
+use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
+use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
     ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
 
 use super::utils::MemoryTracker;
@@ -113,6 +116,16 @@ pub enum CachePolicy {
 impl Default for CachePolicy {
     fn default() -> Self {
         CachePolicy::Fill(CachePriority::High)
+    }
+}
+
+impl From<TracedCachePolicy> for CachePolicy {
+    fn from(policy: TracedCachePolicy) -> Self {
+        match policy {
+            TracedCachePolicy::Disable => Self::Disable,
+            TracedCachePolicy::Fill(priority) => Self::Fill(priority.into()),
+            TracedCachePolicy::NotFill => Self::NotFill,
+        }
     }
 }
 
@@ -381,7 +394,7 @@ impl SstableStore {
                         size: (sst.file_size - sst.meta_offset) as usize,
                     };
                     async move {
-                        let now = minstant::Instant::now();
+                        let now = Instant::now();
                         let buf = store
                             .read(&meta_path, Some(loc))
                             .await
@@ -506,13 +519,19 @@ pub type SstableStoreRef = Arc<SstableStore>;
 pub struct HummockMemoryCollector {
     sstable_store: SstableStoreRef,
     limiter: Arc<MemoryLimiter>,
+    storage_memory_config: StorageMemoryConfig,
 }
 
 impl HummockMemoryCollector {
-    pub fn new(sstable_store: SstableStoreRef, limiter: Arc<MemoryLimiter>) -> Self {
+    pub fn new(
+        sstable_store: SstableStoreRef,
+        limiter: Arc<MemoryLimiter>,
+        storage_memory_config: StorageMemoryConfig,
+    ) -> Self {
         Self {
             sstable_store,
             limiter,
+            storage_memory_config,
         }
     }
 }
@@ -528,6 +547,21 @@ impl MemoryCollector for HummockMemoryCollector {
 
     fn get_uploading_memory_usage(&self) -> u64 {
         self.limiter.get_memory_usage()
+    }
+
+    fn get_meta_cache_memory_usage_ratio(&self) -> f64 {
+        self.sstable_store.get_meta_memory_usage() as f64
+            / (self.storage_memory_config.meta_cache_capacity_mb * 1024 * 1024) as f64
+    }
+
+    fn get_block_cache_memory_usage_ratio(&self) -> f64 {
+        self.sstable_store.block_cache.size() as f64
+            / (self.storage_memory_config.block_cache_capacity_mb * 1024 * 1024) as f64
+    }
+
+    fn get_uploading_memory_usage_ratio(&self) -> f64 {
+        self.limiter.get_memory_usage() as f64
+            / (self.storage_memory_config.shared_buffer_capacity_mb * 1024 * 1024) as f64
     }
 }
 

@@ -201,7 +201,7 @@ impl Compactor {
         };
 
         if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
-            let found_tables = multi.get_exsting_table_ids();
+            let found_tables = multi.get_existing_table_ids();
             let removed_tables = compact_table_ids
                 .iter()
                 .filter(|table_id| !found_tables.contains(table_id))
@@ -495,7 +495,7 @@ impl Compactor {
 
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
-                    let message = tokio::select! {
+                    let message: Option<Result<SubscribeCompactTasksResponse, _>> = tokio::select! {
                         _ = task_progress_interval.tick() => {
                             let mut progress_list = Vec::new();
                             for (&task_id, progress) in task_progress.lock().iter() {

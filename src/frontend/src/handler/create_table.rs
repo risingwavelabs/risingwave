@@ -140,15 +140,11 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
 /// This primary key is not combined with table constraints yet.
-pub fn bind_sql_columns(
-    columns: Vec<ColumnDef>,
-    col_id_gen: &mut ColumnIdGenerator,
-) -> Result<Vec<ColumnDesc>> {
-    let mut column_descs = Vec::with_capacity(columns.len());
+pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>> {
+    let mut columns = Vec::with_capacity(column_defs.len());
 
-    for column in columns {
-        ensure_column_options_supported(&column)?;
-        let column_id = col_id_gen.generate(&column.name.real_value());
+    for column in column_defs {
+        ensure_column_options_supported(column)?;
         // Destruct to make sure all fields are properly handled rather than ignored.
         // Do NOT use `..` to ignore fields you do not want to deal with.
         // Reject them with a clear NotImplemented error.
@@ -159,7 +155,7 @@ pub fn bind_sql_columns(
             ..
         } = column;
 
-        let data_type = data_type.ok_or(ErrorCode::InvalidInputSyntax(
+        let data_type = data_type.clone().ok_or(ErrorCode::InvalidInputSyntax(
             "data type is not specified".into(),
         ))?;
         if let Some(collation) = collation {
@@ -172,7 +168,7 @@ pub fn bind_sql_columns(
 
         check_valid_column_name(&name.real_value())?;
 
-        let field_descs = if let AstDataType::Struct(fields) = &data_type {
+        let field_descs: Vec<ColumnDesc> = if let AstDataType::Struct(fields) = &data_type {
             fields
                 .iter()
                 .map(bind_struct_field)
@@ -180,17 +176,20 @@ pub fn bind_sql_columns(
         } else {
             vec![]
         };
-        column_descs.push(ColumnDesc {
-            data_type: bind_data_type(&data_type)?,
-            column_id,
-            name: name.real_value(),
-            field_descs,
-            type_name: "".to_string(),
-            generated_or_default_column: None,
+        columns.push(ColumnCatalog {
+            column_desc: ColumnDesc {
+                data_type: bind_data_type(&data_type)?,
+                column_id: ColumnId::placeholder(),
+                name: name.real_value(),
+                field_descs,
+                type_name: "".to_string(),
+                generated_or_default_column: None,
+            },
+            is_hidden: false,
         });
     }
 
-    Ok(column_descs)
+    Ok(columns)
 }
 
 fn check_generated_column_constraints(
@@ -295,7 +294,7 @@ pub fn bind_sql_column_constraints(
     Ok(())
 }
 
-fn ensure_table_constraints_supported(table_constraints: &[TableConstraint]) -> Result<()> {
+pub fn ensure_table_constraints_supported(table_constraints: &[TableConstraint]) -> Result<()> {
     for constraint in table_constraints {
         match constraint {
             TableConstraint::Unique {
@@ -352,25 +351,25 @@ fn multiple_pk_definition_err() -> RwError {
     ErrorCode::BindError("multiple primary keys are not allowed".into()).into()
 }
 
-/// Binds constraints that can be specified in both column definitions and table definition.
+/// Binds primary keys defined in SQL.
 ///
 /// It returns the columns together with `pk_column_ids`, and an optional row id column index if
 /// added.
-pub fn bind_sql_table_column_constraints(
-    columns_descs: Vec<ColumnDesc>,
-    columns_defs: Vec<ColumnDef>,
-    table_constraints: Vec<TableConstraint>,
+pub fn bind_pk_on_relation(
+    mut columns: Vec<ColumnCatalog>,
+    pk_names: Vec<String>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
-    ensure_table_constraints_supported(&table_constraints)?;
+    for c in &columns {
+        assert!(c.column_id() != ColumnId::placeholder());
+    }
+
     // Mapping from column name to column id.
-    let name_to_id = columns_descs
+    let name_to_id = columns
         .iter()
-        .map(|c| (c.name.as_str(), c.column_id))
+        .map(|c| (c.name(), c.column_id()))
         .collect::<HashMap<_, _>>();
 
-    let pk_column_names = bind_pk_names(&columns_defs, &table_constraints)?;
-
-    let mut pk_column_ids: Vec<_> = pk_column_names
+    let mut pk_column_ids: Vec<_> = pk_names
         .iter()
         .map(|name| {
             name_to_id.get(name.as_str()).copied().ok_or_else(|| {
@@ -379,34 +378,22 @@ pub fn bind_sql_table_column_constraints(
         })
         .try_collect()?;
 
-    let mut columns_catalog = columns_descs
-        .into_iter()
-        .map(|c| {
-            // All columns except `_row_id` or starts with `_rw` should be visible.
-            let is_hidden = c.name.starts_with("_rw");
-            ColumnCatalog {
-                column_desc: c,
-                is_hidden,
-            }
-        })
-        .collect_vec();
-
     // Add `_row_id` column if `pk_column_ids` is empty.
     let row_id_index = pk_column_ids.is_empty().then(|| {
         let column = ColumnCatalog::row_id_column();
-        let index = columns_catalog.len();
+        let index = columns.len();
         pk_column_ids = vec![column.column_id()];
-        columns_catalog.push(column);
+        columns.push(column);
         index
     });
 
-    if let Some(col) = columns_catalog.iter().map(|c| c.name()).duplicates().next() {
+    if let Some(col) = columns.iter().map(|c| c.name()).duplicates().next() {
         Err(ErrorCode::InvalidInputSyntax(format!(
             "column \"{col}\" specified more than once"
         )))?;
     }
 
-    Ok((columns_catalog, pk_column_ids, row_id_index))
+    Ok((columns, pk_column_ids, row_id_index))
 }
 
 /// `gen_create_table_plan_with_source` generates the plan for creating a table with an external
@@ -423,11 +410,17 @@ pub(crate) async fn gen_create_table_plan_with_source(
     append_only: bool,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let session = context.session_ctx();
-    let column_descs: Vec<ColumnDesc> = bind_sql_columns(column_defs.clone(), &mut col_id_gen)?;
+    let mut columns = bind_sql_columns(&column_defs)?;
+    for c in &mut columns {
+        c.column_desc.column_id = col_id_gen.generate(c.name())
+    }
     let mut properties = context.with_options().inner().clone().into_iter().collect();
 
+    ensure_table_constraints_supported(&constraints)?;
+    let pk_names: Vec<String> = bind_pk_names(&column_defs, &constraints)?;
+
     let (mut columns, mut pk_column_ids, mut row_id_index) =
-        bind_sql_table_column_constraints(column_descs, column_defs.clone(), constraints)?;
+        bind_pk_on_relation(columns, pk_names)?;
 
     let watermark_descs = bind_source_watermark(
         session,
@@ -482,21 +475,23 @@ pub(crate) async fn gen_create_table_plan_with_source(
 pub(crate) fn gen_create_table_plan(
     context: OptimizerContext,
     table_name: ObjectName,
-    columns: Vec<ColumnDef>,
+    column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     mut col_id_gen: ColumnIdGenerator,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let definition = context.normalized_sql().to_owned();
-    let column_descs = bind_sql_columns(columns.clone(), &mut col_id_gen)?;
-
+    let mut columns = bind_sql_columns(&column_defs)?;
+    for c in &mut columns {
+        c.column_desc.column_id = col_id_gen.generate(c.name())
+    }
     let properties = context.with_options().inner().clone().into_iter().collect();
     gen_create_table_plan_without_bind(
         context,
         table_name,
-        column_descs,
         columns,
+        column_defs,
         constraints,
         properties,
         definition,
@@ -510,7 +505,7 @@ pub(crate) fn gen_create_table_plan(
 pub(crate) fn gen_create_table_plan_without_bind(
     context: OptimizerContext,
     table_name: ObjectName,
-    column_descs: Vec<ColumnDesc>,
+    columns: Vec<ColumnCatalog>,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     properties: HashMap<String, String>,
@@ -519,8 +514,9 @@ pub(crate) fn gen_create_table_plan_without_bind(
     append_only: bool,
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
-    let (mut columns, pk_column_ids, row_id_index) =
-        bind_sql_table_column_constraints(column_descs, column_defs.clone(), constraints)?;
+    ensure_table_constraints_supported(&constraints)?;
+    let pk_names = bind_pk_names(&column_defs, &constraints)?;
+    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names)?;
 
     let watermark_descs = bind_source_watermark(
         context.session_ctx(),
@@ -866,17 +862,21 @@ mod tests {
         ] {
             let mut ast = risingwave_sqlparser::parser::Parser::parse_sql(sql).unwrap();
             let risingwave_sqlparser::ast::Statement::CreateTable {
-                columns,
+                columns: column_defs,
                 constraints,
                 ..
             } = ast.remove(0) else {
                 panic!("test case should be create table")
             };
             let actual: Result<_> = (|| {
-                let column_descs =
-                    bind_sql_columns(columns.clone(), &mut ColumnIdGenerator::new_initial())?;
-                let (_, pk_column_ids, _) =
-                    bind_sql_table_column_constraints(column_descs, columns, constraints)?;
+                let mut columns = bind_sql_columns(&column_defs)?;
+                let mut col_id_gen = ColumnIdGenerator::new_initial();
+                for c in &mut columns {
+                    c.column_desc.column_id = col_id_gen.generate(c.name())
+                }
+                ensure_table_constraints_supported(&constraints)?;
+                let pk_names = bind_pk_names(&column_defs, &constraints)?;
+                let (_, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names)?;
                 Ok(pk_column_ids)
             })();
             match (expected, actual) {
