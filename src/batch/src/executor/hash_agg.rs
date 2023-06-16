@@ -236,8 +236,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             self.mem_context.add(memory_usage_diff);
         }
 
-        // generate output data chunks
-        let mut result = groups.into_iter();
+        // Don't use `into_iter` here, it may cause memory leak.
+        let mut result = groups.iter_mut();
         let cardinality = self.chunk_size;
         loop {
             let mut group_builders: Vec<_> = self
@@ -259,9 +259,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 array_len += 1;
                 key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
                 states
-                    .into_iter()
+                    .iter_mut()
                     .zip_eq_fast(&mut agg_builders)
-                    .try_for_each(|(mut aggregator, builder)| aggregator.output(builder))?;
+                    .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
             }
             if !has_next {
                 break; // exit loop
@@ -281,6 +281,11 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
 #[cfg(test)]
 mod tests {
+    use std::alloc::{AllocError, Allocator, Global, Layout};
+    use std::ptr::NonNull;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
     use prometheus::IntGauge;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
@@ -296,9 +301,11 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let src_exec = Box::new(MockExecutor::with_chunk(
-            DataChunk::from_pretty(
-                "i i i
+        let parent_mem = MemoryContext::root(IntGauge::new("root_memory_usage", " ").unwrap());
+        {
+            let src_exec = Box::new(MockExecutor::with_chunk(
+                DataChunk::from_pretty(
+                    "i i i
                  0 1 1
                  1 1 1
                  0 0 1
@@ -307,67 +314,74 @@ mod tests {
                  0 0 2
                  1 1 3
                  0 1 2",
-            ),
-            Schema::new(vec![
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int64),
-            ]),
-        ));
+                ),
+                Schema::new(vec![
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Int64),
+                ]),
+            ));
 
-        let agg_call = AggCall {
-            r#type: Type::Sum as i32,
-            args: vec![InputRef {
-                index: 2,
-                r#type: Some(PbDataType {
-                    type_name: TypeName::Int32 as i32,
+            let agg_call = AggCall {
+                r#type: Type::Sum as i32,
+                args: vec![InputRef {
+                    index: 2,
+                    r#type: Some(PbDataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                }],
+                return_type: Some(PbDataType {
+                    type_name: TypeName::Int64 as i32,
                     ..Default::default()
                 }),
-            }],
-            return_type: Some(PbDataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            distinct: false,
-            order_by: vec![],
-            filter: None,
-        };
+                distinct: false,
+                order_by: vec![],
+                filter: None,
+            };
 
-        let agg_prost = HashAggNode {
-            group_key: vec![0, 1],
-            agg_calls: vec![agg_call],
-        };
+            let agg_prost = HashAggNode {
+                group_key: vec![0, 1],
+                agg_calls: vec![agg_call],
+            };
 
-        let mem_context = MemoryContext::root(IntGauge::new("memory_usage", " ").unwrap());
-        let actual_exec = HashAggExecutorBuilder::deserialize(
-            &agg_prost,
-            src_exec,
-            TaskId::default(),
-            "HashAggExecutor".to_string(),
-            CHUNK_SIZE,
-            mem_context.clone(),
-        )
-        .unwrap();
+            let mem_context = MemoryContext::new(
+                Some(parent_mem.clone()),
+                IntGauge::new("memory_usage", " ").unwrap(),
+            );
+            let actual_exec = HashAggExecutorBuilder::deserialize(
+                &agg_prost,
+                src_exec,
+                TaskId::default(),
+                "HashAggExecutor".to_string(),
+                CHUNK_SIZE,
+                mem_context.clone(),
+            )
+            .unwrap();
 
-        // TODO: currently the order is fixed unless the hasher is changed
-        let expect_exec = Box::new(MockExecutor::with_chunk(
-            DataChunk::from_pretty(
-                "i i I
+            // TODO: currently the order is fixed unless the hasher is changed
+            let expect_exec = Box::new(MockExecutor::with_chunk(
+                DataChunk::from_pretty(
+                    "i i I
                  1 0 1
                  0 0 3
                  0 1 3
                  1 1 6",
-            ),
-            Schema::new(vec![
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int64),
-            ]),
-        ));
-        diff_executor_output(actual_exec, expect_exec).await;
+                ),
+                Schema::new(vec![
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Int64),
+                ]),
+            ));
+            diff_executor_output(actual_exec, expect_exec).await;
 
-        // check estimated memory usage = 4 groups x state size
-        assert_eq!(mem_context.get_bytes_used() as usize, 4 * 72);
+            // check estimated memory usage = 4 groups x state size
+            assert_eq!(mem_context.get_bytes_used() as usize, 4 * 72);
+        }
+
+        // Ensure that agg memory counter has been dropped.
+        assert_eq!(0, parent_mem.get_bytes_used());
     }
 
     #[tokio::test]
@@ -422,5 +436,62 @@ mod tests {
             Schema::new(vec![Field::unnamed(DataType::Int64)]),
         );
         diff_executor_output(actual_exec, Box::new(expect_exec)).await;
+    }
+
+    /// A test to verify that `HashMap` may leak memory counter when using `into_iter`.
+    #[test]
+    fn test_hashmap_into_iter_bug() {
+        let dropped: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
+        {
+            struct MyAllocInner {
+                drop_flag: Arc<AtomicBool>,
+            }
+
+            #[derive(Clone)]
+            struct MyAlloc {
+                inner: Arc<MyAllocInner>,
+            }
+
+            impl Drop for MyAllocInner {
+                fn drop(&mut self) {
+                    println!("MyAlloc freed.");
+                    self.drop_flag.store(true, Ordering::SeqCst);
+                }
+            }
+
+            unsafe impl Allocator for MyAlloc {
+                fn allocate(
+                    &self,
+                    layout: Layout,
+                ) -> std::result::Result<NonNull<[u8]>, AllocError> {
+                    let g = Global;
+                    g.allocate(layout)
+                }
+
+                unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+                    let g = Global;
+                    g.deallocate(ptr, layout)
+                }
+            }
+
+            let mut map = hashbrown::HashMap::with_capacity_in(
+                10,
+                MyAlloc {
+                    inner: Arc::new(MyAllocInner {
+                        drop_flag: dropped.clone(),
+                    }),
+                },
+            );
+            for i in 0..10 {
+                map.entry(i).or_insert_with(|| "i".to_string());
+            }
+
+            for (k, v) in map {
+                println!("{}, {}", k, v);
+            }
+        }
+
+        assert!(!dropped.load(Ordering::SeqCst));
     }
 }
