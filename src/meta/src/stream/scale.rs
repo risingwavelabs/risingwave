@@ -1533,7 +1533,7 @@ where
             })
             .collect();
 
-        let all_table_fragments = self.fragment_manager.list_table_fragments().await?;
+        let all_table_fragments = self.fragment_manager.list_table_fragments().await;
 
         let mut target_plan = HashMap::with_capacity(fragment_ids.len());
 
