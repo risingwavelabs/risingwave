@@ -256,7 +256,7 @@ where
                                                 chunk.cardinality() as u64;
                                             yield Message::Chunk(Self::mapping_chunk(
                                                 Self::mark_chunk(
-                                                    chunk,
+                                                    &chunk,
                                                     current_pos,
                                                     pk_in_output_indices,
                                                     pk_order,
@@ -464,11 +464,12 @@ where
     /// For each row of the chunk, forward it to downstream if its pk <= `current_pos`, otherwise
     /// ignore it. We implement it by changing the visibility bitmap.
     fn mark_chunk(
-        chunk: StreamChunk,
+        chunk: &StreamChunk,
         current_pos: &OwnedRow,
         pk_in_output_indices: PkIndicesRef<'_>,
         pk_order: &[OrderType],
     ) -> StreamChunk {
+        let chunk = chunk.clone(); // FIXME: Temporary workaround.
         let chunk = chunk.compact();
         let (data, ops) = chunk.into_parts();
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
