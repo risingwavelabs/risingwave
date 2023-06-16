@@ -19,7 +19,6 @@ use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::plan_common::PbColumnDesc;
 use risingwave_pb::stream_plan::PbSinkDesc;
 
 use super::{SinkCatalog, SinkId, SinkType};
@@ -89,10 +88,10 @@ impl SinkDesc {
             id: self.id.sink_id,
             name: self.name.clone(),
             definition: self.definition.clone(),
-            columns: self
+            column_catalogs: self
                 .columns
                 .iter()
-                .map(|column| Into::<PbColumnDesc>::into(&column.column_desc))
+                .map(|column| column.to_protobuf())
                 .collect_vec(),
             plan_pk: self.plan_pk.iter().map(|k| k.to_protobuf()).collect_vec(),
             downstream_pk: self.downstream_pk.iter().map(|idx| *idx as _).collect_vec(),

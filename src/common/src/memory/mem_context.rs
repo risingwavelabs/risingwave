@@ -44,6 +44,22 @@ impl From<IntGauge> for MemCounter {
     }
 }
 
+impl MemCounter {
+    fn add(&self, bytes: i64) {
+        match &self {
+            MemCounter::TrAdder(c) => c.add(bytes),
+            MemCounter::Atomic(c) => c.add(bytes),
+        }
+    }
+
+    fn get_bytes_used(&self) -> i64 {
+        match &self {
+            MemCounter::TrAdder(c) => c.get(),
+            MemCounter::Atomic(c) => c.get(),
+        }
+    }
+}
+
 impl From<TrAdderGauge> for MemCounter {
     fn from(value: TrAdderGauge) -> Self {
         MemCounter::TrAdder(value)
@@ -72,10 +88,7 @@ impl MemoryContext {
     /// Add `bytes` memory usage. Pass negative value to decrease memory usage.
     pub fn add(&self, bytes: i64) {
         if let Some(inner) = &self.inner {
-            match &inner.counter {
-                MemCounter::TrAdder(c) => c.add(bytes),
-                MemCounter::Atomic(c) => c.add(bytes),
-            }
+            inner.counter.add(bytes);
 
             if let Some(parent) = &inner.parent {
                 parent.add(bytes);
@@ -85,10 +98,7 @@ impl MemoryContext {
 
     pub fn get_bytes_used(&self) -> i64 {
         if let Some(inner) = &self.inner {
-            match &inner.counter {
-                MemCounter::TrAdder(c) => c.get(),
-                MemCounter::Atomic(c) => c.get(),
-            }
+            inner.counter.get_bytes_used()
         } else {
             0
         }
@@ -100,12 +110,10 @@ impl MemoryContext {
     }
 }
 
-impl Drop for MemoryContext {
+impl Drop for MemoryContextInner {
     fn drop(&mut self) {
-        if let Some(inner) = &self.inner {
-            if let Some(p) = &inner.parent {
-                p.add(-self.get_bytes_used())
-            }
+        if let Some(p) = &self.parent {
+            p.add(-self.counter.get_bytes_used())
         }
     }
 }
