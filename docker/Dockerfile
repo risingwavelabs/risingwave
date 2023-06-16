@@ -49,8 +49,7 @@ FROM base AS risingwave
 
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
 
-RUN apt-get update \
-  && apt-get -y install gdb \
+RUN apt-get -y install gdb \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
