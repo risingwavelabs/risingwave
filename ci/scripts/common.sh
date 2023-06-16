@@ -86,23 +86,3 @@ function download_and_prepare_rw() {
   cargo make pre-start-dev
   cargo make --allow-private link-all-in-one-binaries
 }
-
-# Arguments:
-#   $1: cargo build `profile` of the binaries
-function download_java_binding() {
-  echo "--- Download java binding"
-  if [ -z "$1" ]; then
-    echo "download_java_binding: missing argument profile"
-    exit 1
-  fi
-
-  profile=$1
-
-  echo -e "\033[33mDownload artifacts\033[0m"
-
-  mkdir -p target/debug
-  download-and-decompress-artifact librisingwave_java_binding.so-"$profile" target/debug
-  mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
-  
-  export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
-}

@@ -37,7 +37,7 @@ tracing = "0.1"
 risingwave_expr = { path = "../expr" }
 
 [lib]
-crate_type = ["cdylib"]
+crate-type = ["cdylib"]
 
 [[bin]]
 name = "data-chunk-payload-generator"
