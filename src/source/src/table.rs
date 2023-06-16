@@ -71,7 +71,7 @@ impl TableDmlHandle {
 
     pub fn stream_reader(&self, actor_id: ActorId) -> TableStreamReader {
         let mut core = self.core.write();
-        // TODO: use a unbounded channel with permits to limit the buffer size for data chunks.
+        // TODO: use an unbounded channel with permits to limit the buffer size for data chunks.
         let (tx, rx) = mpsc::unbounded_channel();
         core.changes_txs.push(ChangesSender { actor_id, tx });
 
@@ -119,17 +119,32 @@ impl TableDmlHandle {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum TxnState {
+    Init,
+    Begin,
+    Committed,
+    Rollback,
+}
+
+/// [`WriteHandle`] writes its data into a table in a transactional way.
+///
+/// First, it needs to call `begin()` and then write chunks by calling `write_chunk()`.
+///
+/// Finally call `end()` to commit the transaction or `rollback()` to rollback the transaction.
+///
+/// If the [`WriteHandle`] is dropped with a `Begin` transaction state, it will automatically
+/// rollback the transaction.
 pub struct WriteHandle {
     txn_id: TxnId,
     tx: mpsc::UnboundedSender<(TxnMsg, oneshot::Sender<usize>)>,
     // Indicate whether `TxnMsg::End` or `TxnMsg::Rollback` have been sent to the write channel.
-    finished: bool,
+    txn_state: TxnState,
 }
 
 impl Drop for WriteHandle {
     fn drop(&mut self) {
-        // If this executor is not finished, try to rollback.
-        if !self.finished {
+        if self.txn_state == TxnState::Begin {
             let _ = self.rollback();
         }
     }
@@ -140,12 +155,13 @@ impl WriteHandle {
         Self {
             txn_id,
             tx,
-            finished: false,
+            txn_state: TxnState::Init,
         }
     }
 
-    pub fn begin(&self) -> Result<oneshot::Receiver<usize>> {
-        assert!(!self.finished);
+    pub fn begin(&mut self) -> Result<oneshot::Receiver<usize>> {
+        assert_eq!(self.txn_state, TxnState::Init);
+        self.txn_state = TxnState::Begin;
         self.write_txn_msg(TxnMsg::Begin(self.txn_id))
     }
 
@@ -154,14 +170,14 @@ impl WriteHandle {
     }
 
     pub fn end(&mut self) -> Result<oneshot::Receiver<usize>> {
-        assert!(!self.finished);
-        self.finished = true;
+        assert_eq!(self.txn_state, TxnState::Begin);
+        self.txn_state = TxnState::Committed;
         self.write_txn_msg(TxnMsg::End(self.txn_id))
     }
 
     pub fn rollback(&mut self) -> Result<oneshot::Receiver<usize>> {
-        assert!(!self.finished);
-        self.finished = true;
+        assert_eq!(self.txn_state, TxnState::Begin);
+        self.txn_state = TxnState::Rollback;
         self.write_txn_msg(TxnMsg::Rollback(self.txn_id))
     }
 
@@ -299,7 +315,7 @@ mod tests {
     async fn test_write_handle_rollback_on_drop() -> Result<()> {
         let table_dml_handle = Arc::new(new_table_dml_handle());
         let mut reader = table_dml_handle.stream_reader(ACTOR_ID1).into_stream();
-        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
         write_handle.begin().unwrap();
 
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));

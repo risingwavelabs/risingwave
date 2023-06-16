@@ -122,6 +122,8 @@ impl UpdateExecutor {
 
         let mut notifiers = Vec::new();
 
+        notifiers.push(write_handle.begin()?);
+
         // Transform the data chunk to a stream chunk, then write to the source.
         let write_txn_data = |chunk: DataChunk| {
             // TODO: if the primary key is updated, we should use plain `+,-` instead of `U+,U-`.
@@ -137,8 +139,6 @@ impl UpdateExecutor {
 
             write_handle.write_chunk(stream_chunk)
         };
-
-        notifiers.push(write_handle.begin()?);
 
         #[for_await]
         for data_chunk in self.child.execute() {

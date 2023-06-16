@@ -114,12 +114,14 @@ impl InsertExecutor {
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, 1024);
 
-        let mut notifiers = Vec::new();
-
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
         let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
+
+        let mut notifiers = Vec::new();
+
+        notifiers.push(write_handle.begin()?);
 
         // Transform the data chunk to a stream chunk, then write to the source.
         let write_txn_data = |chunk: DataChunk| async {
@@ -162,8 +164,6 @@ impl InsertExecutor {
 
             write_handle.write_chunk(stream_chunk)
         };
-
-        notifiers.push(write_handle.begin()?);
 
         #[for_await]
         for data_chunk in self.child.execute() {

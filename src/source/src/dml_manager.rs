@@ -214,7 +214,7 @@ mod tests {
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, table_version_id)
             .unwrap();
-        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
         write_handle.begin().unwrap();
 
         // Should be able to write to the table.
@@ -230,7 +230,7 @@ mod tests {
         write_handle.write_chunk(chunk()).unwrap_err();
 
         // Unless we create a new write handle.
-        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
         write_handle.begin().unwrap();
         write_handle.write_chunk(chunk()).unwrap();
 
@@ -268,7 +268,7 @@ mod tests {
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, old_version_id)
             .unwrap();
-        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
         write_handle.begin().unwrap();
 
         // Should be able to write to the table.
@@ -292,7 +292,7 @@ mod tests {
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, new_version_id)
             .unwrap();
-        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
         write_handle.begin().unwrap();
         write_handle.write_chunk(new_chunk()).unwrap();
     }
