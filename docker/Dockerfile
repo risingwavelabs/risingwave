@@ -2,7 +2,7 @@ FROM ubuntu:22.04 as base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl bash lld maven unzip
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl bash lld maven unzip libsasl2-dev
 
 FROM base as builder
 
@@ -44,7 +44,7 @@ RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true && \
     tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
 FROM ubuntu:22.04 as image-base
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates openjdk-11-jdk && rm -rf /var/lib/{apt,dpkg,cache,log}/
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates openjdk-11-jdk libsasl2-dev && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 FROM image-base as risingwave
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
