@@ -269,7 +269,7 @@ impl fmt::Display for StreamSink {
             .sink_desc
             .columns
             .iter()
-            .map(|col| col.column_desc.name.clone())
+            .map(|col| col.name_with_hidden())
             .collect_vec()
             .join(", ");
         builder

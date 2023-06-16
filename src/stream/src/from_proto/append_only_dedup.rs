@@ -52,6 +52,7 @@ impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
             params.executor_id,
             params.actor_context,
             stream.get_watermark_epoch(),
+            stream.streaming_metrics.clone(),
         )))
     }
 }

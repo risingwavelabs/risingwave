@@ -26,6 +26,7 @@ use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
 };
+use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMapping;
 use crate::OptimizerContextRef;
@@ -51,11 +52,7 @@ impl LogicalNow {
 impl Distill for LogicalNow {
     fn distill<'a>(&self) -> Pretty<'a> {
         let vec = if self.base.ctx.is_explain_verbose() {
-            let disp = Pretty::debug(&IndicesDisplay {
-                indices: &(0..self.schema().fields.len()).collect_vec(),
-                input_schema: self.schema(),
-            });
-            vec![("output", disp)]
+            vec![("output", column_names_pretty(self.schema()))]
         } else {
             vec![]
         };
