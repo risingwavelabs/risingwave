@@ -211,7 +211,7 @@ message DeleteWorkerNodeResponse {
 
 // Mark CN as schedulable or as unschedulable
 message UpdateWorkerNodeSchedulabilityRequest {
-  common.HostAddress host = 1;
+  uint32 worker_id = 1;
   bool set_is_schedulable = 2;
 }
 

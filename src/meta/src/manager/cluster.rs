@@ -183,14 +183,18 @@ where
 
     pub async fn update_schedulability(
         &self,
-        host_address: HostAddress,
+        worker_id: u32,
         is_schedulable: bool,
     ) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
-        let worker = core
-            .workers
-            .get_mut(&WorkerKey(host_address.clone()))
-            .ok_or_else(|| anyhow!("Worker node does not exist!"))?;
+        let mut worker_opt: Option<&mut Worker> = None;
+        for (_, w) in core.workers.iter_mut() {
+            if w.worker_id() == worker_id {
+                worker_opt = Some(w);
+                break;
+            }
+        }
+        let worker = worker_opt.ok_or_else(|| anyhow!("Worker node does not exist!"))?;
         let worker_type = worker.worker_type();
 
         // TODO

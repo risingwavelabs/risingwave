@@ -14,15 +14,12 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use anyhow::anyhow;
 use comfy_table::{Attribute, Cell, Row, Table};
 use itertools::Itertools;
-use regex::Regex;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
-use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::table_fragments::State;
-use risingwave_pb::meta::{GetClusterInfoResponse, UpdateWorkerNodeSchedulabilityResponse};
+use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::source::ConnectorSplits;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 
@@ -34,38 +31,16 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
     Ok(response)
 }
 
-fn str_to_addr(addr: &str) -> anyhow::Result<HostAddress> {
-    let ip_addr_regex = r"(\b25[0-5]|\b2[0-4][0-9]|\b[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}:\d+";
-    let re = Regex::new(ip_addr_regex).unwrap();
-    if !re.is_match(addr) {
-        return Err(anyhow!("Please provide a valid IP, e.g. 127.0.0.1:1234"));
-    }
-    let splits = addr.split(':').map(|s| s.to_owned()).collect_vec();
-    let host = splits[0].clone();
-    let port = splits[1].clone().parse::<i32>()?;
-    Ok(HostAddress { host, port })
-}
-
-// convenient wrapper for update_schedulability
-pub async fn update_schedulability_str(
-    context: &CtlContext,
-    addr: &str,
-    is_schedulable: bool,
-) -> anyhow::Result<()> {
-    let _ = update_schedulability(context, str_to_addr(addr)?, is_schedulable).await?;
-    Ok(())
-}
-
 pub async fn update_schedulability(
     context: &CtlContext,
-    addr: HostAddress,
+    worker_id: u32,
     is_schedulable: bool,
-) -> anyhow::Result<UpdateWorkerNodeSchedulabilityResponse> {
+) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    let response = meta_client
-        .update_schedulability(addr, is_schedulable)
+    meta_client
+        .update_schedulability(worker_id, is_schedulable)
         .await?;
-    Ok(response)
+    Ok(())
 }
 
 pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {

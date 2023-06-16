@@ -576,11 +576,11 @@ impl MetaClient {
 
     pub async fn update_schedulability(
         &self,
-        host: HostAddress,
+        worker_id: u32,
         set_is_schedulable: bool,
     ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
         let request = UpdateWorkerNodeSchedulabilityRequest {
-            host: Some(host),
+            worker_id,
             set_is_schedulable,
         };
         let resp = self
