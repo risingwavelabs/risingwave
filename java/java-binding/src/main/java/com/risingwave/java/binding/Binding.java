@@ -14,9 +14,11 @@
 
 package com.risingwave.java.binding;
 
+import io.questdb.jar.jni.JarJniLoader;
+
 public class Binding {
     static {
-        System.loadLibrary("risingwave_java_binding");
+        JarJniLoader.loadLib(Binding.class, "/risingwave/jni", "risingwave_java_binding");
     }
 
     public static native int vnodeCount();
