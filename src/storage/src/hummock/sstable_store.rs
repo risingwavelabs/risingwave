@@ -358,6 +358,14 @@ impl SstableStore {
         self.meta_cache.is_hot_entry(*sst_id, sst_id)
     }
 
+    pub fn lookup_sstable(&self, sst_id: &HummockSstableObjectId) -> Option<TableHolder> {
+        self.meta_cache.lookup(*sst_id, sst_id)
+    }
+
+    pub fn is_hot_block(&self, sst_id: HummockSstableObjectId, block_id: usize) -> bool {
+        self.block_cache.is_hot_block(sst_id, block_id as u64)
+    }
+
     pub fn get_block_cache(&self) -> BlockCache {
         self.block_cache.clone()
     }
@@ -896,6 +904,10 @@ impl BlockStream {
         self.block_idx += 1;
 
         Ok(Some(boxed_block))
+    }
+
+    pub fn get_block_index(&self) -> usize {
+        self.block_idx
     }
 }
 

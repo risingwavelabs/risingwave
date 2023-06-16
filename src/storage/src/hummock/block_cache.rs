@@ -222,6 +222,11 @@ impl BlockCache {
         }
     }
 
+    pub fn is_hot_block(&self, object_id: HummockSstableObjectId, block_idx: u64) -> bool {
+        let h = Self::hash(object_id, block_idx);
+        self.inner.is_hot_entry(h, &(object_id, block_idx))
+    }
+
     fn hash(object_id: HummockSstableObjectId, block_idx: u64) -> u64 {
         let mut hasher = DefaultHasher::default();
         object_id.hash(&mut hasher);

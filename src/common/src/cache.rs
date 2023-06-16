@@ -717,6 +717,14 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         }
     }
 
+    pub fn contains(&self, hash: u64, key: &K) -> bool {
+        let shard = self.shards[self.shard(hash)].lock();
+        unsafe {
+            let ptr = shard.table.lookup(hash, key);
+            !ptr.is_null()
+        }
+    }
+
     pub fn is_hot_entry(self: &Arc<Self>, hash: u64, key: &K) -> bool {
         let shard = self.shards[self.shard(hash)].lock();
         unsafe {

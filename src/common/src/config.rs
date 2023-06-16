@@ -657,7 +657,7 @@ mod default {
         }
 
         pub fn min_table_split_write_throughput() -> u64 {
-            48 * 1024 * 1024 // 48MB
+            32 * 1024 * 1024 // 48MB
         }
     }
 
@@ -748,7 +748,7 @@ mod default {
         }
 
         pub fn max_preload_wait_time_mill() -> u64 {
-            10
+            50
         }
     }
 
