@@ -244,31 +244,40 @@ pub(crate) async fn try_bind_columns_from_source(
                     "User-defined schema is not allowed with row format upsert avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
 
-            let (columns, pk_from_avro) =
-                extract_upsert_avro_table_schema(avro_schema, with_properties).await?;
-
-            let (pk_names, upsert_avro_primary_key) = if sql_defined_pk {
+            if sql_defined_pk {
                 if sql_defined_pk_names.len() != 1 {
                     return Err(RwError::from(ProtocolError(
                         "upsert avro supports only one primary key column.".to_string(),
                     )));
                 }
+                let columns = extract_avro_table_schema(avro_schema, with_properties).await?;
+
                 let upsert_avro_primary_key = sql_defined_pk_names[0].clone();
-                (sql_defined_pk_names, upsert_avro_primary_key)
+                (
+                    Some(columns),
+                    sql_defined_pk_names,
+                    StreamSourceInfo {
+                        row_format: RowFormatType::UpsertAvro as i32,
+                        row_schema_location: avro_schema.row_schema_location.0.clone(),
+                        use_schema_registry: avro_schema.use_schema_registry,
+                        upsert_avro_primary_key,
+                        ..Default::default()
+                    },
+                )
             } else {
-                (pk_from_avro, Default::default())
-            };
-            (
-                Some(columns),
-                pk_names,
-                StreamSourceInfo {
-                    row_format: RowFormatType::UpsertAvro as i32,
-                    row_schema_location: avro_schema.row_schema_location.0.clone(),
-                    use_schema_registry: avro_schema.use_schema_registry,
-                    upsert_avro_primary_key,
-                    ..Default::default()
-                },
-            )
+                let (columns, pk_from_avro) =
+                    extract_upsert_avro_table_schema(avro_schema, with_properties).await?;
+                (
+                    Some(columns),
+                    pk_from_avro,
+                    StreamSourceInfo {
+                        row_format: RowFormatType::UpsertAvro as i32,
+                        row_schema_location: avro_schema.row_schema_location.0.clone(),
+                        use_schema_registry: avro_schema.use_schema_registry,
+                        ..Default::default()
+                    },
+                )
+            }
         }
         SourceSchema::DebeziumAvro(avro_schema) => {
             if sql_defined_schema {
