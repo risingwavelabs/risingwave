@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
+use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
 use crate::hummock::value::HummockValue;
@@ -48,6 +49,7 @@ struct SstableStreamIterator {
     /// For key sanity check of divided SST and debugging
     sstable_info: SstableInfo,
     existing_table_ids: HashSet<StateTableId>,
+    task_progress: Arc<TaskProgress>,
 }
 
 impl SstableStreamIterator {
@@ -71,6 +73,7 @@ impl SstableStreamIterator {
         block_stream: BlockStream,
         max_block_count: usize,
         stats: &StoreLocalStatistic,
+        task_progress: Arc<TaskProgress>,
     ) -> Self {
         Self {
             block_stream,
@@ -79,6 +82,7 @@ impl SstableStreamIterator {
             stats_ptr: stats.remote_io_time.clone(),
             existing_table_ids,
             sstable_info: sstable_info.clone(),
+            task_progress,
         }
     }
 
@@ -206,6 +210,14 @@ impl SstableStreamIterator {
     }
 }
 
+impl Drop for SstableStreamIterator {
+    fn drop(&mut self) {
+        self.task_progress
+            .num_pending_read_io
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Iterates over the KV-pairs of a given list of SSTs. The key-ranges of these SSTs are assumed to
 /// be consecutive and non-overlapping.
 pub struct ConcatSstableIterator {
@@ -225,6 +237,7 @@ pub struct ConcatSstableIterator {
     sstable_store: SstableStoreRef,
 
     stats: StoreLocalStatistic,
+    task_progress: Arc<TaskProgress>,
 }
 
 impl ConcatSstableIterator {
@@ -236,6 +249,7 @@ impl ConcatSstableIterator {
         sst_infos: Vec<SstableInfo>,
         key_range: KeyRange,
         sstable_store: SstableStoreRef,
+        task_progress: Arc<TaskProgress>,
     ) -> Self {
         Self {
             key_range,
@@ -244,8 +258,25 @@ impl ConcatSstableIterator {
             sstables: sst_infos,
             existing_table_ids: HashSet::from_iter(existing_table_ids),
             sstable_store,
+            task_progress,
             stats: StoreLocalStatistic::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub fn for_test(
+        existing_table_ids: Vec<StateTableId>,
+        sst_infos: Vec<SstableInfo>,
+        key_range: KeyRange,
+        sstable_store: SstableStoreRef,
+    ) -> Self {
+        Self::new(
+            existing_table_ids,
+            sst_infos,
+            key_range,
+            sstable_store,
+            Arc::new(TaskProgress::default()),
+        )
     }
 
     /// Resets the iterator, loads the specified SST, and seeks in that SST to `seek_key` if given.
@@ -320,6 +351,9 @@ impl ConcatSstableIterator {
             if start_index >= end_index {
                 found = false;
             } else {
+                self.task_progress
+                    .num_pending_read_io
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let block_stream = self
                     .sstable_store
                     .get_stream(sstable.value(), Some(start_index))
@@ -335,6 +369,7 @@ impl ConcatSstableIterator {
                     block_stream,
                     end_index - start_index,
                     &self.stats,
+                    self.task_progress.clone(),
                 );
                 sstable_iter.seek(seek_key).await?;
 
@@ -465,7 +500,7 @@ mod tests {
             test_key_of(start_index).encode().into(),
             test_key_of(end_index).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -489,7 +524,7 @@ mod tests {
             test_key_of(30000).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -501,7 +536,7 @@ mod tests {
             test_key_of(start_index).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -525,7 +560,7 @@ mod tests {
             test_key_of(0).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -549,7 +584,7 @@ mod tests {
             test_key_of(6000).encode().into(),
             test_key_of(16000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -584,7 +619,7 @@ mod tests {
             test_key_of(0).encode().into(),
             test_key_of(40000).encode().into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
@@ -624,7 +659,7 @@ mod tests {
             next_full_key(&block_1_smallest_key).into(),
             prev_full_key(&block_2_smallest_key).into(),
         );
-        let mut iter = ConcatSstableIterator::new(
+        let mut iter = ConcatSstableIterator::for_test(
             vec![0],
             table_infos.clone(),
             kr.clone(),
