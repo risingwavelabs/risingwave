@@ -150,11 +150,18 @@ public class EsSink extends SinkBase {
 
         /** This method is called after bulk execution. */
         @Override
-        public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {}
+        public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
+            LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
+        }
 
         /** This method is called when the bulk failed and raised a Throwable */
         @Override
-        public void afterBulk(long executionId, BulkRequest request, Throwable failure) {}
+        public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
+            LOG.info(
+                    "Bulk of {} actions failed. Failure: {}",
+                    request.numberOfActions(),
+                    failure.getMessage());
+        }
     }
 
     /**
