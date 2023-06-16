@@ -300,6 +300,13 @@ where
             .select_table_fragments_by_table_id(&job_id.id().into())
             .await?;
         let internal_table_ids = table_fragments.internal_table_ids();
+        // store source information for later use
+        let source = match job_id {
+            StreamingJobId::Table(Some(source_id), _table_id) => {
+                self.catalog_manager.get_source_by_id(source_id).await.ok()
+            }
+            _ => None,
+        };
         let (version, streaming_job_ids) = match job_id {
             StreamingJobId::MaterializedView(table_id) => {
                 self.catalog_manager
@@ -335,6 +342,40 @@ where
         self.stream_manager
             .drop_streaming_jobs(streaming_job_ids)
             .await;
+
+        // for postgres sources, drop replication slot
+        if let Some(source) = source {
+            if source.get_properties().get("connector") == Some(&POSTGRES_CDC_CONNECTOR.to_string())
+            {
+                // create connector client
+                let connector_address =
+                    self.env
+                        .opts
+                        .connector_rpc_endpoint
+                        .as_ref()
+                        .ok_or_else(|| {
+                            MetaError::invalid_parameter("connector endpoint not specified")
+                        })?;
+                let connector_client = ConnectorClient::new(
+                    HostAddr::from_str(connector_address.as_str()).map_err(|e| {
+                        MetaError::invalid_parameter(format!(
+                            "parse connector node endpoint fail: {}",
+                            e
+                        ))
+                    })?,
+                )
+                .await?;
+                // send rpc
+                connector_client
+                    .drop_event_stream(
+                        source.get_id().into(),
+                        SourceType::Postgres,
+                        source.get_properties().clone(),
+                    )
+                    .await
+                    .map_err(MetaError::from)?;
+            }
+        }
         Ok(version)
     }
 
@@ -539,8 +580,6 @@ where
         Vec<risingwave_common::catalog::TableId>,
     )> {
         if let Some(source_id) = source_id {
-            // store source information before removal
-            let source = self.catalog_manager.get_source_by_id(source_id).await?;
             // Drop table and source in catalog. Check `source_id` if it is the table's
             // `associated_source_id`. Indexes also need to be dropped atomically.
             let (version, delete_jobs) = self
@@ -556,37 +595,6 @@ where
             self.source_manager
                 .unregister_sources(vec![source_id])
                 .await;
-            // for postgres sources, drop replication slot
-            if source.get_properties().get("connector") == Some(&POSTGRES_CDC_CONNECTOR.to_string())
-            {
-                // create connector client
-                let connector_address =
-                    self.env
-                        .opts
-                        .connector_rpc_endpoint
-                        .as_ref()
-                        .ok_or_else(|| {
-                            MetaError::invalid_parameter("connector endpoint not specified")
-                        })?;
-                let connector_client = ConnectorClient::new(
-                    HostAddr::from_str(connector_address.as_str()).map_err(|e| {
-                        MetaError::invalid_parameter(format!(
-                            "parse connector node endpoint fail: {}",
-                            e
-                        ))
-                    })?,
-                )
-                .await?;
-                // send rpc
-                connector_client
-                    .drop_event_stream(
-                        source.get_id().into(),
-                        SourceType::Postgres,
-                        source.get_properties().clone(),
-                    )
-                    .await
-                    .map_err(MetaError::from)?;
-            }
             Ok((version, delete_jobs))
         } else {
             self.catalog_manager
