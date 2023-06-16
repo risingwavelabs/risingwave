@@ -180,7 +180,7 @@ public class EsSink extends SinkBase {
     }
 
     /**
-     * use primary keys as id concatenated by '_'
+     * use primary keys as id concatenated by a specific delimiter.
      *
      * @param row
      * @return
