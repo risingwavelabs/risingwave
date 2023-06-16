@@ -281,6 +281,11 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
 #[cfg(test)]
 mod tests {
+    use std::alloc::{AllocError, Allocator, Global, Layout};
+    use std::ptr::NonNull;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
     use prometheus::IntGauge;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
@@ -433,5 +438,62 @@ mod tests {
             Schema::new(vec![Field::unnamed(DataType::Int64)]),
         );
         diff_executor_output(actual_exec, Box::new(expect_exec)).await;
+    }
+
+    /// A test to verify that `HashMap` may leak memory counter when using `into_iter`.
+    #[test]
+    fn test_hashmap_into_iter_bug() {
+        let dropped: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
+        {
+            struct MyAllocInner {
+                drop_flag: Arc<AtomicBool>,
+            }
+
+            #[derive(Clone)]
+            struct MyAlloc {
+                inner: Arc<MyAllocInner>,
+            }
+
+            impl Drop for MyAllocInner {
+                fn drop(&mut self) {
+                    println!("MyAlloc freed.");
+                    self.drop_flag.store(true, Ordering::SeqCst);
+                }
+            }
+
+            unsafe impl Allocator for MyAlloc {
+                fn allocate(
+                    &self,
+                    layout: Layout,
+                ) -> std::result::Result<NonNull<[u8]>, AllocError> {
+                    let g = Global;
+                    g.allocate(layout)
+                }
+
+                unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+                    let g = Global;
+                    g.deallocate(ptr, layout)
+                }
+            }
+
+            let mut map = hashbrown::HashMap::with_capacity_in(
+                10,
+                MyAlloc {
+                    inner: Arc::new(MyAllocInner {
+                        drop_flag: dropped.clone(),
+                    }),
+                },
+            );
+            for i in 0..10 {
+                map.entry(i).or_insert_with(|| "i".to_string());
+            }
+
+            for (k, v) in map {
+                println!("{}, {}", k, v);
+            }
+        }
+
+        assert!(!dropped.load(Ordering::SeqCst));
     }
 }
