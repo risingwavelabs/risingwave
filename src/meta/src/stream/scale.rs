@@ -367,11 +367,7 @@ where
         // Check if we are trying to move a fragment to a node marked as unschedulable
         let unschedulable_nodes = worker_nodes
             .iter()
-            .filter(|(_, w)| {
-                !w.get_property()
-                    .expect("expected worker to have property") // TODO: handle gracefully
-                    .is_schedulable
-            })
+            .filter(|(_, w)| !w.get_property().ok().map_or(false, |p| p.is_schedulable))
             .map(|(_, w)| w)
             .collect_vec();
         let unschedulable_pu_ids: HashSet<u32> = unschedulable_nodes
