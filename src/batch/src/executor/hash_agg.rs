@@ -259,7 +259,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 array_len += 1;
                 key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
                 states
-                    .into_iter()
+                    .iter_mut()
                     .zip_eq_fast(&mut agg_builders)
                     .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
             }
