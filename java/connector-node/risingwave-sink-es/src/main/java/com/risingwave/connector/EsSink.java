@@ -185,7 +185,7 @@ public class EsSink extends SinkBase {
             id = row.get(primaryKeyIndexes.get(0)).toString();
             for (int i = 1; i < primaryKeyIndexes.size(); i++) {
                 id =
-                        id.concat(config.getDelimeter())
+                        id.concat(config.getDelimiter())
                                 .concat(row.get(primaryKeyIndexes.get(i)).toString());
             }
         }

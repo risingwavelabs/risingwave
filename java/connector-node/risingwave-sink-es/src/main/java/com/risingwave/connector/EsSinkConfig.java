@@ -27,17 +27,17 @@ public class EsSinkConfig extends CommonSinkConfig {
     /** Required */
     private String index;
 
-    /** Optional, delimeter for generating id */
-    private String delimeter;
+    /** Optional, delimiter for generating id */
+    private String delimiter;
 
     @JsonCreator
     public EsSinkConfig(
             @JsonProperty(value = "url") String url,
             @JsonProperty(value = "index") String index,
-            @JsonProperty(value = "delimeter") String delimeter) {
+            @JsonProperty(value = "delimiter") String delimiter) {
         this.url = url;
         this.index = index;
-        this.delimeter = delimeter == null ? "_" : delimeter;
+        this.delimiter = delimiter == null ? "_" : delimiter;
     }
 
     public String getUrl() {
@@ -48,7 +48,7 @@ public class EsSinkConfig extends CommonSinkConfig {
         return index;
     }
 
-    public String getDelimeter() {
-        return delimeter;
+    public String getDelimiter() {
+        return delimiter;
     }
 }
