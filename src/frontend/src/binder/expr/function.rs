@@ -728,6 +728,11 @@ impl Binder {
                         binder.auth_context.user_name.clone(),
                     ))
                 }))),
+                ("user", guard_by_len(0, raw(|binder, _inputs| {
+                    Ok(ExprImpl::literal_varchar(
+                        binder.auth_context.user_name.clone(),
+                    ))
+                }))),
                 ("pg_get_userbyid", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
                         let bound_query = binder.bind_get_user_by_id_select(input)?;
