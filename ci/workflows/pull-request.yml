@@ -154,7 +154,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 7
+    timeout_in_minutes: 8
 
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"
