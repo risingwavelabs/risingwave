@@ -14,32 +14,22 @@
 
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
-use std::str::FromStr;
 
-use itertools::Itertools;
-use risingwave_common::catalog::{
-    Field, Schema, TableId, DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
-    RW_INTERNAL_TABLE_FUNCTION_NAME,
-};
+use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
 
-use self::watermark::is_watermark_func;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
-use crate::catalog::function_catalog::FunctionKind;
-use crate::catalog::system_catalog::pg_catalog::{
-    PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
-};
-use crate::expr::{Expr, ExprImpl, InputRef, TableFunction, TableFunctionType};
+use crate::expr::{ExprImpl, InputRef};
 
 mod join;
 mod share;
 mod subquery;
+mod table_function;
 mod table_or_source;
 mod watermark;
 mod window_table_function;
@@ -63,7 +53,7 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
-    TableFunction(Box<TableFunction>),
+    TableFunction(ExprImpl),
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
 }
@@ -76,13 +66,7 @@ impl RewriteExprsRecursive for Relation {
             Relation::WindowTableFunction(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Watermark(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Share(inner) => inner.rewrite_exprs_recursive(rewriter),
-            Relation::TableFunction(inner) => {
-                let new_args = std::mem::take(&mut inner.args)
-                    .into_iter()
-                    .map(|expr| rewriter.rewrite_expr(expr))
-                    .collect();
-                inner.args = new_args;
-            }
+            Relation::TableFunction(inner) => *inner = rewriter.rewrite_expr(inner.take()),
             _ => {}
         }
     }
@@ -405,90 +389,7 @@ impl Binder {
                 for_system_time_as_of_proctime,
             } => self.bind_relation_by_name(name, alias, for_system_time_as_of_proctime),
             TableFactor::TableFunction { name, alias, args } => {
-                let func_name = &name.0[0].real_value();
-                if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
-                    return self.bind_internal_table(args, alias);
-                }
-                if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
-                    || name.real_value().eq_ignore_ascii_case(
-                        format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME)
-                            .as_str(),
-                    )
-                {
-                    return self.bind_relation_by_name_inner(
-                        Some(PG_CATALOG_SCHEMA_NAME),
-                        PG_KEYWORDS_TABLE_NAME,
-                        alias,
-                        false,
-                    );
-                }
-                if let Ok(kind) = WindowTableFunctionKind::from_str(func_name) {
-                    return Ok(Relation::WindowTableFunction(Box::new(
-                        self.bind_window_table_function(alias, kind, args)?,
-                    )));
-                }
-                if is_watermark_func(func_name) {
-                    return Ok(Relation::Watermark(Box::new(
-                        self.bind_watermark(alias, args)?,
-                    )));
-                };
-
-                let args: Vec<ExprImpl> = args
-                    .into_iter()
-                    .map(|arg| self.bind_function_arg(arg))
-                    .flatten_ok()
-                    .try_collect()?;
-                let tf = if let Some(func) = self
-                    .catalog
-                    .first_valid_schema(
-                        &self.db_name,
-                        &self.search_path,
-                        &self.auth_context.user_name,
-                    )?
-                    .get_function_by_name_args(
-                        func_name,
-                        &args.iter().map(|arg| arg.return_type()).collect_vec(),
-                    )
-                    && matches!(func.kind, FunctionKind::Table { .. })
-                {
-                    TableFunction::new_user_defined(func.clone(), args)
-                } else if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
-                    TableFunction::new(table_function_type, args)?
-                } else {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("unknown table function: {}", func_name),
-                        1191.into(),
-                    )
-                    .into());
-                };
-                let columns = if let DataType::Struct(s) = tf.return_type() {
-                    // If the table function returns a struct, it's fields can be accessed just
-                    // like a table's columns.
-                    let schema = Schema::from(&s);
-                    schema.fields.into_iter().map(|f| (false, f)).collect_vec()
-                } else {
-                    // If there is an table alias, we should use the alias as the table function's
-                    // column name. If column aliases are also provided, they
-                    // are handled in bind_table_to_context.
-                    //
-                    // Note: named return value should take precedence over table alias.
-                    // But we don't support it yet.
-                    // e.g.,
-                    // ```
-                    // > create function foo(ret out int) language sql as 'select 1';
-                    // > select t.ret from foo() as t;
-                    // ```
-                    let col_name = if let Some(alias) = &alias {
-                        alias.name.real_value()
-                    } else {
-                        tf.name()
-                    };
-                    vec![(false, Field::with_name(tf.return_type(), col_name))]
-                };
-
-                self.bind_table_to_context(columns, tf.name(), alias)?;
-
-                Ok(Relation::TableFunction(Box::new(tf)))
+                self.bind_table_function(name, alias, args)
             }
             TableFactor::Derived {
                 lateral,
