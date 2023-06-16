@@ -120,10 +120,13 @@ impl<S> MonitoredStateStore<S> {
             .get_duration
             .with_label_values(&[table_id_label.as_str()])
             .start_timer();
+
+        // TODO: attach tracing span
         let value = get_future
             .verbose_instrument_await("store_get")
             .await
             .inspect_err(|e| error!("Failed in get: {:?}", e))?;
+
         timer.observe_duration();
 
         self.storage_metrics
@@ -368,7 +371,8 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
     }
 
     fn into_stream(self) -> impl StateStoreIterItemStream {
-        Self::into_stream_inner(self).instrument(tracing::trace_span!("store_iter"))
+        // TODO: attach tracing span
+        Self::into_stream_inner(self)
     }
 }
 
