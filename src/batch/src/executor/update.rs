@@ -22,14 +22,12 @@ use risingwave_common::array::{
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::transaction::transaction_id::TxnId;
-use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::dml_manager::DmlManagerRef;
-use risingwave_source::WriteHandle;
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -45,17 +43,13 @@ pub struct UpdateExecutor {
     table_id: TableId,
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
-    // Use option to make it possible to impl drop trait.
-    child: Option<BoxedExecutor>,
+    child: BoxedExecutor,
     exprs: Vec<BoxedExpression>,
     chunk_size: usize,
     schema: Schema,
     identity: String,
     returning: bool,
     txn_id: TxnId,
-    write_handle: Option<WriteHandle>,
-    // Indicate whether `TxnMsg::End` or `TxnMsg::Rollback` have been sent to the write channel.
-    finished: bool,
 }
 
 impl UpdateExecutor {
@@ -84,7 +78,7 @@ impl UpdateExecutor {
             table_id,
             table_version_id,
             dml_manager,
-            child: Some(child),
+            child,
             exprs,
             chunk_size,
             schema: if returning {
@@ -97,22 +91,6 @@ impl UpdateExecutor {
             identity,
             returning,
             txn_id,
-            write_handle: None,
-            finished: false,
-        }
-    }
-}
-
-impl Drop for UpdateExecutor {
-    fn drop(&mut self) {
-        // If this executor is not finished, try to rollback.
-        if !self.finished {
-            if let Some(write_handle) = self.write_handle.take() {
-                let txn_id = self.txn_id;
-                tokio::spawn(async move {
-                    let _ = write_handle.write_txn_msg(TxnMsg::Rollback(txn_id)).await;
-                });
-            }
         }
     }
 }
@@ -134,19 +112,18 @@ impl Executor for UpdateExecutor {
 impl UpdateExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let data_types = self.child.as_ref().unwrap().schema().data_types();
+        let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types.clone(), self.chunk_size);
 
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
-        self.write_handle = Some(table_dml_handle.write_handle(self.txn_id)?);
-        let write_handle = self.write_handle.as_ref().unwrap();
+        let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
 
         let mut notifiers = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
-        let write_txn_data = |chunk: DataChunk| async {
+        let write_txn_data = |chunk: DataChunk| {
             // TODO: if the primary key is updated, we should use plain `+,-` instead of `U+,U-`.
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
@@ -155,29 +132,20 @@ impl UpdateExecutor {
                 .collect_vec();
             let stream_chunk = StreamChunk::from_parts(ops, chunk);
 
-            let txn_msg = TxnMsg::Data(self.txn_id, stream_chunk);
-
             #[cfg(debug_assertions)]
-            table_dml_handle.check_txn_msg(&txn_msg);
+            table_dml_handle.check_chunk_schema(&stream_chunk);
 
-            write_handle.write_txn_msg(txn_msg).await
+            write_handle.write_chunk(stream_chunk)
         };
 
-        notifiers.push(
-            write_handle
-                .write_txn_msg(TxnMsg::Begin(self.txn_id))
-                .await?,
-        );
+        notifiers.push(write_handle.begin()?);
 
         #[for_await]
-        for data_chunk in self.child.take().unwrap().execute() {
+        for data_chunk in self.child.execute() {
             let data_chunk = match data_chunk {
                 Ok(data_chunk) => data_chunk,
                 Err(err) => {
-                    write_handle
-                        .write_txn_msg(TxnMsg::Rollback(self.txn_id))
-                        .await?;
-                    self.finished = true;
+                    write_handle.rollback()?;
                     return Err(err);
                 }
             };
@@ -188,10 +156,7 @@ impl UpdateExecutor {
                     let column = match expr.eval(&data_chunk).await {
                         Ok(column) => column,
                         Err(err) => {
-                            write_handle
-                                .write_txn_msg(TxnMsg::Rollback(self.txn_id))
-                                .await?;
-                            self.finished = true;
+                            write_handle.rollback()?;
                             return Err(err.into());
                         }
                     };
@@ -212,17 +177,16 @@ impl UpdateExecutor {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };
                 if let Some(chunk) = builder.append_one_row(row_insert) {
-                    notifiers.push(write_txn_data(chunk).await?);
+                    notifiers.push(write_txn_data(chunk)?);
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            notifiers.push(write_txn_data(chunk).await?);
+            notifiers.push(write_txn_data(chunk)?);
         }
 
-        notifiers.push(write_handle.write_txn_msg(TxnMsg::End(self.txn_id)).await?);
-        self.finished = true;
+        notifiers.push(write_handle.end()?);
 
         // Wait for all chunks to be taken / written.
         let rows_updated = try_join_all(notifiers)
@@ -291,6 +255,7 @@ mod tests {
     };
     use risingwave_common::hash::ActorId;
     use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::util::worker_util::WorkerNodeId;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_source::dml_manager::DmlManager;

@@ -143,7 +143,6 @@ mod tests {
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::transaction::transaction_id::TxnId;
-    use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_connector::source::StreamChunkWithState;
     use risingwave_source::TableDmlHandle;
     use tokio::sync::mpsc;
@@ -152,7 +151,8 @@ mod tests {
     use crate::executor::{barrier_to_message_stream, Barrier};
     use crate::task::ActorId;
 
-    const TEST_TRANSACTION_ID: TxnId = 0;
+    const TEST_TRANSACTION_ID1: TxnId = 0;
+    const TEST_TRANSACTION_ID2: TxnId = 1;
     const ACTOR_ID1: ActorId = 1;
 
     #[tokio::test]
@@ -165,7 +165,8 @@ mod tests {
             .stream_reader(ACTOR_ID1)
             .into_stream_for_source_reader_test();
 
-        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle1 = table_dml_handle.write_handle(TEST_TRANSACTION_ID1).unwrap();
+        let mut write_handle2 = table_dml_handle.write_handle(TEST_TRANSACTION_ID2).unwrap();
 
         let barrier_stream = barrier_to_message_stream(barrier_rx).boxed();
         let stream =
@@ -184,18 +185,9 @@ mod tests {
 
         // Write a chunk, and we should receive it.
 
-        write_handle
-            .write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
-            .await
-            .unwrap();
-        write_handle
-            .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, StreamChunk::default()))
-            .await
-            .unwrap();
-        write_handle
-            .write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
-            .await
-            .unwrap();
+        write_handle1.begin().unwrap();
+        write_handle1.write_chunk(StreamChunk::default()).unwrap();
+        write_handle1.end().unwrap();
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
         barrier_tx.send(Barrier::new_test_barrier(1)).unwrap();
@@ -207,18 +199,9 @@ mod tests {
         // Write a barrier.
         barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
         // Then write a chunk.
-        write_handle
-            .write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
-            .await
-            .unwrap();
-        write_handle
-            .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, StreamChunk::default()))
-            .await
-            .unwrap();
-        write_handle
-            .write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
-            .await
-            .unwrap();
+        write_handle2.begin().unwrap();
+        write_handle2.write_chunk(StreamChunk::default()).unwrap();
+        write_handle2.end().unwrap();
 
         // We should receive the barrier.
         assert_matches!(next!().unwrap(), Either::Left(_));

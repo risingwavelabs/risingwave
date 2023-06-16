@@ -237,7 +237,6 @@ mod tests {
     use risingwave_common::catalog::{ColumnId, Field, INITIAL_TABLE_VERSION_ID};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
-    use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::types::DataType;
     use risingwave_source::dml_manager::DmlManager;
 
@@ -312,21 +311,12 @@ mod tests {
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, INITIAL_TABLE_VERSION_ID)
             .unwrap();
-        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
 
         // Message from batch
-        write_handle
-            .write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
-            .await
-            .unwrap();
-        write_handle
-            .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, batch_chunk))
-            .await
-            .unwrap();
-        write_handle
-            .write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
-            .await
-            .unwrap();
+        write_handle.begin().unwrap();
+        write_handle.write_chunk(batch_chunk).unwrap();
+        write_handle.end().unwrap();
 
         // Consume the 1st message from upstream executor
         let msg = dml_executor.next().await.unwrap().unwrap();

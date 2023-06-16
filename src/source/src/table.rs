@@ -17,6 +17,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use futures_async_stream::try_stream;
 use parking_lot::RwLock;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::ActorId;
@@ -30,7 +31,7 @@ pub type TableDmlHandleRef = Arc<TableDmlHandle>;
 #[derive(Debug)]
 pub struct ChangesSender {
     pub actor_id: ActorId,
-    pub tx: mpsc::Sender<(TxnMsg, oneshot::Sender<usize>)>,
+    pub tx: mpsc::UnboundedSender<(TxnMsg, oneshot::Sender<usize>)>,
 }
 
 #[derive(Debug)]
@@ -41,10 +42,6 @@ pub struct TableDmlHandleCore {
     /// saved here. The insert statement will take one channel randomly.
     pub changes_txs: Vec<ChangesSender>,
 }
-
-/// The buffer size of the channel between each [`TableDmlHandle`] and the source executors.
-// TODO: decide a default value carefully and make this configurable.
-const DML_CHUNK_BUFFER_SIZE: usize = 32;
 
 /// [`TableDmlHandle`] is a special internal source to handle table updates from user,
 /// including insert/delete/update statements via SQL interface.
@@ -74,7 +71,8 @@ impl TableDmlHandle {
 
     pub fn stream_reader(&self, actor_id: ActorId) -> TableStreamReader {
         let mut core = self.core.write();
-        let (tx, rx) = mpsc::channel(DML_CHUNK_BUFFER_SIZE);
+        // TODO: use a unbounded channel with permits to limit the buffer size for data chunks.
+        let (tx, rx) = mpsc::unbounded_channel();
         core.changes_txs.push(ChangesSender { actor_id, tx });
 
         TableStreamReader { rx }
@@ -102,7 +100,7 @@ impl TableDmlHandle {
             .tx
             .clone();
 
-        Ok(WriteHandle { txn_id, tx })
+        Ok(WriteHandle::new(txn_id, tx))
     }
 
     /// Get the reference of all columns in this table.
@@ -110,34 +108,72 @@ impl TableDmlHandle {
         self.column_descs.as_ref()
     }
 
-    pub fn check_txn_msg(&self, txn_msg: &TxnMsg) {
-        if let TxnMsg::Data(_, chunk) = txn_msg {
-            risingwave_common::util::schema_check::schema_check(
-                self.column_descs
-                    .iter()
-                    .filter_map(|c| (!c.is_generated()).then_some(&c.data_type)),
-                chunk.columns(),
-            )
-            .expect("table source write txn_msg schema check failed");
-        }
+    pub fn check_chunk_schema(&self, chunk: &StreamChunk) {
+        risingwave_common::util::schema_check::schema_check(
+            self.column_descs
+                .iter()
+                .filter_map(|c| (!c.is_generated()).then_some(&c.data_type)),
+            chunk.columns(),
+        )
+        .expect("table source write txn_msg schema check failed");
     }
 }
 
 pub struct WriteHandle {
     txn_id: TxnId,
-    tx: mpsc::Sender<(TxnMsg, oneshot::Sender<usize>)>,
+    tx: mpsc::UnboundedSender<(TxnMsg, oneshot::Sender<usize>)>,
+    // Indicate whether `TxnMsg::End` or `TxnMsg::Rollback` have been sent to the write channel.
+    finished: bool,
+}
+
+impl Drop for WriteHandle {
+    fn drop(&mut self) {
+        // If this executor is not finished, try to rollback.
+        if !self.finished {
+            let _ = self.rollback();
+        }
+    }
 }
 
 impl WriteHandle {
+    pub fn new(txn_id: TxnId, tx: mpsc::UnboundedSender<(TxnMsg, oneshot::Sender<usize>)>) -> Self {
+        Self {
+            txn_id,
+            tx,
+            finished: false,
+        }
+    }
+
+    pub fn begin(&self) -> Result<oneshot::Receiver<usize>> {
+        assert!(!self.finished);
+        self.write_txn_msg(TxnMsg::Begin(self.txn_id))
+    }
+
+    pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+        self.write_txn_msg(TxnMsg::Data(self.txn_id, chunk))
+    }
+
+    pub fn end(&mut self) -> Result<oneshot::Receiver<usize>> {
+        assert!(!self.finished);
+        self.finished = true;
+        self.write_txn_msg(TxnMsg::End(self.txn_id))
+    }
+
+    pub fn rollback(&mut self) -> Result<oneshot::Receiver<usize>> {
+        assert!(!self.finished);
+        self.finished = true;
+        self.write_txn_msg(TxnMsg::Rollback(self.txn_id))
+    }
+
     /// Asynchronously write txn messages into table. Changes written here will be simply passed to
     /// the associated streaming task via channel, and then be materialized to storage there.
     ///
     /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,
     /// and the `usize` represents the cardinality of this chunk.
-    pub async fn write_txn_msg(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
+    fn write_txn_msg(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_id, txn_msg.txn_id());
         let (notifier_tx, notifier_rx) = oneshot::channel();
-        match self.tx.send((txn_msg, notifier_tx)).await {
+        match self.tx.send((txn_msg, notifier_tx)) {
             Ok(_) => Ok(notifier_rx),
 
             // It's possible that the source executor is scaled in or migrated, so the channel
@@ -154,7 +190,7 @@ impl WriteHandle {
 #[derive(Debug)]
 pub struct TableStreamReader {
     /// The receiver of the changes channel.
-    rx: mpsc::Receiver<(TxnMsg, oneshot::Sender<usize>)>,
+    rx: mpsc::UnboundedReceiver<(TxnMsg, oneshot::Sender<usize>)>,
 }
 
 impl TableStreamReader {
@@ -197,7 +233,7 @@ mod tests {
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
-    use futures::{FutureExt, StreamExt};
+    use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op, StreamChunk};
     use risingwave_common::catalog::ColumnId;
@@ -220,7 +256,10 @@ mod tests {
     async fn test_table_dml_handle() -> Result<()> {
         let table_dml_handle = Arc::new(new_table_dml_handle());
         let mut reader = table_dml_handle.stream_reader(ACTOR_ID1).into_stream();
-        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        write_handle.begin().unwrap();
+
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
 
         macro_rules! write_chunk {
             ($i:expr) => {{
@@ -229,21 +268,7 @@ mod tests {
                     vec![I64Array::from_iter([$i]).into_ref()],
                     None,
                 );
-                write_handle
-                    .write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
-                    .now_or_never()
-                    .unwrap()
-                    .unwrap();
-                write_handle
-                    .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, chunk))
-                    .now_or_never()
-                    .unwrap()
-                    .unwrap();
-                write_handle
-                    .write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
-                    .now_or_never()
-                    .unwrap()
-                    .unwrap();
+                write_handle.write_chunk(chunk).unwrap();
             }};
         }
 
@@ -251,12 +276,10 @@ mod tests {
 
         macro_rules! check_next_chunk {
             ($i: expr) => {
-                assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
                 assert_matches!(reader.next().await.unwrap()?, txn_msg => {
                     let chunk = txn_msg.as_stream_chunk().unwrap();
                     assert_eq!(chunk.columns()[0].as_int64().iter().collect_vec(), vec![Some($i)]);
                 });
-                assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
             }
         }
 
@@ -264,6 +287,38 @@ mod tests {
 
         write_chunk!(1);
         check_next_chunk!(1);
+
+        write_handle.end().unwrap();
+
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_write_handle_rollback_on_drop() -> Result<()> {
+        let table_dml_handle = Arc::new(new_table_dml_handle());
+        let mut reader = table_dml_handle.stream_reader(ACTOR_ID1).into_stream();
+        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        write_handle.begin().unwrap();
+
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
+
+        let chunk = StreamChunk::new(
+            vec![Op::Insert],
+            vec![I64Array::from_iter([1]).into_ref()],
+            None,
+        );
+        write_handle.write_chunk(chunk).unwrap();
+
+        assert_matches!(reader.next().await.unwrap()?, txn_msg => {
+            let chunk = txn_msg.as_stream_chunk().unwrap();
+            assert_eq!(chunk.columns()[0].as_int64().iter().collect_vec(), vec![Some(1)]);
+        });
+
+        // Rollback on drop
+        drop(write_handle);
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Rollback(_));
 
         Ok(())
     }

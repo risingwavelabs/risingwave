@@ -176,39 +176,18 @@ impl DmlManager {
 
 #[cfg(test)]
 mod tests {
-    use futures::FutureExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
     use risingwave_common::hash::ActorId;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
-    use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::types::DataType;
-    use tokio::sync::oneshot;
 
     use super::*;
-    use crate::WriteHandle;
 
     const TEST_TRANSACTION_ID: TxnId = 0;
     const ACTOR_ID1: ActorId = 1;
     const ACTOR_ID2: ActorId = 2;
-
-    #[easy_ext::ext(WriteHandleTestExt)]
-    impl WriteHandle {
-        pub fn write_chunk_ready(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
-            self.write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
-                .now_or_never()
-                .unwrap()?;
-            let result = self
-                .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, chunk))
-                .now_or_never()
-                .unwrap();
-            self.write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
-                .now_or_never()
-                .unwrap()?;
-            result
-        }
-    }
 
     #[test]
     fn test_register_and_drop() {
@@ -236,9 +215,10 @@ mod tests {
             .table_dml_handle(table_id, table_version_id)
             .unwrap();
         let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        write_handle.begin().unwrap();
 
         // Should be able to write to the table.
-        write_handle.write_chunk_ready(chunk()).unwrap();
+        write_handle.write_chunk(chunk()).unwrap();
 
         // After dropping the corresponding reader, the write handle should be not allowed to write.
         // This is to simulate the scale-in of DML executors.
@@ -247,11 +227,12 @@ mod tests {
             drop(r1);
         }
 
-        write_handle.write_chunk_ready(chunk()).unwrap_err();
+        write_handle.write_chunk(chunk()).unwrap_err();
 
         // Unless we create a new write handle.
         let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
-        write_handle.write_chunk_ready(chunk()).unwrap();
+        write_handle.begin().unwrap();
+        write_handle.write_chunk(chunk()).unwrap();
 
         // After dropping the last reader, no more writes are allowed.
         // This is to simulate the dropping of the table.
@@ -259,7 +240,7 @@ mod tests {
             dml_manager.unregister_changes_sender(table_id, ACTOR_ID2);
             drop(r2);
         }
-        write_handle.write_chunk_ready(chunk()).unwrap_err();
+        write_handle.write_chunk(chunk()).unwrap_err();
     }
 
     #[test]
@@ -288,9 +269,10 @@ mod tests {
             .table_dml_handle(table_id, old_version_id)
             .unwrap();
         let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        write_handle.begin().unwrap();
 
         // Should be able to write to the table.
-        write_handle.write_chunk_ready(old_chunk()).unwrap();
+        write_handle.write_chunk(old_chunk()).unwrap();
 
         // Start reading the new version.
         let new_h = dml_manager
@@ -299,7 +281,7 @@ mod tests {
         let _new_r = new_h.stream_reader(ACTOR_ID2);
 
         // Still be able to write to the old write handle, if the channel is not closed.
-        write_handle.write_chunk_ready(old_chunk()).unwrap();
+        write_handle.write_chunk(old_chunk()).unwrap();
 
         // However, it is no longer possible to create a `table_dml_handle` with the old version;
         dml_manager
@@ -311,7 +293,8 @@ mod tests {
             .table_dml_handle(table_id, new_version_id)
             .unwrap();
         let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
-        write_handle.write_chunk_ready(new_chunk()).unwrap();
+        write_handle.begin().unwrap();
+        write_handle.write_chunk(new_chunk()).unwrap();
     }
 
     #[test]
