@@ -110,6 +110,11 @@ impl AvroParserConfig {
         }
     }
 
+    pub fn pk_names(&self) -> Result<Vec<String>> {
+        // TODO(st1page): refactor this
+        Ok(self.extract_pks()?.into_iter().map(|c| c.name).collect())
+    }
+
     pub fn extract_pks(&self) -> Result<Vec<ColumnDesc>> {
         if let Some(Schema::Record { fields, .. }) = self.key_schema.as_deref() {
             let mut index = 0;

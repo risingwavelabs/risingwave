@@ -84,11 +84,10 @@ async fn extract_avro_table_schema(
 }
 
 /// Map an Avro schema to a relational schema. And extract primary key columns.
-#[allow(dead_code)]
 async fn extract_upsert_avro_table_schema(
     schema: &AvroSchema,
     with_properties: &HashMap<String, String>,
-) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>)> {
+) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     let conf = AvroParserConfig::new(
         with_properties,
         schema.row_schema_location.0.as_str(),
@@ -112,7 +111,7 @@ async fn extract_upsert_avro_table_schema(
                     )))
                 })
         })
-        .map_ok(|desc| ColumnId::new(desc.column_id))
+        .map_ok(|desc| desc.name.clone())
         .collect::<Result<Vec<_>>>()?;
     Ok((
         vec_column_desc
@@ -244,21 +243,24 @@ pub(crate) async fn try_bind_columns_from_source(
                 return Err(RwError::from(ProtocolError(
                     "User-defined schema is not allowed with row format upsert avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
-            if !sql_defined_pk {
-                return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format upsert avro."
-                        .to_string(),
-                )));
-            }
-            if sql_defined_pk_names.len() != 1 {
-                return Err(RwError::from(ProtocolError(
-                    "upsert avro supports only one primary key column.".to_string(),
-                )));
-            }
-            let upsert_avro_primary_key = sql_defined_pk_names[0].clone();
+
+            let (columns, pk_from_avro) =
+                extract_upsert_avro_table_schema(avro_schema, with_properties).await?;
+
+            let (pk_names, upsert_avro_primary_key) = if sql_defined_pk {
+                if sql_defined_pk_names.len() != 1 {
+                    return Err(RwError::from(ProtocolError(
+                        "upsert avro supports only one primary key column.".to_string(),
+                    )));
+                }
+                let upsert_avro_primary_key = sql_defined_pk_names[0].clone();
+                (sql_defined_pk_names, upsert_avro_primary_key)
+            } else {
+                (pk_from_avro, Default::default())
+            };
             (
-                Some(extract_avro_table_schema(avro_schema, with_properties).await?),
-                sql_defined_pk_names,
+                Some(columns),
+                pk_names,
                 StreamSourceInfo {
                     row_format: RowFormatType::UpsertAvro as i32,
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
