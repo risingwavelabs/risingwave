@@ -646,7 +646,7 @@ where
             .unwrap();
 
         prev_epoch.span().in_scope(|| {
-            tracing::info!(epoch = new_epoch.value().0, "new barrier enqueued");
+            tracing::info!(target: "rw_tracing", epoch = new_epoch.value().0, "new barrier enqueued");
         });
 
         let command_ctx = Arc::new(CommandContext::new(
