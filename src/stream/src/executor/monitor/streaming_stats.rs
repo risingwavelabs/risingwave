@@ -105,6 +105,7 @@ pub struct StreamingMetrics {
     pub lru_physical_now_ms: IntGauge,
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
+    pub lru_evicted_watermark_time_diff_ms: GenericGaugeVec<AtomicI64>,
     pub jemalloc_allocated_bytes: IntGauge,
     pub jemalloc_active_bytes: IntGauge,
 
@@ -588,6 +589,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let lru_evicted_watermark_time_diff_ms = register_int_gauge_vec_with_registry!(
+            "lru_evicted_watermark_time_diff_ms",
+            "The diff between current watermark and latest evicted watermark time by actors",
+            &["table_id", "actor_id", "desc"],
+            registry
+        )
+        .unwrap();
+
         let jemalloc_allocated_bytes = register_int_gauge_with_registry!(
             "jemalloc_allocated_bytes",
             "The allocated memory jemalloc, got from jemalloc_ctl",
@@ -695,6 +704,7 @@ impl StreamingMetrics {
             lru_physical_now_ms,
             lru_runtime_loop_count,
             lru_watermark_step,
+            lru_evicted_watermark_time_diff_ms,
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
             user_compute_error_count,
