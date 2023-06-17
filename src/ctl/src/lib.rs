@@ -56,6 +56,9 @@ enum Commands {
     /// Commands for Meta
     #[clap(subcommand)]
     Meta(MetaCommands),
+    /// Commands for Scaling
+    #[clap(subcommand)]
+    Scale(ScaleCommands),
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
@@ -191,6 +194,42 @@ enum TableCommands {
     },
     /// list all state tables
     List,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ScaleResizeCommands {
+    /// The worker ids that needs to be excluded during scheduling
+    #[clap(long, value_delimiter = ',', value_name = "id,...")]
+    exclude_workers: Option<Vec<u32>>,
+
+    /// The worker ids that needs to be included during scheduling
+    #[clap(long, value_delimiter = ',', value_name = "id,...")]
+    include_workers: Option<Vec<u32>>,
+
+    /// Will generate a plan supported by the `reschedule` command and save it to the provided path
+    /// by the `--output`.
+    #[clap(long, default_value_t = false)]
+    generate: bool,
+
+    /// The output file to write the generated plan to, standard output by default
+    #[clap(long)]
+    output: Option<String>,
+
+    /// Automatic yes to prompts
+    #[clap(short = 'y', long, default_value_t = false)]
+    yes: bool,
+
+    /// Specify the fragment ids that need to be scheduled.
+    /// empty by default, which means all fragments will be scheduled
+    #[clap(long)]
+    fragments: Option<Vec<u32>>,
+}
+
+#[derive(Subcommand, Debug)]
+enum ScaleCommands {
+    /// The resize command scales up and down the cluster by specifying the worker ids to be
+    /// included and excluded.
+    Resize(ScaleResizeCommands),
 }
 
 #[derive(Subcommand)]
@@ -386,6 +425,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
+        Commands::Scale(ScaleCommands::Resize(resize)) => {
+            cmd_impl::scale::resize(context, resize).await?
+        }
     }
     Ok(())
 }
