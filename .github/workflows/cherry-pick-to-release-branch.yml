@@ -1,0 +1,19 @@
+name: PR for release branch
+on:
+  push:
+    branches:
+      - main
+jobs:
+  release_pull_request:
+    if: "contains(github.event.head_commit.message, 'fix')"
+    runs-on: ubuntu-latest
+    name: release_pull_request
+    steps:
+      - name: checkout
+        uses: actions/checkout@v1
+      - name: Create PR to branch
+        uses: risingwavelabs/github-action-cherry-pick@master
+        with:
+          pr_branch: 'v0.19.0-rc'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
