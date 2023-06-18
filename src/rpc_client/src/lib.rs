@@ -50,8 +50,10 @@ mod connector_client;
 mod hummock_meta_client;
 mod meta_client;
 // mod sink_client;
+mod compactor_client;
 mod stream_client;
 
+pub use compactor_client::CompactorClient;
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::ConnectorClient;
 pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
