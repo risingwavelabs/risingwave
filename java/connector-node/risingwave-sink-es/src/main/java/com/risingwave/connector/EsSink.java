@@ -166,7 +166,7 @@ public class EsSink extends SinkBase {
     }
 
     /**
-     * Kind of serialization.
+     * The api accepts doc in map form.
      *
      * @param row
      * @return Map from Field name to Value
