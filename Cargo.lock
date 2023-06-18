@@ -5922,9 +5922,11 @@ version = "0.19.1"
 dependencies = [
  "anyhow",
  "async-trait",
+ "await-tree",
  "clap 4.2.7",
  "madsim-tokio",
  "madsim-tonic",
+ "parking_lot 0.12.1",
  "prometheus",
  "risingwave_common",
  "risingwave_common_service",
