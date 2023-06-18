@@ -23,7 +23,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tokio::time::Instant;
 use tracing::error;
-use tracing_futures::Instrument;
 
 use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};

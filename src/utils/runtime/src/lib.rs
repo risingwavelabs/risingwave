@@ -23,7 +23,7 @@ use std::time::Duration;
 use futures::Future;
 use risingwave_common::metrics::MetricsLayer;
 use tracing::level_filters::LevelFilter as Level;
-use tracing_subscriber::filter::{Directive, Targets};
+use tracing_subscriber::filter::{Directive, FilterFn, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, EnvFilter};
@@ -201,6 +201,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
                 .with_filter(filter(vec![
                     ("rw_tracing", Level::OFF), // filter out tracing-only events
                 ]))
+                .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
                 .boxed(),
         );
     };
