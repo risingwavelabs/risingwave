@@ -289,9 +289,11 @@ class TypeUtils {
             vector.allocateNew(values.length);
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
-                    var d = (PeriodDuration) values[i];
-                    vector.set(i, (int) d.getPeriod().toTotalMonths(), d.getPeriod().getDays(),
-                            d.getDuration().toNanos());
+                    var pd = (PeriodDuration) values[i];
+                    var months = (int) pd.getPeriod().toTotalMonths();
+                    var days = pd.getPeriod().getDays();
+                    var nanos = pd.getDuration().toNanos();
+                    vector.set(i, months, days, nanos);
                 }
             }
         } else if (fieldVector instanceof VarCharVector) {
@@ -326,15 +328,16 @@ class TypeUtils {
                 var innerVector = (LargeVarCharVector) vector.getDataVector();
                 for (int i = 0; i < values.length; i++) {
                     var array = (String[]) values[i];
-                    if (array != null) {
-                        vector.startNewValue(i);
-                        for (int j = 0; j < array.length; j++) {
-                            if (array[j] != null) {
-                                innerVector.setSafe(j, array[j].getBytes());
-                            }
-                        }
-                        vector.endValue(i, array.length);
+                    if (array == null) {
+                        continue;
                     }
+                    vector.startNewValue(i);
+                    for (int j = 0; j < array.length; j++) {
+                        if (array[j] != null) {
+                            innerVector.setSafe(j, array[j].getBytes());
+                        }
+                    }
+                    vector.endValue(i, array.length);
                 }
             } else {
                 throw new IllegalArgumentException("Unsupported type: " + fieldVector.getClass());

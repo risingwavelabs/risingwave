@@ -91,12 +91,12 @@ public class TestUdfServer {
 
     public static class ReturnAll implements ScalarFunction {
         public static class Row {
-            public boolean bool;
-            public short i16;
-            public int i32;
-            public long i64;
-            public float f32;
-            public double f64;
+            public Boolean bool;
+            public Short i16;
+            public Integer i32;
+            public Long i64;
+            public Float f32;
+            public Double f64;
             public LocalDate date;
             public LocalTime time;
             public LocalDateTime timestamp;
@@ -106,7 +106,7 @@ public class TestUdfServer {
             public @DataTypeHint("JSONB") String jsonb;
         }
 
-        public Row eval(boolean bool, short i16, int i32, long i64, float f32, double f64,
+        public Row eval(Boolean bool, Short i16, Integer i32, Long i64, Float f32, Double f64,
                 LocalDate date, LocalTime time, LocalDateTime timestamp, PeriodDuration interval,
                 String str, byte[] bytes, @DataTypeHint("JSONB") String jsonb) {
             var row = new Row();
@@ -130,71 +130,71 @@ public class TestUdfServer {
     @Test
     public void all_types() throws Exception {
         var c0 = new BitVector("", allocator);
-        c0.allocateNew(1);
+        c0.allocateNew(2);
         c0.set(0, 1);
-        c0.setValueCount(1);
+        c0.setValueCount(2);
 
         var c1 = new SmallIntVector("", allocator);
-        c1.allocateNew(1);
+        c1.allocateNew(2);
         c1.set(0, 1);
-        c1.setValueCount(1);
+        c1.setValueCount(2);
 
         var c2 = new IntVector("", allocator);
-        c2.allocateNew(1);
+        c2.allocateNew(2);
         c2.set(0, 1);
-        c2.setValueCount(1);
+        c2.setValueCount(2);
 
         var c3 = new BigIntVector("", allocator);
-        c3.allocateNew(1);
+        c3.allocateNew(2);
         c3.set(0, 1);
-        c3.setValueCount(1);
+        c3.setValueCount(2);
 
         var c4 = new Float4Vector("", allocator);
-        c4.allocateNew(1);
+        c4.allocateNew(2);
         c4.set(0, 1);
-        c4.setValueCount(1);
+        c4.setValueCount(2);
 
         var c5 = new Float8Vector("", allocator);
-        c5.allocateNew(1);
+        c5.allocateNew(2);
         c5.set(0, 1);
-        c5.setValueCount(1);
+        c5.setValueCount(2);
 
         var c6 = new DateDayVector("", allocator);
-        c6.allocateNew(1);
+        c6.allocateNew(2);
         c6.set(0, (int) LocalDate.of(2023, 1, 1).toEpochDay());
-        c6.setValueCount(1);
+        c6.setValueCount(2);
 
         var c7 = new TimeMicroVector("", allocator);
-        c7.allocateNew(1);
+        c7.allocateNew(2);
         c7.set(0, LocalTime.of(1, 2, 3).toNanoOfDay() / 1000);
-        c7.setValueCount(1);
+        c7.setValueCount(2);
 
         var c8 = new TimeStampMicroVector("", allocator);
-        c8.allocateNew(1);
+        c8.allocateNew(2);
         var ts = LocalDateTime.of(2023, 1, 1, 1, 2, 3);
         c8.set(0, ts.toLocalDate().toEpochDay() * 24 * 3600 * 1000000 + ts.toLocalTime().toNanoOfDay() / 1000);
-        c8.setValueCount(1);
+        c8.setValueCount(2);
 
         var c9 = new IntervalMonthDayNanoVector("", FieldType.nullable(MinorType.INTERVALMONTHDAYNANO.getType()),
                 allocator);
-        c9.allocateNew(1);
+        c9.allocateNew(2);
         c9.set(0, 1, 2, 3);
-        c9.setValueCount(1);
+        c9.setValueCount(2);
 
         var c10 = new VarCharVector("", allocator);
-        c10.allocateNew(1);
+        c10.allocateNew(2);
         c10.set(0, "string".getBytes());
-        c10.setValueCount(1);
+        c10.setValueCount(2);
 
         var c11 = new VarBinaryVector("", allocator);
-        c11.allocateNew(1);
+        c11.allocateNew(2);
         c11.set(0, "bytes".getBytes());
-        c11.setValueCount(1);
+        c11.setValueCount(2);
 
         var c12 = new LargeVarCharVector("", allocator);
-        c12.allocateNew(1);
+        c12.allocateNew(2);
         c12.set(0, "{ key: 1 }".getBytes());
-        c12.setValueCount(1);
+        c12.setValueCount(2);
 
         var input = VectorSchemaRoot.of(c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12);
 
@@ -202,7 +202,7 @@ public class TestUdfServer {
             var output = stream.getRoot();
             assertTrue(stream.next());
             assertEquals(
-                    "{\"bool\":true,\"i16\":1,\"i32\":1,\"i64\":1,\"f32\":1.0,\"f64\":1.0,\"date\":19358,\"time\":3723000000,\"timestamp\":[2023,1,1,1,2,3],\"interval\":{\"period\":\"P1M2D\",\"duration\":3E-9},\"str\":\"string\",\"bytes\":\"Ynl0ZXM=\",\"jsonb\":\"{ key: 1 }\"}",
+                    "{\"bool\":true,\"i16\":1,\"i32\":1,\"i64\":1,\"f32\":1.0,\"f64\":1.0,\"date\":19358,\"time\":3723000000,\"timestamp\":[2023,1,1,1,2,3],\"interval\":{\"period\":\"P1M2D\",\"duration\":3E-9},\"str\":\"string\",\"bytes\":\"Ynl0ZXM=\",\"jsonb\":\"{ key: 1 }\"}\n{}",
                     output.contentToTSVString().trim());
         }
     }
