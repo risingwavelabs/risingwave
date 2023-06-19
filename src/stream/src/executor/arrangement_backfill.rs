@@ -103,7 +103,6 @@ where
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
-        // let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
         let pk_in_output_indices = self
             .upstream_table
             .pk_indices()
@@ -257,12 +256,12 @@ where
 
                                     // Consume upstream buffer chunk
                                     if let Some(current_pos) = &current_pos {
-                                        for chunk in upstream_chunk_buffer.drain(..) {
+                                        for chunk in &upstream_chunk_buffer {
                                             cur_barrier_upstream_processed_rows +=
                                                 chunk.cardinality() as u64;
                                             yield Message::Chunk(Self::mapping_chunk(
                                                 Self::mark_chunk(
-                                                    &chunk,
+                                                    chunk,
                                                     current_pos,
                                                     &pk_in_output_indices,
                                                     &pk_order,
