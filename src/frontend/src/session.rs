@@ -31,10 +31,10 @@ use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::{load_config, BatchConfig};
+use risingwave_common::config::{load_config, BatchConfig, MetaConfig};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::session_config::ConfigMap;
+use risingwave_common::session_config::{ConfigMap, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -111,6 +111,7 @@ pub struct FrontendEnv {
     source_metrics: Arc<SourceMetrics>,
 
     batch_config: BatchConfig,
+    meta_config: MetaConfig,
 
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
@@ -157,6 +158,7 @@ impl FrontendEnv {
             sessions_map: Arc::new(Mutex::new(HashMap::new())),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
+            meta_config: MetaConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
         }
@@ -173,6 +175,7 @@ impl FrontendEnv {
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
         let batch_config = config.batch;
+        let meta_config = config.meta;
 
         let frontend_address: HostAddr = opts
             .advertise_addr
@@ -191,7 +194,7 @@ impl FrontendEnv {
             WorkerType::Frontend,
             &frontend_address,
             Default::default(),
-            &config.meta,
+            &meta_config,
         )
         .await?;
 
@@ -321,6 +324,7 @@ impl FrontendEnv {
                 frontend_metrics,
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
                 batch_config,
+                meta_config,
                 source_metrics,
                 creating_streaming_job_tracker,
             },
@@ -383,6 +387,10 @@ impl FrontendEnv {
 
     pub fn batch_config(&self) -> &BatchConfig {
         &self.batch_config
+    }
+
+    pub fn meta_config(&self) -> &MetaConfig {
+        &self.meta_config
     }
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
@@ -677,6 +685,14 @@ impl SessionImpl {
         let notice = str.into();
         tracing::trace!("notice to user:{}", notice);
         self.notices.write().push(notice);
+    }
+
+    pub fn is_barrier_read(&self) -> bool {
+        match self.config().get_visible_mode() {
+            VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
+            VisibilityMode::All => true,
+            VisibilityMode::Checkpoint => false,
+        }
     }
 }
 

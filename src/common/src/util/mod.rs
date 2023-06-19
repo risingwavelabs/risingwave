@@ -29,6 +29,7 @@ mod future_utils;
 pub mod hash_util;
 pub mod iter_util;
 pub mod memcmp_encoding;
+pub mod panic;
 pub mod pretty_bytes;
 pub mod prost;
 pub mod resource_util;
@@ -40,6 +41,7 @@ pub mod schema_check;
 pub mod sort_util;
 pub mod stream_cancel;
 pub mod stream_graph_visitor;
+pub mod tracing;
 pub mod value_encoding;
 pub mod worker_util;
 

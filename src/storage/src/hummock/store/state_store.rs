@@ -18,13 +18,12 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use minitrace::future::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{warn, Instrument};
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
@@ -66,14 +65,24 @@ pub struct LocalHummockStorage {
     /// Read handle.
     read_version: Arc<RwLock<HummockReadVersion>>,
 
+    /// This indicates that this `LocalHummockStorage` replicates another `LocalHummockStorage`.
+    /// It's used by executors in different CNs to synchronize states.
+    ///
+    /// Within `LocalHummockStorage` we use this flag to avoid uploading local state to be
+    /// persisted, so we won't have duplicate data.
+    ///
+    /// This also handles a corner case where an executor doing replication
+    /// is scheduled to the same CN as its Upstream executor.
+    /// In that case, we use this flag to avoid reading the same data twice,
+    /// by ignoring the replicated ReadVersion.
+    is_replicated: bool,
+
     /// Event sender.
     event_sender: mpsc::UnboundedSender<HummockEvent>,
 
     memory_limiter: Arc<MemoryLimiter>,
 
     hummock_version_reader: HummockVersionReader,
-
-    tracing: Arc<risingwave_tracing::RwTracingService>,
 
     stats: Arc<HummockStateStoreMetrics>,
 
@@ -169,7 +178,7 @@ impl StateStoreRead for LocalHummockStorage {
     ) -> Self::IterFuture<'_> {
         assert!(epoch <= self.epoch());
         self.iter_inner(map_table_key_range(key_range), epoch, read_options)
-            .in_span(self.tracing.new_tracer("hummock_iter"))
+            .instrument(tracing::trace_span!("hummock_iter"))
     }
 }
 
@@ -404,9 +413,11 @@ impl LocalHummockStorage {
         self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
         // insert imm to uploader
-        self.event_sender
-            .send(HummockEvent::ImmToUploader(imm))
-            .unwrap();
+        if !self.is_replicated {
+            self.event_sender
+                .send(HummockEvent::ImmToUploader(imm))
+                .unwrap();
+        }
 
         timer.observe_duration();
 
@@ -426,7 +437,6 @@ impl LocalHummockStorage {
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
-        tracing: Arc<risingwave_tracing::RwTracingService>,
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
     ) -> Self {
@@ -437,12 +447,12 @@ impl LocalHummockStorage {
             table_id: option.table_id,
             is_consistent_op: option.is_consistent_op,
             table_option: option.table_option,
+            is_replicated: option.is_replicated,
             instance_guard,
             read_version,
             event_sender,
             memory_limiter,
             hummock_version_reader,
-            tracing,
             stats,
             write_limiter,
         }

@@ -151,22 +151,25 @@ where
     pub async fn activate_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
         let mut core = self.core.write().await;
         let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
-        if worker.worker_node.state == State::Running as i32 {
-            return Ok(());
+        if worker.worker_node.state != State::Running as i32 {
+            worker.worker_node.state = State::Running as i32;
+            worker.insert(self.env.meta_store()).await?;
+            core.update_worker_node(worker.clone());
         }
-        worker.worker_node.state = State::Running as i32;
-        worker.insert(self.env.meta_store()).await?;
-
-        core.update_worker_node(worker.clone());
 
         // Notify frontends of new compute node.
+        // Always notify because a running worker's property may have been changed.
         let worker_type = worker.worker_type();
         if worker_type == WorkerType::ComputeNode {
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Add, Info::Node(worker.worker_node))
+                .notify_frontend(Operation::Add, Info::Node(worker.worker_node.clone()))
                 .await;
         }
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::WorkerNodeActivated(worker.worker_node))
+            .await;
 
         Ok(())
     }
@@ -196,7 +199,7 @@ where
         // local notification.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
+            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker_node))
             .await;
 
         Ok(worker_type)
@@ -324,6 +327,11 @@ where
     pub async fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
         let core = self.core.read().await;
         core.list_active_streaming_parallel_units()
+    }
+
+    pub async fn list_active_serving_compute_nodes(&self) -> Vec<WorkerNode> {
+        let core = self.core.read().await;
+        core.list_serving_worker_node(Some(State::Running))
     }
 
     /// Get the cluster info used for scheduling a streaming job.
@@ -474,6 +482,13 @@ impl ClusterManagerCore {
         self.list_worker_node(WorkerType::ComputeNode, worker_state)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
+            .collect()
+    }
+
+    pub fn list_serving_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
+        self.list_worker_node(WorkerType::ComputeNode, worker_state)
+            .into_iter()
+            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
             .collect()
     }
 

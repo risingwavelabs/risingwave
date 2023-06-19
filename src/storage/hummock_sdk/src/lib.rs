@@ -22,7 +22,6 @@
 #![feature(impl_trait_in_assoc_type)]
 
 mod key_cmp;
-
 use std::cmp::Ordering;
 
 pub use key_cmp::*;
@@ -240,12 +239,12 @@ impl SstObjectIdRange {
 
 pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     let len = ssts.len();
-    for i in 1..len {
-        if ssts[i - 1]
+    for i in 0..len - 1 {
+        if ssts[i]
             .key_range
             .as_ref()
             .unwrap()
-            .compare_right_with(&ssts[i].key_range.as_ref().unwrap().left)
+            .compare_right_with(&ssts[i + 1].key_range.as_ref().unwrap().left)
             != Ordering::Less
         {
             return false;

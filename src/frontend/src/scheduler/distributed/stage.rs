@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::mem;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
@@ -462,7 +463,7 @@ impl StageRunner {
                             sent_signal_to_next = true;
                             break;
                         }
-                        TaskStatusPb::Pending => {
+                        TaskStatusPb::Ping => {
                             debug!("Receive ping from task {:?}", status.task_id.unwrap());
                         }
                         status => {
@@ -638,17 +639,19 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_streaming_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
-        self.catalog_reader
+    fn get_streaming_vnode_mapping(
+        &self,
+        table_id: &TableId,
+    ) -> SchedulerResult<ParallelUnitMapping> {
+        let fragment_id = self
+            .catalog_reader
             .read_guard()
             .get_table_by_id(table_id)
-            .map(|table| {
-                self.worker_node_manager
-                    .manager
-                    .get_streaming_fragment_mapping(&table.fragment_id)
-            })
-            .ok()
-            .flatten()
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?
+            .fragment_id;
+        self.worker_node_manager
+            .manager
+            .get_streaming_fragment_mapping(&fragment_id)
     }
 
     fn choose_worker(
@@ -659,7 +662,7 @@ impl StageRunner {
     ) -> SchedulerResult<Option<WorkerNode>> {
         let plan_node = plan_fragment.root.as_ref().expect("fail to get plan node");
         let vnode_mapping = match dml_table_id {
-            Some(table_id) => self.get_streaming_vnode_mapping(&table_id),
+            Some(table_id) => Some(self.get_streaming_vnode_mapping(&table_id)?),
             None => {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)
@@ -814,21 +817,20 @@ impl StageRunner {
         plan_fragment: PlanFragment,
         worker: Option<WorkerNode>,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
-        let worker_node_addr = worker
-            .unwrap_or(self.worker_node_manager.next_random_worker()?)
-            .host
-            .unwrap();
-
+        let mut worker = worker.unwrap_or(self.worker_node_manager.next_random_worker()?);
+        let worker_node_addr = worker.host.take().unwrap();
         let compute_client = self
             .compute_client_pool
             .get_by_addr((&worker_node_addr).into())
             .await
+            .inspect_err(|_| self.mask_failed_serving_worker(&worker))
             .map_err(|e| anyhow!(e))?;
 
         let t_id = task_id.task_id;
         let stream_status = compute_client
             .create_task(task_id, plan_fragment, self.epoch.clone())
             .await
+            .inspect_err(|_| self.mask_failed_serving_worker(&worker))
             .map_err(|e| anyhow!(e))?
             .fuse();
 
@@ -961,5 +963,24 @@ impl StageRunner {
 
     fn is_root_stage(&self) -> bool {
         self.stage.id == 0
+    }
+
+    fn mask_failed_serving_worker(&self, worker: &WorkerNode) {
+        if !worker.property.as_ref().map_or(false, |p| p.is_serving) {
+            return;
+        }
+        let duration = std::cmp::max(
+            Duration::from_secs(
+                self.ctx
+                    .session
+                    .env()
+                    .meta_config()
+                    .max_heartbeat_interval_secs as _,
+            ) / 10,
+            Duration::from_secs(1),
+        );
+        self.worker_node_manager
+            .manager
+            .mask_worker_node(worker.id, duration);
     }
 }

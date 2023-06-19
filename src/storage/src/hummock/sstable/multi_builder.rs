@@ -79,6 +79,7 @@ where
     /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
     /// switch SST.
     largest_vnode_in_current_partition: usize,
+    last_vnode: usize,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -125,6 +126,7 @@ where
             split_by_table,
             split_weight_by_vnode,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            last_vnode: 0,
         }
     }
 
@@ -143,6 +145,7 @@ where
             split_by_table: false,
             split_weight_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            last_vnode: 0,
         }
     }
 
@@ -179,10 +182,12 @@ where
         is_new_user_key: bool,
     ) -> HummockResult<()> {
         let mut switch_builder = false;
+        let mut vnode_changed = false;
         if self.split_by_table && full_key.user_key.table_id.table_id != self.last_table_id {
             self.last_table_id = full_key.user_key.table_id.table_id;
             switch_builder = true;
-
+            self.last_vnode = 0;
+            vnode_changed = true;
             if self.split_weight_by_vnode > 1 {
                 self.largest_vnode_in_current_partition =
                     VirtualNode::COUNT / (self.split_weight_by_vnode as usize) - 1;
@@ -190,6 +195,10 @@ where
         }
         if self.largest_vnode_in_current_partition != VirtualNode::MAX.to_index() {
             let key_vnode = full_key.user_key.get_vnode_id();
+            if key_vnode != self.last_vnode {
+                self.last_vnode = key_vnode;
+                vnode_changed = true;
+            }
             if key_vnode > self.largest_vnode_in_current_partition {
                 switch_builder = true;
 
@@ -203,9 +212,11 @@ where
                     ((key_vnode - small_segments_area) / (basic + 1) + 1) * (basic + 1)
                         + small_segments_area
                 }) - 1;
+                self.last_vnode = key_vnode;
                 debug_assert!(key_vnode <= self.largest_vnode_in_current_partition);
             }
         }
+
         // We use this `need_seal_current` flag to store whether we need to call `seal_current` and
         // then call `seal_current` later outside the `if let` instead of calling
         // `seal_current` at where we set `need_seal_current = true`. This is because
@@ -216,12 +227,13 @@ where
         // `current_builder` itself is required to be `Sync`, which is unnecessary.
         let mut need_seal_current = false;
         if let Some(builder) = self.current_builder.as_ref() {
-            if is_new_user_key
-                && (switch_builder
-                    || (!(self.is_target_level_l0_or_lbase && self.split_by_table)
-                        && builder.reach_capacity()))
-            {
-                need_seal_current = true;
+            if is_new_user_key {
+                if switch_builder {
+                    need_seal_current = true;
+                } else if builder.reach_capacity() {
+                    need_seal_current = self.split_weight_by_vnode == 0
+                        || (self.is_target_level_l0_or_lbase && vnode_changed);
+                }
             }
         }
         if need_seal_current {
@@ -233,6 +245,11 @@ where
         }
 
         if self.current_builder.is_none() {
+            if let Some(progress) = &self.task_progress {
+                progress
+                    .num_pending_write_io
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
             let builder = self.builder_factory.open_builder().await?;
             self.current_builder = Some(builder);
         }
@@ -254,7 +271,6 @@ where
             let builder_output = builder.finish().await?;
             {
                 // report
-
                 if let Some(progress) = &self.task_progress {
                     progress.inc_ssts_sealed();
                 }
@@ -308,6 +324,11 @@ where
             .del_agg
             .get_tombstone_between(self.last_sealed_key.as_ref(), largest_user_key.as_ref());
         if !monotonic_deletes.is_empty() && self.current_builder.is_none() {
+            if let Some(progress) = &self.task_progress {
+                progress
+                    .num_pending_write_io
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
             let builder = self.builder_factory.open_builder().await?;
             self.current_builder = Some(builder);
         }

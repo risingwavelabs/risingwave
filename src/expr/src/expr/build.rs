@@ -20,7 +20,6 @@ use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
 use super::expr_array_concat::ArrayConcatExpression;
-use super::expr_array_remove::ArrayRemoveExpression;
 use super::expr_case::CaseExpression;
 use super::expr_coalesce::CoalesceExpression;
 use super::expr_concat_ws::ConcatWsExpression;
@@ -43,15 +42,23 @@ use crate::{bail, ExprError, Result};
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use PbType as E;
 
-    match prost.expr_type() {
+    let func_call = match prost.get_rex_node()? {
+        RexNode::InputRef(_) => return InputRefExpression::try_from_boxed(prost),
+        RexNode::Constant(_) => return LiteralExpression::try_from_boxed(prost),
+        RexNode::Udf(_) => return UdfExpression::try_from_boxed(prost),
+        RexNode::FuncCall(func_call) => func_call,
+        RexNode::Now(_) => unreachable!("now should not be built at backend"),
+    };
+
+    let func_type = prost.function_type();
+
+    match func_type {
         // Dedicated types
         E::All | E::Some => SomeAllExpression::try_from_boxed(prost),
         E::In => InExpression::try_from_boxed(prost),
         E::Case => CaseExpression::try_from_boxed(prost),
         E::Coalesce => CoalesceExpression::try_from_boxed(prost),
         E::ConcatWs => ConcatWsExpression::try_from_boxed(prost),
-        E::ConstantValue => LiteralExpression::try_from_boxed(prost),
-        E::InputRef => InputRefExpression::try_from_boxed(prost),
         E::Field => FieldExpression::try_from_boxed(prost),
         E::Array => NestedConstructExpression::try_from_boxed(prost),
         E::Row => NestedConstructExpression::try_from_boxed(prost),
@@ -63,24 +70,17 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             ArrayConcatExpression::try_from_boxed(prost)
         }
         E::Vnode => VnodeExpression::try_from_boxed(prost),
-        E::Udf => UdfExpression::try_from_boxed(prost),
-        E::ArrayRemove => ArrayRemoveExpression::try_from_boxed(prost),
         E::Proctime => ProcTimeExpression::try_from_boxed(prost),
 
         _ => {
-            let Some(RexNode::FuncCall(call)) = &prost.rex_node else {
-                return Err(ExprError::UnsupportedFunction(format!("{:?}", prost.rex_node)));
-            };
-
-            let func = prost.expr_type();
             let ret_type = DataType::from(prost.get_return_type().unwrap());
-            let children = call
+            let children = func_call
                 .get_children()
                 .iter()
                 .map(build_from_prost)
                 .try_collect()?;
 
-            build_func(func, ret_type, children)
+            build_func(func_type, ret_type, children)
         }
     }
 }

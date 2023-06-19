@@ -292,6 +292,7 @@ fn bench_expr(c: &mut Criterion) {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         }) {
             Ok(agg) => agg,
             Err(e) => {

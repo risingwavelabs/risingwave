@@ -17,6 +17,7 @@ use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
@@ -159,10 +160,73 @@ impl TableCatalogBuilder {
     }
 }
 
+/// See also [`super::generic::DistillUnit`].
+pub trait Distill {
+    fn distill<'a>(&self) -> Pretty<'a>;
+}
+
+macro_rules! impl_distill_by_unit {
+    ($ty:ty, $core:ident, $name:expr) => {
+        use pretty_xmlish::Pretty;
+        use $crate::optimizer::plan_node::generic::DistillUnit;
+        use $crate::optimizer::plan_node::utils::Distill;
+        impl Distill for $ty {
+            fn distill<'a>(&self) -> Pretty<'a> {
+                self.$core.distill_with_name($name)
+            }
+        }
+
+        impl std::fmt::Display for $ty {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.$core.fmt_with_name(f, $name)
+            }
+        }
+    };
+}
+pub(crate) use impl_distill_by_unit;
+
+pub fn column_names_pretty<'a>(schema: &Schema) -> Pretty<'a> {
+    let columns = (schema.fields.iter())
+        .map(|f| f.name.clone())
+        .map(Pretty::from)
+        .collect();
+    Pretty::Array(columns)
+}
+
 #[derive(Clone, Copy)]
 pub struct IndicesDisplay<'a> {
     pub indices: &'a [usize],
     pub input_schema: &'a Schema,
+}
+
+impl<'a> IndicesDisplay<'a> {
+    /// Returns `None` means all
+    pub fn from_join<PlanRef: GenericPlanRef>(
+        join: &'a generic::Join<PlanRef>,
+        input_schema: &'a Schema,
+    ) -> Option<Self> {
+        Self::from(
+            &join.output_indices,
+            join.internal_column_num(),
+            input_schema,
+        )
+    }
+
+    /// Returns `None` means all
+    pub fn from(
+        indices: &'a [usize],
+        internal_column_num: usize,
+        input_schema: &'a Schema,
+    ) -> Option<Self> {
+        if indices.iter().copied().eq(0..internal_column_num) {
+            None
+        } else {
+            Some(Self {
+                indices,
+                input_schema,
+            })
+        }
+    }
 }
 
 impl fmt::Display for IndicesDisplay<'_> {
@@ -181,3 +245,26 @@ impl fmt::Debug for IndicesDisplay<'_> {
         f.finish()
     }
 }
+
+/// Call `debug_struct` on the given formatter to create a debug struct builder.
+/// If a property list is provided, properties in it will be added to the struct name according to
+/// the condition of that property.
+macro_rules! formatter_debug_plan_node {
+    ($formatter:ident, $name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
+        {
+            #[allow(unused_mut)]
+            let mut properties: Vec<&str> = vec![];
+            $( if $cond { properties.push($prop); } )*
+            let mut name = $name.to_string();
+            if !properties.is_empty() {
+                name += " [";
+                name += &properties.join(", ");
+                name += "]";
+            }
+            $formatter.debug_struct(&name)
+        }
+    };
+}
+pub(crate) use formatter_debug_plan_node;
+
+use super::generic::{self, GenericPlanRef};

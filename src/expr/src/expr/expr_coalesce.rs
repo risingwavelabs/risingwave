@@ -95,7 +95,7 @@ impl<'a> TryFrom<&'a ExprNode> for CoalesceExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::Coalesce);
+        ensure!(prost.get_function_type().unwrap() == Type::Coalesce);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
@@ -130,7 +130,7 @@ mod tests {
 
     pub fn make_coalesce_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
         ExprNode {
-            expr_type: Coalesce as i32,
+            function_type: Coalesce as i32,
             return_type: Some(PbDataType {
                 type_name: ret as i32,
                 ..Default::default()

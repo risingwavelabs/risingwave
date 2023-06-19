@@ -57,6 +57,11 @@ message IntraLevelDelta {
   repeated SstableInfo inserted_table_infos = 4;
 }
 
+enum CompatibilityVersion {
+  VERSION_UNSPECIFIED = 0;
+  NO_TRIVIAL_SPLIT = 1;
+}
+
 message GroupConstruct {
   CompactionConfig group_config = 1;
   // If `parent_group_id` is not 0, it means `parent_group_id` splits into `parent_group_id` and this group, so this group is not empty initially.
@@ -64,6 +69,7 @@ message GroupConstruct {
   repeated uint32 table_ids = 3;
   uint64 group_id = 4;
   uint64 new_sst_start_id = 5;
+  CompatibilityVersion version = 6;
 }
 
 message GroupMetaChange {
@@ -76,6 +82,7 @@ message GroupTableChange {
   uint64 target_group_id = 2;
   uint64 origin_group_id = 3;
   uint64 new_sst_start_id = 4;
+  CompatibilityVersion version = 5;
 }
 
 message GroupDestroy {}
@@ -378,6 +385,9 @@ message CompactTaskProgress {
   uint64 task_id = 1;
   uint32 num_ssts_sealed = 2;
   uint32 num_ssts_uploaded = 3;
+  uint64 num_progress_key = 4;
+  uint64 num_pending_read_io = 5;
+  uint64 num_pending_write_io = 6;
 }
 
 // The measurement of the workload on a compactor to determine whether it is idle.
@@ -579,6 +589,20 @@ message SplitCompactionGroupResponse {
   uint64 new_group_id = 1;
 }
 
+message RiseCtlPauseVersionCheckpointRequest {}
+
+message RiseCtlPauseVersionCheckpointResponse {}
+
+message RiseCtlResumeVersionCheckpointRequest {}
+
+message RiseCtlResumeVersionCheckpointResponse {}
+
+message RiseCtlGetCheckpointVersionRequest {}
+
+message RiseCtlGetCheckpointVersionResponse {
+  HummockVersion checkpoint_version = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -604,6 +628,9 @@ service HummockManagerService {
   rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
   rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
+  rpc RiseCtlPauseVersionCheckpoint(RiseCtlPauseVersionCheckpointRequest) returns (RiseCtlPauseVersionCheckpointResponse);
+  rpc RiseCtlResumeVersionCheckpoint(RiseCtlResumeVersionCheckpointRequest) returns (RiseCtlResumeVersionCheckpointResponse);
+  rpc RiseCtlGetCheckpointVersion(RiseCtlGetCheckpointVersionRequest) returns (RiseCtlGetCheckpointVersionResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc GetScaleCompactor(GetScaleCompactorRequest) returns (GetScaleCompactorResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);

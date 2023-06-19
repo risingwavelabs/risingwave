@@ -16,7 +16,7 @@ statement ok
 set streaming_parallelism = 0;
 
 statement ok
-create materialized view mv
+create materialized view mv1
 emit on window close
 as
 select
@@ -24,6 +24,16 @@ select
     lag(foo, 2) over (partition by bar order by tm),
     max(foo) over (partition by bar order by tm rows between 1 preceding and 1 following),
     sum(foo) over (partition by bar order by tm rows 2 preceding exclude current row)
+from t;
+
+statement ok
+create materialized view mv2
+emit on window close
+as
+select
+    tm, foo, bar,
+    lead(foo, 1) over (partition by bar order by tm) as l1,
+    lead(foo, 3) over (partition by bar order by tm) as l2
 from t;
 
 statement ok
@@ -37,11 +47,15 @@ insert into t values
 ;
 
 # Note that the row where foo = 5 is not emitted because it's window is not closed by watermark.
-query TI
-select * from mv order by tm;
+query Tiiiii
+select * from mv1 order by tm;
 ----
 2023-05-06 16:51:00  1  100  NULL  8  NULL
 2023-05-06 16:56:00  8  100  NULL  8  1
+
+query Tiiii
+select * from mv2 order by tm;
+----
 
 statement ok
 insert into t values
@@ -49,16 +63,24 @@ insert into t values
 , ('2023-05-06 18:11:00', 9, 200)
 ;
 
-query TI
-select * from mv order by tm;
+query Tiiiii
+select * from mv1 order by tm;
 ----
 2023-05-06 16:51:00  1  100  NULL  8  NULL
 2023-05-06 16:56:00  8  100  NULL  8  1
 2023-05-06 17:30:00  3  200  NULL  6  NULL
 2023-05-06 17:35:00  5  100  1     8  9
 
+query Tiiii
+select * from mv2 order by tm;
+----
+2023-05-06 16:51:00  1  100  8  4
+
 statement ok
-drop materialized view mv;
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv2;
 
 statement ok
 drop table t;

@@ -244,6 +244,9 @@ pub struct MetaConfig {
     /// Whether config object storage bucket lifecycle to purge stale data.
     #[serde(default)]
     pub do_not_config_object_storage_lifecycle: bool,
+
+    #[serde(default = "default::meta::partition_vnode_count")]
+    pub partition_vnode_count: u32,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -283,6 +286,9 @@ pub struct BatchConfig {
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
 
+    #[serde(default = "default::batch::enable_barrier_read")]
+    pub enable_barrier_read: bool,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -298,10 +304,6 @@ pub struct StreamingConfig {
     /// decided by `tokio`.
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
-
-    /// Enable reporting tracing information to jaeger.
-    #[serde(default = "default::streaming::enable_jaegar_tracing")]
-    pub enable_jaeger_tracing: bool,
 
     /// Enable async stack tracing through `await-tree` for risectl.
     #[serde(default = "default::streaming::async_stack_trace")]
@@ -334,6 +336,11 @@ pub struct StorageConfig {
     /// is enough space.
     #[serde(default)]
     pub shared_buffer_capacity_mb: Option<usize>,
+
+    /// The shared buffer will start flushing data to object when the ratio of memory usage to the
+    /// shared buffer capacity exceed such ratio.
+    #[serde(default = "default::storage::shared_buffer_flush_ratio")]
+    pub shared_buffer_flush_ratio: f32,
 
     /// The threshold for the number of immutable memtables to merge to a new imm.
     #[serde(default = "default::storage::imm_merge_threshold")]
@@ -417,12 +424,27 @@ pub struct FileCacheConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-#[derive(Debug, Default, Clone, ValueEnum, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
 pub enum AsyncStackTraceOption {
+    /// Disabled.
     Off,
-    #[default]
+    /// Enabled with basic instruments.
     On,
-    Verbose,
+    /// Enabled with extra verbose instruments in release build.
+    /// Behaves the same as `on` in debug build due to performance concern.
+    #[default]
+    #[clap(alias = "verbose")]
+    ReleaseVerbose,
+}
+
+impl AsyncStackTraceOption {
+    pub fn is_verbose(self) -> Option<bool> {
+        match self {
+            Self::Off => None,
+            Self::On => Some(false),
+            Self::ReleaseVerbose => Some(!cfg!(debug_assertions)),
+        }
+    }
 }
 
 serde_with::with_prefix!(streaming_prefix "stream_");
@@ -433,12 +455,6 @@ serde_with::with_prefix!(batch_prefix "batch_");
 /// It is put at [`StreamingConfig::developer`].
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct StreamingDeveloperConfig {
-    /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
-    /// and might affect the prometheus performance. If you only need actor input and output
-    /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
-    #[serde(default = "default::developer::stream_enable_executor_row_count")]
-    pub enable_executor_row_count: bool,
-
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
     #[serde(default = "default::developer::connector_message_buffer_size")]
@@ -613,6 +629,10 @@ mod default {
         pub fn split_group_size_limit() -> u64 {
             20 * 1024 * 1024 * 1024 // 20GB
         }
+
+        pub fn partition_vnode_count() -> u32 {
+            64
+        }
     }
 
     pub mod server {
@@ -646,6 +666,10 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> usize {
             1024
+        }
+
+        pub fn shared_buffer_flush_ratio() -> f32 {
+            0.8
         }
 
         pub fn imm_merge_threshold() -> usize {
@@ -711,12 +735,8 @@ mod default {
             10000
         }
 
-        pub fn enable_jaegar_tracing() -> bool {
-            false
-        }
-
         pub fn async_stack_trace() -> AsyncStackTraceOption {
-            AsyncStackTraceOption::On
+            AsyncStackTraceOption::default()
         }
 
         pub fn unique_user_stream_errors() -> usize {
@@ -759,10 +779,6 @@ mod default {
 
         pub fn batch_chunk_size() -> usize {
             1024
-        }
-
-        pub fn stream_enable_executor_row_count() -> bool {
-            false
         }
 
         pub fn connector_message_buffer_size() -> usize {
@@ -831,6 +847,12 @@ mod default {
 
         pub fn telemetry_enabled() -> Option<bool> {
             system_param::default::telemetry_enabled()
+        }
+    }
+
+    pub mod batch {
+        pub fn enable_barrier_read() -> bool {
+            true
         }
     }
 }

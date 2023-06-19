@@ -19,6 +19,7 @@ import json
 import grpc
 import connector_service_pb2_grpc
 import connector_service_pb2
+import data_pb2
 import psycopg2
 
 
@@ -26,8 +27,10 @@ def make_mock_schema():
     # todo
     schema = connector_service_pb2.TableSchema(
         columns=[
-            connector_service_pb2.TableSchema.Column(name="id", data_type=2),
-            connector_service_pb2.TableSchema.Column(name="name", data_type=7)
+            connector_service_pb2.TableSchema.Column(
+                name="id", data_type=data_pb2.DataType(type_name=2)),
+            connector_service_pb2.TableSchema.Column(
+                name="name", data_type=data_pb2.DataType(type_name=7))
         ],
         pk_indices=[0]
     )
@@ -208,7 +211,8 @@ def validate_jdbc_sink(input_file):
     rows = cur.fetchall()
     expected = [list(row.values())
                 for batch in load_input(input_file) for row in batch]
-    def convert(b): 
+
+    def convert(b):
         return [(item[1]['id'], item[1]['name']) for item in b]
     expected = convert(expected)
 
@@ -227,6 +231,13 @@ def validate_jdbc_sink(input_file):
                     "Integration test failed: expected {} at row {}, column {}, but got {}".format(expected[i][j], i, j,
                                                                                                    rows[i][j]))
                 exit(1)
+
+
+def test_elasticsearch_sink(input_file):
+    test_sink("elasticsearch",
+              {"url": "http://127.0.0.1:9200",
+               "index": "test"},
+              input_file)
 
 
 def test_iceberg_sink(input_file):
@@ -288,6 +299,8 @@ if __name__ == "__main__":
         '--input_file', default="./data/sink_input.json", help="input data to run tests")
     parser.add_argument('--input_binary_file', default="./data/sink_input",
                         help="input stream chunk data to run tests")
+    parser.add_argument('--es_sink', action='store_true',
+                        help='run elasticsearch sink test')
     args = parser.parse_args()
     if args.file_sink:
         test_file_sink(args.input_binary_file)
@@ -301,3 +314,5 @@ if __name__ == "__main__":
         test_upsert_iceberg_sink(args.input_file)
     if args.deltalake_sink:
         test_deltalake_sink(args.input_file)
+    if args.es_sink:
+        test_elasticsearch_sink(args.input_file)

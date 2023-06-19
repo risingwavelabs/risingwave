@@ -143,6 +143,19 @@ create table s8 (
 ) row format debezium_json
 
 statement ok
+create table s8_no_schema_field (
+  id integer,
+  first_name varchar,
+  last_name varchar,
+  email varchar,
+  PRIMARY KEY (id)
+) with (
+  connector = 'kafka',
+  topic = 'debezium_log_no_schema_field',
+  properties.bootstrap.server = 'message_queue:29092'
+) row format debezium_json
+
+statement ok
 create table s9 with (
   connector = 'kafka', 
   topic = 'avro_bin',
@@ -324,6 +337,17 @@ WITH (
 	topic = 'debezium_mongo_json_customers')
 ROW FORMAT DEBEZIUM_MONGO_JSON
 
+statement ok
+CREATE TABLE mongo_customers_no_schema_field (
+	_id BIGINT PRIMARY KEY,
+	payload jsonb
+)
+WITH (
+	connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+	topic = 'debezium_mongo_json_customers_no_schema_field')
+ROW FORMAT DEBEZIUM_MONGO_JSON
+
 # we cannot create upsert_json source without pk
 statement error
 CREATE TABLE upsert_students (
@@ -493,6 +517,15 @@ select id, first_name, last_name, email from s8;
 1004 Anne1 Kretchmar annek@noanswer.org
 1005 add add2 add
 
+query ITTT rowsort
+select id, first_name, last_name, email from s8_no_schema_field;
+----
+1001 Sally Thomas sally.thomas@acme.com
+1002 George Bailey gbailey@foobar.com
+1003 Edward Walker ed@walker.com
+1004 Anne1 Kretchmar annek@noanswer.org
+1005 add add2 add
+
 query IITFFBTT
 select id, sequence_id, name, score, avg_score, is_lasted, entrance_date, birthday, passed from s9;
 ----
@@ -527,7 +560,7 @@ select * from s14;
 query I
 select count(*) from s15
 ----
-0
+2
 
 query I
 select count(*) from s16
@@ -571,6 +604,20 @@ query II
 SELECT
 	*
 FROM
+	mongo_customers_no_schema_field
+ORDER BY
+	_id;
+----
+1001    {"_id": {"$numberLong": "1001"}, "email": "sally.thomas@acme.com", "first_name": "Sally", "last_name": "Thomas"}
+1002    {"_id": {"$numberLong": "1002"}, "email": "gbailey@foobar.com", "first_name": "George", "last_name": "Bailey"}
+1003    {"_id": {"$numberLong": "1003"}, "email": "ed@walker.com", "first_name": "Edward", "last_name": "Walker"}
+1004    {"_id": {"$numberLong": "1004"}, "email": "annek@noanswer.org", "first_name": "Anne", "last_name": "Kretchmar"}
+
+
+query II 
+SELECT
+	*
+FROM
 	upsert_students
 ORDER BY
 	"ID";
@@ -594,6 +641,9 @@ drop table s6
 
 statement ok
 drop table s8
+
+statement ok
+drop table s8_no_schema_field
 
 statement ok
 drop table s9
@@ -636,6 +686,9 @@ drop source s23
 
 statement ok
 DROP TABLE mongo_customers;
+
+statement ok
+DROP TABLE mongo_customers_no_schema_field;
 
 statement ok
 DROP TABLE upsert_students;

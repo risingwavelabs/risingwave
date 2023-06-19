@@ -47,6 +47,7 @@ fn create_agg_call(
         distinct: false,
         order_by: vec![],
         filter: None,
+        direct_args: vec![],
     }
 }
 
@@ -101,6 +102,7 @@ fn create_hash_agg_executor(
         "HashAggExecutor".to_string(),
         CHUNK_SIZE,
         MemoryContext::none(),
+        None,
     ))
 }
 

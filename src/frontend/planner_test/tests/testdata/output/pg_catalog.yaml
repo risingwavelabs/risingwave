@@ -2,10 +2,10 @@
 - sql: |
     select * from pg_catalog.pg_type
   logical_plan: |
-    LogicalProject { exprs: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory] }
-    └─LogicalScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory] }
+    LogicalProject { exprs: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive] }
+    └─LogicalScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive] }
   batch_plan: |
-    BatchScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory], distribution: Single }
+    BatchScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive], distribution: Single }
 - sql: |
     select * from pg_catalog.pg_namespace
   logical_plan: |

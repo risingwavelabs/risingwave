@@ -21,46 +21,39 @@ use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::UnionNode;
 
-use super::{ExprRewritable, PlanRef};
+use super::utils::formatter_debug_plan_node;
+use super::{generic, ExprRewritable, PlanRef};
+use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, StreamNode};
+use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamUnion` implements [`super::LogicalUnion`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamUnion {
     pub base: PlanBase,
-    logical: LogicalUnion,
+    logical: generic::Union<PlanRef>,
 }
 
 impl StreamUnion {
-    pub fn new(logical: LogicalUnion) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.logical_pk.to_vec();
-        let schema = logical.schema().clone();
-        let inputs = logical.inputs();
+    pub fn new(logical: generic::Union<PlanRef>) -> Self {
+        let inputs = &logical.inputs;
         let dist = inputs[0].distribution().clone();
-        assert!(logical
-            .inputs()
-            .iter()
-            .all(|input| *input.distribution() == dist));
+        assert!(inputs.iter().all(|input| *input.distribution() == dist));
         let watermark_columns = inputs.iter().fold(
             {
-                let mut bitset = FixedBitSet::with_capacity(schema.len());
+                let mut bitset = FixedBitSet::with_capacity(logical.schema().len());
                 bitset.toggle_range(..);
                 bitset
             },
             |acc_watermark_columns, input| acc_watermark_columns.bitand(input.watermark_columns()),
         );
 
-        let base = PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices,
-            logical.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             dist,
-            logical.inputs().iter().all(|x| x.append_only()),
-            logical.inputs().iter().all(|x| x.emit_on_window_close()),
+            inputs.iter().all(|x| x.append_only()),
+            inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
         );
         StreamUnion { base, logical }
@@ -69,7 +62,7 @@ impl StreamUnion {
 
 impl fmt::Display for StreamUnion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamUnion");
+        let mut builder = formatter_debug_plan_node!(f, "StreamUnion");
         self.logical.fmt_fields_with_builder(&mut builder);
 
         let watermark_columns = &self.base.watermark_columns;
@@ -90,18 +83,13 @@ impl fmt::Display for StreamUnion {
 
 impl PlanTreeNode for StreamUnion {
     fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
-        let mut vec = smallvec::SmallVec::new();
-        vec.extend(self.logical.inputs().into_iter());
-        vec
+        smallvec::SmallVec::from_vec(self.logical.inputs.clone())
     }
 
     fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
-        Self::new(LogicalUnion::new_with_source_col(
-            self.logical.all(),
-            inputs.to_owned(),
-            self.logical.source_col(),
-        ))
-        .into()
+        let mut new = self.logical.clone();
+        new.inputs = inputs.to_vec();
+        Self::new(new).into()
     }
 }
 

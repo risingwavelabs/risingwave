@@ -197,7 +197,6 @@ async fn compaction_test(
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
         Arc::new(FilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
         compactor_metrics.clone(),
     )
     .await?;
@@ -284,8 +283,8 @@ async fn run_compare_result(
             if op == 0 {
                 let end_key = key_number + (rng.next_u64() % range_mod) + 1;
                 overlap_ranges.push((key_number, end_key, epoch, idx));
-                let start_key = format!("\0\0{:010}", key_number);
-                let end_key = format!("\0\0{:010}", end_key);
+                let start_key = format!("{:010}", key_number);
+                let end_key = format!("{:010}", end_key);
                 normal
                     .delete_range(start_key.as_bytes(), end_key.as_bytes())
                     .await;
@@ -293,7 +292,7 @@ async fn run_compare_result(
                     .delete_range(start_key.as_bytes(), end_key.as_bytes())
                     .await;
             } else if op < 5 {
-                let key = format!("\0\0{:010}", key_number);
+                let key = format!("{:010}", key_number);
                 let a = normal.get(key.as_bytes()).await;
                 let b = delete_range.get(key.as_bytes()).await;
                 assert!(
@@ -306,8 +305,8 @@ async fn run_compare_result(
                 );
             } else if op < 10 {
                 let end_key = key_number + (rng.next_u64() % range_mod) + 1;
-                let start_key = format!("\0\0{:010}", key_number);
-                let end_key = format!("\0\0{:010}", end_key);
+                let start_key = format!("{:010}", key_number);
+                let end_key = format!("{:010}", end_key);
                 let ret1 = normal.scan(start_key.as_bytes(), end_key.as_bytes()).await;
                 let ret2 = delete_range
                     .scan(start_key.as_bytes(), end_key.as_bytes())
@@ -320,7 +319,7 @@ async fn run_compare_result(
                 if overlap {
                     continue;
                 }
-                let key = format!("\0\0{:010}", key_number);
+                let key = format!("{:010}", key_number);
                 let val = format!("val-{:010}-{:016}-{:016}", idx, key_number, epoch);
                 normal.insert(key.as_bytes(), val.as_bytes());
                 delete_range.insert(key.as_bytes(), val.as_bytes());
@@ -561,6 +560,7 @@ fn run_compactor_thread(
         output_memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
+        await_tree_reg: None,
     });
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,

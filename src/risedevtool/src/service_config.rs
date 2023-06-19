@@ -68,6 +68,8 @@ pub struct MetaNodeConfig {
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
 
+    pub provide_jaeger: Option<Vec<JaegerConfig>>,
+
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
@@ -90,6 +92,8 @@ pub struct FrontendConfig {
     pub health_check_port: u16,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub provide_jaeger: Option<Vec<JaegerConfig>>,
+
     pub user_managed: bool,
 }
 
@@ -110,6 +114,8 @@ pub struct CompactorConfig {
     pub provide_minio: Option<Vec<MinioConfig>>,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub provide_jaeger: Option<Vec<JaegerConfig>>,
+
     pub user_managed: bool,
     pub max_concurrent_task_number: u64,
     pub compaction_worker_threads_number: Option<usize>,
@@ -210,6 +216,8 @@ pub struct JaegerConfig {
     pub id: String,
     pub dashboard_address: String,
     pub dashboard_port: u16,
+    pub otlp_address: String,
+    pub otlp_port: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -220,9 +228,6 @@ pub struct AwsS3Config {
     phantom_use: Option<String>,
     pub id: String,
     pub bucket: String,
-    // 's3_compatible' is true means using other s3 compatible object store, and the access key
-    // id and access key secret is configured in a specific profile.
-    pub s3_compatible: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

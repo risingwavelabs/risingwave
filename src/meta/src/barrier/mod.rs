@@ -25,6 +25,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -63,9 +64,11 @@ mod notifier;
 mod progress;
 mod recovery;
 mod schedule;
+mod trace;
 
 pub use self::command::{Command, Reschedule};
 pub use self::schedule::BarrierScheduler;
+pub use self::trace::TracedEpoch;
 
 /// Status of barrier manager.
 enum BarrierManagerStatus {
@@ -211,14 +214,17 @@ where
     }
 
     fn cancel_command(&mut self, cancelled_command: TrackingCommand<S>) {
-        if let Some(index) = self
-            .command_ctx_queue
-            .iter()
-            .position(|x| x.command_ctx.prev_epoch == cancelled_command.context.prev_epoch)
-        {
+        if let Some(index) = self.command_ctx_queue.iter().position(|x| {
+            x.command_ctx.prev_epoch.value() == cancelled_command.context.prev_epoch.value()
+        }) {
             self.command_ctx_queue.remove(index);
             self.remove_changes(cancelled_command.context.command.changes());
         }
+    }
+
+    fn cancel_stashed_command(&mut self, id: TableId) {
+        self.finished_commands
+            .retain(|x| x.context.table_to_create() != Some(id));
     }
 
     /// Before resolving the actors to be sent or collected, we should first record the newly
@@ -312,9 +318,11 @@ where
     /// Enqueue a barrier command, and init its state to `InFlight`.
     fn enqueue_command(&mut self, command_ctx: Arc<CommandContext<S>>, notifiers: Vec<Notifier>) {
         let timer = self.metrics.barrier_latency.start_timer();
+
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
             wait_commit_timer: None,
+
             state: InFlight,
             command_ctx,
             notifiers,
@@ -333,7 +341,7 @@ where
         if let Some(node) = self
             .command_ctx_queue
             .iter_mut()
-            .find(|x| x.command_ctx.prev_epoch.0 == prev_epoch)
+            .find(|x| x.command_ctx.prev_epoch.value().0 == prev_epoch)
         {
             assert!(matches!(node.state, InFlight));
             node.wait_commit_timer = Some(wait_commit_timer);
@@ -390,7 +398,7 @@ where
     pub fn contains_epoch(&self, epoch: u64) -> bool {
         self.command_ctx_queue
             .iter()
-            .any(|x| x.command_ctx.prev_epoch.0 == epoch)
+            .any(|x| x.command_ctx.prev_epoch.value().0 == epoch)
     }
 
     /// After some command is committed, the changes will be applied to the meta store so we can
@@ -443,6 +451,7 @@ pub struct EpochNode<S: MetaStore> {
     timer: Option<HistogramTimer>,
     /// The timer of `barrier_wait_commit_latency`
     wait_commit_timer: Option<HistogramTimer>,
+
     /// Whether this barrier is in-flight or completed.
     state: BarrierEpochState,
     /// Context of this command to generate barrier and do some post jobs.
@@ -545,15 +554,14 @@ where
         if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
             // may need to avoid this when we have more state persisted in meta store.
-            let new_epoch = state.in_flight_prev_epoch.next();
-            assert!(new_epoch > state.in_flight_prev_epoch);
-            state.in_flight_prev_epoch = new_epoch;
+
+            // XXX(bugen): why we need this?
+            let new_epoch = state.in_flight_prev_epoch().next();
 
             self.set_status(BarrierManagerStatus::Recovering).await;
-            let new_epoch = self.recovery(state.in_flight_prev_epoch).await;
-            state.in_flight_prev_epoch = new_epoch;
+            let new_epoch = self.recovery(new_epoch).await;
             state
-                .update_inflight_prev_epoch(self.env.meta_store())
+                .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)
                 .await
                 .unwrap();
         } else if self.fragment_manager.has_any_table_fragments().await {
@@ -629,19 +637,17 @@ where
         } = self.scheduled_barriers.pop_or_default().await;
         let info = self.resolve_actor_info(checkpoint_control, &command).await;
 
-        let prev_epoch = state.in_flight_prev_epoch;
+        let prev_epoch = state.in_flight_prev_epoch();
+
         let new_epoch = prev_epoch.next();
-        state.in_flight_prev_epoch = new_epoch;
-        assert!(
-            new_epoch > prev_epoch,
-            "new{:?},prev{:?}",
-            new_epoch,
-            prev_epoch
-        );
         state
-            .update_inflight_prev_epoch(self.env.meta_store())
+            .update_inflight_prev_epoch(self.env.meta_store(), new_epoch.clone())
             .await
             .unwrap();
+
+        prev_epoch.span().in_scope(|| {
+            tracing::info!(target: "rw_tracing", epoch = new_epoch.value().0, "new barrier enqueued");
+        });
 
         let command_ctx = Arc::new(CommandContext::new(
             self.fragment_manager.clone(),
@@ -667,7 +673,7 @@ where
         command_context: Arc<CommandContext<S>>,
         barrier_complete_tx: &UnboundedSender<BarrierCompletion>,
     ) {
-        let prev_epoch = command_context.prev_epoch.0;
+        let prev_epoch = command_context.prev_epoch.value().0;
         let result = self.inject_barrier_inner(command_context.clone()).await;
         match result {
             Ok(node_need_collect) => {
@@ -711,12 +717,12 @@ where
                 let request_id = Uuid::new_v4().to_string();
                 let barrier = Barrier {
                     epoch: Some(risingwave_pb::data::Epoch {
-                        curr: command_context.curr_epoch.0,
-                        prev: command_context.prev_epoch.0,
+                        curr: command_context.curr_epoch.value().0,
+                        prev: command_context.prev_epoch.value().0,
                     }),
                     mutation,
-                    // TODO(chi): add distributed tracing
-                    span: vec![],
+                    tracing_context: TracingContext::from_span(command_context.curr_epoch.span())
+                        .to_protobuf(),
                     checkpoint: command_context.checkpoint,
                     passed_actors: vec![],
                 };
@@ -751,7 +757,10 @@ where
         command_context: Arc<CommandContext<S>>,
         barrier_complete_tx: UnboundedSender<BarrierCompletion>,
     ) {
-        let prev_epoch = command_context.prev_epoch.0;
+        let prev_epoch = command_context.prev_epoch.value().0;
+        let tracing_context =
+            TracingContext::from_span(command_context.prev_epoch.span()).to_protobuf();
+
         let info = command_context.info.clone();
         let client_pool = client_pool_ref.deref();
         let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
@@ -760,11 +769,13 @@ where
                 None
             } else {
                 let request_id = Uuid::new_v4().to_string();
+                let tracing_context = tracing_context.clone();
                 async move {
                     let client = client_pool.get(node).await?;
                     let request = BarrierCompleteRequest {
                         request_id,
                         prev_epoch,
+                        tracing_context,
                     };
                     tracing::trace!(
                         target: "events::meta::barrier::barrier_complete",
@@ -864,10 +875,9 @@ where
             self.set_status(BarrierManagerStatus::Recovering).await;
             let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::new();
-            let new_epoch = self.recovery(state.in_flight_prev_epoch).await;
-            state.in_flight_prev_epoch = new_epoch;
+            let new_epoch = self.recovery(state.in_flight_prev_epoch()).await;
             state
-                .update_inflight_prev_epoch(self.env.meta_store())
+                .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)
                 .await
                 .unwrap();
             self.set_status(BarrierManagerStatus::Running).await;
@@ -882,7 +892,7 @@ where
         node: &mut EpochNode<S>,
         checkpoint_control: &mut CheckpointControl<S>,
     ) -> MetaResult<()> {
-        let prev_epoch = node.command_ctx.prev_epoch.0;
+        let prev_epoch = node.command_ctx.prev_epoch.value().0;
         match &mut node.state {
             Completed(resps) => {
                 // We must ensure all epochs are committed in ascending order,
@@ -901,7 +911,11 @@ where
                 } else if checkpoint {
                     new_snapshot = self
                         .hummock_manager
-                        .commit_epoch(node.command_ctx.prev_epoch.0, synced_ssts, sst_to_worker)
+                        .commit_epoch(
+                            node.command_ctx.prev_epoch.value().0,
+                            synced_ssts,
+                            sst_to_worker,
+                        )
                         .await?;
                 } else {
                     new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));
@@ -964,16 +978,20 @@ where
                     checkpoint_control.stash_command_to_finish(command);
                 }
 
+                if let Some(command) = cancelled_command {
+                    checkpoint_control.cancel_command(command);
+                } else if let Some(table_id) = node.command_ctx.table_to_cancel() {
+                    // the cancelled command is possibly stashed in `finished_commands` and waiting
+                    // for checkpoint, we should also clear it.
+                    checkpoint_control.cancel_stashed_command(table_id);
+                }
+
                 let remaining = checkpoint_control.finish_commands(checkpoint).await?;
                 // If there are remaining commands (that requires checkpoint to finish), we force
                 // the next barrier to be a checkpoint.
                 if remaining {
                     assert!(!checkpoint);
                     self.scheduled_barriers.force_checkpoint_in_next_barrier();
-                }
-
-                if let Some(command) = cancelled_command {
-                    checkpoint_control.cancel_command(command);
                 }
 
                 node.timer.take().unwrap().observe_duration();

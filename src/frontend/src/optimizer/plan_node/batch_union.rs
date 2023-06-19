@@ -12,29 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UnionNode;
 
-use super::{ExprRewritable, PlanRef, ToBatchPb, ToDistributedBatch};
-use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, ToLocalBatch};
+use super::utils::impl_distill_by_unit;
+use super::{generic, ExprRewritable, PlanRef, ToBatchPb, ToDistributedBatch};
+use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchUnion` implements [`super::LogicalUnion`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUnion {
     pub base: PlanBase,
-    logical: LogicalUnion,
+    logical: generic::Union<PlanRef>,
 }
 
 impl BatchUnion {
-    pub fn new(logical: LogicalUnion) -> Self {
-        let ctx = logical.base.ctx.clone();
-
+    pub fn new(logical: generic::Union<PlanRef>) -> Self {
         let dist = if logical
-            .inputs()
+            .inputs
             .iter()
             .all(|input| *input.distribution() == Distribution::Single)
         {
@@ -43,27 +40,23 @@ impl BatchUnion {
             Distribution::SomeShard
         };
 
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
+        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
         BatchUnion { base, logical }
     }
 }
 
-impl fmt::Display for BatchUnion {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchUnion")
-    }
-}
+impl_distill_by_unit!(BatchUnion, logical, "BatchUnion");
 
 impl PlanTreeNode for BatchUnion {
     fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
-        let mut vec = smallvec::SmallVec::new();
-        vec.extend(self.logical.inputs().into_iter());
-        vec
+        smallvec::SmallVec::from_vec(self.logical.inputs.clone())
     }
 
     fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
         // For batch query, we don't need to clone `source_col`, so just use new.
-        Self::new(LogicalUnion::new(self.logical.all(), inputs.to_owned())).into()
+        let mut new = self.logical.clone();
+        new.inputs = inputs.to_vec();
+        Self::new(new).into()
     }
 }
 

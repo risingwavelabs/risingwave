@@ -21,7 +21,7 @@ use super::*;
 #[function("generate_series(int32, int32) -> setof int32")]
 #[function("generate_series(int64, int64) -> setof int64")]
 #[function("generate_series(decimal, decimal) -> setof decimal")]
-fn generate_series<T>(start: T, stop: T) -> impl Iterator<Item = Result<T>>
+fn generate_series<T>(start: T, stop: T) -> Result<impl Iterator<Item = Result<T>>>
 where
     T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
 {
@@ -32,7 +32,7 @@ where
 #[function("generate_series(int64, int64, int64) -> setof int64")]
 #[function("generate_series(decimal, decimal, decimal) -> setof decimal")]
 #[function("generate_series(timestamp, timestamp, interval) -> setof timestamp")]
-fn generate_series_step<T, S>(start: T, stop: T, step: S) -> impl Iterator<Item = Result<T>>
+fn generate_series_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = Result<T>>>
 where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
     S: IsNegative + Copy,
@@ -43,7 +43,7 @@ where
 #[function("range(int32, int32) -> setof int32")]
 #[function("range(int64, int64) -> setof int64")]
 #[function("range(decimal, decimal) -> setof decimal")]
-fn range<T>(start: T, stop: T) -> impl Iterator<Item = Result<T>>
+fn range<T>(start: T, stop: T) -> Result<impl Iterator<Item = Result<T>>>
 where
     T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
 {
@@ -54,7 +54,7 @@ where
 #[function("range(int64, int64, int64) -> setof int64")]
 #[function("range(decimal, decimal, decimal) -> setof decimal")]
 #[function("range(timestamp, timestamp, interval) -> setof timestamp")]
-fn range_step<T, S>(start: T, stop: T, step: S) -> impl Iterator<Item = Result<T>>
+fn range_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = Result<T>>>
 where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
     S: IsNegative + Copy,
@@ -67,22 +67,20 @@ fn range_generic<T, S, const INCLUSIVE: bool>(
     start: T,
     stop: T,
     step: S,
-) -> impl Iterator<Item = Result<T>>
+) -> Result<impl Iterator<Item = Result<T>>>
 where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
     S: IsNegative + Copy,
 {
+    if step.is_zero() {
+        return Err(ExprError::InvalidParam {
+            name: "step",
+            reason: "step size cannot equal zero".into(),
+        });
+    }
     let mut cur = start;
-    let zero = step.is_zero();
     let neg = step.is_negative();
-
     let mut next = move || {
-        if zero {
-            return Err(ExprError::InvalidParam {
-                name: "step",
-                reason: "step size cannot equal zero".into(),
-            });
-        }
         match (INCLUSIVE, neg) {
             (true, true) if cur < stop => return Ok(None),
             (true, false) if cur > stop => return Ok(None),
@@ -94,7 +92,7 @@ where
         cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
         Ok(Some(ret))
     };
-    std::iter::from_fn(move || next().transpose())
+    Ok(std::iter::from_fn(move || next().transpose()))
 }
 
 #[cfg(test)]

@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::generic::DynamicFilter;
-use super::utils::IndicesDisplay;
+use super::utils::{formatter_debug_plan_node, IndicesDisplay};
 use super::{generic, ExprRewritable};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
@@ -58,7 +58,7 @@ impl StreamDynamicFilter {
 impl fmt::Display for StreamDynamicFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("StreamDynamicFilter");
+        let mut builder = formatter_debug_plan_node!(f, "StreamDynamicFilter");
 
         self.core.fmt_fields_with_builder(&mut builder);
         let watermark_columns = &self.base.watermark_columns;

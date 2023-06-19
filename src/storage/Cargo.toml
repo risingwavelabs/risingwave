@@ -17,7 +17,7 @@ normal = ["workspace-hack"]
 arc-swap = "1"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
-await-tree = "0.1.1"
+await-tree = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
 crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
@@ -31,8 +31,6 @@ itertools = "0.10"
 libc = "0.2"
 lz4 = "1.23.1"
 memcomparable = "0.2"
-minitrace = "0.4"
-minstant = "0.1"
 num-integer = "0.1"
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
@@ -42,6 +40,7 @@ risingwave_backup = { path = "../storage/backup" }
 risingwave_common = { path = "../common" }
 risingwave_common_service = { path = "../common/common_service" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
+risingwave_hummock_trace = { path = "../storage/hummock_trace" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
@@ -65,6 +64,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tracing = "0.1"
+tracing-futures = { version = "0.2", features = ["futures-03"] }
 xorf = "0.8.1"
 xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.12", default-features = false }
