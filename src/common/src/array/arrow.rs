@@ -167,7 +167,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Varchar => Self::Utf8,
             DataType::Jsonb => Self::LargeUtf8,
             DataType::Bytea => Self::Binary,
-            DataType::Decimal => Self::Decimal128(28, 0), // arrow precision can not be 0
+            DataType::Decimal => Self::Decimal128(38, 0), // arrow precision can not be 0
             DataType::Struct(struct_type) => Self::Struct(
                 struct_type
                     .iter()
@@ -369,7 +369,7 @@ impl From<&DecimalArray> for arrow_array::Decimal128Array {
             .max()
             .unwrap_or(0) as u32;
         let mut builder = arrow_array::builder::Decimal128Builder::with_capacity(array.len())
-            .with_data_type(arrow_schema::DataType::Decimal128(28, max_scale as i8));
+            .with_data_type(arrow_schema::DataType::Decimal128(38, max_scale as i8));
         for value in array.iter() {
             builder.append_option(value.map(|d| decimal_to_i128(d, max_scale)));
         }

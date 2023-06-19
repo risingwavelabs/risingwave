@@ -94,7 +94,7 @@ def jsonb_array_struct_identity(v: Tuple[List[Any], int]) -> Tuple[List[Any], in
     return v
 
 
-ALL_TYPES = "BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB"
+ALL_TYPES = "BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB"
 
 
 @udf(
@@ -108,6 +108,7 @@ def return_all(
     i64,
     f32,
     f64,
+    decimal,
     date,
     time,
     timestamp,
@@ -123,6 +124,7 @@ def return_all(
         i64,
         f32,
         f64,
+        decimal,
         date,
         time,
         timestamp,

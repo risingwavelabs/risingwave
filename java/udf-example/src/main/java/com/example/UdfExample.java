@@ -161,12 +161,13 @@ public class UdfExample {
 
     public static class ReturnAll implements ScalarFunction {
         public static class Row {
-            public boolean bool;
-            public short i16;
-            public int i32;
-            public long i64;
-            public float f32;
-            public double f64;
+            public Boolean bool;
+            public Short i16;
+            public Integer i32;
+            public Long i64;
+            public Float f32;
+            public Double f64;
+            public BigDecimal decimal;
             public LocalDate date;
             public LocalTime time;
             public LocalDateTime timestamp;
@@ -176,7 +177,8 @@ public class UdfExample {
             public @DataTypeHint("JSONB") String jsonb;
         }
 
-        public Row eval(boolean bool, short i16, int i32, long i64, float f32, double f64,
+        public Row eval(Boolean bool, Short i16, Integer i32, Long i64, Float f32, Double f64,
+                BigDecimal decimal,
                 LocalDate date, LocalTime time, LocalDateTime timestamp, PeriodDuration interval,
                 String str, byte[] bytes, @DataTypeHint("JSONB") String jsonb) {
             var row = new Row();
@@ -186,6 +188,7 @@ public class UdfExample {
             row.i64 = i64;
             row.f32 = f32;
             row.f64 = f64;
+            row.decimal = decimal;
             row.date = date;
             row.time = time;
             row.timestamp = timestamp;
