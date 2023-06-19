@@ -14,9 +14,16 @@
 
 package com.risingwave.connector.jdbc;
 
+import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.api.sink.SinkRow;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.postgresql.util.PGInterval;
+import org.postgresql.util.PGobject;
 
 public class PostgresDialect implements JdbcDialect {
 
@@ -43,5 +50,46 @@ public class PostgresDialect implements JdbcDialect {
                         + ")"
                         + " DO UPDATE SET "
                         + updateClause);
+    }
+
+    @Override
+    public void bindUpsertStatement(
+            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
+            throws SQLException {
+        var columnDescs = tableSchema.getColumnDescs();
+        int placeholderIdx = 1;
+        for (int i = 0; i < row.size(); i++) {
+            var column = columnDescs.get(i);
+            switch (column.getDataType().getTypeName()) {
+                case DECIMAL:
+                    stmt.setBigDecimal(placeholderIdx++, (java.math.BigDecimal) row.get(i));
+                    break;
+                case INTERVAL:
+                    stmt.setObject(placeholderIdx++, new PGInterval((String) row.get(i)));
+                    break;
+                case JSONB:
+                    // reference: https://github.com/pgjdbc/pgjdbc/issues/265
+                    var pgObj = new PGobject();
+                    pgObj.setType("jsonb");
+                    pgObj.setValue((String) row.get(i));
+                    stmt.setObject(placeholderIdx++, pgObj);
+                    break;
+                case BYTEA:
+                    stmt.setBytes(placeholderIdx++, (byte[]) row.get(i));
+                    break;
+                case LIST:
+                    var val = row.get(i);
+                    assert (val instanceof Object[]);
+                    Object[] objArray = (Object[]) val;
+                    assert (column.getDataType().getFieldTypeCount() == 1);
+                    var fieldType = column.getDataType().getFieldType(0);
+                    stmt.setArray(
+                            i + 1, conn.createArrayOf(fieldType.getTypeName().name(), objArray));
+                    break;
+                default:
+                    stmt.setObject(placeholderIdx++, row.get(i));
+                    break;
+            }
+        }
     }
 }

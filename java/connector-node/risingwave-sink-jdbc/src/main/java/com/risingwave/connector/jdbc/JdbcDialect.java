@@ -16,6 +16,11 @@ package com.risingwave.connector.jdbc;
 
 import static java.lang.String.format;
 
+import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.api.sink.SinkRow;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -46,6 +51,10 @@ public interface JdbcDialect {
      */
     Optional<String> getUpsertStatement(
             String tableName, List<String> fieldNames, List<String> uniqueKeyFields);
+
+    void bindUpsertStatement(
+            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
+            throws SQLException;
 
     /**
      * Generates a string that will be used as a {@link java.sql.PreparedStatement} to insert a row

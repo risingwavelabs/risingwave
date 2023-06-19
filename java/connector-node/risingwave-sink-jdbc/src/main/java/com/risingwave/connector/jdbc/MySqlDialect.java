@@ -14,9 +14,15 @@
 
 package com.risingwave.connector.jdbc;
 
+import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.api.sink.SinkRow;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.apache.commons.lang3.StringUtils;
 
 public class MySqlDialect implements JdbcDialect {
 
@@ -36,5 +42,43 @@ public class MySqlDialect implements JdbcDialect {
                 getInsertIntoStatement(tableName, fieldNames)
                         + " ON DUPLICATE KEY UPDATE "
                         + updateClause);
+    }
+
+    @Override
+    public void bindUpsertStatement(
+            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
+            throws SQLException {
+        var columnDescs = tableSchema.getColumnDescs();
+        int placeholderIdx = 1;
+        for (int i = 0; i < row.size(); i++) {
+            var column = columnDescs.get(i);
+            switch (column.getDataType().getTypeName()) {
+                case DECIMAL:
+                    stmt.setBigDecimal(placeholderIdx++, (java.math.BigDecimal) row.get(i));
+                    break;
+                case INTERVAL:
+                case JSONB:
+                    stmt.setObject(placeholderIdx++, row.get(i));
+                    break;
+                case BYTEA:
+                    stmt.setBytes(placeholderIdx++, (byte[]) row.get(i));
+                    break;
+                case LIST:
+                    var val = row.get(i);
+                    assert (val instanceof Object[]);
+                    Object[] objArray = (Object[]) val;
+                    // convert Array type to a string for other database
+                    // reference:
+                    // https://dev.mysql.com/doc/workbench/en/wb-migration-database-postgresql-typemapping.html
+                    var arrayString = StringUtils.join(objArray, ",");
+                    stmt.setString(placeholderIdx++, arrayString);
+                    break;
+                case STRUCT:
+                    throw new RuntimeException("STRUCT type is not supported yet");
+                default:
+                    stmt.setObject(placeholderIdx++, row.get(i));
+                    break;
+            }
+        }
     }
 }

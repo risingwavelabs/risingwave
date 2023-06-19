@@ -19,16 +19,12 @@ import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.jdbc.JdbcDialect;
 import com.risingwave.connector.jdbc.JdbcDialectFactory;
-import com.risingwave.connector.jdbc.PostgresDialect;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import org.apache.commons.lang3.StringUtils;
-import org.postgresql.util.PGInterval;
-import org.postgresql.util.PGobject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -117,7 +113,8 @@ public class JDBCSink extends SinkBase {
         try {
             switch (row.getOp()) {
                 case INSERT:
-                    bindUpsertStatementValues(upsertPreparedStmt, row);
+                    jdbcDialect.bindUpsertStatement(
+                            upsertPreparedStmt, conn, getTableSchema(), row);
                     return upsertPreparedStmt;
                 case UPDATE_INSERT:
                     if (!updateFlag) {
@@ -125,7 +122,8 @@ public class JDBCSink extends SinkBase {
                                 .withDescription("an UPDATE_DELETE should precede an UPDATE_INSERT")
                                 .asRuntimeException();
                     }
-                    bindUpsertStatementValues(upsertPreparedStmt, row);
+                    jdbcDialect.bindUpsertStatement(
+                            upsertPreparedStmt, conn, getTableSchema(), row);
                     updateFlag = false;
                     return upsertPreparedStmt;
                 default:
@@ -168,70 +166,6 @@ public class JDBCSink extends SinkBase {
                     .withDescription(
                             String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
-        }
-    }
-
-    /**
-     * Bind prepared statement parameters for insert/update command.
-     *
-     * @param stmt prepared statement for
-     * @param row column values to fill into statement
-     * @return prepared sql statement for insert/delete
-     * @throws SQLException
-     */
-    private void bindUpsertStatementValues(PreparedStatement stmt, SinkRow row)
-            throws SQLException {
-        var columnDescs = getTableSchema().getColumnDescs();
-        int placeholderIdx = 1;
-        for (int i = 0; i < row.size(); i++) {
-            var column = columnDescs.get(i);
-            switch (column.getDataType().getTypeName()) {
-                case DECIMAL:
-                    stmt.setBigDecimal(placeholderIdx++, (java.math.BigDecimal) row.get(i));
-                    break;
-                case INTERVAL:
-                    if (jdbcDialect instanceof PostgresDialect) {
-                        stmt.setObject(placeholderIdx++, new PGInterval((String) row.get(i)));
-                    } else {
-                        stmt.setObject(placeholderIdx++, row.get(i));
-                    }
-                    break;
-                case JSONB:
-                    if (jdbcDialect instanceof PostgresDialect) {
-                        // reference: https://github.com/pgjdbc/pgjdbc/issues/265
-                        var pgObj = new PGobject();
-                        pgObj.setType("jsonb");
-                        pgObj.setValue((String) row.get(i));
-                        stmt.setObject(placeholderIdx++, pgObj);
-                    } else {
-                        stmt.setObject(placeholderIdx++, row.get(i));
-                    }
-                    break;
-                case BYTEA:
-                    stmt.setBytes(placeholderIdx++, (byte[]) row.get(i));
-                    break;
-                case LIST:
-                    var val = row.get(i);
-                    assert (val instanceof Object[]);
-                    Object[] objArray = (Object[]) val;
-                    if (jdbcDialect instanceof PostgresDialect) {
-                        assert (column.getDataType().getFieldTypeCount() == 1);
-                        var fieldType = column.getDataType().getFieldType(0);
-                        stmt.setArray(
-                                i + 1,
-                                conn.createArrayOf(fieldType.getTypeName().name(), objArray));
-                    } else {
-                        // convert Array type to a string for other database
-                        // reference:
-                        // https://dev.mysql.com/doc/workbench/en/wb-migration-database-postgresql-typemapping.html
-                        var arrayString = StringUtils.join(objArray, ",");
-                        stmt.setString(placeholderIdx++, arrayString);
-                    }
-                    break;
-                default:
-                    stmt.setObject(placeholderIdx++, row.get(i));
-                    break;
-            }
         }
     }
 
