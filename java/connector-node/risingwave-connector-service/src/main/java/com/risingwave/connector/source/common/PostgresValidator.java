@@ -132,29 +132,32 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 throw ValidatorUtils.invalidArgument("Primary key mismatch");
             }
         }
-        // check whether source schema match table schema on upstream
+
+        // Check whether source schema match table schema on upstream
+        // All columns defined must exist in upstream database
         try (var stmt =
                 jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.table_schema"))) {
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
             var res = stmt.executeQuery();
-            int index = 0;
+
+            // Field name in lower case -> data type
+            Map<String, String> schema = new HashMap<>();
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
-                if (index >= tableSchema.getNumColumns()) {
-                    throw ValidatorUtils.invalidArgument("The number of columns mismatch");
-                }
+                schema.put(field.toLowerCase(), dataType);
+            }
 
-                var srcColName = tableSchema.getColumnNames()[index++];
-                if (!srcColName.equalsIgnoreCase(field)) {
+            for (var e : tableSchema.getColumnTypes().entrySet()) {
+                var pgDataType = schema.get(e.getKey().toLowerCase());
+                if (pgDataType == null) {
                     throw ValidatorUtils.invalidArgument(
-                            "table column defined in the source mismatches upstream column "
-                                    + field);
+                            "Column '" + e.getKey() + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(dataType, tableSchema.getColumnType(srcColName))) {
+                if (!isDataTypeCompatible(pgDataType, e.getValue())) {
                     throw ValidatorUtils.invalidArgument(
-                            "incompatible data type of column " + srcColName);
+                            "Incompatible data type of column " + e.getKey());
                 }
             }
         }
