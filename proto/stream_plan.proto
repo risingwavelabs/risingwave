@@ -420,6 +420,9 @@ enum ChainType {
 
   // UPSTREAM_ONLY is corresponding to the chain executor, but doesn't consume the snapshot.
   UPSTREAM_ONLY = 4;
+
+  // ARRANGEMENT_BACKFILL corresponds to the `ArrangementBackfillExecutor`.
+  ARRANGEMENT_BACKFILL = 5;
 }
 
 // ChainNode is used for mv on mv.
@@ -449,6 +452,9 @@ message ChainNode {
 
   // The upstream materialized view info used by backfill.
   plan_common.StorageTableDesc table_desc = 7;
+
+  // The state table used by ArrangementBackfill to replicate upstream mview's state table.
+  catalog.Table arrangement_table = 8;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.

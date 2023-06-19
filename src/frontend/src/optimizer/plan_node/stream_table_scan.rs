@@ -46,7 +46,7 @@ pub struct StreamTableScan {
 
 impl StreamTableScan {
     pub fn new(logical: generic::Scan) -> Self {
-        Self::new_with_chain_type(logical, ChainType::Backfill)
+        Self::new_with_chain_type(logical, ChainType::ArrangementBackfill)
     }
 
     pub fn new_with_chain_type(logical: generic::Scan, chain_type: ChainType) -> Self {
@@ -115,6 +115,11 @@ impl StreamTableScan {
         self.chain_type
     }
 
+    /// Builds upstream state table description. Used for `ArrangementBackfill`.
+    fn build_upstream_state_table(&self, state: &mut BuildFragmentGraphState) -> TableCatalog {
+        todo!()
+    }
+
     /// Build catalog for backfill state
     ///
     /// Schema
@@ -128,10 +133,7 @@ impl StreamTableScan {
     /// we update it for all vnodes.
     /// "pk" here might be confusing. It refers to the
     /// upstream pk which we use to track the backfill progress.
-    pub fn build_backfill_state_catalog(
-        &self,
-        state: &mut BuildFragmentGraphState,
-    ) -> TableCatalog {
+    fn build_backfill_state_catalog(&self, state: &mut BuildFragmentGraphState) -> TableCatalog {
         let properties = self.ctx().with_options().internal_table_subset();
         let mut catalog_builder = TableCatalogBuilder::new(properties);
         let upstream_schema = &self.logical.table_desc.columns;
@@ -207,7 +209,9 @@ impl StreamTableScan {
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.chain_type {
             // For backfill, we additionally need the primary key columns.
-            ChainType::Backfill => self.logical.output_and_pk_column_ids(),
+            ChainType::Backfill | ChainType::ArrangementBackfill => {
+                self.logical.output_and_pk_column_ids()
+            }
             ChainType::Chain | ChainType::Rearrange | ChainType::UpstreamOnly => {
                 self.logical.output_column_ids()
             }
@@ -253,6 +257,18 @@ impl StreamTableScan {
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
+        let (table_desc, arrangement_table) = if self.chain_type == ChainType::ArrangementBackfill {
+            (
+                None,
+                Some(
+                    self.build_upstream_state_table(state)
+                        .to_internal_table_prost(),
+                ),
+            )
+        } else {
+            (Some(self.logical.table_desc.to_protobuf()), None)
+        };
+
         PbStreamNode {
             fields: self.schema().to_prost(),
             input: vec![
@@ -281,7 +297,9 @@ impl StreamTableScan {
                 output_indices,
                 upstream_column_ids,
                 // The table desc used by backfill executor
-                table_desc: Some(self.logical.table_desc.to_protobuf()),
+                table_desc,
+                // The table desc used by arrangement backfill executor
+                arrangement_table,
                 state_table: Some(catalog),
             })),
             stream_key,

@@ -521,6 +521,7 @@ impl ToStream for LogicalScan {
             )));
         }
         if self.predicate().always_true() {
+            // TODO(kwannoel): Use optimizer ctx here to allow toggling different table scans.
             Ok(StreamTableScan::new(self.core.clone()).into())
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
