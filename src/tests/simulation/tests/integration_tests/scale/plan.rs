@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::get_reschedule_plan_request::Policy::ResizePolicy;
-use risingwave_pb::meta::get_reschedule_plan_request::{PbPolicy, PbResizePolicy};
+use risingwave_pb::meta::get_reschedule_plan_request::{PbPolicy, PbResizePolicy, WorkerIds};
 use risingwave_pb::meta::{PbGetReschedulePlanResponse, PbReschedule};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
@@ -59,8 +61,12 @@ async fn test_resize_normal() -> Result<()> {
 
     let resp = cluster
         .get_reschedule_plan(ResizePolicy(PbResizePolicy {
-            fragment_ids: vec![join_fragment_id],
-            worker_ids: vec![retained_worker.id],
+            fragment_target_worker_ids: HashMap::from([(
+                join_fragment_id,
+                WorkerIds {
+                    worker_ids: vec![retained_worker.id],
+                },
+            )]),
         }))
         .await?;
 
@@ -133,8 +139,12 @@ async fn test_resize_single() -> Result<()> {
 
     let resp = cluster
         .get_reschedule_plan(ResizePolicy(PbResizePolicy {
-            fragment_ids: vec![agg_fragment_id],
-            worker_ids: workers.iter().map(|worker| worker.id).collect(),
+            fragment_target_worker_ids: HashMap::from([(
+                agg_fragment_id,
+                WorkerIds {
+                    worker_ids: workers.iter().map(|worker| worker.id).collect(),
+                },
+            )]),
         }))
         .await?;
 
@@ -205,19 +215,17 @@ async fn test_resize_no_shuffle() -> Result<()> {
     let selected_worker = &workers[0];
 
     let selected_worker_id = selected_worker.id;
-    let worker_parallel_unit_ids = selected_worker
-        .parallel_units
-        .iter()
-        .map(|parallel_unit| parallel_unit.id as ParallelUnitId)
-        .collect_vec();
 
     // will perform a request with fragment_ids = [selected_fragment.id] and worker_ids =
     // [worker_id]
-
     let resp = cluster
         .get_reschedule_plan(ResizePolicy(PbResizePolicy {
-            fragment_ids: vec![selected_fragment_id],
-            worker_ids: vec![selected_worker_id],
+            fragment_target_worker_ids: HashMap::from([(
+                selected_fragment_id,
+                WorkerIds {
+                    worker_ids: vec![selected_worker_id],
+                },
+            )]),
         }))
         .await?;
 

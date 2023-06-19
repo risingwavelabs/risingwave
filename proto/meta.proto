@@ -368,13 +368,16 @@ message RescheduleResponse {
 message GetReschedulePlanRequest {
   uint64 revision = 1;
 
+  message WorkerIds {
+    repeated uint32 worker_ids = 1;
+  }
+
   message ResizePolicy {
-    repeated uint32 fragment_ids = 1;
-    repeated uint32 worker_ids = 2;
+    map<uint32, WorkerIds> fragment_target_worker_ids = 1;
   }
 
   oneof policy {
-    ResizePolicy resize_policy = 4;
+    ResizePolicy resize_policy = 2;
   }
 }
 
