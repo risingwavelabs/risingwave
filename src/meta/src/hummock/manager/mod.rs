@@ -63,7 +63,7 @@ use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_pin_unpin_snapshot_state,
-    trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
+    trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_version_stat,
     trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
@@ -2210,14 +2210,16 @@ where
                                 }
 
                                 HummockTimerEvent::Report => {
-                                    let (current_version, id_to_config) = {
+                                    let (current_version, id_to_config, branched_sst) = {
                                         let mut versioning_guard =
                                             write_lock!(hummock_manager.as_ref(), versioning).await;
                                         let configs =
                                             hummock_manager.get_compaction_group_map().await;
+                                        let versioning_deref = versioning_guard.deref_mut();
                                         (
-                                            versioning_guard.deref_mut().current_version.clone(),
+                                            versioning_deref.current_version.clone(),
                                             configs,
+                                            versioning_deref.branched_ssts.clone(),
                                         )
                                     };
 
@@ -2226,12 +2228,23 @@ where
                                     {
                                         let compaction_group_config =
                                             &id_to_config[&compaction_group_id];
+
+                                        let group_levels = current_version
+                                            .get_compaction_group_levels(
+                                                compaction_group_config.group_id(),
+                                            );
+
+                                        trigger_split_stat(
+                                            &hummock_manager.metrics,
+                                            compaction_group_config.group_id(),
+                                            group_levels.member_table_ids.len(),
+                                            &branched_sst,
+                                        );
+
                                         trigger_lsm_stat(
                                             &hummock_manager.metrics,
                                             compaction_group_config.compaction_config(),
-                                            current_version.get_compaction_group_levels(
-                                                compaction_group_config.group_id(),
-                                            ),
+                                            group_levels,
                                             compaction_group_config.group_id(),
                                         )
                                     }

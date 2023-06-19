@@ -102,6 +102,7 @@ fn create_hash_agg_executor(
         "HashAggExecutor".to_string(),
         CHUNK_SIZE,
         MemoryContext::none(),
+        None,
     ))
 }
 
