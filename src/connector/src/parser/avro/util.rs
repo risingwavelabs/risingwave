@@ -30,7 +30,6 @@ pub fn avro_schema_to_column_descs(schema: &Schema) -> anyhow::Result<Vec<Column
     }
 }
 
-
 const RW_DECIMAL_MAX_PRECISION: usize = 28;
 const DBZ_VARIABLE_SCALE_DECIMAL_NAME: &str = "VariableScaleDecimal";
 const DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE: &str = "io.debezium.data";

@@ -22,7 +22,7 @@ use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
-use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
+use risingwave_common::error::Result as RwResult;
 use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -410,6 +410,7 @@ pub(crate) fn unix_epoch_days() -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::error::{ErrorCode, RwError};
     use risingwave_common::types::Timestamp;
 
     use super::*;
