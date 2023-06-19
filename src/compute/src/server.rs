@@ -224,6 +224,7 @@ pub async fn compute_node_serve(
                 output_memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
+                await_tree_reg: None,
             });
 
             let (handle, shutdown_sender) =
