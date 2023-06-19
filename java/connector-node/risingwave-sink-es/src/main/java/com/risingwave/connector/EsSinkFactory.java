@@ -14,7 +14,6 @@
 
 package com.risingwave.connector;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
@@ -45,7 +44,6 @@ public class EsSinkFactory implements SinkFactory {
             Map<String, String> tableProperties,
             Catalog.SinkType sinkType) {
         ObjectMapper mapper = new ObjectMapper();
-        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
         EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
 
         // 1. check url

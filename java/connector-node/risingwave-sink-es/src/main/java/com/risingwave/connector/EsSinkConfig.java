@@ -32,9 +32,9 @@ public class EsSinkConfig extends CommonSinkConfig {
 
     @JsonCreator
     public EsSinkConfig(
-            @JsonProperty(value = "url") String url,
-            @JsonProperty(value = "index") String index,
-            @JsonProperty(value = "delimiter") String delimiter) {
+            @JsonProperty(value = "url", required = true) String url,
+            @JsonProperty(value = "index", required = true) String index,
+            @JsonProperty(value = "delimiter", required = false) String delimiter) {
         this.url = url;
         this.index = index;
         this.delimiter = delimiter == null ? "_" : delimiter;
