@@ -75,9 +75,7 @@ public class IcebergSinkFactoryTest {
                                         "table.name",
                                         tableName));
         try {
-            assertTrue(
-                    sink.getHadoopCatalog()
-                            .tableExists(TableIdentifier.of(databaseName, tableName)));
+            assertTrue(sink.getCatalog().tableExists(TableIdentifier.of(databaseName, tableName)));
             assertEquals(
                     sink.getIcebergTable().location(),
                     warehousePath + "/" + databaseName + "/" + tableName);

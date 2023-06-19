@@ -23,6 +23,13 @@ import com.risingwave.connector.common.S3Config;
 public class IcebergSinkConfig extends S3Config {
     private String sinkType;
 
+    @JsonProperty(value = "catalog.type")
+    private String catalogType;
+
+    @JsonProperty(value = "metastore.uri")
+    private String metaStoreUri;
+
+    @JsonProperty(value = "warehouse.path")
     private String warehousePath;
 
     private String databaseName;
@@ -38,11 +45,9 @@ public class IcebergSinkConfig extends S3Config {
     @JsonCreator
     public IcebergSinkConfig(
             @JsonProperty(value = "type") String sinkType,
-            @JsonProperty(value = "warehouse.path") String warehousePath,
             @JsonProperty(value = "database.name") String databaseName,
             @JsonProperty(value = "table.name") String tableName) {
         this.sinkType = sinkType;
-        this.warehousePath = warehousePath;
         this.databaseName = databaseName;
         this.tableName = tableName;
     }
@@ -55,8 +60,12 @@ public class IcebergSinkConfig extends S3Config {
         return warehousePath;
     }
 
-    public void setWarehousePath(String warehousePath) {
-        this.warehousePath = warehousePath;
+    public String getCatalogType() {
+        return catalogType;
+    }
+
+    public String getMetaStoreUri() {
+        return metaStoreUri;
     }
 
     public String getDatabaseName() {

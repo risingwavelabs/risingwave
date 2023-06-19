@@ -14,10 +14,12 @@
 
 package com.risingwave.connector;
 
+import static io.grpc.Status.INVALID_ARGUMENT;
 import static io.grpc.Status.UNIMPLEMENTED;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.collect.ImmutableMap;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
@@ -30,8 +32,10 @@ import java.util.Set;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.hadoop.HadoopCatalog;
+import org.apache.iceberg.hive.HiveCatalog;
 import org.apache.iceberg.types.Types;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,16 +55,13 @@ public class IcebergSinkFactory implements SinkFactory {
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
         IcebergSinkConfig config = mapper.convertValue(tableProperties, IcebergSinkConfig.class);
-        String warehousePath = getWarehousePath(config);
-        config.setWarehousePath(warehousePath);
-
-        String scheme = UrlParser.parseLocationScheme(warehousePath);
         TableIdentifier tableIdentifier =
                 TableIdentifier.of(config.getDatabaseName(), config.getTableName());
-        Configuration hadoopConf = createHadoopConf(scheme, config);
         SinkBase sink = null;
 
-        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
+        try {
+            Catalog hadoopCatalog = initCatalog(config);
+
             Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
             String sinkType = config.getSinkType();
             if (sinkType.equals("append-only")) {
@@ -94,14 +95,11 @@ public class IcebergSinkFactory implements SinkFactory {
         mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
         IcebergSinkConfig config = mapper.convertValue(tableProperties, IcebergSinkConfig.class);
 
-        String warehousePath = getWarehousePath(config);
-        String scheme = UrlParser.parseLocationScheme(warehousePath);
         TableIdentifier tableIdentifier =
                 TableIdentifier.of(config.getDatabaseName(), config.getTableName());
-        Configuration hadoopConf = createHadoopConf(scheme, config);
 
-        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
-
+        try {
+            Catalog hadoopCatalog = initCatalog(config);
             Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
 
             // Check that all columns in tableSchema exist in the iceberg table.
@@ -158,20 +156,49 @@ public class IcebergSinkFactory implements SinkFactory {
         }
     }
 
-    private static String getWarehousePath(IcebergSinkConfig config) {
-        String warehousePath = config.getWarehousePath();
-        // unify s3 and s3a
-        if (warehousePath.startsWith("s3://")) {
-            return warehousePath.replace("s3://", "s3a://");
+    private static Catalog initCatalog(IcebergSinkConfig config) {
+        String catalogType = config.getCatalogType();
+        if (catalogType == null) {
+            catalogType = "hadoop";
         }
-        return warehousePath;
+        switch (catalogType) {
+            case "hadoop":
+                String warehousePath = config.getWarehousePath();
+                if (warehousePath == null) {
+                    throw INVALID_ARGUMENT
+                            .withDescription("should set 'warehouse.path' for hadoop catalog")
+                            .asRuntimeException();
+                }
+                String scheme = UrlParser.parseLocationScheme(warehousePath);
+                Configuration hadoopConf = createHadoopConf(scheme, config);
+                HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);
+                return hadoopCatalog;
+            case "hive":
+                String uri = config.getMetaStoreUri();
+                if (uri == null) {
+                    throw INVALID_ARGUMENT
+                            .withDescription("should set 'metastore.uri' for hive catalog")
+                            .asRuntimeException();
+                }
+                HiveCatalog hiveCatalog = new HiveCatalog();
+                hiveCatalog.initialize("hive", ImmutableMap.of("uri", uri));
+                return hiveCatalog;
+            default:
+                throw INVALID_ARGUMENT
+                        .withDescription(
+                                String.format(
+                                        "only support catalog type as hadoop and hive but get %s",
+                                        config.getCatalogType()))
+                        .asRuntimeException();
+        }
     }
 
-    private Configuration createHadoopConf(String scheme, IcebergSinkConfig config) {
-        switch (scheme) {
+    private static Configuration createHadoopConf(String scheme, IcebergSinkConfig config) {
+        switch (scheme.toLowerCase()) {
             case "file":
                 return new Configuration();
             case "s3a":
+            case "s3":
                 Configuration hadoopConf = S3Utils.getHadoopConf(config);
                 hadoopConf.set(confIoImpl, s3FileIOImpl);
                 return hadoopConf;

@@ -20,30 +20,36 @@ import static io.grpc.Status.UNIMPLEMENTED;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 import org.apache.iceberg.*;
+import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.data.GenericRecord;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.data.parquet.GenericParquetWriter;
-import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.parquet.Parquet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class IcebergSink extends SinkBase {
-    private final HadoopCatalog hadoopCatalog;
+    private static final Logger LOG = LoggerFactory.getLogger(IcebergSink.class);
+
+    private final Catalog catalog;
     private final FileFormat fileFormat;
     private final Schema rowSchema;
     private final Table icebergTable;
     private Map<PartitionKey, DataWriter<Record>> dataWriterMap = new HashMap<>();
     private boolean closed = false;
 
-    public HadoopCatalog getHadoopCatalog() {
-        return this.hadoopCatalog;
+    public Catalog getCatalog() {
+        return this.catalog;
     }
 
     public Table getIcebergTable() {
@@ -52,11 +58,11 @@ public class IcebergSink extends SinkBase {
 
     public IcebergSink(
             TableSchema tableSchema,
-            HadoopCatalog hadoopCatalog,
+            Catalog hadoopCatalog,
             Table icebergTable,
             FileFormat fileFormat) {
         super(tableSchema);
-        this.hadoopCatalog = hadoopCatalog;
+        this.catalog = hadoopCatalog;
         this.icebergTable = icebergTable;
         this.rowSchema =
                 icebergTable.schema().select(Arrays.asList(getTableSchema().getColumnNames()));
@@ -152,10 +158,18 @@ public class IcebergSink extends SinkBase {
             for (DataWriter<Record> dataWriter : dataWriterMap.values()) {
                 dataWriter.close();
             }
-            hadoopCatalog.close();
+            if (catalog instanceof Closeable) {
+                Closeable closeableCatalog = (Closeable) catalog;
+                try {
+                    closeableCatalog.close();
+                } catch (IOException ex) {
+                    LOG.error("Unable to close catalog: %s", ex);
+                }
+            }
+
             closed = true;
         } catch (Exception e) {
-            throw INTERNAL.withCause(e).asRuntimeException();
+            LOG.error("failed to drop iceberg sink %s", e);
         }
     }
 

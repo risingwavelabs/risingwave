@@ -21,6 +21,7 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
 import io.grpc.Status;
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -36,18 +37,22 @@ import org.apache.iceberg.PartitionKey;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.Transaction;
+import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.data.GenericRecord;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.data.parquet.GenericParquetWriter;
 import org.apache.iceberg.deletes.EqualityDeleteWriter;
-import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.io.DataWriter;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.types.Types;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class UpsertIcebergSink extends SinkBase {
-    private final HadoopCatalog hadoopCatalog;
+    private static final Logger LOG = LoggerFactory.getLogger(UpsertIcebergSink.class);
+
+    private final Catalog catalog;
     private final Table icebergTable;
     private final FileFormat fileFormat;
     private final Schema rowSchema;
@@ -59,11 +64,11 @@ public class UpsertIcebergSink extends SinkBase {
 
     public UpsertIcebergSink(
             TableSchema tableSchema,
-            HadoopCatalog hadoopCatalog,
+            Catalog hadoopCatalog,
             Table icebergTable,
             FileFormat fileFormat) {
         super(tableSchema);
-        this.hadoopCatalog = hadoopCatalog;
+        this.catalog = hadoopCatalog;
         this.icebergTable = icebergTable;
         this.fileFormat = fileFormat;
         this.rowSchema =
@@ -243,10 +248,17 @@ public class UpsertIcebergSink extends SinkBase {
     @Override
     public void drop() {
         try {
-            hadoopCatalog.close();
+            if (catalog instanceof Closeable) {
+                Closeable closeableCatalog = (Closeable) catalog;
+                try {
+                    closeableCatalog.close();
+                } catch (IOException ex) {
+                    LOG.error("failed to close catalog: %s", ex);
+                }
+            }
             closed = true;
         } catch (Exception e) {
-            throw INTERNAL.withCause(e).asRuntimeException();
+            LOG.error("failed to drop iceberg upsert sink %s", e);
         }
     }
 
