@@ -198,6 +198,10 @@ impl LogStoreBufferReceiver {
                 .expect("should get the item because notified")
         }
     }
+
+    pub(crate) fn truncate(&mut self, offset: ReaderTruncationOffsetType) {
+        self.buffer.try_lock().expect("should be able to acquire the lock because there should not be any parallel contention").updated_truncation = Some(offset);
+    }
 }
 
 pub(crate) fn new_log_store_buffer(

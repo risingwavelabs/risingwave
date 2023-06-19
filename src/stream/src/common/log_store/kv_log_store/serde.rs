@@ -358,17 +358,18 @@ impl LogStoreRowSerde {
 
 #[derive(Debug)]
 enum StreamState {
+    /// The stream has not emitted any row op yet.
     Uninitialized,
-    AllConsumingRow {
-        curr_epoch: u64,
-    },
+    /// All parallelism of stream are consuming row.
+    AllConsumingRow { curr_epoch: u64 },
+    /// Some parallelism has reached the barrier, and is waiting for other parallelism to reach the
+    /// barrier.
     BarrierAligning {
         curr_epoch: u64,
         is_checkpoint: bool,
     },
-    BarrierEmitted {
-        prev_epoch: u64,
-    },
+    /// All parallelism has reached the barrier, and the barrier is emitted.
+    BarrierEmitted { prev_epoch: u64 },
 }
 
 struct LogStoreRowOpStream<S: StateStoreReadIterStream> {

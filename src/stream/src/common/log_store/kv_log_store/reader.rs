@@ -32,6 +32,18 @@ use crate::common::log_store::kv_log_store::serde::{
 };
 use crate::common::log_store::{LogReader, LogStoreError, LogStoreReadItem, LogStoreResult};
 
+enum ReaderState<S: StateStore> {
+    /// No data has been read yet
+    Uninitialized,
+    /// Consuming data previously written to state store before the reader was initialized.
+    ConsumingStateStore {
+        first_write_epoch: u64,
+        state_store_stream: Pin<Box<LogStoreItemStream<S::IterStream>>>,
+    },
+    /// Consuming newly written data after the reader was initialized.
+    ConsumingStream { epoch: u64 },
+}
+
 pub struct KvLogStoreReader<S: StateStore> {
     table_id: TableId,
 
@@ -42,17 +54,8 @@ pub struct KvLogStoreReader<S: StateStore> {
     rx: LogStoreBufferReceiver,
 
     reader_state: ReaderState<S>,
-}
 
-enum ReaderState<S: StateStore> {
-    Uninitialized,
-    ConsumingStateStore {
-        first_write_epoch: u64,
-        state_store_stream: Pin<Box<LogStoreItemStream<S::IterStream>>>,
-    },
-    ConsumingStream {
-        epoch: u64,
-    },
+    latest_barrier: Option<u64>,
 }
 
 impl<S: StateStore> KvLogStoreReader<S> {
@@ -68,7 +71,20 @@ impl<S: StateStore> KvLogStoreReader<S> {
             reader_state: ReaderState::Uninitialized,
             serde,
             rx,
+            latest_barrier: None,
         }
+    }
+
+    fn recv_barrier(&mut self, epoch: u64) {
+        if let Some(prev_epoch) = &self.latest_barrier {
+            assert!(
+                epoch > *prev_epoch,
+                "next epoch {} should be greater than prev epoch {}",
+                epoch,
+                prev_epoch
+            );
+        }
+        self.latest_barrier = Some(epoch);
     }
 }
 
@@ -89,7 +105,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     state_store
                         .iter(
                             (Included(range_start), Excluded(range_end)),
-                            first_write_epoch,
+                            u64::MAX,
                             ReadOptions {
                                 prefix_hint: None,
                                 ignore_range_tombstone: false,
@@ -124,7 +140,12 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     state_store_stream,
                 } => {
                     match state_store_stream.try_next().await? {
-                        Some((epoch, item)) => return Ok((epoch, item)),
+                        Some((epoch, item)) => {
+                            if let LogStoreReadItem::Barrier { .. } = &item {
+                                self.recv_barrier(epoch);
+                            }
+                            return Ok((epoch, item));
+                        }
                         None => {
                             let first_write_epoch = *first_write_epoch;
                             // all consumed
@@ -195,6 +216,13 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                         is_checkpoint,
                         next_epoch,
                     } => {
+                        assert!(
+                            epoch < next_epoch,
+                            "next epoch {} should be greater than current epoch {}",
+                            next_epoch,
+                            epoch
+                        );
+                        self.recv_barrier(epoch);
                         self.reader_state = ReaderState::ConsumingStream { epoch: next_epoch };
                         return Ok((epoch, LogStoreReadItem::Barrier { is_checkpoint }));
                     }
@@ -208,6 +236,11 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
     }
 
     fn truncate(&mut self) -> Self::TruncateFuture<'_> {
-        async move { todo!() }
+        async move {
+            if let Some(epoch) = &self.latest_barrier {
+                self.rx.truncate(*epoch);
+            }
+            Ok(())
+        }
     }
 }
