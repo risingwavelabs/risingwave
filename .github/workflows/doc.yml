@@ -25,7 +25,7 @@ jobs:
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: "sccache"
-      - name: Archive artifact
+      - name: Fix file permissions
         shell: sh
         run: |
           chmod -c -R +rX "target/doc" |
