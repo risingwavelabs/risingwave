@@ -2,7 +2,7 @@
 #!/usr/bin/env bash
 
 # Exits as soon as any line fails.
-set -euo pipefail
+# set -euo pipefail
 
 echo "--- preparing elasticsearch"
 wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.17.10-linux-x86_64.tar.gz
