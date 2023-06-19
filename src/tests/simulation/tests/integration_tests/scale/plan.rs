@@ -18,8 +18,10 @@ use anyhow::Result;
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
-use risingwave_pb::meta::get_reschedule_plan_request::Policy::ResizePolicy;
-use risingwave_pb::meta::get_reschedule_plan_request::{PbPolicy, PbResizePolicy, WorkerIds};
+use risingwave_pb::meta::get_reschedule_plan_request::Policy::ResizeStablePolicy;
+use risingwave_pb::meta::get_reschedule_plan_request::{
+    PbPolicy, PbResizeStablePolicy, WorkerChanges,
+};
 use risingwave_pb::meta::{PbGetReschedulePlanResponse, PbReschedule};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
@@ -59,12 +61,15 @@ async fn test_resize_normal() -> Result<()> {
 
     let retained_worker = workers.pop().unwrap();
 
+    let removed_workers = workers.iter().map(|worker| worker.id).collect_vec();
+
     let resp = cluster
-        .get_reschedule_plan(ResizePolicy(PbResizePolicy {
-            fragment_target_worker_ids: HashMap::from([(
+        .get_reschedule_plan(PbPolicy::ResizeStablePolicy(PbResizeStablePolicy {
+            fragment_worker_changes: HashMap::from([(
                 join_fragment_id,
-                WorkerIds {
-                    worker_ids: vec![retained_worker.id],
+                WorkerChanges {
+                    include_worker_ids: vec![],
+                    exclude_worker_ids: removed_workers,
                 },
             )]),
         }))
@@ -91,7 +96,6 @@ async fn test_resize_normal() -> Result<()> {
 
     Ok(())
 }
-
 #[madsim::test]
 async fn test_resize_single() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
@@ -138,11 +142,12 @@ async fn test_resize_single() -> Result<()> {
     let prev_worker = prev_workers.into_iter().exactly_one().unwrap();
 
     let resp = cluster
-        .get_reschedule_plan(ResizePolicy(PbResizePolicy {
-            fragment_target_worker_ids: HashMap::from([(
+        .get_reschedule_plan(ResizeStablePolicy(PbResizeStablePolicy {
+            fragment_worker_changes: HashMap::from([(
                 agg_fragment_id,
-                WorkerIds {
-                    worker_ids: workers.iter().map(|worker| worker.id).collect(),
+                WorkerChanges {
+                    include_worker_ids: vec![],
+                    exclude_worker_ids: vec![prev_worker.id],
                 },
             )]),
         }))
@@ -168,7 +173,6 @@ async fn test_resize_single() -> Result<()> {
 
     Ok(())
 }
-
 #[madsim::test]
 async fn test_resize_no_shuffle() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
@@ -193,7 +197,12 @@ async fn test_resize_no_shuffle() -> Result<()> {
     session
         .run("create materialized view mv6 as select * from mv3;")
         .await?;
-    session.run("create materialized view mv7 as select mv1.v as mv1v, mv5.v as mv5v from mv1 join mv5 on mv1.v = mv5.v;").await?;
+    session
+        .run(
+            "create materialized view mv7 as select mv1.v as mv1v, mv5.v as mv5v from mv1
+join mv5 on mv1.v = mv5.v;",
+        )
+        .await?;
 
     let chain_fragments: [_; 8] = cluster
         .locate_fragments([identity_contains("chain")])
@@ -205,25 +214,24 @@ async fn test_resize_no_shuffle() -> Result<()> {
 
     let selected_fragment_id = selected_fragment.inner.fragment_id;
 
-    let workers: Vec<WorkerNode> = cluster
+    let mut workers: Vec<WorkerNode> = cluster
         .list_workers()
         .await?
         .into_iter()
         .filter(|worker: &WorkerNode| worker.r#type() == WorkerType::ComputeNode)
         .collect();
 
-    let selected_worker = &workers[0];
+    workers.pop();
 
-    let selected_worker_id = selected_worker.id;
+    let removed_worker_ids = workers.iter().map(|worker| worker.id).collect_vec();
 
-    // will perform a request with fragment_ids = [selected_fragment.id] and worker_ids =
-    // [worker_id]
     let resp = cluster
-        .get_reschedule_plan(ResizePolicy(PbResizePolicy {
-            fragment_target_worker_ids: HashMap::from([(
+        .get_reschedule_plan(PbPolicy::ResizeStablePolicy(PbResizeStablePolicy {
+            fragment_worker_changes: HashMap::from([(
                 selected_fragment_id,
-                WorkerIds {
-                    worker_ids: vec![selected_worker_id],
+                WorkerChanges {
+                    include_worker_ids: vec![],
+                    exclude_worker_ids: removed_worker_ids,
                 },
             )]),
         }))

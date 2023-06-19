@@ -26,7 +26,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
-use risingwave_pb::meta::get_reschedule_plan_request::{Policy, ResizePolicy, WorkerIds};
+use risingwave_pb::meta::get_reschedule_plan_request::{Policy, ResizeStablePolicy, WorkerChanges};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
@@ -1494,20 +1494,34 @@ impl<S> GlobalStreamManager<S>
 where
     S: MetaStore,
 {
-    async fn generate_resize_plan(
+    async fn generate_stable_resize_plan(
         &self,
-        policy: ResizePolicy,
+        policy: ResizeStablePolicy,
     ) -> MetaResult<HashMap<FragmentId, ParallelUnitReschedule>> {
-        let ResizePolicy {
-            fragment_target_worker_ids,
+        let ResizeStablePolicy {
+            fragment_worker_changes,
         } = policy;
 
-        let mut target_plan = HashMap::with_capacity(fragment_target_worker_ids.len());
+        let mut target_plan = HashMap::with_capacity(fragment_worker_changes.len());
 
         let workers = self
             .cluster_manager
             .list_active_streaming_compute_nodes()
             .await;
+
+        let worker_parallel_units = workers
+            .iter()
+            .map(|worker| {
+                (
+                    worker.id,
+                    worker
+                        .parallel_units
+                        .iter()
+                        .map(|parallel_unit| parallel_unit.id as ParallelUnitId)
+                        .collect::<HashSet<_>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
 
         let all_table_fragments = self.fragment_manager.list_table_fragments().await;
 
@@ -1531,36 +1545,40 @@ where
             actor_status.extend(table_fragments.actor_status.clone());
         }
 
-        for (fragment_id, WorkerIds { worker_ids }) in fragment_target_worker_ids {
+        for (
+            fragment_id,
+            WorkerChanges {
+                include_worker_ids,
+                exclude_worker_ids,
+            },
+        ) in fragment_worker_changes
+        {
             let fragment = match fragment_map.get(&fragment_id).cloned() {
                 None => bail!("Fragment id {} not found", fragment_id),
                 Some(fragment) => fragment,
             };
 
-            let target_worker_ids: HashSet<_> = worker_ids.into_iter().collect();
+            let include_worker_ids: HashSet<_> = include_worker_ids.into_iter().collect();
+            let exclude_worker_ids: HashSet<_> = exclude_worker_ids.into_iter().collect();
 
-            let target_workers = workers
-                .iter()
-                .filter(|worker| target_worker_ids.contains(&worker.id))
+            let intersection_ids = include_worker_ids
+                .intersection(&exclude_worker_ids)
                 .collect_vec();
 
-            if target_workers.len() != target_worker_ids.len() {
-                let found_worker_ids = target_workers.iter().map(|worker| worker.id).collect();
-                let not_found_worker_ids: HashSet<_> =
-                    target_worker_ids.difference(&found_worker_ids).collect();
-
-                bail!("Worker ids {:?} not found", not_found_worker_ids);
+            if !intersection_ids.is_empty() {
+                bail!(
+                    "Include worker ids {:?} and exclude worker ids {:?} have intersection {:?}",
+                    include_worker_ids,
+                    exclude_worker_ids,
+                    intersection_ids
+                );
             }
 
-            let target_parallel_unit_ids: HashSet<_> = target_workers
-                .iter()
-                .flat_map(|worker| {
-                    worker
-                        .parallel_units
-                        .iter()
-                        .map(|unit| unit.id as ParallelUnitId)
-                })
-                .collect();
+            for worker_id in include_worker_ids.iter().chain(exclude_worker_ids.iter()) {
+                if !worker_parallel_units.contains_key(worker_id) {
+                    bail!("Worker id {} not found", worker_id);
+                }
+            }
 
             let fragment_parallel_unit_ids: HashSet<_> = fragment
                 .actors
@@ -1582,6 +1600,13 @@ where
                     let single_parallel_unit_id =
                         fragment_parallel_unit_ids.iter().exactly_one().unwrap();
 
+                    let target_parallel_unit_ids: HashSet<_> = worker_parallel_units
+                        .keys()
+                        .chain(include_worker_ids.iter())
+                        .filter(|id| !exclude_worker_ids.contains(*id))
+                        .flat_map(|id| worker_parallel_units.get(id).cloned().unwrap())
+                        .collect();
+
                     if !target_parallel_unit_ids.contains(single_parallel_unit_id) {
                         // todo: choose a target parallel unit by single actor count
                         let chosen_target_parallel_unit_id =
@@ -1597,6 +1622,24 @@ where
                     }
                 }
                 FragmentDistributionType::Hash => {
+                    let include_worker_parallel_unit_ids = include_worker_ids
+                        .iter()
+                        .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
+                        .cloned()
+                        .collect_vec();
+
+                    let exclude_worker_parallel_unit_ids = exclude_worker_ids
+                        .iter()
+                        .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
+                        .cloned()
+                        .collect_vec();
+
+                    let mut target_parallel_unit_ids: HashSet<_> =
+                        fragment_parallel_unit_ids.clone();
+                    target_parallel_unit_ids.extend(include_worker_parallel_unit_ids.iter());
+                    target_parallel_unit_ids
+                        .retain(|id| !exclude_worker_parallel_unit_ids.contains(id));
+
                     let to_expand_parallel_units = target_parallel_unit_ids
                         .difference(&fragment_parallel_unit_ids)
                         .sorted()
@@ -1714,7 +1757,7 @@ where
         policy: Policy,
     ) -> MetaResult<HashMap<FragmentId, ParallelUnitReschedule>> {
         match policy {
-            Policy::ResizePolicy(resize) => self.generate_resize_plan(resize).await,
+            Policy::ResizeStablePolicy(resize) => self.generate_stable_resize_plan(resize).await,
         }
     }
 }
