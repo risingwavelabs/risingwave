@@ -191,7 +191,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+azblob://<container-name>@<data_path>"
+      - "hummock+azblob://<container_name>@<root>"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"

@@ -179,7 +179,7 @@ profile:
       # If you want to use azblob as storage backend, configure bucket(container) name and root path:
       - use: opendal
         engine: azblob
-        bucket: test-bucket
+        bucket: congyi-test-container
         root: risingwave
       - use: compactor
       # - use: prometheus
