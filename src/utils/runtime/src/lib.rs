@@ -198,10 +198,10 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
         layers.push(
             fmt_layer
+                .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
                 .with_filter(filter(vec![
                     ("rw_tracing", Level::OFF), // filter out tracing-only events
                 ]))
-                .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
                 .boxed(),
         );
     };
