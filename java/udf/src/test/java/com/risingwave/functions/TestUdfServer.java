@@ -15,14 +15,17 @@
 package com.risingwave.functions;
 
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.Iterator;
 import java.util.stream.IntStream;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
-import org.apache.arrow.vector.IntVector;
-import org.apache.arrow.vector.VarCharVector;
-import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.types.Types.MinorType;
+import org.apache.arrow.vector.types.pojo.FieldType;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -41,7 +44,7 @@ public class TestUdfServer {
     public static void setup() throws IOException {
         server = new UdfServer("localhost", 0);
         server.addFunction("gcd", new Gcd());
-        server.addFunction("to_string", new ToString());
+        server.addFunction("return_all", new ReturnAll());
         server.addFunction("series", new Series());
         server.start();
 
@@ -82,28 +85,117 @@ public class TestUdfServer {
         try (var stream = client.call("gcd", input)) {
             var output = stream.getRoot();
             assertTrue(stream.next());
-            assertEquals(output.contentToTSVString().trim(), "3");
+            assertEquals("3", output.contentToTSVString().trim());
         }
     }
 
-    public static class ToString implements ScalarFunction {
-        public String eval(String s) {
-            return s;
+    public static class ReturnAll implements ScalarFunction {
+        public static class Row {
+            public boolean bool;
+            public short i16;
+            public int i32;
+            public long i64;
+            public float f32;
+            public double f64;
+            public String str;
+            public byte[] bytes;
+            public LocalDate date;
+            public LocalTime time;
+            public LocalDateTime timestamp;
+            public PeriodDuration interval;
+        }
+
+        public Row eval(boolean bool, short i16, int i32, long i64, float f32, double f64, String str, byte[] bytes,
+                LocalDate date, LocalTime time, LocalDateTime timestamp, PeriodDuration interval) {
+            var row = new Row();
+            row.bool = bool;
+            row.i16 = i16;
+            row.i32 = i32;
+            row.i64 = i64;
+            row.f32 = f32;
+            row.f64 = f64;
+            row.str = str;
+            row.bytes = bytes;
+            row.date = date;
+            row.time = time;
+            row.timestamp = timestamp;
+            row.interval = interval;
+            return row;
         }
     }
 
     @Test
-    public void to_string() throws Exception {
-        var c0 = new VarCharVector("", allocator);
+    public void all_types() throws Exception {
+        var c0 = new BitVector("", allocator);
         c0.allocateNew(1);
-        c0.set(0, "string".getBytes());
+        c0.set(0, 1);
         c0.setValueCount(1);
-        var input = VectorSchemaRoot.of(c0);
 
-        try (var stream = client.call("to_string", input)) {
+        var c1 = new SmallIntVector("", allocator);
+        c1.allocateNew(1);
+        c1.set(0, 1);
+        c1.setValueCount(1);
+
+        var c2 = new IntVector("", allocator);
+        c2.allocateNew(1);
+        c2.set(0, 1);
+        c2.setValueCount(1);
+
+        var c3 = new BigIntVector("", allocator);
+        c3.allocateNew(1);
+        c3.set(0, 1);
+        c3.setValueCount(1);
+
+        var c4 = new Float4Vector("", allocator);
+        c4.allocateNew(1);
+        c4.set(0, 1);
+        c4.setValueCount(1);
+
+        var c5 = new Float8Vector("", allocator);
+        c5.allocateNew(1);
+        c5.set(0, 1);
+        c5.setValueCount(1);
+
+        var c6 = new VarCharVector("", allocator);
+        c6.allocateNew(1);
+        c6.set(0, "string".getBytes());
+        c6.setValueCount(1);
+
+        var c7 = new VarBinaryVector("", allocator);
+        c7.allocateNew(1);
+        c7.set(0, "bytes".getBytes());
+        c7.setValueCount(1);
+
+        var c8 = new DateDayVector("", allocator);
+        c8.allocateNew(1);
+        c8.set(0, (int) LocalDate.of(2023, 1, 1).toEpochDay());
+        c8.setValueCount(1);
+
+        var c9 = new TimeMicroVector("", allocator);
+        c9.allocateNew(1);
+        c9.set(0, LocalTime.of(1, 2, 3).toNanoOfDay() / 1000);
+        c9.setValueCount(1);
+
+        var c10 = new TimeStampMicroVector("", allocator);
+        c10.allocateNew(1);
+        var ts = LocalDateTime.of(2023, 1, 1, 1, 2, 3);
+        c10.set(0, ts.toLocalDate().toEpochDay() * 24 * 3600 * 1000000 + ts.toLocalTime().toNanoOfDay() / 1000);
+        c10.setValueCount(1);
+
+        var c11 = new IntervalMonthDayNanoVector("", FieldType.nullable(MinorType.INTERVALMONTHDAYNANO.getType()),
+                allocator);
+        c11.allocateNew(1);
+        c11.set(0, 1, 2, 3);
+        c11.setValueCount(1);
+
+        var input = VectorSchemaRoot.of(c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11);
+
+        try (var stream = client.call("return_all", input)) {
             var output = stream.getRoot();
             assertTrue(stream.next());
-            assertEquals(output.contentToTSVString().trim(), "string");
+            assertEquals(
+                    "{\"bool\":true,\"i16\":1,\"i32\":1,\"i64\":1,\"f32\":1.0,\"f64\":1.0,\"str\":\"string\",\"bytes\":\"Ynl0ZXM=\",\"date\":19358,\"time\":3723000000,\"timestamp\":[2023,1,1,1,2,3],\"interval\":{\"period\":\"P1M2D\",\"duration\":3E-9}}",
+                    output.contentToTSVString().trim());
         }
     }
 
@@ -127,7 +219,7 @@ public class TestUdfServer {
         try (var stream = client.call("series", input)) {
             var output = stream.getRoot();
             assertTrue(stream.next());
-            assertEquals(output.contentToTSVString(), "row_index\t\n1\t0\n2\t0\n2\t1\n");
+            assertEquals("row_index\t\n1\t0\n2\t0\n2\t1\n", output.contentToTSVString());
         }
     }
 }
