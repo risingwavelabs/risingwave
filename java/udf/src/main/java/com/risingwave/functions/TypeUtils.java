@@ -390,7 +390,7 @@ class TypeUtils {
         } else if (field.getType() instanceof ArrowType.List) {
             // object is org.apache.arrow.vector.util.JsonStringArrayList
             var subfield = field.getChildren().get(0);
-            var subfunc = processFunc(subfield, null);
+            var subfunc = processFunc(subfield, targetClass.getComponentType());
             if (subfield.getType() instanceof ArrowType.Utf8) {
                 return obj -> obj == null ? null : ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
             } else if (subfield.getType() instanceof ArrowType.LargeUtf8) {
