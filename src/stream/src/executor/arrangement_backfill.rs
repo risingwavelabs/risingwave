@@ -41,7 +41,7 @@ use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message
 use crate::common::table::iter_utils::merge_sort;
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{PkIndices, StreamExecutorResult, Watermark};
+use crate::executor::{Barrier, PkIndices, StreamExecutorResult, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
 
 pub struct ArrangementBackfillExecutor<S: StateStore> {
@@ -213,14 +213,76 @@ where
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
         if to_backfill {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
+            let mut pending_barrier: Option<Barrier> = None;
             'backfill_loop: loop {
-                // Each time we break out of the backfill loop, we need to flush
-                // We can't do it while processing the stream barrier, since the immutable reference
-                // to upstream_table is live. So we have to do it here.
-                if let Some(_current_pos) = &current_pos {
+                let mut cur_barrier_snapshot_processed_rows: u64 = 0;
+                let mut cur_barrier_upstream_processed_rows: u64 = 0;
+
+                // Process barrier
+                // Each time we break out of the backfill_stream loop,
+                // it is typically due to barrier (except the first time).
+                // So we should immediately process barrier if there's one pending.
+                if let Some(barrier) = pending_barrier.clone() {
+                    // If it is a barrier, switch snapshot and consume
+                    // upstream buffer chunk
+
+                    if let Some(current_pos) = &current_pos {
+                        // NOTE: We do not consume the chunk here.
+                        // We still need to flush it to the `state_table`,
+                        // to ensure the upstream state is replicated.
+                        for chunk in &upstream_chunk_buffer {
+                            cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
+                            yield Message::Chunk(Self::mapping_chunk(
+                                Self::mark_chunk(
+                                    chunk,
+                                    current_pos,
+                                    &pk_in_output_indices,
+                                    &pk_order,
+                                ),
+                                &self.output_indices,
+                            ));
+                        }
+                    }
                     for chunk in upstream_chunk_buffer.drain(..) {
                         upstream_table.write_chunk(chunk);
                     }
+                    self.metrics
+                        .backfill_snapshot_read_row_count
+                        .with_label_values(&[
+                            upstream_table_id.to_string().as_str(),
+                            self.actor_id.to_string().as_str(),
+                        ])
+                        .inc_by(cur_barrier_snapshot_processed_rows);
+
+                    self.metrics
+                        .backfill_upstream_output_row_count
+                        .with_label_values(&[
+                            upstream_table_id.to_string().as_str(),
+                            self.actor_id.to_string().as_str(),
+                        ])
+                        .inc_by(cur_barrier_upstream_processed_rows);
+
+                    // Update snapshot read epoch.
+                    snapshot_read_epoch = barrier.epoch.prev;
+
+                    self.progress.update(
+                        barrier.epoch.curr,
+                        snapshot_read_epoch,
+                        total_snapshot_processed_rows,
+                    );
+
+                    // Persist state on barrier
+                    Self::persist_state(
+                        barrier.epoch,
+                        &mut self.state_table,
+                        false,
+                        &current_pos,
+                        &mut old_state,
+                        &mut current_state,
+                    )
+                    .await?;
+
+                    yield Message::Barrier(barrier);
                 }
 
                 let left_upstream = upstream.by_ref().map(Either::Left);
@@ -238,9 +300,6 @@ where
                         stream::PollNext::Left
                     });
 
-                let mut cur_barrier_snapshot_processed_rows: u64 = 0;
-                let mut cur_barrier_upstream_processed_rows: u64 = 0;
-
                 #[for_await]
                 for either in backfill_stream {
                     match either {
@@ -248,65 +307,12 @@ where
                         Either::Left(msg) => {
                             match msg? {
                                 Message::Barrier(barrier) => {
-                                    // If it is a barrier, switch snapshot and consume
-                                    // upstream buffer chunk
+                                    // We have to process the barrier outside of the loop.
+                                    // This is because our state_table reference is still live
+                                    // here, we have to break the loop to drop it,
+                                    // so we can do replication of upstream state_table.
+                                    pending_barrier = Some(barrier);
 
-                                    if let Some(current_pos) = &current_pos {
-                                        // NOTE: We do not consume the chunk here.
-                                        // We still need to flush it to the `state_table`,
-                                        // to ensure the upstream state is replicated.
-                                        for chunk in &upstream_chunk_buffer {
-                                            cur_barrier_upstream_processed_rows +=
-                                                chunk.cardinality() as u64;
-                                            yield Message::Chunk(Self::mapping_chunk(
-                                                Self::mark_chunk(
-                                                    chunk,
-                                                    current_pos,
-                                                    &pk_in_output_indices,
-                                                    &pk_order,
-                                                ),
-                                                &self.output_indices,
-                                            ));
-                                        }
-                                    }
-
-                                    self.metrics
-                                        .backfill_snapshot_read_row_count
-                                        .with_label_values(&[
-                                            upstream_table_id.to_string().as_str(),
-                                            self.actor_id.to_string().as_str(),
-                                        ])
-                                        .inc_by(cur_barrier_snapshot_processed_rows);
-
-                                    self.metrics
-                                        .backfill_upstream_output_row_count
-                                        .with_label_values(&[
-                                            upstream_table_id.to_string().as_str(),
-                                            self.actor_id.to_string().as_str(),
-                                        ])
-                                        .inc_by(cur_barrier_upstream_processed_rows);
-
-                                    // Update snapshot read epoch.
-                                    snapshot_read_epoch = barrier.epoch.prev;
-
-                                    self.progress.update(
-                                        barrier.epoch.curr,
-                                        snapshot_read_epoch,
-                                        total_snapshot_processed_rows,
-                                    );
-
-                                    // Persist state on barrier
-                                    Self::persist_state(
-                                        barrier.epoch,
-                                        &mut self.state_table,
-                                        false,
-                                        &current_pos,
-                                        &mut old_state,
-                                        &mut current_state,
-                                    )
-                                    .await?;
-
-                                    yield Message::Barrier(barrier);
                                     // Break the for loop and start a new snapshot read stream.
                                     break;
                                 }
