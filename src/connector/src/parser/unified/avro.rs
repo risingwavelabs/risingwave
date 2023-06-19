@@ -324,7 +324,6 @@ where
 #[cfg(test)]
 mod tests {
     use apache_avro::Decimal as AvroDecimal;
-    use num_traits::FromPrimitive;
     use risingwave_common::types::Decimal;
 
     use super::*;
