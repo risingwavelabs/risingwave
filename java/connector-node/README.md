@@ -78,13 +78,19 @@ We have integration tests that involve the use of several sinks, including file 
 Downloading and launching MinIO is a straightforward process. For PostgreSQL, I recommend launching it using Docker. When setting up PostgreSQL, please ensure that the values for `POSTGRES_PASSWORD`, `POSTGRES_DB`, and `POSTGRES_USER` match the corresponding settings in the `integration_tests.py` file.
 
 ```shell
+# create postgress in docker
 docker run --name my-postgres -e POSTGRES_PASSWORD=connector -e POSTGRES_DB=test -e POSTGRES_USER=test -d -p 5432:5432 postgres
+# connect postgress
+psql -h localhost -p 5432 -U test -d postgres
 ```
 Also remember to create the database and tables in postgresql
 
 ```sql
+# create table
 CREATE TABLE test (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);
 ```
+
+If you want to create a Sink to this pg instance, please check details at [here](https://www.risingwave.dev/docs/current/sink-to-postgres/). About how to launch rw in kubernetes, please check [here](https://github.com/risingwavelabs/risingwave-operator/blob/main/README.md).
 
 By maintaining consistency between these configurations, you can ensure a smooth execution of the integration tests. Please check more details in `connector-node-integration.yml`.
 
