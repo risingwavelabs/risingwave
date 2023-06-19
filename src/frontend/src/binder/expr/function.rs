@@ -910,11 +910,11 @@ impl Binder {
     }
 
     fn ensure_now_function_allowed(&self) -> Result<()> {
-        if self.is_for_stream()
+        if (self.is_for_stream()
             && !matches!(
                 self.context.clause,
-                Some(Clause::Where) | Some(Clause::Having)
-            )
+                Some(Clause::Where) | Some(Clause::Having)) 
+            )|| self.is_for_ddl()
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",

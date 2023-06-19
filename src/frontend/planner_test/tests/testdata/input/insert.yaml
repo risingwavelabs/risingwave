@@ -262,5 +262,4 @@
     create table t (a int, b timestamptz default now());
     insert into t values (1);
   expected_outputs:
-  - batch_plan
-  - logical_plan
+  - binder_error
