@@ -12,18 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(no_coverage))]
+package com.risingwave.connector.jdbc;
 
-#[cfg_attr(coverage, no_coverage)]
-fn main() {
-    use clap::Parser;
+public interface JdbcDialectFactory {
 
-    let opts = risingwave_compaction_test::CompactionTestOpts::parse();
-
-    risingwave_rt::init_risingwave_logger(
-        risingwave_rt::LoggerSettings::default(),
-        prometheus::Registry::new(),
-    );
-
-    risingwave_rt::main_okk(risingwave_compaction_test::start(opts))
+    JdbcDialect create();
 }
