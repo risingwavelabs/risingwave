@@ -64,6 +64,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tracing = "0.1"
+tracing-futures = { version = "0.2", features = ["futures-03"] }
 xorf = "0.8.1"
 xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.12", default-features = false }
