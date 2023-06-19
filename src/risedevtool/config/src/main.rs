@@ -87,7 +87,7 @@ impl Components {
             Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
             Self::RustComponents => "[Build] Rust components",
             Self::Dashboard => "[Build] Dashboard v2",
-            Self::Tracing => "[Component] Tracing: Tempo",
+            Self::Tracing => "[Component] Tracing: Grafana Tempo",
             Self::Release => "[Build] Enable release mode",
             Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
@@ -138,7 +138,7 @@ Required if you want to build dashboard v2 from source."
             Self::Tracing => {
                 "
 Required if you want to use tracing. This option will help
-you download Tempo."
+you download Grafana Tempo."
             }
             Self::Release => {
                 "

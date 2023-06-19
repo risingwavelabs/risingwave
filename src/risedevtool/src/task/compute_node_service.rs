@@ -20,7 +20,7 @@ use anyhow::Result;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_tempo_endpoint, add_meta_node, ComputeNodeConfig};
+use crate::{add_meta_node, add_tempo_endpoint, ComputeNodeConfig};
 
 pub struct ComputeNodeService {
     config: ComputeNodeConfig,
