@@ -464,7 +464,7 @@ impl Binder {
                 let columns = if let DataType::Struct(s) = tf.return_type() {
                     // If the table function returns a struct, it's fields can be accessed just
                     // like a table's columns.
-                    let schema = Schema::from(&s);
+                    let schema = Schema::from(&*s);
                     schema.fields.into_iter().map(|f| (false, f)).collect_vec()
                 } else {
                     // If there is an table alias, we should use the alias as the table function's
@@ -481,7 +481,7 @@ impl Binder {
                     let col_name = if let Some(alias) = &alias {
                         alias.name.real_value()
                     } else {
-                        tf.name()
+                        tf.name().to_string()
                     };
                     vec![(false, Field::with_name(tf.return_type(), col_name))]
                 };
