@@ -19,6 +19,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{atomic, Arc};
 use std::time::Instant;
 
+use await_tree::InstrumentAwait;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -127,7 +128,7 @@ impl SstableStreamIterator {
     /// `self.block_iter` to `None`.
     async fn next_block(&mut self) -> HummockResult<()> {
         // Check if we want and if we can load the next block.
-        if self.remaining_blocks > 0 && let Some(block) = self.download_next_block().await? {
+        if self.remaining_blocks > 0 && let Some(block) = self.download_next_block().verbose_instrument_await("stream_iter_next_block").await? {
             let mut block_iter = BlockIterator::new(BlockHolder::from_owned_block(block));
             block_iter.seek_to_first();
 
@@ -280,6 +281,7 @@ impl ConcatSstableIterator {
             let sstable = self
                 .sstable_store
                 .sstable(table_info, &mut self.stats)
+                .verbose_instrument_await("stream_iter_sstable")
                 .await?;
             let stats_ptr = self.stats.remote_io_time.clone();
             let now = Instant::now();
@@ -323,6 +325,7 @@ impl ConcatSstableIterator {
                 let block_stream = self
                     .sstable_store
                     .get_stream(sstable.value(), Some(start_index))
+                    .verbose_instrument_await("stream_iter_get_stream")
                     .await?;
 
                 // Determine time needed to open stream.
