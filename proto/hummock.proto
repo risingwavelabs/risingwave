@@ -386,6 +386,8 @@ message CompactTaskProgress {
   uint32 num_ssts_sealed = 2;
   uint32 num_ssts_uploaded = 3;
   uint64 num_progress_key = 4;
+  uint64 num_pending_read_io = 5;
+  uint64 num_pending_write_io = 6;
 }
 
 // The measurement of the workload on a compactor to determine whether it is idle.
