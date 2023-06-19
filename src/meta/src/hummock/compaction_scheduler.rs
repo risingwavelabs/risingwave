@@ -437,7 +437,6 @@ where
         let compactor = match self.hummock_manager.get_idle_compactor().await {
             Some(compactor) => compactor,
             None => {
-                let _ = sched_channel.try_sched_compaction(compaction_group, task_type);
                 return false;
             }
         };
