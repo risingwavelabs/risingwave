@@ -191,6 +191,7 @@ pub(crate) mod tests {
                 options.sstable_id_remote_fetch_number,
             )),
             task_progress_manager: Default::default(),
+            await_tree_reg: None,
         }
     }
 
