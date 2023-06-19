@@ -74,6 +74,7 @@ impl CacheRefillPolicy {
                         ssts.extend(level_delta.inserted_table_infos.clone());
                     }
                 }
+
                 if hit_count > 0 || is_l0_compact {
                     for sst in &ssts {
                         flatten_reqs.push(self.sstable_store.sstable(sst, &mut stats));
@@ -81,6 +82,7 @@ impl CacheRefillPolicy {
                 }
 
                 if is_l0_compact && is_base_level_compact && hit_count > 0 {
+                    ssts.retain(|sst| self.sstable_store.lookup_sstable(&sst.object_id).is_none());
                     let mut sstable_iters = vec![];
                     for d in &group_delta.group_deltas {
                         if let Some(group_delta::DeltaType::IntraLevel(level_delta)) =
@@ -146,7 +148,7 @@ async fn preload_l1_data(
         }
     }
 
-    const MIN_OVERLAP_HOT_BLOCK_COUNT: usize = 4;
+    const MIN_OVERLAP_HOT_BLOCK_COUNT: usize = 32;
     for sst in insert_ssts {
         let key_range = sst.key_range.as_ref().unwrap();
         let mut replace_hot_block = 0;
@@ -192,13 +194,6 @@ async fn preload_l1_data(
             continue;
         }
         let sstable = sstable_store.sstable(&sst, &mut stats).await?;
-        if replace_hot_block < sstable.value().meta.block_metas.len() / 20 {
-            info!(
-                "skip prefetch for sst-{} hot blocks: {}",
-                sst.sst_id, replace_hot_block
-            );
-            continue;
-        }
         let mut smallest_key = sstable.value().meta.largest_key.clone();
         let mut largest_key = sstable.value().meta.smallest_key.clone();
         for info in &removed_sstables {
