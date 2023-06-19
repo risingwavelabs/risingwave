@@ -92,14 +92,14 @@ ENABLE_ETCD=true
 # FIXME: Don't use kafka for now,
 # Until 1.0, then we can re-enable it...
 # This is because previous versions of risedev-tool (from previous releases)
-# fetch kafka from `clcdn.apache.org` which only maintains the latest few
+# fetch kafka from clcdn.apache.org which only maintains the latest few
 # versions of kafka.
 # This comment belongs to a PR for the release of 1.0.
-# In this PR, we also change the source of kafka bin to `downloads.apache.org`,
+# In this PR, we also change the source of kafka bin to downloads.apache.org,
 # which maintain old versions of kafka (until 2012).
 # ENABLE_KAFKA=true
 
-# Fetch `risingwave` binary from release.
+# Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=false
 
 # Ensure it will link the all-in-one binary from our release.
