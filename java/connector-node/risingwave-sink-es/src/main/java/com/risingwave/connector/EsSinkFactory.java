@@ -53,6 +53,7 @@ public class EsSinkFactory implements SinkFactory {
         } catch (IllegalArgumentException e) {
             throw Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException();
         }
+        System.out.println("check url success");
 
         // 2. check connection
         RestHighLevelClient client = new RestHighLevelClient(RestClient.builder(host));
@@ -67,6 +68,8 @@ public class EsSinkFactory implements SinkFactory {
         } catch (Exception e) {
             throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
         }
+        System.out.println("check connection success");
+
         // 3. close client
         try {
             client.close();
