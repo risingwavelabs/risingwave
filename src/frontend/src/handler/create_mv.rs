@@ -141,6 +141,7 @@ pub fn gen_create_mv_plan(
 
 pub async fn handle_create_mv(
     handler_args: HandlerArgs,
+    if_not_exists: bool,
     name: ObjectName,
     query: Query,
     columns: Vec<Ident>,
@@ -148,7 +149,16 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    session.check_relation_name_duplicated(name.clone())?;
+    if let Err(e) = session.check_relation_name_duplicated(name.clone()) {
+        if if_not_exists {
+            return Ok(PgResponse::empty_result_with_notice(
+                StatementType::CREATE_MATERIALIZED_VIEW,
+                format!("relation \"{}\" already exists, skipping", name),
+            ));
+        } else {
+            return Err(e);
+        }
+    }
 
     let (table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);

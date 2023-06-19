@@ -305,6 +305,8 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             distinct_dedup: DistinctDeduplicater::new(
                 &this.agg_calls,
                 &this.watermark_epoch,
+                &this.distinct_dedup_tables,
+                this.actor_ctx.id,
                 this.metrics.clone(),
             ),
             state_changed: false,
@@ -395,6 +397,7 @@ mod tests {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -403,6 +406,7 @@ mod tests {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -411,6 +415,7 @@ mod tests {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
             AggCall {
                 kind: AggKind::Min,
@@ -419,6 +424,7 @@ mod tests {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
         ];
 

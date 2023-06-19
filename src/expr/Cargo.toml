@@ -21,10 +21,12 @@ arrow-array = "36"
 arrow-schema = "36"
 async-trait = "0.1"
 auto_enums = "0.8"
+await-tree = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 ctor = "0.1"
 dyn-clone = "1"
+easy-ext = "1"
 either = "1"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
@@ -32,7 +34,6 @@ hex = "0.4.3"
 itertools = "0.10"
 md5 = "0.7.0"
 num-traits = "0.2"
-ouroboros = "0.15"
 parse-display = "0.6"
 paste = "1"
 regex = "1"
@@ -41,6 +42,7 @@ risingwave_expr_macro = { path = "macro" }
 risingwave_pb = { path = "../prost" }
 risingwave_udf = { path = "../udf" }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+self_cell = "1.0.0"
 serde_json = "1"
 sha1 = "0.10.5"
 sha2 = "0.10.6"
@@ -54,6 +56,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = "0.4"
+expect-test = "1"
 serde_json = "1"
 
 [[bench]]

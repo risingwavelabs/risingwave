@@ -25,8 +25,16 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.apache.commons.lang3.StringUtils;
+import org.postgresql.util.PGInterval;
+import org.postgresql.util.PGobject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+enum DatabaseType {
+    MYSQL,
+    POSTGRES,
+}
 
 public class JDBCSink extends SinkBase {
     public static final String INSERT_TEMPLATE = "INSERT INTO %s (%s) VALUES (%s)";
@@ -37,6 +45,7 @@ public class JDBCSink extends SinkBase {
     private final JDBCSinkConfig config;
     private final Connection conn;
     private final List<String> pkColumnNames;
+    private final DatabaseType targetDbType;
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
 
     private String updateDeleteConditionBuffer;
@@ -46,6 +55,17 @@ public class JDBCSink extends SinkBase {
 
     public JDBCSink(JDBCSinkConfig config, TableSchema tableSchema) {
         super(tableSchema);
+
+        var jdbcUrl = config.getJdbcUrl().toLowerCase();
+        if (jdbcUrl.startsWith("jdbc:mysql")) {
+            this.targetDbType = DatabaseType.MYSQL;
+        } else if (jdbcUrl.startsWith("jdbc:postgresql")) {
+            this.targetDbType = DatabaseType.POSTGRES;
+        } else {
+            throw Status.INVALID_ARGUMENT
+                    .withDescription("Unsupported jdbc url: " + jdbcUrl)
+                    .asRuntimeException();
+        }
 
         this.config = config;
         try {
@@ -73,7 +93,7 @@ public class JDBCSink extends SinkBase {
                             String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
-        LOG.info("detected pk {}", pkColumnNames);
+        LOG.info("detected pk column {}", pkColumnNames);
         return pkColumnNames;
     }
 
@@ -89,13 +109,9 @@ public class JDBCSink extends SinkBase {
                 String insertStmt =
                         String.format(
                                 INSERT_TEMPLATE, config.getTableName(), columnsRepr, valuesRepr);
+
                 try {
-                    PreparedStatement stmt =
-                            conn.prepareStatement(insertStmt, Statement.RETURN_GENERATED_KEYS);
-                    for (int i = 0; i < row.size(); i++) {
-                        stmt.setObject(i + 1, row.get(i));
-                    }
-                    return stmt;
+                    return generatePreparedStatement(insertStmt, row, null);
                 } catch (SQLException e) {
                     throw io.grpc.Status.INTERNAL
                             .withDescription(
@@ -174,14 +190,7 @@ public class JDBCSink extends SinkBase {
                                 updateDeleteConditionBuffer);
                 try {
                     PreparedStatement stmt =
-                            conn.prepareStatement(updateStmt, Statement.RETURN_GENERATED_KEYS);
-                    int placeholderIdx = 1;
-                    for (int i = 0; i < row.size(); i++) {
-                        stmt.setObject(placeholderIdx++, row.get(i));
-                    }
-                    for (Object value : updateDeleteValueBuffer) {
-                        stmt.setObject(placeholderIdx++, value);
-                    }
+                            generatePreparedStatement(updateStmt, row, updateDeleteValueBuffer);
                     updateDeleteConditionBuffer = null;
                     updateDeleteValueBuffer = null;
                     return stmt;
@@ -199,6 +208,78 @@ public class JDBCSink extends SinkBase {
         }
     }
 
+    /**
+     * Generates sql statement for insert/update
+     *
+     * @param inputStmt insert/update template string
+     * @param row column values to fill into statement
+     * @param updateDeleteValueBuffer pk values for update condition, pass null for insert
+     * @return prepared sql statement for insert/delete
+     * @throws SQLException
+     */
+    private PreparedStatement generatePreparedStatement(
+            String inputStmt, SinkRow row, Object[] updateDeleteValueBuffer) throws SQLException {
+        PreparedStatement stmt = conn.prepareStatement(inputStmt, Statement.RETURN_GENERATED_KEYS);
+        var columnDescs = getTableSchema().getColumnDescs();
+        int placeholderIdx = 1;
+        for (int i = 0; i < row.size(); i++) {
+            var column = columnDescs.get(i);
+            switch (column.getDataType().getTypeName()) {
+                case DECIMAL:
+                    stmt.setBigDecimal(placeholderIdx++, (java.math.BigDecimal) row.get(i));
+                    break;
+                case INTERVAL:
+                    if (targetDbType == DatabaseType.POSTGRES) {
+                        stmt.setObject(placeholderIdx++, new PGInterval((String) row.get(i)));
+                    } else {
+                        stmt.setObject(placeholderIdx++, row.get(i));
+                    }
+                    break;
+                case JSONB:
+                    if (targetDbType == DatabaseType.POSTGRES) {
+                        // reference: https://github.com/pgjdbc/pgjdbc/issues/265
+                        var pgObj = new PGobject();
+                        pgObj.setType("jsonb");
+                        pgObj.setValue((String) row.get(i));
+                        stmt.setObject(placeholderIdx++, pgObj);
+                    } else {
+                        stmt.setObject(placeholderIdx++, row.get(i));
+                    }
+                    break;
+                case BYTEA:
+                    stmt.setBytes(placeholderIdx++, (byte[]) row.get(i));
+                    break;
+                case LIST:
+                    var val = row.get(i);
+                    assert (val instanceof Object[]);
+                    Object[] objArray = (Object[]) val;
+                    if (targetDbType == DatabaseType.POSTGRES) {
+                        var fieldType = column.getDataType().getFieldType(0);
+                        var sqlType =
+                                JdbcUtils.getDbSqlType(
+                                        targetDbType, fieldType.getTypeName(), fieldType);
+                        stmt.setArray(i + 1, conn.createArrayOf(sqlType, objArray));
+                    } else {
+                        // convert Array type to a string for other database
+                        // reference:
+                        // https://dev.mysql.com/doc/workbench/en/wb-migration-database-postgresql-typemapping.html
+                        var arrayString = StringUtils.join(objArray, ",");
+                        stmt.setString(placeholderIdx++, arrayString);
+                    }
+                    break;
+                default:
+                    stmt.setObject(placeholderIdx++, row.get(i));
+                    break;
+            }
+        }
+        if (updateDeleteValueBuffer != null) {
+            for (Object value : updateDeleteValueBuffer) {
+                stmt.setObject(placeholderIdx++, value);
+            }
+        }
+        return stmt;
+    }
+
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
@@ -208,7 +289,7 @@ public class JDBCSink extends SinkBase {
                     continue;
                 }
                 if (stmt != null) {
-                    try {
+                    try (stmt) {
                         LOG.debug("Executing statement: {}", stmt);
                         stmt.executeUpdate();
                     } catch (SQLException e) {

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::iter;
 use std::iter::empty;
 use std::marker::PhantomData;
@@ -25,6 +24,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
+use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -38,6 +38,7 @@ use crate::executor::{
     check_shutdown, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
     ExecutorBuilder,
 };
+use crate::risingwave_common::estimate_size::EstimateSize;
 use crate::risingwave_common::hash::NullBitmap;
 use crate::task::{BatchTaskContext, ShutdownMsg};
 
@@ -77,6 +78,7 @@ pub struct HashJoinExecutor<K> {
 
     shutdown_rx: Option<Receiver<ShutdownMsg>>,
 
+    mem_ctx: MemoryContext,
     _phantom: PhantomData<K>,
 }
 
@@ -126,7 +128,8 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
 ///
 /// This can be seen as an implicit linked list. For convenience, we use `RowIdIter` to iterate all
 /// build side row ids with the given key.
-pub type JoinHashMap<K> = HashMap<K, RowId, PrecomputedBuildHasher>;
+pub type JoinHashMap<K> =
+    hashbrown::HashMap<K, RowId, PrecomputedBuildHasher, MonitoredGlobalAlloc>;
 
 struct RowIdIter<'a> {
     current_row_id: Option<RowId>,
@@ -157,7 +160,7 @@ pub struct EquiJoinParams<K> {
     probe_side: BoxedExecutor,
     probe_data_types: Vec<DataType>,
     probe_key_idxs: Vec<usize>,
-    build_side: Vec<DataChunk>,
+    build_side: Vec<DataChunk, MonitoredGlobalAlloc>,
     build_data_types: Vec<DataType>,
     full_data_types: Vec<DataType>,
     hash_map: JoinHashMap<K>,
@@ -172,7 +175,7 @@ impl<K> EquiJoinParams<K> {
         probe_side: BoxedExecutor,
         probe_data_types: Vec<DataType>,
         probe_key_idxs: Vec<usize>,
-        build_side: Vec<DataChunk>,
+        build_side: Vec<DataChunk, MonitoredGlobalAlloc>,
         build_data_types: Vec<DataType>,
         full_data_types: Vec<DataType>,
         hash_map: JoinHashMap<K>,
@@ -226,18 +229,22 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let build_data_types = self.build_side_source.schema().data_types();
         let full_data_types = [probe_data_types.clone(), build_data_types.clone()].concat();
 
-        let mut build_side = Vec::new();
+        let mut build_side = Vec::new_in(self.mem_ctx.global_allocator());
         let mut build_row_count = 0;
         #[for_await]
         for build_chunk in self.build_side_source.execute() {
-            let build_chunk = build_chunk?;
+            let build_chunk = build_chunk?.compact();
             if build_chunk.cardinality() > 0 {
                 build_row_count += build_chunk.cardinality();
-                build_side.push(build_chunk.compact())
+                self.mem_ctx.add(build_chunk.estimated_heap_size() as i64);
+                build_side.push(build_chunk);
             }
         }
-        let mut hash_map =
-            JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
+        let mut hash_map = JoinHashMap::with_capacity_and_hasher_in(
+            build_row_count,
+            PrecomputedBuildHasher,
+            self.mem_ctx.global_allocator(),
+        );
         let mut next_build_row_with_same_key =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
 
@@ -252,6 +259,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 // Only insert key to hash map if it is consistent with the null safe restriction.
                 if build_key.null_bitmap().is_subset(&null_matched) {
                     let row_id = RowId::new(build_chunk_id, build_row_id);
+                    self.mem_ctx.add(build_key.estimated_heap_size() as i64);
                     next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
                 }
             }
@@ -497,6 +505,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_row,
                         build_data_types.len(),
                     ) {
+                        non_equi_state.first_output_row_id.clear();
                         yield spilled
                     }
                 }
@@ -1715,6 +1724,8 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             .map(|&x| x as usize)
             .collect();
 
+        let identity = context.plan_node().get_identity().clone();
+
         Ok(HashJoinExecutorArgs {
             join_type,
             output_indices,
@@ -1724,10 +1735,11 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             build_key_idxs: right_key_idxs,
             null_matched: hash_join_node.get_null_safe().clone(),
             cond,
-            identity: context.plan_node().get_identity().clone(),
+            identity: identity.clone(),
             right_key_types,
             chunk_size: context.context.get_config().developer.chunk_size,
             shutdown_rx: Some(context.shutdown_rx.clone()),
+            mem_ctx: context.context.create_executor_mem_context(&identity),
         }
         .dispatch())
     }
@@ -1746,6 +1758,7 @@ struct HashJoinExecutorArgs {
     right_key_types: Vec<DataType>,
     chunk_size: usize,
     shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    mem_ctx: MemoryContext,
 }
 
 impl HashKeyDispatcher for HashJoinExecutorArgs {
@@ -1764,6 +1777,7 @@ impl HashKeyDispatcher for HashJoinExecutorArgs {
             self.identity,
             self.chunk_size,
             self.shutdown_rx,
+            self.mem_ctx,
         ))
     }
 
@@ -1786,6 +1800,7 @@ impl<K> HashJoinExecutor<K> {
         identity: String,
         chunk_size: usize,
         shutdown_rx: Option<Receiver<ShutdownMsg>>,
+        mem_ctx: MemoryContext,
     ) -> Self {
         assert_eq!(probe_key_idxs.len(), build_key_idxs.len());
         assert_eq!(probe_key_idxs.len(), null_matched.len());
@@ -1820,6 +1835,7 @@ impl<K> HashJoinExecutor<K> {
             identity,
             chunk_size,
             shutdown_rx,
+            mem_ctx,
             _phantom: PhantomData,
         }
     }
@@ -1833,6 +1849,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
     use risingwave_common::hash::Key32;
+    use risingwave_common::memory::MemoryContext;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
@@ -2062,6 +2079,7 @@ mod tests {
                 "HashJoinExecutor".to_string(),
                 chunk_size,
                 shutdown_rx,
+                MemoryContext::none(),
             ))
         }
 

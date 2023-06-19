@@ -17,25 +17,22 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Reader, Schema};
-use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::schema_resolver::*;
-use super::util::{extract_inner_field_schema, from_avro_value};
 use crate::common::UpsertMessage;
-use crate::impl_common_parser_logic;
 use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
+use crate::parser::unified::upsert::UpsertChangeEvent;
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
-
-impl_common_parser_logic!(AvroParser);
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct AvroParser {
@@ -124,7 +121,7 @@ impl AvroParserConfig {
             Ok(fields)
         } else {
             Err(RwError::from(InternalError(
-                "schema invalid, record required".into(),
+                "Kafka message key schema is invalid. Record type is required, or specify a primary key column to bypass the primary key detection.".into(),
             )))
         }
     }
@@ -179,12 +176,7 @@ impl AvroParser {
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        enum Op {
-            Insert,
-            Delete,
-        }
-
-        let (_payload, op) = if self.is_enable_upsert() {
+        let (raw_key, raw_value) = if self.is_enable_upsert() {
             let msg: UpsertMessage<'_> = bincode::deserialize(&payload).map_err(|e| {
                 RwError::from(ProtocolError(format!(
                     "extract payload err {:?}, you may need to check the 'upsert' parameter",
@@ -192,98 +184,116 @@ impl AvroParser {
                 )))
             })?;
             if !msg.record.is_empty() {
-                (msg.record, Op::Insert)
+                (Some(msg.primary_key), Some(msg.record))
             } else {
-                (msg.primary_key, Op::Delete)
+                (Some(msg.primary_key), None)
             }
         } else {
-            (Cow::from(&payload), Op::Insert)
+            (None, Some(Cow::from(&payload)))
         };
 
-        // parse payload to avro value
-        // if use confluent schema, get writer schema from confluent schema registry
-        let avro_value = if let Some(resolver) = &self.schema_resolver {
-            let (schema_id, mut raw_payload) = extract_schema_id(&_payload)?;
-            let writer_schema = resolver.get(schema_id).await?;
-            let reader_schema = if matches!(op, Op::Delete) {
-                self.key_schema.as_deref()
+        let avro_value = if let Some(payload) = raw_value {
+            // parse payload to avro value
+            // if use confluent schema, get writer schema from confluent schema registry
+            if let Some(resolver) = &self.schema_resolver {
+                let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
+                let writer_schema = resolver.get(schema_id).await?;
+                let reader_schema = Some(&*self.schema);
+                Some(
+                    from_avro_datum(writer_schema.as_ref(), &mut raw_payload, reader_schema)
+                        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
+                )
             } else {
-                Some(&*self.schema)
-            };
-            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, reader_schema)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
+                let mut reader = Reader::with_schema(&self.schema, &payload as &[u8])
+                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+                match reader.next() {
+                    Some(Ok(v)) => Some(v),
+                    Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
+                    None => {
+                        return Err(RwError::from(ProtocolError(
+                            "avro parse unexpected eof".to_string(),
+                        )));
+                    }
+                }
+            }
         } else {
-            let mut reader = Reader::with_schema(&self.schema, &payload as &[u8])
+            None
+        };
+
+        let avro_key = if let Some(payload) = raw_key {
+            if let Some(resolver) = &self.schema_resolver {
+                let (schema_id, mut raw_payload) = extract_schema_id(payload.as_ref())?;
+                let writer_schema = resolver.get(schema_id).await?;
+                let reader_schema = self.key_schema.as_ref();
+                let value = from_avro_datum(
+                    writer_schema.as_ref(),
+                    &mut raw_payload,
+                    reader_schema.map(|x| &**x),
+                )
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-            match reader.next() {
-                Some(Ok(v)) => v,
-                Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
-                None => {
-                    return Err(RwError::from(ProtocolError(
-                        "avro parse unexpected eof".to_string(),
-                    )));
+
+                Some(value)
+            } else if let Some(key_schema) = self.key_schema.as_ref() {
+                let mut reader = Reader::with_schema(key_schema, &payload as &[u8])
+                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+                match reader.next() {
+                    Some(Ok(v)) => Some(v),
+                    Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
+                    None => {
+                        return Err(RwError::from(ProtocolError(
+                            "avro parse unexpected eof".to_string(),
+                        )));
+                    }
                 }
+            } else {
+                None
             }
+        } else {
+            None
         };
 
-        // the avro can be a key or a value
-        if let Value::Record(fields) = avro_value {
-            let fill = |column: &SourceColumnDesc| {
-                let tuple = match fields.iter().find(|val| column.name.eq(&val.0)) {
-                    None => return Ok(None),
-                    Some(tup) => tup,
-                };
-
-                let field_schema = extract_inner_field_schema(&self.schema, Some(&column.name))?;
-                from_avro_value(tuple.1.clone(), field_schema).map_err(|e| {
-                    tracing::error!(
-                        "failed to process value ({}): {}",
-                        String::from_utf8_lossy(&payload),
-                        e
-                    );
-                    e
-                })
-            };
-            match op {
-                Op::Insert => writer.insert(fill),
-                Op::Delete => writer.delete(fill),
-            }
-        } else if self.upsert_primary_key_column_name.is_some()
-            && matches!(op, Op::Delete)
-            && matches!(
-                avro_value,
-                Value::Boolean(_)
-                    | Value::String(_)
-                    | Value::Int(_)
-                    | Value::Long(_)
-                    | Value::Float(_)
-                    | Value::Decimal(_)
-                    | Value::Date(_)
-                    | Value::TimestampMillis(_)
-                    | Value::TimestampMicros(_)
-                    | Value::Duration(_)
-            )
-        {
-            writer.delete(|desc| {
-                if &desc.name != self.upsert_primary_key_column_name.as_ref().unwrap() {
-                    Ok(None)
-                } else {
-                    from_avro_value(avro_value.clone(), self.key_schema.as_deref().unwrap())
-                        .map_err(|e| {
-                            tracing::error!(
-                                "failed to process value ({}): {}",
-                                String::from_utf8_lossy(&payload),
-                                e
-                            );
-                            e
-                        })
-                }
-            })
-        } else {
-            Err(RwError::from(ProtocolError(
-                "avro parse unexpected value".to_string(),
-            )))
+        let mut accessor: UpsertChangeEvent<AvroAccess<'_, '_>, AvroAccess<'_, '_>> =
+            UpsertChangeEvent::default();
+        if let Some(key) = &avro_key {
+            accessor = accessor.with_key(AvroAccess::new(
+                key,
+                AvroParseOptions {
+                    schema: self.key_schema.as_deref(),
+                    ..Default::default()
+                },
+            ));
         }
+
+        if let Some(value) = &avro_value {
+            accessor = accessor.with_value(AvroAccess::new(
+                value,
+                AvroParseOptions::default().with_schema(&self.schema),
+            ));
+        }
+
+        if let Some(pk) = &self.upsert_primary_key_column_name {
+            accessor = accessor.with_key_as_column_name(pk);
+        }
+
+        apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
+    }
+}
+
+impl ByteStreamSourceParser for AvroParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 

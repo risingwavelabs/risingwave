@@ -17,11 +17,14 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
+use super::utils::{formatter_debug_plan_node, Distill};
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -55,27 +58,33 @@ impl StreamSource {
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.logical.catalog.clone()
     }
-
-    pub fn column_names(&self) -> Vec<String> {
-        self.schema()
-            .fields()
-            .iter()
-            .map(|f| f.name.clone())
-            .collect()
-    }
 }
 
 impl_plan_tree_node_for_leaf! { StreamSource }
 
 impl fmt::Display for StreamSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamSource");
+        let mut builder = formatter_debug_plan_node!(f, "StreamSource");
         if let Some(catalog) = self.source_catalog() {
             builder
                 .field("source", &catalog.name)
-                .field("columns", &self.column_names());
+                .field("columns", &self.schema().names_str());
         }
         builder.finish()
+    }
+}
+impl Distill for StreamSource {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let fields = if let Some(catalog) = self.source_catalog() {
+            let src = Pretty::from(catalog.name.clone());
+            vec![
+                ("source", src),
+                ("columns", column_names_pretty(self.schema())),
+            ]
+        } else {
+            vec![]
+        };
+        Pretty::childless_record("StreamSource", fields)
     }
 }
 

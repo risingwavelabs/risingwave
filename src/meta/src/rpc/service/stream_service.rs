@@ -104,7 +104,7 @@ where
     ) -> Result<Response<ListTableFragmentsResponse>, Status> {
         let req = request.into_inner();
         let table_ids = HashSet::<u32>::from_iter(req.table_ids);
-        let table_fragments = self.fragment_manager.list_table_fragments().await?;
+        let table_fragments = self.fragment_manager.list_table_fragments().await;
         let info = table_fragments
             .into_iter()
             .filter(|tf| table_ids.contains(&tf.table_id().table_id))

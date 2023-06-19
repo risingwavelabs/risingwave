@@ -73,6 +73,7 @@ impl FunctionAttr {
         Ok(quote! {
             #[ctor::ctor]
             fn #ctor_name() {
+                use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { crate::sig::func::_register(#descriptor_type {
                     func: risingwave_pb::expr::expr_node::Type::#pb_type,
                     inputs_type: &[#(#args),*],
@@ -297,6 +298,7 @@ impl FunctionAttr {
         Ok(quote! {
             #[ctor::ctor]
             fn #ctor_name() {
+                use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { crate::sig::agg::_register(#descriptor_type {
                     func: crate::agg::AggKind::#pb_type,
                     inputs_type: &[#(#args),*],
@@ -467,6 +469,7 @@ impl FunctionAttr {
         Ok(quote! {
             #[ctor::ctor]
             fn #ctor_name() {
+                use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { crate::sig::table_function::_register(#descriptor_type {
                     func: risingwave_pb::expr::table_function::Type::#pb_type,
                     inputs_type: &[#(#args),*],
@@ -480,9 +483,10 @@ impl FunctionAttr {
 
     fn generate_build_table_function(&self) -> Result<TokenStream2> {
         let num_args = self.args.len();
+        let return_types = output_types(&self.ret);
         let fn_name = format_ident!("{}", self.user_fn.name);
         let struct_name = format_ident!("{}", self.ident_name());
-        let ids = (0..num_args)
+        let arg_ids = (0..num_args)
             .filter(|i| match &self.prebuild {
                 Some(s) => !s.contains(&format!("${i}")),
                 None => true,
@@ -492,17 +496,45 @@ impl FunctionAttr {
             Some(s) => s.contains(&format!("${i}")),
             None => false,
         });
-        let elems: Vec<_> = ids.iter().map(|i| format_ident!("v{i}")).collect();
+        let inputs: Vec<_> = arg_ids.iter().map(|i| format_ident!("i{i}")).collect();
         let all_child: Vec<_> = (0..num_args).map(|i| format_ident!("child{i}")).collect();
         let const_child: Vec<_> = const_ids.map(|i| format_ident!("child{i}")).collect();
-        let child: Vec<_> = ids.iter().map(|i| format_ident!("child{i}")).collect();
-        let array_refs: Vec<_> = ids.iter().map(|i| format_ident!("array{i}")).collect();
-        let arrays: Vec<_> = ids.iter().map(|i| format_ident!("a{i}")).collect();
+        let child: Vec<_> = arg_ids.iter().map(|i| format_ident!("child{i}")).collect();
+        let array_refs: Vec<_> = arg_ids.iter().map(|i| format_ident!("array{i}")).collect();
+        let arrays: Vec<_> = arg_ids.iter().map(|i| format_ident!("a{i}")).collect();
         let arg_arrays = self
             .args
             .iter()
             .map(|t| format_ident!("{}", types::array_type(t)));
-        let array_builder = format_ident!("{}Builder", types::array_type(&self.ret));
+        let outputs = (0..return_types.len())
+            .map(|i| format_ident!("o{i}"))
+            .collect_vec();
+        let builders = (0..return_types.len())
+            .map(|i| format_ident!("builder{i}"))
+            .collect_vec();
+        let builder_types = return_types
+            .iter()
+            .map(|ty| format_ident!("{}Builder", types::array_type(ty)))
+            .collect_vec();
+        let return_types = if return_types.len() == 1 {
+            vec![quote! { self.return_type.clone() }]
+        } else {
+            (0..return_types.len())
+                .map(|i| quote! { self.return_type.as_struct().types().nth(#i).unwrap().clone() })
+                .collect()
+        };
+        let build_value_array = if return_types.len() == 1 {
+            quote! { let [value_array] = value_arrays; }
+        } else {
+            quote! {
+                let bitmap = value_arrays[0].null_bitmap().clone();
+                let value_array = StructArray::new(
+                    self.return_type.as_struct().clone(),
+                    value_arrays.to_vec(),
+                    bitmap,
+                ).into_ref();
+            }
+        };
         let const_arg = match &self.prebuild {
             Some(_) => quote! { &self.const_arg },
             None => quote! {},
@@ -518,11 +550,23 @@ impl FunctionAttr {
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
         };
-        let value = match self.user_fn.return_type {
-            ReturnType::T => quote! { Some(value) },
-            ReturnType::Option => quote! { value },
-            ReturnType::Result => quote! { Some(value?) },
-            ReturnType::ResultOption => quote! { value? },
+        let iter = match self.user_fn.return_type {
+            ReturnType::T => quote! { iter },
+            ReturnType::Option => quote! { iter.flatten() },
+            ReturnType::Result => quote! { iter? },
+            ReturnType::ResultOption => quote! { value?.flatten() },
+        };
+        let iterator_item_type = self.user_fn.iterator_item_type.clone().ok_or_else(|| {
+            Error::new(
+                self.user_fn.return_type_span,
+                "expect `impl Iterator` in return type",
+            )
+        })?;
+        let output = match iterator_item_type {
+            ReturnType::T => quote! { Some(output) },
+            ReturnType::Option => quote! { output },
+            ReturnType::Result => quote! { Some(output?) },
+            ReturnType::ResultOption => quote! { output? },
         };
 
         Ok(quote! {
@@ -562,22 +606,24 @@ impl FunctionAttr {
                         let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
 
-                        let mut index_builder = I64ArrayBuilder::new(self.chunk_size);
-                        let mut value_builder = #array_builder::with_type(self.chunk_size, self.return_type.clone());
+                        let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
+                        #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
 
                         for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
-                            if let (#(Some(#elems),)*) = row && visible {
-                                for value in #fn_name(#(#elems,)* #const_arg) {
-                                    index_builder.append(Some(i as i64));
-                                    match #value {
-                                        Some(v) => value_builder.append(Some(v.as_scalar_ref())),
-                                        None => value_builder.append_null(),
+                            if let (#(Some(#inputs),)*) = row && visible {
+                                let iter = #fn_name(#(#inputs,)* #const_arg);
+                                for output in #iter {
+                                    index_builder.append(Some(i as i32));
+                                    match #output {
+                                        Some((#(#outputs),*)) => { #(#builders.append(Some(#outputs.as_scalar_ref()));)* }
+                                        None => { #(#builders.append_null();)* }
                                     }
 
                                     if index_builder.len() == self.chunk_size {
-                                        let index_array = std::mem::replace(&mut index_builder, I64ArrayBuilder::new(self.chunk_size)).finish();
-                                        let value_array = std::mem::replace(&mut value_builder, #array_builder::with_type(self.chunk_size, self.return_type.clone())).finish();
-                                        yield DataChunk::new(vec![index_array.into_ref(), value_array.into_ref()], self.chunk_size);
+                                        let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
+                                        let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
+                                        #build_value_array
+                                        yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
                                     }
                                 }
                             }
@@ -585,9 +631,10 @@ impl FunctionAttr {
 
                         if index_builder.len() > 0 {
                             let len = index_builder.len();
-                            let index_array = index_builder.finish();
-                            let value_array = value_builder.finish();
-                            yield DataChunk::new(vec![index_array.into_ref(), value_array.into_ref()], len);
+                            let index_array = index_builder.finish().into_ref();
+                            let value_arrays = [#(#builders.finish().into_ref()),*];
+                            #build_value_array
+                            yield DataChunk::new(vec![index_array, value_array], len);
                         }
                     }
                 }
@@ -605,14 +652,31 @@ impl FunctionAttr {
 
 fn data_type_name(ty: &str) -> TokenStream2 {
     let variant = format_ident!("{}", types::data_type(ty));
-    quote! { risingwave_common::types::DataTypeName::#variant }
+    quote! { DataTypeName::#variant }
 }
 
 fn data_type(ty: &str) -> TokenStream2 {
     if let Some(ty) = ty.strip_suffix("[]") {
         let inner_type = data_type(ty);
-        return quote! { risingwave_common::types::DataType::List(Box::new(#inner_type)) };
+        return quote! { DataType::List(Box::new(#inner_type)) };
+    }
+    if ty.starts_with("struct<") {
+        return quote! { DataType::Struct(#ty.parse().expect("invalid struct type")) };
     }
     let variant = format_ident!("{}", types::data_type(ty));
-    quote! { risingwave_common::types::DataType::#variant }
+    quote! { DataType::#variant }
+}
+
+/// Extract multiple output types.
+///
+/// ```ignore
+/// output_types("int32") -> ["int32"]
+/// output_types("struct<key varchar, value jsonb>") -> ["varchar", "jsonb"]
+/// ```
+fn output_types(ty: &str) -> Vec<&str> {
+    if let Some(s) = ty.strip_prefix("struct<") && let Some(args) = s.strip_suffix('>') {
+        args.split(',').map(|s| s.split_whitespace().nth(1).unwrap()).collect()
+    } else {
+        vec![ty]
+    }
 }

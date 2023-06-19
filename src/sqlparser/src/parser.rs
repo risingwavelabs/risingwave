@@ -22,6 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
+use itertools::Itertools;
 use tracing::{debug, instrument};
 
 use crate::ast::ddl::{
@@ -708,6 +709,19 @@ impl Parser {
             None
         };
 
+        let within_group = if self.parse_keywords(&[Keyword::WITHIN, Keyword::GROUP]) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
+            let order_by_parsed = self.parse_comma_separated(Parser::parse_order_by_expr)?;
+            let order_by = order_by_parsed.iter().exactly_one().map_err(|_| {
+                ParserError::ParserError("only one arg in order by is expected here".to_string())
+            })?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(order_by.clone()))
+        } else {
+            None
+        };
+
         Ok(Expr::Function(Function {
             name,
             args,
@@ -715,6 +729,7 @@ impl Parser {
             distinct,
             order_by,
             filter,
+            within_group,
         }))
     }
 
@@ -1881,6 +1896,7 @@ impl Parser {
         materialized: bool,
         or_replace: bool,
     ) -> Result<Statement, ParserError> {
+        let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         // Many dialects support `OR ALTER` right after `CREATE`, but we don't (yet).
         // ANSI SQL and Postgres support RECURSIVE here, but we don't support it either.
         let name = self.parse_object_name()?;
@@ -1895,6 +1911,7 @@ impl Parser {
         let query = Box::new(self.parse_query()?);
         // Optional `WITH [ CASCADED | LOCAL ] CHECK OPTION` is widely supported here.
         Ok(Statement::CreateView {
+            if_not_exists,
             name,
             columns,
             query,

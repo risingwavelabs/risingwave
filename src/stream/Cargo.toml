@@ -19,7 +19,7 @@ anyhow = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-await-tree = "0.1.1"
+await-tree = { workspace = true }
 bytes = "1"
 dyn-clone = "1"
 educe = "0.4"
@@ -35,8 +35,6 @@ local_stats_alloc = { path = "../utils/local_stats_alloc" }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 maplit = "1.0.2"
 memcomparable = "0.2"
-minitrace = "0.4"
-minstant = "0.1"
 multimap = "0.8"
 num-traits = "0.2"
 parking_lot = "0.12"

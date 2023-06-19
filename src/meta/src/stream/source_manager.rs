@@ -180,7 +180,7 @@ impl ConnectorSourceWorker {
                 .flat_map(|col| &col.column_desc)
                 .map(|col| Column {
                     name: col.name.clone(),
-                    data_type: col.column_type.as_ref().unwrap().type_name,
+                    data_type: col.column_type.clone(),
                 })
                 .collect(),
             pk_indices,
@@ -520,7 +520,7 @@ where
 
         let mut actor_splits = HashMap::new();
         let mut source_fragments = HashMap::new();
-        for table_fragments in fragment_manager.list_table_fragments().await? {
+        for table_fragments in fragment_manager.list_table_fragments().await {
             source_fragments.extend(table_fragments.stream_source_fragments());
             actor_splits.extend(table_fragments.actor_splits.clone());
         }
