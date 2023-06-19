@@ -393,11 +393,11 @@ def _string_to_data_type(type_str: str):
     elif type_str in ("DATE"):
         return pa.date32()
     elif type_str in ("TIME", "TIME WITHOUT TIME ZONE"):
-        return pa.time32("ms")
+        return pa.time64("us")
     elif type_str in ("TIMESTAMP", "TIMESTAMP WITHOUT TIME ZONE"):
-        return pa.timestamp("ms")
+        return pa.timestamp("us")
     elif type_str.startswith("INTERVAL"):
-        return pa.duration("us")
+        return pa.month_day_nano_interval()
     elif type_str in ("VARCHAR"):
         return pa.string()
     elif type_str in ("JSONB"):
