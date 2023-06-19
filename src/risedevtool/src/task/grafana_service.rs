@@ -71,10 +71,10 @@ impl GrafanaService {
             GrafanaGen.gen_prometheus_datasource_yml(config)?,
         )?;
 
-        if !config.provide_jaeger.as_ref().unwrap().is_empty() {
+        if !config.provide_tempo.as_ref().unwrap().is_empty() {
             fs_err::write(
-                config_datasources_dir.join("risedev-jaeger.yml"),
-                GrafanaGen.gen_jaeger_datasource_yml(config)?,
+                config_datasources_dir.join("risedev-tempo.yml"),
+                GrafanaGen.gen_tempo_datasource_yml(config)?,
             )?;
         }
 
