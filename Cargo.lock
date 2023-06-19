@@ -5935,7 +5935,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_rt",
  "risingwave_storage",
- "risingwave_tracing",
  "tracing",
  "workspace-hack",
 ]
@@ -5994,7 +5993,6 @@ dependencies = [
  "risingwave_source",
  "risingwave_storage",
  "risingwave_stream",
- "risingwave_tracing",
  "serde",
  "serde_json",
  "tempfile",
@@ -6098,7 +6096,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "risingwave_stream",
- "risingwave_tracing",
  "serde_json",
  "size",
  "tracing",
@@ -6280,7 +6277,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "risingwave_test_runner",
- "risingwave_tracing",
  "serial_test",
  "sync-point",
  "workspace-hack",
@@ -6702,7 +6698,6 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_test_runner",
- "risingwave_tracing",
  "scopeguard",
  "sled",
  "spin 0.9.8",
@@ -6785,18 +6780,6 @@ version = "1.0.0-alpha"
 dependencies = [
  "fail",
  "sync-point",
- "workspace-hack",
-]
-
-[[package]]
-name = "risingwave_tracing"
-version = "1.0.0-alpha"
-dependencies = [
- "anyhow",
- "futures",
- "madsim-tokio",
- "rand",
- "tracing",
  "workspace-hack",
 ]
 
