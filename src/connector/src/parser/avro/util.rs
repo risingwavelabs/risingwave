@@ -30,6 +30,11 @@ pub fn avro_schema_to_column_descs(schema: &Schema) -> anyhow::Result<Vec<Column
     }
 }
 
+
+const RW_DECIMAL_MAX_PRECISION: usize = 28;
+const DBZ_VARIABLE_SCALE_DECIMAL_NAME: &str = "VariableScaleDecimal";
+const DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE: &str = "io.debezium.data";
+
 fn avro_field_to_column_desc(
     name: &str,
     schema: &Schema,
@@ -76,14 +81,29 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
         Schema::Boolean => DataType::Boolean,
         Schema::Float => DataType::Float32,
         Schema::Double => DataType::Float64,
-        Schema::Decimal { .. } => DataType::Decimal,
+        Schema::Decimal { precision, .. } => {
+            if precision > &RW_DECIMAL_MAX_PRECISION {
+                tracing::warn!(
+                    "RisingWave supports decimal precision up to {}, but got {}. Will truncate.",
+                    RW_DECIMAL_MAX_PRECISION,
+                    precision
+                );
+            }
+            DataType::Decimal
+        }
         Schema::Date => DataType::Date,
         Schema::TimestampMillis => DataType::Timestamptz,
         Schema::TimestampMicros => DataType::Timestamptz,
         Schema::Duration => DataType::Interval,
         Schema::Bytes => DataType::Bytea,
         Schema::Enum { .. } => DataType::Varchar,
-        Schema::Record { fields, .. } => {
+        Schema::Record { fields, name, .. } => {
+            if name.name == DBZ_VARIABLE_SCALE_DECIMAL_NAME
+                && name.namespace == Some(DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE.into())
+            {
+                return Ok(DataType::Decimal);
+            }
+
             let struct_fields = fields
                 .iter()
                 .map(|f| avro_type_mapping(&f.schema))

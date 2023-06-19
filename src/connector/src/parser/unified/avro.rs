@@ -14,10 +14,12 @@
 
 use std::str::FromStr;
 
+use anyhow::anyhow;
 use apache_avro::types::Value;
 use apache_avro::{Decimal as AvroDecimal, Schema};
 use chrono::Datelike;
 use itertools::Itertools;
+use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
@@ -25,7 +27,6 @@ use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, Scalar
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{Access, AccessError, AccessResult};
-
 #[derive(Clone)]
 /// Options for parsing an `AvroValue` into Datum, with an optional avro schema.
 pub struct AvroParseOptions<'a> {
@@ -116,6 +117,40 @@ impl<'a> AvroParseOptions<'a> {
                 };
                 let decimal = avro_decimal_to_rust_decimal(avro_decimal.clone(), precision, scale)
                     .map_err(|_| create_error())?;
+                ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
+            }
+            (Some(DataType::Decimal), Value::Record(fields)) => {
+                // VariableScaleDecimal has fixed fields, scale(int) and value(bytes)
+                let find_in_records = |field_name: &str| {
+                    fields
+                        .iter()
+                        .find(|field| field.0 == field_name)
+                        .map(|field| &field.1)
+                };
+                let scale = match find_in_records("scale").ok_or(AccessError::Other(anyhow!(
+                    "scale field not found in VariableScaleDecimal"
+                )))? {
+                    Value::Int(scale) => Ok(*scale),
+                    avro_value => Err(AccessError::Other(anyhow!(
+                        "scale field in VariableScaleDecimal is not int, got {:?}",
+                        avro_value
+                    ))),
+                }?;
+
+                let value: BigInt = match find_in_records("value").ok_or(AccessError::Other(
+                    anyhow!("value field not found in VariableScaleDecimal"),
+                ))? {
+                    Value::Bytes(bytes) => Ok(BigInt::from_signed_bytes_be(bytes)),
+                    avro_value => Err(AccessError::Other(anyhow!(
+                        "value field in VariableScaleDecimal is not bytes, got {:?}",
+                        avro_value
+                    ))),
+                }?;
+
+                let negative = value.sign() == Sign::Minus;
+                let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1);
+                let decimal =
+                    rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
                 ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
             }
 
@@ -286,22 +321,26 @@ where
 }
 
 const RW_DECIMAL_MAX_PRECISION: usize = 28;
-fn avro_decimal_to_rust_decimal(
+pub(crate) fn avro_decimal_to_rust_decimal(
     avro_decimal: AvroDecimal,
-    precision: usize,
+    _precision: usize,
     scale: usize,
 ) -> RwResult<rust_decimal::Decimal> {
-    if precision > RW_DECIMAL_MAX_PRECISION {
-        return Err(RwError::from(ErrorCode::ProtocolError(format!(
-            "only support decimal with max precision {} but given avro decimal with precision {}",
-            RW_DECIMAL_MAX_PRECISION, precision
-        ))));
-    }
-
     let negative = !avro_decimal.is_positive();
     let bytes = avro_decimal.to_vec_unsigned();
 
-    let (lo, mid, hi) = match bytes.len() {
+    let (lo, mid, hi) = extract_decimal(bytes);
+    Ok(rust_decimal::Decimal::from_parts(
+        lo,
+        mid,
+        hi,
+        negative,
+        scale as u32,
+    ))
+}
+
+pub(crate) fn extract_decimal(bytes: Vec<u8>) -> (u32, u32, u32) {
+    match bytes.len() {
         len @ 0..=4 => {
             let mut pad = vec![0; 4 - len];
             pad.extend_from_slice(&bytes);
@@ -324,14 +363,7 @@ fn avro_decimal_to_rust_decimal(
             (lo, mid, hi)
         }
         _ => unreachable!(),
-    };
-    Ok(rust_decimal::Decimal::from_parts(
-        lo,
-        mid,
-        hi,
-        negative,
-        scale as u32,
-    ))
+    }
 }
 
 pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
