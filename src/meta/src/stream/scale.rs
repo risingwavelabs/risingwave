@@ -539,17 +539,6 @@ where
                     );
                 }
             }
-
-            if current_parallel_units
-                .iter()
-                .all(|x| removed_parallel_units.contains(x))
-            {
-                bail!(
-                    "can't remove all parallel units from fragment {}",
-                    fragment_id
-                );
-            }
-
             for added in added_parallel_units {
                 if !parallel_unit_id_to_worker_id.contains_key(added) {
                     bail!("parallel unit {} not available", added);
@@ -565,7 +554,16 @@ where
             }
 
             match fragment.distribution_type() {
-                FragmentDistributionType::Hash => {}
+                FragmentDistributionType::Hash => {
+                    if current_parallel_units.len() + added_parallel_units.len()
+                        <= removed_parallel_units.len()
+                    {
+                        bail!(
+                            "can't remove all parallel units from fragment {}",
+                            fragment_id
+                        );
+                    }
+                }
                 FragmentDistributionType::Single => {
                     if added_parallel_units.len() != removed_parallel_units.len() {
                         bail!("single distribution fragment only support migration");
@@ -695,12 +693,11 @@ where
                 }
             }
 
-            if new_actor_ids.is_empty() {
-                bail!(
-                    "should be at least one actor in fragment {} after rescheduling",
-                    fragment_id
-                );
-            }
+            assert!(
+                !new_actor_ids.is_empty(),
+                "should be at least one actor in fragment {} after rescheduling",
+                fragment_id
+            );
 
             fragment_actors_after_reschedule.insert(*fragment_id, new_actor_ids);
         }
