@@ -96,6 +96,10 @@ impl FragmentManagerCore {
             })
             .collect()
     }
+
+    pub fn table_fragments(&self) -> &BTreeMap<TableId, TableFragments> {
+        &self.table_fragments
+    }
 }
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
