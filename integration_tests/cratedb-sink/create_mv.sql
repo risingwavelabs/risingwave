@@ -11,7 +11,7 @@ CREATE SINK target_count_postgres_sink
 FROM
     target_count WITH (
         connector = 'jdbc',
-        jdbc.url = 'jdbc:postgresql://cratedb:5432/crate?user=crate',
+        jdbc.url = 'jdbc:postgresql://cratedb:15432/crate?user=crate',
         table.name = 'target_count',
         type = 'upsert'
     );

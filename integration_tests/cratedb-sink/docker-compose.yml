@@ -47,11 +47,11 @@ services:
     restart: always
     container_name: datagen
   # Use this command to connect to the DB from outside the container:
-  #   psql -h localhost -p 5433 -d crate -U crate
+  #   psql -h localhost -p 15432 -d crate -U crate
   cratedb:
     image: crate
     ports:
-      - 5433:5432
+      - 15432:5432
       - 4200:4200
     restart: always
     container_name: cratedb
