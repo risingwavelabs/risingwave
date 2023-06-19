@@ -16,25 +16,14 @@ use std::fmt::Debug;
 
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use simd_json::{BorrowedValue, StaticNode, ValueAccess};
+use risingwave_common::types::DataType;
+use simd_json::{BorrowedValue, Mutable};
 
-use super::operators::*;
+use crate::parser::unified::debezium::{DebeziumChangeEvent, MongoProjeciton};
+use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
-
-const BEFORE: &str = "before";
-const AFTER: &str = "after";
-const OP: &str = "op";
-
-#[inline]
-fn ensure_not_null<'a, 'b: 'a>(value: &'a BorrowedValue<'b>) -> Option<&'a BorrowedValue<'b>> {
-    if let BorrowedValue::Static(StaticNode::Null) = value {
-        None
-    } else {
-        Some(value)
-    }
-}
 
 #[derive(Debug)]
 pub struct DebeziumMongoJsonParser {
@@ -44,71 +33,6 @@ pub struct DebeziumMongoJsonParser {
     source_ctx: SourceContextRef,
 }
 
-fn parse_bson_value(
-    id_type: &DataType,
-    payload_type: &DataType, /* Only `DataType::Jsonb` is supported now. But it can be extended
-                              * in the future. */
-    value: &BorrowedValue<'_>,
-) -> anyhow::Result<(Datum, Datum)> {
-    let bson_str = value.as_str().unwrap_or_default();
-    let bson_value: serde_json::Value = serde_json::from_str(bson_str)?;
-    let bson_doc = bson_value.as_object().ok_or_else(|| {
-        RwError::from(ProtocolError(
-            "Debezuim Mongo requires payload is a document".into(),
-        ))
-    })?;
-    let id_field = bson_doc
-        .get("_id")
-        .ok_or_else(|| {
-            RwError::from(ProtocolError(
-                "Debezuim Mongo requires document has a `_id` field".into(),
-            ))
-        })?
-        .clone();
-    let id: Datum = match id_type {
-        DataType::Jsonb => ScalarImpl::Jsonb(id_field.into()).into(),
-        DataType::Varchar => match id_field {
-            serde_json::Value::String(s) => Some(ScalarImpl::Utf8(s.into())),
-            serde_json::Value::Object(obj) if obj.contains_key("$oid") => Some(ScalarImpl::Utf8(
-                obj["$oid"].as_str().to_owned().unwrap_or_default().into(),
-            )),
-            _ => Err(RwError::from(ProtocolError(format!(
-                "Can not convert bson {:?} to {:?}",
-                id_field, id_type
-            ))))?,
-        },
-        DataType::Int32 => {
-            if let serde_json::Value::Object(ref obj) = id_field && obj.contains_key("$numberInt") {
-                let int_str = obj["$numberInt"].as_str().unwrap_or_default();
-                Some(ScalarImpl::Int32(int_str.parse().unwrap_or_default()))
-            } else {
-                Err(RwError::from(ProtocolError(format!(
-                    "Can not convert bson {:?} to {:?}",
-                    id_field, id_type
-                ))))?
-            }
-        }
-        DataType::Int64 => {
-            if let serde_json::Value::Object(ref obj) = id_field && obj.contains_key("$numberLong")
-            {
-                let int_str = obj["$numberLong"].as_str().unwrap_or_default();
-                Some(ScalarImpl::Int64(int_str.parse().unwrap_or_default()))
-            } else {
-                Err(RwError::from(ProtocolError(format!(
-                    "Can not convert bson {:?} to {:?}",
-                    id_field, id_type
-                ))))?
-            }
-        }
-        _ => unreachable!("DebeziumMongoJsonParser::new must ensure _id column datatypes."),
-    };
-    let payload: Datum = match payload_type {
-        DataType::Jsonb => ScalarImpl::Jsonb(bson_value.into()).into(),
-        _ => unreachable!("DebeziumMongoJsonParser::new must ensure payload column datatypes."),
-    };
-
-    Ok((id, payload))
-}
 impl DebeziumMongoJsonParser {
     pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
         let id_column = rw_columns
@@ -158,114 +82,23 @@ impl DebeziumMongoJsonParser {
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
+        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         // Event can be configured with and without the "payload" field present.
         // See https://github.com/risingwavelabs/risingwave/issues/10178
-        let payload = ensure_not_null(event.get("payload").unwrap_or(&event));
-        let op = payload.get(OP).and_then(|v| v.as_str()).ok_or_else(|| {
-            RwError::from(ProtocolError(
-                "op field not found in debezium json".to_owned(),
-            ))
-        })?;
 
-        match op {
-            DEBEZIUM_UPDATE_OP => {
-                let before = payload
-                    .get(BEFORE)
-                    .and_then(ensure_not_null)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "before is missing for updating event.".to_string(),
-                        ))
-                    })?;
+        let payload = if let Some(payload) = event.get_mut("payload") {
+            std::mem::take(payload)
+        } else {
+            event
+        };
 
-                let after = payload
-                    .get(AFTER)
-                    .and_then(ensure_not_null)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "after is missing for updating event".to_string(),
-                        ))
-                    })?;
-                let (before_id, before_payload) = parse_bson_value(
-                    &self.id_column.data_type,
-                    &self.payload_column.data_type,
-                    before,
-                )?;
-                let (after_id, after_payload) = parse_bson_value(
-                    &self.id_column.data_type,
-                    &self.payload_column.data_type,
-                    after,
-                )?;
+        let accessor = JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM);
 
-                writer.update(|column| {
-                    if column.name == self.id_column.name {
-                        Ok((before_id.clone(), after_id.clone()))
-                    } else if column.name == self.payload_column.name {
-                        Ok((before_payload.clone(), after_payload.clone()))
-                    } else {
-                        unreachable!("writer.update must not pass columns more than required")
-                    }
-                })
-            }
-            DEBEZIUM_CREATE_OP | DEBEZIUM_READ_OP => {
-                let after = payload
-                    .get(AFTER)
-                    .and_then(ensure_not_null)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "after is missing for creating event".to_string(),
-                        ))
-                    })?;
+        let row_op = DebeziumChangeEvent::with_value(MongoProjeciton::new(accessor));
 
-                let (after_id, after_payload) = parse_bson_value(
-                    &self.id_column.data_type,
-                    &self.payload_column.data_type,
-                    after,
-                )?;
-
-                writer.insert(|column| {
-                    if column.name == self.id_column.name {
-                        Ok(after_id.clone())
-                    } else if column.name == self.payload_column.name {
-                        Ok(after_payload.clone())
-                    } else {
-                        unreachable!("writer.insert must not pass columns more than required")
-                    }
-                })
-            }
-            DEBEZIUM_DELETE_OP => {
-                let before = payload
-                    .get(BEFORE)
-                    .and_then(ensure_not_null)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "before is missing for delete event".to_string(),
-                        ))
-                    })?;
-                let (before_id, before_payload) = parse_bson_value(
-                    &self.id_column.data_type,
-                    &self.payload_column.data_type,
-                    before,
-                )?;
-
-                writer.delete(|column| {
-                    if column.name == self.id_column.name {
-                        Ok(before_id.clone())
-                    } else if column.name == self.payload_column.name {
-                        Ok(before_payload.clone())
-                    } else {
-                        unreachable!("writer.delete must not pass columns more than required")
-                    }
-                })
-            }
-            _ => Err(RwError::from(ProtocolError(format!(
-                "unknown debezium op: {}",
-                op
-            )))),
-        }
+        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
     }
 }
 
@@ -292,50 +125,33 @@ mod tests {
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::Row;
-    use risingwave_common::types::ToOwnedDatum;
+    use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 
     use super::*;
+    use crate::parser::unified::debezium::extract_bson_id;
     use crate::parser::SourceStreamChunkBuilder;
     #[test]
     fn test_parse_bson_value_id_int() {
         let data = r#"{"_id":{"$numberInt":"2345"}}"#;
         let pld: serde_json::Value = serde_json::from_str(data).unwrap();
-        let (a, b) = parse_bson_value(
-            &DataType::Int32,
-            &DataType::Jsonb,
-            &simd_json::value::borrowed::Value::String(data.into()),
-        )
-        .unwrap();
+        let a = extract_bson_id(&DataType::Int32, &pld).unwrap();
         assert_eq!(a, Some(ScalarImpl::Int32(2345)));
-        assert_eq!(b, Some(ScalarImpl::Jsonb(pld.into())))
     }
     #[test]
     fn test_parse_bson_value_id_long() {
         let data = r#"{"_id":{"$numberLong":"22423434544"}}"#;
         let pld: serde_json::Value = serde_json::from_str(data).unwrap();
 
-        let (a, b) = parse_bson_value(
-            &DataType::Int64,
-            &DataType::Jsonb,
-            &simd_json::value::borrowed::Value::String(data.into()),
-        )
-        .unwrap();
+        let a = extract_bson_id(&DataType::Int64, &pld).unwrap();
         assert_eq!(a, Some(ScalarImpl::Int64(22423434544)));
-        assert_eq!(b, Some(ScalarImpl::Jsonb(pld.into())))
     }
 
     #[test]
     fn test_parse_bson_value_id_oid() {
         let data = r#"{"_id":{"$oid":"5d505646cf6d4fe581014ab2"}}"#;
         let pld: serde_json::Value = serde_json::from_str(data).unwrap();
-        let (a, b) = parse_bson_value(
-            &DataType::Varchar,
-            &DataType::Jsonb,
-            &simd_json::value::borrowed::Value::String(data.into()),
-        )
-        .unwrap();
+        let a = extract_bson_id(&DataType::Varchar, &pld).unwrap();
         assert_eq!(a, Some(ScalarImpl::Utf8("5d505646cf6d4fe581014ab2".into())));
-        assert_eq!(b, Some(ScalarImpl::Jsonb(pld.into())))
     }
     fn get_columns() -> Vec<SourceColumnDesc> {
         let descs = vec![

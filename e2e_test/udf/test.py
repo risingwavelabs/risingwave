@@ -41,10 +41,10 @@ def series(n: int) -> Iterator[int]:
         yield i
 
 
-@udtf(input_types="INT", result_types=["INT", "VARCHAR"])
-def series2(n: int) -> Iterator[Tuple[int, str]]:
-    for i in range(n):
-        yield i, f"#{i}"
+@udtf(input_types="VARCHAR", result_types=["VARCHAR", "INT"])
+def split(string: str) -> Iterator[Tuple[str, int]]:
+    for s in string.split(" "):
+        yield s, len(s)
 
 
 @udf(input_types="VARCHAR", result_type="DECIMAL")
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     server.add_function(gcd)
     server.add_function(gcd3)
     server.add_function(series)
-    server.add_function(series2)
+    server.add_function(split)
     server.add_function(extract_tcp_info)
     server.add_function(hex_to_dec)
     server.add_function(array_access)

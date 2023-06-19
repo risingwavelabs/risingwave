@@ -16,11 +16,11 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, ComputeNodeConfig};
+use crate::{add_jaeger_endpoint, add_meta_node, ComputeNodeConfig};
 
 pub struct ComputeNodeService {
     config: ComputeNodeConfig,
@@ -69,22 +69,11 @@ impl ComputeNodeService {
             .arg("--role")
             .arg(&config.role);
 
-        let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
-        match provide_jaeger.len() {
-            0 => {}
-            1 => {
-                cmd.arg("--enable-jaeger-tracing");
-            }
-            other_size => {
-                return Err(anyhow!(
-                    "{} Jaeger instance found in config, but only 1 is needed",
-                    other_size
-                ))
-            }
-        }
-
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
+
+        let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
+        add_jaeger_endpoint(provide_jaeger, cmd)?;
 
         Ok(())
     }
@@ -115,7 +104,7 @@ impl Task for ComputeNodeService {
         if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
             cmd.env(
-                "_RJEM_MALLOC_CONF",
+                "MALLOC_CONF",
                 "prof:true,lg_prof_interval:40,lg_prof_sample:19,prof_prefix:compute-node",
             );
         }
