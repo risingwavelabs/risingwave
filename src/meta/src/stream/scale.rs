@@ -539,6 +539,17 @@ where
                     );
                 }
             }
+
+            if current_parallel_units
+                .iter()
+                .all(|x| removed_parallel_units.contains(x))
+            {
+                bail!(
+                    "can't remove all parallel units from fragment {}",
+                    fragment_id
+                );
+            }
+
             for added in added_parallel_units {
                 if !parallel_unit_id_to_worker_id.contains_key(added) {
                     bail!("parallel unit {} not available", added);
