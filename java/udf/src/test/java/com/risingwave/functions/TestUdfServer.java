@@ -15,6 +15,7 @@
 package com.risingwave.functions;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -97,6 +98,7 @@ public class TestUdfServer {
             public Long i64;
             public Float f32;
             public Double f64;
+            public BigDecimal decimal;
             public LocalDate date;
             public LocalTime time;
             public LocalDateTime timestamp;
@@ -107,6 +109,7 @@ public class TestUdfServer {
         }
 
         public Row eval(Boolean bool, Short i16, Integer i32, Long i64, Float f32, Double f64,
+                BigDecimal decimal,
                 LocalDate date, LocalTime time, LocalDateTime timestamp, PeriodDuration interval,
                 String str, byte[] bytes, @DataTypeHint("JSONB") String jsonb) {
             var row = new Row();
@@ -116,6 +119,7 @@ public class TestUdfServer {
             row.i64 = i64;
             row.f32 = f32;
             row.f64 = f64;
+            row.decimal = decimal;
             row.date = date;
             row.time = time;
             row.timestamp = timestamp;
@@ -159,50 +163,55 @@ public class TestUdfServer {
         c5.set(0, 1);
         c5.setValueCount(2);
 
-        var c6 = new DateDayVector("", allocator);
+        var c6 = new DecimalVector("", allocator, 38, 0);
         c6.allocateNew(2);
-        c6.set(0, (int) LocalDate.of(2023, 1, 1).toEpochDay());
+        c6.set(0, BigDecimal.valueOf(10).pow(37));
         c6.setValueCount(2);
 
-        var c7 = new TimeMicroVector("", allocator);
+        var c7 = new DateDayVector("", allocator);
         c7.allocateNew(2);
-        c7.set(0, LocalTime.of(1, 2, 3).toNanoOfDay() / 1000);
+        c7.set(0, (int) LocalDate.of(2023, 1, 1).toEpochDay());
         c7.setValueCount(2);
 
-        var c8 = new TimeStampMicroVector("", allocator);
+        var c8 = new TimeMicroVector("", allocator);
         c8.allocateNew(2);
-        var ts = LocalDateTime.of(2023, 1, 1, 1, 2, 3);
-        c8.set(0, ts.toLocalDate().toEpochDay() * 24 * 3600 * 1000000 + ts.toLocalTime().toNanoOfDay() / 1000);
+        c8.set(0, LocalTime.of(1, 2, 3).toNanoOfDay() / 1000);
         c8.setValueCount(2);
 
-        var c9 = new IntervalMonthDayNanoVector("", FieldType.nullable(MinorType.INTERVALMONTHDAYNANO.getType()),
-                allocator);
+        var c9 = new TimeStampMicroVector("", allocator);
         c9.allocateNew(2);
-        c9.set(0, 1, 2, 3);
+        var ts = LocalDateTime.of(2023, 1, 1, 1, 2, 3);
+        c9.set(0, ts.toLocalDate().toEpochDay() * 24 * 3600 * 1000000 + ts.toLocalTime().toNanoOfDay() / 1000);
         c9.setValueCount(2);
 
-        var c10 = new VarCharVector("", allocator);
+        var c10 = new IntervalMonthDayNanoVector("", FieldType.nullable(MinorType.INTERVALMONTHDAYNANO.getType()),
+                allocator);
         c10.allocateNew(2);
-        c10.set(0, "string".getBytes());
+        c10.set(0, 1, 2, 3);
         c10.setValueCount(2);
 
-        var c11 = new VarBinaryVector("", allocator);
+        var c11 = new VarCharVector("", allocator);
         c11.allocateNew(2);
-        c11.set(0, "bytes".getBytes());
+        c11.set(0, "string".getBytes());
         c11.setValueCount(2);
 
-        var c12 = new LargeVarCharVector("", allocator);
+        var c12 = new VarBinaryVector("", allocator);
         c12.allocateNew(2);
-        c12.set(0, "{ key: 1 }".getBytes());
+        c12.set(0, "bytes".getBytes());
         c12.setValueCount(2);
 
-        var input = VectorSchemaRoot.of(c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12);
+        var c13 = new LargeVarCharVector("", allocator);
+        c13.allocateNew(2);
+        c13.set(0, "{ key: 1 }".getBytes());
+        c13.setValueCount(2);
+
+        var input = VectorSchemaRoot.of(c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13);
 
         try (var stream = client.call("return_all", input)) {
             var output = stream.getRoot();
             assertTrue(stream.next());
             assertEquals(
-                    "{\"bool\":true,\"i16\":1,\"i32\":1,\"i64\":1,\"f32\":1.0,\"f64\":1.0,\"date\":19358,\"time\":3723000000,\"timestamp\":[2023,1,1,1,2,3],\"interval\":{\"period\":\"P1M2D\",\"duration\":3E-9},\"str\":\"string\",\"bytes\":\"Ynl0ZXM=\",\"jsonb\":\"{ key: 1 }\"}\n{}",
+                    "{\"bool\":true,\"i16\":1,\"i32\":1,\"i64\":1,\"f32\":1.0,\"f64\":1.0,\"decimal\":10000000000000000000000000000000000000,\"date\":19358,\"time\":3723000000,\"timestamp\":[2023,1,1,1,2,3],\"interval\":{\"period\":\"P1M2D\",\"duration\":3E-9},\"str\":\"string\",\"bytes\":\"Ynl0ZXM=\",\"jsonb\":\"{ key: 1 }\"}\n{}",
                     output.contentToTSVString().trim());
         }
     }

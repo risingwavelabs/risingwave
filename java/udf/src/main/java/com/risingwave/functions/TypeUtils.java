@@ -56,7 +56,7 @@ class TypeUtils {
         } else if (typeStr.equals("FLOAT8") || typeStr.equals("DOUBLE PRECISION")) {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE));
         } else if (typeStr.startsWith("DECIMAL") || typeStr.startsWith("NUMERIC")) {
-            return Field.nullable(name, new ArrowType.Decimal(38, 28, 128));
+            return Field.nullable(name, new ArrowType.Decimal(38, 0, 128));
         } else if (typeStr.equals("DATE")) {
             return Field.nullable(name, new ArrowType.Date(DateUnit.DAY));
         } else if (typeStr.equals("TIME") || typeStr.equals("TIME WITHOUT TIME ZONE")) {
@@ -110,7 +110,7 @@ class TypeUtils {
         } else if (param == Double.class || param == double.class) {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE));
         } else if (param == BigDecimal.class) {
-            return Field.nullable(name, new ArrowType.Decimal(28, 0, 128));
+            return Field.nullable(name, new ArrowType.Decimal(38, 0, 128));
         } else if (param == LocalDate.class) {
             return Field.nullable(name, new ArrowType.Date(DateUnit.DAY));
         } else if (param == LocalTime.class) {
