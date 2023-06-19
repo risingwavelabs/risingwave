@@ -32,17 +32,10 @@ jobs:
           while read line; do
               echo "::warning title=Invalid file permissions automatically fixed::$line"
           done
-          tar \
-            --dereference --hard-dereference \
-            --directory "target/doc" \
-            -cvf "$RUNNER_TEMP/artifact.tar" \
-            --exclude=.git \
-            --exclude=.github \
-            .
       - name: Upload artifacts
         uses: actions/upload-pages-artifact@v1
         with:
-          path: ${{ runner.temp }}/artifact.tar
+          path: target/doc
 
   deploy:
     needs: build
