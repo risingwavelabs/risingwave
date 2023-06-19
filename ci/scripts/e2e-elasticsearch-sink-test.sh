@@ -26,7 +26,3 @@ if [ $? -ne 0 ]; then
   echo "The output is not as expected."
   exit 1
 fi
-
-echo "--- Kill cluster"
-cargo make ci-kill
-pkill -f connector-node
