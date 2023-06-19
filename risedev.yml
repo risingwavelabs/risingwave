@@ -1039,6 +1039,9 @@ template:
     # Prometheus used by this Grafana instance
     provide-prometheus: "prometheus*"
 
+    # Jaeger used by this Grafana instance
+    provide-jaeger: "jaeger*"
+
   jaeger:
     # Id of this instance
     id: jaeger

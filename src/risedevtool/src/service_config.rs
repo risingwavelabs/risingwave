@@ -204,7 +204,9 @@ pub struct GrafanaConfig {
     pub address: String,
     pub listen_address: String,
     pub port: u16,
+
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+    pub provide_jaeger: Option<Vec<JaegerConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
