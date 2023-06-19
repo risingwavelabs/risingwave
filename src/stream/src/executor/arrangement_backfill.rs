@@ -121,7 +121,6 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
-        let init_epoch = first_barrier.epoch.prev;
         if let Some(state_table) = self.state_table.as_mut() {
             state_table.init_epoch(first_barrier.epoch);
         }
@@ -146,8 +145,7 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                let snapshot =
-                    Self::snapshot_read(schema.clone(), &upstream_table, init_epoch, None, false);
+                let snapshot = Self::snapshot_read(schema.clone(), &upstream_table, None);
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
             }
@@ -185,7 +183,7 @@ where
         // expects to have been initialized in previous epoch.
 
         // The epoch used to snapshot read upstream mv.
-        let mut snapshot_read_epoch = init_epoch;
+        let mut snapshot_read_epoch;
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
@@ -217,8 +215,8 @@ where
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             'backfill_loop: loop {
                 // Each time we break out of the backfill loop, we need to flush
-                // We can't do it while processing the stream barrier, since the immutable reference to
-                // upstream_table is live. So we have to do it here.
+                // We can't do it while processing the stream barrier, since the immutable reference
+                // to upstream_table is live. So we have to do it here.
                 if let Some(_current_pos) = &current_pos {
                     for chunk in upstream_chunk_buffer.drain(..) {
                         upstream_table.write_chunk(chunk);
@@ -227,14 +225,11 @@ where
 
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
-                let right_snapshot = pin!(Self::snapshot_read(
-                    schema.clone(),
-                    &upstream_table,
-                    snapshot_read_epoch,
-                    current_pos.clone(),
-                    true
-                )
-                .map(Either::Right),);
+                let right_snapshot =
+                    pin!(
+                        Self::snapshot_read(schema.clone(), &upstream_table, current_pos.clone(),)
+                            .map(Either::Right),
+                    );
 
                 // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
                 // comes.
@@ -428,9 +423,7 @@ where
     async fn snapshot_read(
         schema: Arc<Schema>,
         upstream_table: &StateTable<S>,
-        _epoch: u64,
         current_pos: Option<OwnedRow>,
-        _ordered: bool,
     ) {
         // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
         // scan. Otherwise, use Excluded.
