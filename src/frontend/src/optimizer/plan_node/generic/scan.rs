@@ -17,6 +17,7 @@ use std::rc::Rc;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -263,6 +264,28 @@ impl Scan {
             for_system_time_as_of_proctime,
             ctx,
         }
+    }
+
+    pub(crate) fn columns_pretty<'a>(&self, verbose: bool) -> Pretty<'a> {
+        Pretty::Array(
+            match verbose {
+                true => self.column_names_with_table_prefix(),
+                false => self.column_names(),
+            }
+            .into_iter()
+            .map(Pretty::from)
+            .collect(),
+        )
+    }
+
+    pub(crate) fn fields_pretty_schema(&self) -> Schema {
+        let fields = self
+            .table_desc
+            .columns
+            .iter()
+            .map(|col| Field::from_with_table_name_prefix(col, &self.table_name))
+            .collect();
+        Schema { fields }
     }
 }
 

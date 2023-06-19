@@ -145,7 +145,7 @@ mod test {
 
     fn expect_actual_eq(expect: BoundStatement, actual: BoundStatement) {
         // Use debug format to compare. May modify in future.
-        assert!(format!("{:?}", expect) == format!("{:?}", actual));
+        assert_eq!(format!("{:?}", expect), format!("{:?}", actual));
     }
 
     #[tokio::test]

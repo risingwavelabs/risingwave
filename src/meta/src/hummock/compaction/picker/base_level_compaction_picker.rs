@@ -108,6 +108,7 @@ impl LevelCompactionPicker {
         let l0_select_tables_vec = non_overlap_sub_level_picker
             .pick_l0_multi_non_overlap_level(&l0.sub_levels, &level_handlers[0]);
         if l0_select_tables_vec.is_empty() {
+            stats.skip_by_pending_files += 1;
             return None;
         }
 

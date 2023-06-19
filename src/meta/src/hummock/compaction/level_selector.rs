@@ -491,6 +491,7 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
             .state
             .entry(group.group_id)
             .or_insert_with(SpaceReclaimPickerState::default);
+
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
         compaction_input.add_pending_task(task_id, level_handlers);
 
@@ -946,7 +947,6 @@ pub mod tests {
         assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 0);
         assert_eq!(compaction.input.target_level, 2);
-        assert_eq!(compaction.target_file_size, config.target_file_size_base);
 
         levels_handlers[0].remove_task(1);
         levels_handlers[2].remove_task(1);

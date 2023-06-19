@@ -555,6 +555,21 @@ def section_object_storage(outer_panels):
                         )
                     ],
                 ),
+                panels.timeseries_ops(
+                    "Operation Retry Rate",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(irate({metric('aws_sdk_retry_counts')}[$__rate_interval])) by (instance, job, type)",
+                            "{{type}} - {{job}} @ {{instance}}",
+                        ),
+
+                        panels.target(
+                            f"sum(irate({metric('s3_read_request_retry_count')}[$__rate_interval])) by (instance, job, type)",
+                            "{{type}} - {{job}} @ {{instance}}",
+                        )
+                    ],
+                ),
                 panels.timeseries_dollar(
                     "Estimated S3 Cost (Realtime)",
                     "There are two types of operations: 1. GET, SELECT, and DELETE, they cost 0.0004 USD per 1000 "
@@ -605,7 +620,7 @@ def section_streaming(panels):
             [
                 panels.target(
                     f"rate({metric('stream_source_output_rows_counts')}[$__rate_interval])",
-                    "source={{source_name}} {{source_id}} @ {{instance}}",
+                    "source={{source_name}} actor={{actor_id}} @ {{instance}}",
                 ),
             ],
         ),
@@ -829,12 +844,22 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Actor Memory Usage",
+                    "Actor Memory Usage (TaskLocalAlloc)",
                     "",
                     [
                         panels.target(
                             "rate(actor_memory_usage[$__rate_interval])",
                             "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Executor Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            "stream_memory_usage",
+                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
                         ),
                     ],
                 ),
@@ -1384,7 +1409,7 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
+                panels.timeseries_count(
                     "Batch Mpp Task Number",
                     "",
                     [
@@ -1394,12 +1419,22 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
+                panels.timeseries_memory(
                     "Batch Mem Usage",
                     "All memory usage of batch executors in bytes",
                     [
                         panels.target(
                             f"{metric('batch_total_mem')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Batch Heartbeat Worker Number",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('batch_heartbeat_worker_num')}",
                             "",
                         ),
                     ],
@@ -1772,7 +1807,7 @@ def section_hummock(panels):
             "False-Positive / Positive",
             [
                 panels.target(
-                    f"1 - (((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
+                    f"(((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
                     "read req bloom filter false positive rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
@@ -1924,12 +1959,12 @@ def section_hummock(panels):
                     "data cache - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
-                    "Memory limiter usage - {{job}} @ {{instance}}",
+                    f"sum({metric('uploading_memory_size')}) by (job,instance)",
+                    "uploading memory - {{job}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum({metric('state_store_uploader_uploading_task_size')}) by (job,instance)",
-                    "uploading memory - {{job}} @ {{instance}}",
+                    "uploading task size - {{job}} @ {{instance}}",
                 ),
             ],
         ),
@@ -2218,6 +2253,30 @@ Objects are classified into 3 groups:
                             f"rate({metric('storage_version_checkpoint_latency_sum')}[$__rate_interval]) / rate({metric('storage_version_checkpoint_latency_count')}[$__rate_interval])",
                             "version_checkpoint_latency_avg",
                         ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Write Stop Compaction Groups",
+                    "When certain per compaction group threshold is exceeded (e.g. number of level 0 sub-level in LSMtree), write op to that compaction group is stopped temporarily. Check log for detail reason of write stop.",
+                    [
+                        panels.target(f"{metric('storage_write_stop_compaction_groups')}",
+                                      "compaction_group_{{compaction_group_id}}"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Full GC Trigger Count",
+                    "total number of attempts to trigger full GC",
+                    [
+                        panels.target(f"{metric('storage_full_gc_trigger_count')}",
+                                      "full_gc_trigger_count"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Full GC Last Watermark",
+                    "the object id watermark used in last full GC",
+                    [
+                        panels.target(f"{metric('storage_full_gc_last_object_id_watermark')}",
+                                      "full_gc_last_object_id_watermark"),
                     ],
                 ),
             ],

@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
 use std::mem::replace;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use futures::{pin_mut, Stream, TryStreamExt};
+use futures::stream::{FuturesUnordered, StreamFuture};
+use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
@@ -376,7 +375,7 @@ struct LogStoreRowOpStream<S: StateStoreReadIterStream> {
     serde: LogStoreRowSerde,
 
     /// Streams that have not reached a barrier
-    row_streams: VecDeque<Pin<Box<S>>>,
+    row_streams: FuturesUnordered<StreamFuture<Pin<Box<S>>>>,
 
     /// Streams that have reached a barrier
     barrier_streams: Vec<Pin<Box<S>>>,
@@ -390,7 +389,10 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
         Self {
             serde,
             barrier_streams: Vec::with_capacity(streams.len()),
-            row_streams: VecDeque::from(streams.into_iter().map(|s| Box::pin(s)).collect_vec()),
+            row_streams: streams
+                .into_iter()
+                .map(|s| Box::pin(s).into_future())
+                .collect(),
             stream_state: StreamState::Uninitialized,
         }
     }
@@ -454,7 +456,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
         let this = self;
         pin_mut!(this);
 
-        while let Some((epoch, row_op)) = this.try_next().await? {
+        while let Some((epoch, row_op)) = this.next_op().await? {
             match row_op {
                 LogStoreRowOp::Row { op, row } => {
                     ops.push(op);
@@ -490,110 +492,81 @@ pub(crate) fn new_log_store_item_stream<S: StateStoreReadIterStream>(
     LogStoreRowOpStream::new(streams, serde).into_log_store_item_stream(chunk_size)
 }
 
-impl<S: StateStoreReadIterStream> Stream for LogStoreRowOpStream<S> {
-    type Item = LogStoreResult<(u64, LogStoreRowOp)>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut try_poll = move || -> LogStoreResult<Poll<Option<(u64, LogStoreRowOp)>>> {
-            assert!(!self.row_streams.is_empty());
-            let data_stream_count = self.row_streams.len();
-            for _ in 0..data_stream_count {
-                match self
-                    .row_streams
-                    .front_mut()
-                    .expect("should not be none")
-                    .as_mut()
-                    .poll_next(cx)
-                {
-                    Poll::Ready(opt) => {
-                        match opt {
-                            Some(result) => {
-                                let (_key, value) = result?;
-                                let (decoded_epoch, op) = self.serde.deserialize(value)?;
-                                self.check_epoch(decoded_epoch)?;
-                                match op {
-                                    LogStoreRowOp::Row { op, row } => {
-                                        match &self.stream_state {
-                                            StreamState::Uninitialized
-                                            | StreamState::BarrierEmitted { .. } => {
-                                                self.stream_state = StreamState::AllConsumingRow {
-                                                    curr_epoch: decoded_epoch,
-                                                }
-                                            }
-                                            _ => {}
-                                        };
-                                        return Ok(Poll::Ready(Some((
-                                            decoded_epoch,
-                                            LogStoreRowOp::Row { op, row },
-                                        ))));
-                                    }
-                                    LogStoreRowOp::Barrier { is_checkpoint } => {
-                                        self.check_is_checkpoint(is_checkpoint)?;
-                                        // Put the current stream to the barrier streams
-                                        let stream =
-                                            self.row_streams.pop_front().expect("should be some");
-                                        self.barrier_streams.push(stream);
-
-                                        if self.row_streams.is_empty() {
-                                            self.stream_state = StreamState::BarrierEmitted {
-                                                prev_epoch: decoded_epoch,
-                                            };
-                                            while let Some(stream) = self.barrier_streams.pop() {
-                                                self.row_streams.push_front(stream);
-                                            }
-                                            return Ok(Poll::Ready(Some((
-                                                decoded_epoch,
-                                                LogStoreRowOp::Barrier { is_checkpoint },
-                                            ))));
-                                        } else {
-                                            self.stream_state = StreamState::BarrierAligning {
-                                                curr_epoch: decoded_epoch,
-                                                is_checkpoint,
-                                            };
-                                            continue;
-                                        }
-                                    }
-                                }
-                            }
-                            None => {
-                                // End of stream
-                                match &self.stream_state {
-                                    StreamState::BarrierEmitted { .. } => {},
-                                    s => return Err(LogStoreError::Internal(
-                                        anyhow!(
-                                        "when any of the stream reaches the end, it should be right after emitting an barrier. Current state: {:?}",
-                                        s)
-                                    )
-                                    ),
-                                }
-                                assert!(self.barrier_streams.is_empty(), "should not have any pending barrier received stream after barrier emit");
-                                while let Some(mut stream) = self.row_streams.pop_front() {
-                                    match stream.as_mut().poll_next(cx) {
-                                        Poll::Ready(None) => {}
-                                        poll_result => {
-                                            return Err(LogStoreError::Internal(
-                                                anyhow!("when any of the stream reaches the end, other stream should also reaches the end, but poll result: {:?}", poll_result))
-                                            );
-                                        }
-                                    }
-                                }
-                                return Ok(Poll::Ready(None));
+impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
+    async fn next_op(&mut self) -> LogStoreResult<Option<(u64, LogStoreRowOp)>> {
+        assert!(!self.row_streams.is_empty());
+        while let (Some(result), stream) = self
+            .row_streams
+            .next()
+            .await
+            .expect("row stream should not be empty when polled")
+        {
+            let (_key, value): (_, Bytes) = result?;
+            let (decoded_epoch, op) = self.serde.deserialize(value)?;
+            self.check_epoch(decoded_epoch)?;
+            match op {
+                LogStoreRowOp::Row { op, row } => {
+                    match &self.stream_state {
+                        StreamState::Uninitialized | StreamState::BarrierEmitted { .. } => {
+                            self.stream_state = StreamState::AllConsumingRow {
+                                curr_epoch: decoded_epoch,
                             }
                         }
-                    }
-                    Poll::Pending => {
-                        // Stream pending. Put it to the back
-                        let stream = self.row_streams.pop_front().expect("should be some");
-                        self.row_streams.push_back(stream);
+                        _ => {}
+                    };
+                    self.row_streams.push(stream.into_future());
+                    return Ok(Some((decoded_epoch, LogStoreRowOp::Row { op, row })));
+                }
+                LogStoreRowOp::Barrier { is_checkpoint } => {
+                    self.check_is_checkpoint(is_checkpoint)?;
+                    // Put the current stream to the barrier streams
+                    self.barrier_streams.push(stream);
+
+                    if self.row_streams.is_empty() {
+                        self.stream_state = StreamState::BarrierEmitted {
+                            prev_epoch: decoded_epoch,
+                        };
+                        while let Some(stream) = self.barrier_streams.pop() {
+                            self.row_streams.push(stream.into_future());
+                        }
+                        return Ok(Some((
+                            decoded_epoch,
+                            LogStoreRowOp::Barrier { is_checkpoint },
+                        )));
+                    } else {
+                        self.stream_state = StreamState::BarrierAligning {
+                            curr_epoch: decoded_epoch,
+                            is_checkpoint,
+                        };
+                        continue;
                     }
                 }
             }
-            Ok(Poll::Pending)
-        };
-        match try_poll() {
-            Ok(result) => result.map(|opt| opt.map(Ok)),
-            Err(e) => Poll::Ready(Some(Err(e))),
         }
+        // End of stream
+        match &self.stream_state {
+            StreamState::BarrierEmitted { .. } | StreamState::Uninitialized => {},
+            s => return Err(LogStoreError::Internal(
+                anyhow!(
+                    "when any of the stream reaches the end, it should be right after emitting an barrier. Current state: {:?}",
+                    s)
+                )
+            ),
+        }
+        assert!(
+            self.barrier_streams.is_empty(),
+            "should not have any pending barrier received stream after barrier emit"
+        );
+        if cfg!(debug_assertion) {
+            while let Some((opt, _stream)) = self.row_streams.next().await {
+                if let Some(result) = opt {
+                    return Err(LogStoreError::Internal(
+                        anyhow!("when any of the stream reaches the end, other stream should also reaches the end, but poll result: {:?}", result))
+                    );
+                }
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -602,6 +575,7 @@ mod tests {
     use std::future::poll_fn;
     use std::task::Poll;
 
+    use futures::stream::empty;
     use futures::{pin_mut, stream, StreamExt, TryStreamExt};
     use itertools::Itertools;
     use rand::prelude::SliceRandom;
@@ -930,10 +904,6 @@ mod tests {
         let mut index = (0..MERGE_SIZE).collect_vec();
         index.shuffle(&mut thread_rng());
 
-        assert!(poll_fn(|cx| Poll::Ready(stream.poll_next_unpin(cx)))
-            .await
-            .is_pending());
-
         for i in index {
             tx1[i].take().unwrap().send(()).unwrap();
             for j in 0..ops[i].len() {
@@ -945,7 +915,7 @@ mod tests {
                             row: rows[i][j].clone(),
                         }
                     ),
-                    stream.next().await.unwrap().unwrap()
+                    stream.next_op().await.unwrap().unwrap()
                 );
             }
         }
@@ -957,7 +927,7 @@ mod tests {
                     is_checkpoint: false
                 }
             ),
-            stream.next().await.unwrap().unwrap()
+            stream.next_op().await.unwrap().unwrap()
         );
 
         let mut index = (0..MERGE_SIZE).collect_vec();
@@ -974,7 +944,7 @@ mod tests {
                             row: rows[i][j].clone(),
                         }
                     ),
-                    stream.next().await.unwrap().unwrap()
+                    stream.next_op().await.unwrap().unwrap()
                 );
             }
         }
@@ -986,10 +956,10 @@ mod tests {
                     is_checkpoint: true,
                 }
             ),
-            stream.next().await.unwrap().unwrap()
+            stream.next_op().await.unwrap().unwrap()
         );
 
-        assert!(stream.next().await.is_none());
+        assert!(stream.next_op().await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -1089,6 +1059,21 @@ mod tests {
                 assert!(is_checkpoint);
             }
         }
+
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_empty_stream() {
+        let table = gen_test_table();
+
+        let serde = LogStoreRowSerde::new(&table, None);
+
+        const CHUNK_SIZE: usize = 3;
+
+        let stream = new_log_store_item_stream(vec![empty(), empty()], serde, CHUNK_SIZE);
+
+        pin_mut!(stream);
 
         assert!(stream.next().await.is_none());
     }

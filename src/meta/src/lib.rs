@@ -37,6 +37,7 @@
 
 pub mod backup_restore;
 mod barrier;
+pub(crate) mod batch;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
 mod error;
@@ -159,6 +160,11 @@ pub struct OverrideConfigOpts {
     #[override_opts(path = system.data_directory, optional_in_config)]
     data_directory: Option<String>,
 
+    /// Whether config object storage bucket lifecycle to purge stale data.
+    #[clap(long, env = "RW_DO_NOT_CONFIG_BUCKET_LIFECYCLE")]
+    #[override_opts(path = meta.do_not_config_object_storage_lifecycle)]
+    do_not_config_object_storage_lifecycle: Option<bool>,
+
     /// Remote storage url for storing snapshots.
     #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
     #[override_opts(path = system.backup_storage_url, optional_in_config)]
@@ -260,6 +266,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 max_compactor_task_multiplier: config.meta.max_compactor_task_multiplier,
                 split_group_size_limit: config.meta.split_group_size_limit,
                 move_table_size_limit: config.meta.move_table_size_limit,
+                partition_vnode_count: config.meta.partition_vnode_count,
+                do_not_config_object_storage_lifecycle: config
+                    .meta
+                    .do_not_config_object_storage_lifecycle,
             },
             config.system.into_init_system_params(),
         )

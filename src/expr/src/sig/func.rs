@@ -19,10 +19,10 @@ use std::fmt;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_pb::expr::expr_node::PbType;
 
+use super::FuncSigDebug;
 use crate::error::Result;
 use crate::expr::BoxedExpression;
 
@@ -76,14 +76,13 @@ pub struct FuncSign {
 
 impl fmt::Debug for FuncSign {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = format!(
-            "{}({})->{:?}",
-            self.func.as_str_name(),
-            self.inputs_type.iter().map(|t| format!("{t:?}")).join(","),
-            self.ret_type
-        )
-        .to_lowercase();
-        f.write_str(&s)
+        FuncSigDebug {
+            func: self.func.as_str_name(),
+            inputs_type: self.inputs_type,
+            ret_type: self.ret_type,
+            set_returning: false,
+        }
+        .fmt(f)
     }
 }
 
@@ -106,3 +105,96 @@ pub unsafe fn _register(desc: FuncSign) {
 /// vector. The calls are guaranteed to be sequential. The vector will be drained and moved into
 /// `FUNC_SIG_MAP` on the first access of `FUNC_SIG_MAP`.
 static mut FUNC_SIG_MAP_INIT: Vec<FuncSign> = Vec::new();
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use itertools::Itertools;
+
+    use super::*;
+
+    #[test]
+    fn test_func_sig_map() {
+        // convert FUNC_SIG_MAP to a more convenient map for testing
+        let mut new_map: BTreeMap<PbType, BTreeMap<Vec<DataTypeName>, Vec<FuncSign>>> =
+            BTreeMap::new();
+        for ((func, num_args), sigs) in &FUNC_SIG_MAP.0 {
+            for sig in sigs {
+                // validate the FUNC_SIG_MAP is consistent
+                assert_eq!(func, &sig.func);
+                assert_eq!(num_args, &sig.inputs_type.len());
+
+                new_map
+                    .entry(*func)
+                    .or_default()
+                    .entry(sig.inputs_type.to_vec())
+                    .or_default()
+                    .push(sig.clone());
+            }
+        }
+
+        let duplicated: BTreeMap<_, Vec<_>> = new_map
+            .into_iter()
+            .filter_map(|(k, funcs_with_same_name)| {
+                let funcs_with_same_name_type: Vec<_> = funcs_with_same_name
+                    .into_values()
+                    .filter_map(|v| {
+                        if v.len() > 1 {
+                            Some(
+                                format!(
+                                    "{:}({:?}) -> {:?}",
+                                    v[0].func.as_str_name(),
+                                    v[0].inputs_type.iter().format(", "),
+                                    v.iter().map(|sig| sig.ret_type).format("/")
+                                )
+                                .to_ascii_lowercase(),
+                            )
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !funcs_with_same_name_type.is_empty() {
+                    Some((k, funcs_with_same_name_type))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // This snapshot shows the function signatures without a unique match. Frontend has to
+        // handle them specially without relying on FuncSigMap.
+        let expected = expect_test::expect![[r#"
+            {
+                Cast: [
+                    "cast(boolean) -> int32/varchar",
+                    "cast(int16) -> int256/decimal/float64/float32/int64/int32/varchar",
+                    "cast(int32) -> int256/int16/decimal/float64/float32/int64/boolean/varchar",
+                    "cast(int64) -> int256/int32/int16/decimal/float64/float32/varchar",
+                    "cast(float32) -> decimal/int64/int32/int16/float64/varchar",
+                    "cast(float64) -> decimal/float32/int64/int32/int16/varchar",
+                    "cast(decimal) -> float64/float32/int64/int32/int16/varchar",
+                    "cast(date) -> timestamp/varchar",
+                    "cast(varchar) -> date/time/timestamp/jsonb/interval/int256/float32/float64/decimal/int16/int32/int64/varchar/boolean/bytea/list",
+                    "cast(time) -> interval/varchar",
+                    "cast(timestamp) -> date/time/varchar",
+                    "cast(interval) -> time/varchar",
+                    "cast(list) -> varchar/list",
+                    "cast(jsonb) -> boolean/float64/float32/decimal/int64/int32/int16/varchar",
+                    "cast(int256) -> float64/varchar",
+                ],
+                ArrayAccess: [
+                    "array_access(list, int32) -> boolean/int16/int32/int64/int256/float32/float64/decimal/serial/date/time/timestamp/timestamptz/interval/varchar/bytea/jsonb/list/struct",
+                ],
+                ArrayLength: [
+                    "array_length(list) -> int64/int32",
+                ],
+                Cardinality: [
+                    "cardinality(list) -> int64/int32",
+                ],
+            }
+        "#]];
+        expected.assert_debug_eq(&duplicated);
+    }
+}

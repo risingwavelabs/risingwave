@@ -47,6 +47,7 @@ itertools = "0.10"
 itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 memcomparable = { version = "0.2", features = ["decimal"] }
+num-integer = "0.1"
 num-traits = "0.2"
 number_prefix = "0.4.0"
 parking_lot = "0.12"
@@ -89,6 +90,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 toml = "0.7"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+tracing-subscriber = "0.3.16"
 twox-hash = "1"
 url = "2"
 uuid = "1.2.2"
@@ -110,6 +112,7 @@ criterion = "0.4"
 more-asserts = "0.3"
 pretty_assertions = "1"
 rand = "0.8"
+rusty-fork = "0.3"
 tempfile = "3"
 
 [[bench]]

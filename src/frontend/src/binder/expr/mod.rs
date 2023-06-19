@@ -156,7 +156,7 @@ impl Binder {
                 timestamp,
                 time_zone,
             } => self.bind_at_time_zone(*timestamp, time_zone),
-            // special syntaxt for string
+            // special syntax for string
             Expr::Trim {
                 expr,
                 trim_where,

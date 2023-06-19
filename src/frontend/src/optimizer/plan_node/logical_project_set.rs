@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalProject,
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
@@ -61,6 +60,9 @@ impl LogicalProjectSet {
 
     /// `create` will analyze select exprs with table functions and construct a plan.
     ///
+    /// When there is no table functions in the select list, it will return a simple
+    /// `LogicalProject`.
+    ///
     /// When table functions are used as arguments of a table function or a usual function, the
     /// arguments will be put at a lower `ProjectSet` while the call will be put at a higher
     /// `Project` or `ProjectSet`. The plan is like:
@@ -71,6 +73,13 @@ impl LogicalProjectSet {
     ///
     /// Otherwise it will be a simple `ProjectSet`.
     pub fn create(input: PlanRef, select_list: Vec<ExprImpl>) -> PlanRef {
+        if select_list
+            .iter()
+            .all(|e: &ExprImpl| !e.has_table_function())
+        {
+            return LogicalProject::create(input, select_list);
+        }
+
         /// Rewrites a `FunctionCall` or `TableFunction` whose args contain table functions into one
         /// using `InputRef` as args.
         struct Rewriter {
@@ -177,13 +186,6 @@ impl LogicalProjectSet {
     pub fn select_list(&self) -> &Vec<ExprImpl> {
         &self.core.select_list
     }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let _verbose = self.base.ctx.is_explain_verbose();
-        // TODO: add verbose display like Project
-
-        self.core.fmt_with_name(f, name)
-    }
 }
 
 impl PlanTreeNodeUnary for LogicalProjectSet {
@@ -215,15 +217,27 @@ impl PlanTreeNodeUnary for LogicalProjectSet {
 }
 
 impl_plan_tree_node_for_unary! {LogicalProjectSet}
-
-impl fmt::Display for LogicalProjectSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalProjectSet")
-    }
-}
+impl_distill_by_unit!(LogicalProjectSet, core, "LogicalProjectSet");
+// TODO: add verbose display like Project
 
 impl ColPrunable for LogicalProjectSet {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let output_required_cols = required_cols;
+        let required_cols = {
+            let mut required_cols_set = FixedBitSet::from_iter(required_cols.iter().copied());
+            required_cols_set.grow(self.select_list().len() + 1);
+            let mut cols = required_cols.to_vec();
+            // We should not prune table functions, because the final number of result rows is
+            // depended by all table function calls
+            for (i, e) in self.select_list().iter().enumerate() {
+                if e.has_table_function() && !required_cols_set.contains(i + 1) {
+                    cols.push(i + 1);
+                    required_cols_set.set(i + 1, true);
+                }
+            }
+            cols
+        };
+
         let input_col_num = self.input().schema().len();
 
         let input_required_cols = collect_input_refs(
@@ -248,19 +262,19 @@ impl ColPrunable for LogicalProjectSet {
             .collect();
 
         // Reconstruct the LogicalProjectSet
-        let new_node: PlanRef = LogicalProjectSet::new(new_input, select_list).into();
-        if new_node.schema().len() == required_cols.len() {
+        let new_node: PlanRef = LogicalProjectSet::create(new_input, select_list);
+        if new_node.schema().len() == output_required_cols.len() {
             // current schema perfectly fit the required columns
             new_node
         } else {
             // projected_row_id column is not needed so we did a projection to remove it
-            let mut new_output_cols = Vec::from(required_cols);
+            let mut new_output_cols = required_cols.to_vec();
             if !required_cols.contains(&0) {
                 new_output_cols.insert(0, 0);
             }
             let mapping =
                 &ColIndexMapping::with_remaining_columns(&new_output_cols, self.schema().len());
-            let output_required_cols = required_cols
+            let output_required_cols = output_required_cols
                 .iter()
                 .map(|&idx| mapping.map(idx))
                 .collect_vec();

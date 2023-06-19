@@ -114,6 +114,9 @@ pub struct StreamingMetrics {
     // Materialize
     pub materialize_cache_hit_count: GenericCounterVec<AtomicU64>,
     pub materialize_cache_total_count: GenericCounterVec<AtomicU64>,
+
+    // Memory
+    pub stream_memory_usage: GenericGaugeVec<AtomicI64>,
 }
 
 impl StreamingMetrics {
@@ -129,7 +132,7 @@ impl StreamingMetrics {
         let source_output_row_count = register_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
             "Total number of rows that have been output from source",
-            &["source_id", "source_name"],
+            &["source_id", "source_name", "actor_id"],
             registry
         )
         .unwrap();
@@ -622,6 +625,15 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
+
+        let stream_memory_usage = register_int_gauge_vec_with_registry!(
+            "stream_memory_usage",
+            "Memory usage for stream executors",
+            &["table_id", "actor_id", "desc"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             executor_row_count,
@@ -688,6 +700,7 @@ impl StreamingMetrics {
             user_compute_error_count,
             materialize_cache_hit_count,
             materialize_cache_total_count,
+            stream_memory_usage,
         }
     }
 

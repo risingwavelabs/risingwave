@@ -64,13 +64,10 @@ where
             meta_opts.min_delta_log_num_for_hummock_version_checkpoint,
         ),
     ];
-    // Start vacuum in non-deterministic compaction test
-    if !meta_opts.compaction_deterministic_test {
-        workers.push(start_vacuum_scheduler(
-            vacuum_manager,
-            Duration::from_secs(meta_opts.vacuum_interval_sec),
-        ));
-    }
+    workers.push(start_vacuum_scheduler(
+        vacuum_manager,
+        Duration::from_secs(meta_opts.vacuum_interval_sec),
+    ));
     workers
 }
 
@@ -144,6 +141,11 @@ pub fn start_checkpoint_loop<S: MetaStore>(
                     tracing::info!("Hummock version checkpoint is stopped");
                     return;
                 }
+            }
+            if hummock_manager.is_version_checkpoint_paused()
+                || hummock_manager.env.opts.compaction_deterministic_test
+            {
+                continue;
             }
             if let Err(err) = hummock_manager
                 .create_version_checkpoint(min_delta_log_num)

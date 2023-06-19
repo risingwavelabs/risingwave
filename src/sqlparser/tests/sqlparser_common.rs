@@ -335,7 +335,8 @@ fn parse_select_count_wildcard() {
             over: None,
             distinct: false,
             order_by: vec![],
-            filter: None
+            filter: None,
+            within_group: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -355,7 +356,8 @@ fn parse_select_count_distinct() {
             over: None,
             distinct: true,
             order_by: vec![],
-            filter: None
+            filter: None,
+            within_group: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1073,7 +1075,8 @@ fn parse_select_having() {
                 over: None,
                 distinct: false,
                 order_by: vec![],
-                filter: None
+                filter: None,
+                within_group: None,
             })),
             op: BinaryOperator::Gt,
             right: Box::new(Expr::Value(number("1"))),
@@ -1829,6 +1832,7 @@ fn parse_named_argument_function() {
             distinct: false,
             order_by: vec![],
             filter: None,
+            within_group: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1864,6 +1868,7 @@ fn parse_window_functions() {
             distinct: false,
             order_by: vec![],
             filter: None,
+            within_group: None,
         }),
         expr_from_projection(&select.projection[0])
     );
@@ -1906,6 +1911,7 @@ fn parse_aggregate_with_order_by() {
                 }
             ],
             filter: None,
+            within_group: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1935,6 +1941,7 @@ fn parse_aggregate_with_filter() {
                     Expr::Identifier(Ident::new_unchecked("a"))
                 )))))
             })),
+            within_group: None,
         }),
         expr_from_projection(only(&select.projection)),
     );
@@ -2181,6 +2188,7 @@ fn parse_delimited_identifiers() {
             distinct: false,
             order_by: vec![],
             filter: None,
+            within_group: None,
         }),
         expr_from_projection(&select.projection[1]),
     );
@@ -2908,10 +2916,11 @@ fn parse_exists_subquery() {
 
 #[test]
 fn parse_create_view() {
-    let sql = "CREATE VIEW myschema.myview AS SELECT foo FROM bar";
+    let sql = "CREATE VIEW IF NOT EXISTS myschema.myview AS SELECT foo FROM bar";
     match verified_stmt(sql) {
         Statement::CreateView {
             name,
+            if_not_exists,
             columns,
             query,
             or_replace,
@@ -2920,6 +2929,7 @@ fn parse_create_view() {
             emit_mode,
         } => {
             assert_eq!("myschema.myview", name.to_string());
+            assert!(if_not_exists);
             assert_eq!(Vec::<Ident>::new(), columns);
             assert_eq!("SELECT foo FROM bar", query.to_string());
             assert!(!materialized);
@@ -2959,6 +2969,7 @@ fn parse_create_view_with_columns() {
     let sql = "CREATE VIEW v (has, cols) AS SELECT 1, 2";
     match verified_stmt(sql) {
         Statement::CreateView {
+            if_not_exists,
             name,
             columns,
             or_replace,
@@ -2967,6 +2978,7 @@ fn parse_create_view_with_columns() {
             materialized,
             emit_mode,
         } => {
+            assert!(!if_not_exists);
             assert_eq!("v", name.to_string());
             assert_eq!(
                 columns,
@@ -2986,6 +2998,7 @@ fn parse_create_or_replace_view() {
     let sql = "CREATE OR REPLACE VIEW v AS SELECT 1";
     match verified_stmt(sql) {
         Statement::CreateView {
+            if_not_exists,
             name,
             columns,
             or_replace,
@@ -2994,6 +3007,7 @@ fn parse_create_or_replace_view() {
             materialized,
             emit_mode,
         } => {
+            assert!(!if_not_exists);
             assert_eq!("v", name.to_string());
             assert_eq!(columns, vec![]);
             assert_eq!(with_options, vec![]);
@@ -3015,6 +3029,7 @@ fn parse_create_or_replace_materialized_view() {
     let sql = "CREATE OR REPLACE MATERIALIZED VIEW v AS SELECT 1";
     match verified_stmt(sql) {
         Statement::CreateView {
+            if_not_exists,
             name,
             columns,
             or_replace,
@@ -3023,7 +3038,9 @@ fn parse_create_or_replace_materialized_view() {
             materialized,
             emit_mode,
         } => {
+            assert!(!if_not_exists);
             assert_eq!("v", name.to_string());
+            assert!(!if_not_exists);
             assert_eq!(columns, vec![]);
             assert_eq!(with_options, vec![]);
             assert_eq!("SELECT 1", query.to_string());
@@ -3040,6 +3057,7 @@ fn parse_create_materialized_view() {
     let sql = "CREATE MATERIALIZED VIEW myschema.myview AS SELECT foo FROM bar";
     match verified_stmt(sql) {
         Statement::CreateView {
+            if_not_exists,
             name,
             or_replace,
             columns,
@@ -3048,6 +3066,7 @@ fn parse_create_materialized_view() {
             with_options,
             emit_mode,
         } => {
+            assert!(!if_not_exists);
             assert_eq!("myschema.myview", name.to_string());
             assert_eq!(Vec::<Ident>::new(), columns);
             assert_eq!("SELECT foo FROM bar", query.to_string());
@@ -3065,6 +3084,7 @@ fn parse_create_materialized_view_emit_immediately() {
     let sql = "CREATE MATERIALIZED VIEW myschema.myview EMIT IMMEDIATELY AS SELECT foo FROM bar";
     match verified_stmt(sql) {
         Statement::CreateView {
+            if_not_exists,
             name,
             or_replace,
             columns,
@@ -3073,6 +3093,7 @@ fn parse_create_materialized_view_emit_immediately() {
             with_options,
             emit_mode,
         } => {
+            assert!(!if_not_exists);
             assert_eq!("myschema.myview", name.to_string());
             assert_eq!(Vec::<Ident>::new(), columns);
             assert_eq!("SELECT foo FROM bar", query.to_string());
@@ -3091,6 +3112,7 @@ fn parse_create_materialized_view_emit_on_window_close() {
         "CREATE MATERIALIZED VIEW myschema.myview EMIT ON WINDOW CLOSE AS SELECT foo FROM bar";
     match verified_stmt(sql) {
         Statement::CreateView {
+            if_not_exists,
             name,
             or_replace,
             columns,
@@ -3099,6 +3121,7 @@ fn parse_create_materialized_view_emit_on_window_close() {
             with_options,
             emit_mode,
         } => {
+            assert!(!if_not_exists);
             assert_eq!("myschema.myview", name.to_string());
             assert_eq!(Vec::<Ident>::new(), columns);
             assert_eq!("SELECT foo FROM bar", query.to_string());
