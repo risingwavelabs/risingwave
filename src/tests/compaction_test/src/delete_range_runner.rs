@@ -560,6 +560,7 @@ fn run_compactor_thread(
         output_memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
+        await_tree_reg: None,
     });
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,
