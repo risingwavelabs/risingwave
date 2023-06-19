@@ -401,7 +401,7 @@ async fn test_release_context_resource() {
                 worker_node_parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
-                is_schedulable: true,
+                is_unschedulable: false,
             },
         )
         .await
@@ -488,7 +488,7 @@ async fn test_hummock_manager_basic() {
                 worker_node_parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
-                is_schedulable: true,
+                is_unschedulable: false,
             },
         )
         .await

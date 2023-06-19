@@ -220,7 +220,7 @@ impl MetaClient {
             true,
         );
 
-        if !property.is_schedulable {
+        if property.is_unschedulable {
             tracing::warn!("worker {:?} registered as unschedulable", addr.clone());
         }
         let init_result: Result<_> = tokio_retry::Retry::spawn(retry_strategy, || async {
@@ -577,11 +577,11 @@ impl MetaClient {
     pub async fn update_schedulability(
         &self,
         host: HostAddress,
-        set_is_schedulable: bool,
+        set_is_unschedulable: bool,
     ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
         let request = UpdateWorkerNodeSchedulabilityRequest {
             host: Some(host),
-            set_is_schedulable,
+            set_is_unschedulable,
         };
         let resp = self
             .inner

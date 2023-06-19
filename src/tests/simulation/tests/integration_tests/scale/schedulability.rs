@@ -48,9 +48,9 @@ fn pu_ids_on_unschedulable_nodes(all_workers: &Vec<WorkerNode>) -> HashSet<u32> 
     let unschedulable_nodes_ids = all_workers
         .iter()
         .filter(|w| {
-            !w.get_property()
+            w.get_property()
                 .expect("expected worker to have property")
-                .is_schedulable
+                .is_unschedulable
         })
         .map(|n| n.id)
         .collect_vec();
@@ -255,9 +255,9 @@ async fn mark_as_unschedulable_is_idempotent(
         let new_ids: HashSet<u32> = workers
             .iter()
             .filter(|w| {
-                !w.get_property()
+                w.get_property()
                     .expect("expected node to have property")
-                    .is_schedulable
+                    .is_unschedulable
             })
             .map(|w| w.id)
             .collect();
@@ -436,6 +436,9 @@ macro_rules! test {
         }
     };
 }
+
+// TODO: Write test that checks if we register a node after crash, it cannot overwrite its own
+// schedulablility proptery
 
 // q0, q1, q2: too trivial
 test!(q3);

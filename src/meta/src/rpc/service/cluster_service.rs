@@ -77,7 +77,7 @@ where
             Some(ha) => ha,
         };
         self.cluster_manager
-            .update_schedulability(host_address, inner.set_is_schedulable)
+            .update_schedulability(host_address, inner.set_is_unschedulable)
             .await?;
         Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
             status: None,

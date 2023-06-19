@@ -73,7 +73,7 @@ pub async fn compactor_serve(
 
     // Register to the cluster.
     let p = Property {
-        is_schedulable: true,
+        is_unschedulable: false,
         ..Default::default()
     };
 

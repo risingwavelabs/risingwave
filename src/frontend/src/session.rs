@@ -191,7 +191,7 @@ impl FrontendEnv {
 
         // Register in meta by calling `AddWorkerNode` RPC.
         let p = Property {
-            is_schedulable: true,
+            is_unschedulable: false,
             ..Default::default()
         };
 

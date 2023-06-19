@@ -725,7 +725,7 @@ mod tests {
                         worker_node_parallelism: fake_parallelism,
                         is_streaming: true,
                         is_serving: true,
-                        is_schedulable: true,
+                        is_unschedulable: false,
                     },
                 )
                 .await?;

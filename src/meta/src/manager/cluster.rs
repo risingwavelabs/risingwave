@@ -115,17 +115,20 @@ where
                     worker.worker_node.property,
                     property
                 );
+                // TODO: we cannot update schedulability proptery here
                 worker.worker_node.property = property;
                 worker.insert(self.env.meta_store()).await?;
             }
             return Ok(worker.to_protobuf());
         }
+
         // Generate worker id.
         let worker_id = self
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::Worker }>()
             .await? as WorkerId;
+
         // Generate parallel units.
         let parallel_units = if r#type == WorkerType::ComputeNode {
             self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
@@ -184,7 +187,7 @@ where
     pub async fn update_schedulability(
         &self,
         host_address: HostAddress,
-        is_schedulable: bool,
+        is_unschedulable: bool,
     ) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
         let worker = core
@@ -202,14 +205,14 @@ where
             Err(_) => {
                 tracing::warn!("worker did not have property");
                 Property {
-                    is_schedulable: true,
+                    is_unschedulable: false,
                     is_serving: true,
                     is_streaming: true,
                 }
             }
         };
         let new_prop = Property {
-            is_schedulable,
+            is_unschedulable,
             is_serving: old_prop.is_serving,
             is_streaming: old_prop.is_streaming,
         };
@@ -399,7 +402,7 @@ where
             Some(Property {
                 is_streaming: worker_property.is_streaming,
                 is_serving: worker_property.is_serving,
-                is_schedulable: worker_property.is_schedulable,
+                is_unschedulable: worker_property.is_unschedulable,
             })
         } else {
             None
@@ -534,7 +537,7 @@ impl ClusterManagerCore {
                 if list_unschedulable {
                     true
                 } else {
-                    w.property.as_ref().map_or(true, |p| p.is_schedulable)
+                    !w.property.as_ref().map_or(false, |p| p.is_unschedulable)
                 }
             })
             .collect_vec()
@@ -649,7 +652,7 @@ mod tests {
                         worker_node_parallelism: fake_parallelism as _,
                         is_streaming: true,
                         is_serving: true,
-                        is_schedulable: true,
+                        is_unschedulable: false,
                     },
                 )
                 .await
@@ -720,7 +723,7 @@ mod tests {
                     worker_node_parallelism: fake_parallelism as _,
                     is_streaming: true,
                     is_serving: true,
-                    is_schedulable: true,
+                    is_unschedulable: false,
                 },
             )
             .await

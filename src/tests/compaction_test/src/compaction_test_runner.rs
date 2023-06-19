@@ -237,7 +237,7 @@ async fn init_metadata_for_replay(
     let meta_client: MetaClient;
 
     let p = Property {
-        is_schedulable: true,
+        is_unschedulable: false,
         ..Default::default()
     };
     tokio::select! {
@@ -256,7 +256,7 @@ async fn init_metadata_for_replay(
     let tables = meta_client.risectl_list_state_tables().await?;
 
     let p = Property {
-        is_schedulable: true,
+        is_unschedulable: false,
         ..Default::default()
     };
     let (new_meta_client, _) = MetaClient::register_new(
@@ -293,7 +293,7 @@ async fn pull_version_deltas(
     // We reuse the RiseCtl worker type here
 
     let p = Property {
-        is_schedulable: true,
+        is_unschedulable: false,
         ..Default::default()
     };
     let (meta_client, _) = MetaClient::register_new(
@@ -347,7 +347,7 @@ async fn start_replay(
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
     let p = Property {
-        is_schedulable: true,
+        is_unschedulable: false,
         ..Default::default()
     };
     let (meta_client, system_params) = MetaClient::register_new(

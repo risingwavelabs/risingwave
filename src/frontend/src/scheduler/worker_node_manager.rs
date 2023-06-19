@@ -389,7 +389,7 @@ mod tests {
                 state: worker_node::State::Running as i32,
                 parallel_units: vec![],
                 property: Some(Property {
-                    is_schedulable: true,
+                    is_unschedulable: false,
                     is_serving: true,
                     is_streaming: true,
                 }),
@@ -401,7 +401,7 @@ mod tests {
                 state: worker_node::State::Running as i32,
                 parallel_units: vec![],
                 property: Some(Property {
-                    is_schedulable: true,
+                    is_unschedulable: false,
                     is_serving: true,
                     is_streaming: false,
                 }),

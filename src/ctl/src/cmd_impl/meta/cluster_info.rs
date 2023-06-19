@@ -35,11 +35,11 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
 pub async fn update_schedulability(
     context: &CtlContext,
     addr: HostAddress,
-    is_schedulable: bool,
+    is_unschedulable: bool,
 ) -> anyhow::Result<UpdateWorkerNodeSchedulabilityResponse> {
     let meta_client = context.meta_client().await?;
     let response = meta_client
-        .update_schedulability(addr, is_schedulable)
+        .update_schedulability(addr, is_unschedulable)
         .await?;
     Ok(response)
 }
