@@ -7,7 +7,7 @@ on:
 
 jobs:
   release_pull_request:
-    if: "contains(github.event.pull_request.labels.*.name, 'release-v1.0') && github.event.pull_request.merged == true"
+    if: "contains(github.event.pull_request.labels.*.name, 'need-cherry-pick-v0.19') && github.event.pull_request.merged == true"
     runs-on: ubuntu-latest
     name: release_pull_request
     steps:
