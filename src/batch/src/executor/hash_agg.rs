@@ -26,11 +26,13 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::agg::{build as build_agg, AggCall, BoxedAggState};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
+use tokio::sync::watch::Receiver;
 
+use super::check_shutdown;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::{BatchTaskContext, TaskId};
+use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
 
 type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher, A>;
 
@@ -48,6 +50,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
             self.identity,
             self.chunk_size,
             self.mem_context,
+            self.shutdown_rx,
         ))
     }
 
@@ -66,6 +69,7 @@ pub struct HashAggExecutorBuilder {
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
 }
 
 impl HashAggExecutorBuilder {
@@ -76,6 +80,7 @@ impl HashAggExecutorBuilder {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
+        shutdown_rx: Option<Receiver<ShutdownMsg>>,
     ) -> Result<BoxedExecutor> {
         let agg_init_states: Vec<_> = hash_agg_node
             .get_agg_calls()
@@ -113,6 +118,7 @@ impl HashAggExecutorBuilder {
             identity,
             chunk_size,
             mem_context,
+            shutdown_rx,
         };
 
         Ok(builder.dispatch())
@@ -141,6 +147,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             identity.clone(),
             source.context.get_config().developer.chunk_size,
             source.context.create_executor_mem_context(identity),
+            Some(source.shutdown_rx.clone()),
         )
     }
 }
@@ -159,6 +166,7 @@ pub struct HashAggExecutor<K> {
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
     _phantom: PhantomData<K>,
 }
 
@@ -172,6 +180,7 @@ impl<K> HashAggExecutor<K> {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
+        shutdown_rx: Option<Receiver<ShutdownMsg>>,
     ) -> Self {
         HashAggExecutor {
             agg_init_states,
@@ -182,6 +191,7 @@ impl<K> HashAggExecutor<K> {
             identity,
             chunk_size,
             mem_context,
+            shutdown_rx,
             _phantom: PhantomData,
         }
     }
@@ -255,6 +265,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let mut has_next = false;
             let mut array_len = 0;
             for (key, states) in result.by_ref().take(cardinality) {
+                check_shutdown(&self.shutdown_rx)?;
                 has_next = true;
                 array_len += 1;
                 key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
@@ -286,6 +297,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
+    use futures_async_stream::for_await;
     use prometheus::IntGauge;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
@@ -357,6 +369,7 @@ mod tests {
                 "HashAggExecutor".to_string(),
                 CHUNK_SIZE,
                 mem_context.clone(),
+                None,
             )
             .unwrap();
 
@@ -427,6 +440,7 @@ mod tests {
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
+            None,
         )
         .unwrap();
 
@@ -495,5 +509,60 @@ mod tests {
         }
 
         assert!(!dropped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn test_shutdown() {
+        let src_exec = MockExecutor::with_chunk(
+            DataChunk::from_pretty(
+                "i i i
+                 0 1 1",
+            ),
+            Schema::new(vec![Field::unnamed(DataType::Int32); 3]),
+        );
+
+        let agg_call = AggCall {
+            r#type: Type::Sum as i32,
+            args: vec![InputRef {
+                index: 2,
+                r#type: Some(PbDataType {
+                    type_name: TypeName::Int32 as i32,
+                    ..Default::default()
+                }),
+            }],
+            return_type: Some(PbDataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            distinct: false,
+            order_by: vec![],
+            filter: None,
+            direct_args: vec![],
+        };
+
+        let agg_prost = HashAggNode {
+            group_key: vec![0, 1],
+            agg_calls: vec![agg_call],
+        };
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
+        let actual_exec = HashAggExecutorBuilder::deserialize(
+            &agg_prost,
+            Box::new(src_exec),
+            TaskId::default(),
+            "HashAggExecutor".to_string(),
+            CHUNK_SIZE,
+            MemoryContext::none(),
+            Some(shutdown_rx),
+        )
+        .unwrap();
+
+        shutdown_tx.send(ShutdownMsg::Cancel).unwrap();
+
+        #[for_await]
+        for data in actual_exec.execute() {
+            assert!(data.is_err());
+            break;
+        }
     }
 }

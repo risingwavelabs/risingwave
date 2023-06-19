@@ -25,7 +25,7 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: aws.env
+    env_file: multiple_object_storage.env
     container_name: compactor-0
     healthcheck:
       test:
@@ -60,7 +60,7 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: aws.env
+    env_file: multiple_object_storage.env
     container_name: compute-node-0
     healthcheck:
       test:
@@ -191,7 +191,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+s3-compatible://bucket-name"
+      - "hummock+azblob://<container_name>@<root>"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"
@@ -207,7 +207,7 @@ services:
       - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: aws.env
+    env_file: multiple_object_storage.env
     container_name: meta-node-0
     healthcheck:
       test:

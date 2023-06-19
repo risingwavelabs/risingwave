@@ -39,6 +39,7 @@
                 <include>*:risingwave-source-cdc</include>
 
                 <!-- Sink connectors -->
+                <include>*:risingwave-sink-es</include>
                 <include>*:risingwave-sink-jdbc</include>
                 <include>*:risingwave-sink-iceberg</include>
                 <include>*:risingwave-sink-deltalake</include>
