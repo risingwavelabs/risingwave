@@ -84,6 +84,7 @@ pub trait TableIter: Send {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 }
 
+/// Collects data chunks from stream of rows.
 pub async fn collect_data_chunk<E, S>(
     stream: &mut S,
     schema: &Schema,
