@@ -86,6 +86,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
                     table_option: TableOption {
                         retention_seconds: None,
                     },
+                    is_replicated: false,
                 })
                 .await;
 
