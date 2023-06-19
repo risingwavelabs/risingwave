@@ -257,3 +257,11 @@
   expected_outputs:
   - batch_plan
   - logical_plan
+- name: insert to a table with default proctime()
+  sql: |
+    create table t (a int, b timestamptz default proctime());
+    insert into t values (1);
+  expected_outputs:
+  - batch_plan
+  - logical_plan
+

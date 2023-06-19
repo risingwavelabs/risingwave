@@ -334,3 +334,14 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t, mapping: [0:0], default: [1<-(2:Int32 + 3:Int32)] }
       └─BatchValues { rows: [[1:Int32]] }
+- name: insert to a table with default proctime()
+  sql: |
+    create table t (a int, b timestamptz default proctime());
+    insert into t values (1);
+  logical_plan: |
+    LogicalInsert { table: t, mapping: [0:0], default: [1<-Proctime] }
+    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t, mapping: [0:0], default: [1<-'2021-04-01 00:00:00+00:00':Timestamptz] }
+      └─BatchValues { rows: [[1:Int32]] }

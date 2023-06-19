@@ -44,7 +44,7 @@ select * from t2;
 2 2
 
 statement ok
-create table tt (v1 int, v2 timestamptz default now());
+create table tt (v1 int, v2 timestamptz default proctime());
 
 statement ok
 insert into tt values (1);
