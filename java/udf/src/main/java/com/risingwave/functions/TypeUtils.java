@@ -384,6 +384,9 @@ class TypeUtils {
         } else if (field.getType() instanceof ArrowType.Time && targetClass == LocalTime.class) {
             // object is Long
             return obj -> obj == null ? null : LocalTime.ofNanoOfDay((long) obj * 1000);
+        } else if (field.getType() instanceof ArrowType.Interval && targetClass == PeriodDuration.class) {
+            // object is arrow PeriodDuration
+            return obj -> obj == null ? null : new PeriodDuration((org.apache.arrow.vector.PeriodDuration) obj);
         } else if (field.getType() instanceof ArrowType.List) {
             // object is org.apache.arrow.vector.util.JsonStringArrayList
             var subfield = field.getChildren().get(0);
