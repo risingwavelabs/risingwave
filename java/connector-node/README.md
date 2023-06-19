@@ -30,17 +30,15 @@ cd assembly/target && tar xvf risingwave-connector-1.0.0.tar.gz
 java -classpath "./libs/*" com.risingwave.connector.ConnectorService
 ```
 
-Sometimes, you need to specify the shared library path. For example, when program want to run class related to java-binding, they need to call shared library file. If not, it will throw exception when running. You need:
+Currently, during the Maven build process, all the required shared libraries are built and added to the JAR file. These shared libraries can then be loaded directly from the Java code.
 
-```
-RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
-JAVA_ROOT=$RISINGWAVE_ROOT/java
-CONNECTOR_ROOT=$JAVA_ROOT/connector-node
-# Build shared library file
-cd $RISINGWAVE_ROOT && cargo build -p risingwave_java_binding
-# specify the Djava.library.path, please make sure the shared library you needed exist in /target/debug
-cd ${CONNECTOR_ROOT}/assembly/target && java -classpath "./libs/*" -Djava.library.path=${RISINGWAVE_ROOT}/target/debug com.risingwave.connector.ConnectorService
-```
+Here are some tips to follow:
+
+If you encounter an error stating that the program cannot access the library, it may be due to merging new features or outdated documentation. In such cases, you will need to manually build the corresponding Java shared library file.
+
+After building the shared library file, move it into the `java/connector-node/assembly/target directory`, make sure to specify the shared library path using the `-Djava.library.path=java/connector-node/assembly/target` flag. This tells Java where to find the required shared library files.
+
+By following these steps, you should be able to resolve any issues related to accessing the shared libraries in your Java program.
 
 ## Docker image
 Alternatively, to build and run the Docker image, run the following command from the project's root directory:
