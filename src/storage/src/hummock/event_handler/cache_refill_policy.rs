@@ -232,7 +232,7 @@ async fn preload_l1_data(
         }
 
         if !KeyComparator::encoded_full_key_less_than(&smallest_key, &largest_key) {
-            return Ok(());
+            continue;
         }
         let mut start_index = 0;
         let sstable_meta = sstable.value().as_ref();
