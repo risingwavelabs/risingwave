@@ -247,7 +247,7 @@ where
                         for chunk in upstream_chunk_buffer.drain(..) {
                             upstream_table.write_chunk(chunk);
                         }
-                        upstream_table.commit(barrier.epoch);
+                        upstream_table.commit(barrier.epoch).await?;
                     }
 
                     self.metrics
