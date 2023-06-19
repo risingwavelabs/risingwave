@@ -97,16 +97,18 @@ public class TestUdfServer {
             public long i64;
             public float f32;
             public double f64;
-            public String str;
-            public byte[] bytes;
             public LocalDate date;
             public LocalTime time;
             public LocalDateTime timestamp;
             public PeriodDuration interval;
+            public String str;
+            public byte[] bytes;
+            public @DataTypeHint("JSONB") String jsonb;
         }
 
-        public Row eval(boolean bool, short i16, int i32, long i64, float f32, double f64, String str, byte[] bytes,
-                LocalDate date, LocalTime time, LocalDateTime timestamp, PeriodDuration interval) {
+        public Row eval(boolean bool, short i16, int i32, long i64, float f32, double f64,
+                LocalDate date, LocalTime time, LocalDateTime timestamp, PeriodDuration interval,
+                String str, byte[] bytes, @DataTypeHint("JSONB") String jsonb) {
             var row = new Row();
             row.bool = bool;
             row.i16 = i16;
@@ -114,12 +116,13 @@ public class TestUdfServer {
             row.i64 = i64;
             row.f32 = f32;
             row.f64 = f64;
-            row.str = str;
-            row.bytes = bytes;
             row.date = date;
             row.time = time;
             row.timestamp = timestamp;
             row.interval = interval;
+            row.str = str;
+            row.bytes = bytes;
+            row.jsonb = jsonb;
             return row;
         }
     }
@@ -156,45 +159,50 @@ public class TestUdfServer {
         c5.set(0, 1);
         c5.setValueCount(1);
 
-        var c6 = new VarCharVector("", allocator);
+        var c6 = new DateDayVector("", allocator);
         c6.allocateNew(1);
-        c6.set(0, "string".getBytes());
+        c6.set(0, (int) LocalDate.of(2023, 1, 1).toEpochDay());
         c6.setValueCount(1);
 
-        var c7 = new VarBinaryVector("", allocator);
+        var c7 = new TimeMicroVector("", allocator);
         c7.allocateNew(1);
-        c7.set(0, "bytes".getBytes());
+        c7.set(0, LocalTime.of(1, 2, 3).toNanoOfDay() / 1000);
         c7.setValueCount(1);
 
-        var c8 = new DateDayVector("", allocator);
+        var c8 = new TimeStampMicroVector("", allocator);
         c8.allocateNew(1);
-        c8.set(0, (int) LocalDate.of(2023, 1, 1).toEpochDay());
+        var ts = LocalDateTime.of(2023, 1, 1, 1, 2, 3);
+        c8.set(0, ts.toLocalDate().toEpochDay() * 24 * 3600 * 1000000 + ts.toLocalTime().toNanoOfDay() / 1000);
         c8.setValueCount(1);
 
-        var c9 = new TimeMicroVector("", allocator);
+        var c9 = new IntervalMonthDayNanoVector("", FieldType.nullable(MinorType.INTERVALMONTHDAYNANO.getType()),
+                allocator);
         c9.allocateNew(1);
-        c9.set(0, LocalTime.of(1, 2, 3).toNanoOfDay() / 1000);
+        c9.set(0, 1, 2, 3);
         c9.setValueCount(1);
 
-        var c10 = new TimeStampMicroVector("", allocator);
+        var c10 = new VarCharVector("", allocator);
         c10.allocateNew(1);
-        var ts = LocalDateTime.of(2023, 1, 1, 1, 2, 3);
-        c10.set(0, ts.toLocalDate().toEpochDay() * 24 * 3600 * 1000000 + ts.toLocalTime().toNanoOfDay() / 1000);
+        c10.set(0, "string".getBytes());
         c10.setValueCount(1);
 
-        var c11 = new IntervalMonthDayNanoVector("", FieldType.nullable(MinorType.INTERVALMONTHDAYNANO.getType()),
-                allocator);
+        var c11 = new VarBinaryVector("", allocator);
         c11.allocateNew(1);
-        c11.set(0, 1, 2, 3);
+        c11.set(0, "bytes".getBytes());
         c11.setValueCount(1);
 
-        var input = VectorSchemaRoot.of(c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11);
+        var c12 = new LargeVarCharVector("", allocator);
+        c12.allocateNew(1);
+        c12.set(0, "{ key: 1 }".getBytes());
+        c12.setValueCount(1);
+
+        var input = VectorSchemaRoot.of(c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12);
 
         try (var stream = client.call("return_all", input)) {
             var output = stream.getRoot();
             assertTrue(stream.next());
             assertEquals(
-                    "{\"bool\":true,\"i16\":1,\"i32\":1,\"i64\":1,\"f32\":1.0,\"f64\":1.0,\"str\":\"string\",\"bytes\":\"Ynl0ZXM=\",\"date\":19358,\"time\":3723000000,\"timestamp\":[2023,1,1,1,2,3],\"interval\":{\"period\":\"P1M2D\",\"duration\":3E-9}}",
+                    "{\"bool\":true,\"i16\":1,\"i32\":1,\"i64\":1,\"f32\":1.0,\"f64\":1.0,\"date\":19358,\"time\":3723000000,\"timestamp\":[2023,1,1,1,2,3],\"interval\":{\"period\":\"P1M2D\",\"duration\":3E-9},\"str\":\"string\",\"bytes\":\"Ynl0ZXM=\",\"jsonb\":\"{ key: 1 }\"}",
                     output.contentToTSVString().trim());
         }
     }
