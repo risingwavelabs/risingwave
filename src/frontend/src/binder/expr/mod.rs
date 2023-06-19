@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::{
     TrimWhereField, UnaryOperator,
 };
 
+use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Parameter, SubqueryKind};
 
@@ -87,14 +88,9 @@ impl Binder {
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
             Expr::Identifier(ident) => {
-                if [
-                    "session_user",
-                    "user",
-                    "current_schema",
-                    "current_timestamp",
-                ]
-                .iter()
-                .any(|e| ident.real_value().as_str() == *e)
+                if SYS_FUNCTION_WITHOUT_ARGS
+                    .iter()
+                    .any(|e| ident.real_value().as_str() == *e)
                 {
                     // Rewrite a system variable to a function call, e.g. `SELECT current_schema;`
                     // will be rewritten to `SELECT current_schema();`.
