@@ -546,7 +546,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
         }
         // End of stream
         match &self.stream_state {
-            StreamState::BarrierEmitted { .. } => {},
+            StreamState::BarrierEmitted { .. } | StreamState::Uninitialized => {},
             s => return Err(LogStoreError::Internal(
                 anyhow!(
                     "when any of the stream reaches the end, it should be right after emitting an barrier. Current state: {:?}",
@@ -576,6 +576,7 @@ mod tests {
     use std::future::poll_fn;
     use std::task::Poll;
 
+    use futures::stream::empty;
     use futures::{pin_mut, stream, StreamExt, TryStreamExt};
     use itertools::Itertools;
     use rand::prelude::SliceRandom;
@@ -1059,6 +1060,21 @@ mod tests {
                 assert!(is_checkpoint);
             }
         }
+
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_empty_stream() {
+        let table = gen_test_table();
+
+        let serde = LogStoreRowSerde::new(&table, None);
+
+        const CHUNK_SIZE: usize = 3;
+
+        let stream = new_log_store_item_stream(vec![empty(), empty()], serde, CHUNK_SIZE);
+
+        pin_mut!(stream);
 
         assert!(stream.next().await.is_none());
     }
