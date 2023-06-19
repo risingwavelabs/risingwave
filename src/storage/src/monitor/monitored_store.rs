@@ -23,6 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tokio::time::Instant;
 use tracing::error;
+use tracing_futures::Instrument;
 
 use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
@@ -120,9 +121,9 @@ impl<S> MonitoredStateStore<S> {
             .with_label_values(&[table_id_label.as_str()])
             .start_timer();
 
-        // TODO: attach tracing span
         let value = get_future
             .verbose_instrument_await("store_get")
+            .instrument(tracing::trace_span!("store_get"))
             .await
             .inspect_err(|e| error!("Failed in get: {:?}", e))?;
 
@@ -370,8 +371,7 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
     }
 
     fn into_stream(self) -> impl StateStoreIterItemStream {
-        // TODO: attach tracing span
-        Self::into_stream_inner(self)
+        Self::into_stream_inner(self).instrument(tracing::trace_span!("store_iter"))
     }
 }
 
