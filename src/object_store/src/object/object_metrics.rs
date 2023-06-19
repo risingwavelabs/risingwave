@@ -25,6 +25,7 @@ pub struct ObjectStoreMetrics {
     pub operation_latency: HistogramVec,
     pub operation_size: HistogramVec,
     pub failure_count: GenericCounterVec<AtomicU64>,
+    pub request_retry_count: GenericCounterVec<AtomicU64>,
 }
 
 impl ObjectStoreMetrics {
@@ -81,12 +82,21 @@ impl ObjectStoreMetrics {
         )
         .unwrap();
 
+        let request_retry_count = register_int_counter_vec_with_registry!(
+            "s3_read_request_retry_count",
+            "The number of retry times of object store request",
+            &["type"],
+            registry
+        )
+        .unwrap();
+
         Self {
             write_bytes,
             read_bytes,
             operation_latency,
             operation_size,
             failure_count,
+            request_retry_count,
         }
     }
 

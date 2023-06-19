@@ -25,12 +25,12 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: s3-compatible.env
+    env_file: multiple_object_storage.env
     container_name: compactor-0
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/6660; exit $?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/6660; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -60,12 +60,12 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: s3-compatible.env
+    env_file: multiple_object_storage.env
     container_name: compute-node-0
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5688; exit $?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5688; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -145,7 +145,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/4566; exit $?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/4566; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -168,7 +168,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/3001; exit $?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/3001; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -191,7 +191,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+s3-compatible://bucket-name"
+      - "hummock+gcs://<bucket-name>@<data_path>"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"
@@ -207,12 +207,12 @@ services:
       - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: s3-compatible.env
+    env_file: multiple_object_storage.env
     container_name: meta-node-0
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5690; exit $?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5690; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -238,7 +238,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - sh -c 'printf "GET /-/healthy HTTP/1.0\n\n" | nc localhost 9500; exit $?;'
+        - sh -c 'printf "GET /-/healthy HTTP/1.0\n\n" | nc localhost 9500; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5

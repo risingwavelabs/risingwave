@@ -22,17 +22,6 @@ WITH (
 ROW FORMAT UPSERT_AVRO 
 row schema location confluent schema registry 'http://message_queue:8081'
 
-# but if we let the key as a column, there's no such requirement
-statement ok
-CREATE TABLE upsert_student_key_not_subset_of_value_avro_json (
-	key_struct struct<NOTEXIST INT> PRIMARY KEY
-)
-WITH (
-	connector = 'kafka',
-  properties.bootstrap.server = 'message_queue:29092',
-	topic = 'upsert_student_key_not_subset_of_value_avro_json')
-ROW FORMAT UPSERT_AVRO 
-row schema location confluent schema registry 'http://message_queue:8081'
 
 statement ok
 CREATE TABLE upsert_student_avro_json ()
@@ -46,7 +35,7 @@ row schema location confluent schema registry 'http://message_queue:8081'
 
 statement ok
 CREATE TABLE upsert_avro_json (
-   id TEXT  PRIMARY KEY
+  PRIMARY KEY("ID")
 )
 WITH (
 connector = 'kafka',
@@ -58,7 +47,7 @@ row schema location confluent schema registry 'http://message_queue:8081'
 # Just ignore the kafka key, it works
 statement ok
 CREATE TABLE upsert_avro_json2 (
-    "ID" TEXT PRIMARY KEY
+  PRIMARY KEY("ID")
 )
 WITH (
 	connector = 'kafka',
@@ -68,10 +57,26 @@ ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 statement ok
+CREATE TABLE debezium_non_compact (PRIMARY KEY(order_id)) with (
+    connector = 'kafka',
+    kafka.topic = 'debezium_non_compact_avro_json',
+    kafka.brokers = 'message_queue:29092',
+    kafka.scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_AVRO ROW SCHEMA LOCATION CONFLUENT SCHEMA REGISTRY 'http://message_queue:8081';
+
+statement ok
+CREATE TABLE debezium_compact (PRIMARY KEY(order_id)) with (
+    connector = 'kafka',
+    kafka.topic = 'debezium_compact_avro_json',
+    kafka.brokers = 'message_queue:29092',
+    kafka.scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_AVRO ROW SCHEMA LOCATION CONFLUENT SCHEMA REGISTRY 'http://message_queue:8081';
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 1s
+sleep 5s
 
 
 query II
@@ -82,28 +87,10 @@ FROM
 ORDER BY
  "ID";
 ----
-id1 update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z
-id2 delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-id3 delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-id5 delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
-
-
-
-query II
-SELECT
- *
-FROM
- upsert_student_key_not_subset_of_value_avro_json
-ORDER BY
- "ID";
-----
-(1) 1 Ethan Martinez 18 6.1 180
-(2) 2 Emily Jackson 19 5.4 110
-(3) 3 Noah Thompson 21 6.3 195
-(4) 4 Emma Brown 20 5.3 130
-(5) 5 Michael Williams 22 6.2 190
-(6) 6 Leah Davis 18 5.7 140
-(9) 9 Jacob Anderson 20 5.8 155
+update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z
+delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
+delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
+delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
 
 
 query II
@@ -134,16 +121,20 @@ ORDER BY
 4 Emma Brown 20 5.3 130
 5 Michael Williams 22 6.2 190
 6 Leah Davis 18 5.7 140
-7 Connor Wilson 19 5.9 160
-8 Ava Garcia 21 5.2 115
 9 Jacob Anderson 20 5.8 155
+
+query I
+select count(*) from debezium_non_compact;
+----
+2
+
+query I
+select count(*) from debezium_compact;
+----
+2
 
 statement ok
 DROP TABLE upsert_avro_json;
-
-
-statement ok
-DROP TABLE upsert_student_key_not_subset_of_value_avro_json;
 
 
 statement ok
@@ -151,3 +142,9 @@ DROP TABLE upsert_avro_json2;
 
 statement ok
 DROP TABLE upsert_student_avro_json;
+
+statement ok
+DROP TABLE debezium_non_compact;
+
+statement ok
+DROP TABLE debezium_compact;

@@ -42,6 +42,7 @@ use super::group_top_n::GroupTopNCache;
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
@@ -133,6 +134,13 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             pk_indices, schema, ..
         } = input_info;
 
+        let metrics_info = MetricsInfo::new(
+            ctx.streaming_metrics.clone(),
+            state_table.table_id(),
+            ctx.id,
+            "GroupTopN",
+        );
+
         let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
@@ -147,7 +155,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
-            caches: GroupTopNCache::new(watermark_epoch),
+            caches: GroupTopNCache::new(watermark_epoch, metrics_info),
             cache_key_serde,
             ctx,
         })

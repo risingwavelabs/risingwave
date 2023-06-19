@@ -29,8 +29,8 @@ use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
-    compact_task, CompactionConfig, CompactionGroupInfo, GroupConstruct, GroupDelta, GroupDestroy,
-    GroupMetaChange, GroupTableChange,
+    compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
+    GroupDelta, GroupDestroy, GroupMetaChange, GroupTableChange,
 };
 use tokio::sync::{OnceCell, RwLock};
 
@@ -344,6 +344,15 @@ impl<S: MetaStore> HummockManager<S> {
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
         self.env.meta_store().txn(trx).await?;
+        for group_id in &groups_to_remove {
+            let max_level = versioning
+                .current_version
+                .get_compaction_group_levels(*group_id)
+                .get_levels()
+                .len();
+            remove_compaction_group_in_sst_stat(&self.metrics, *group_id, max_level);
+        }
+
         let sst_split_info = versioning
             .current_version
             .apply_version_delta(&new_version_delta);
@@ -351,9 +360,6 @@ impl<S: MetaStore> HummockManager<S> {
         new_version_delta.commit();
         branched_ssts.commit_memory();
 
-        for group_id in &groups_to_remove {
-            remove_compaction_group_in_sst_stat(&self.metrics, *group_id);
-        }
         self.notify_last_version_delta(versioning);
 
         // Purge may cause write to meta store. If it hurts performance while holding versioning
@@ -529,6 +535,7 @@ impl<S: MetaStore> HummockManager<S> {
                         origin_group_id: parent_group_id,
                         target_group_id: compaction_group_id,
                         new_sst_start_id,
+                        version: CompatibilityVersion::NoTrivialSplit as i32,
                     })),
                 });
                 compaction_group_id
@@ -563,6 +570,7 @@ impl<S: MetaStore> HummockManager<S> {
                                 parent_group_id,
                                 new_sst_start_id,
                                 table_ids: table_ids.to_vec(),
+                                version: CompatibilityVersion::NoTrivialSplit as i32,
                             })),
                         }],
                     },
@@ -609,18 +617,12 @@ impl<S: MetaStore> HummockManager<S> {
         for (object_id, sst_id, _parent_old_sst_id, parent_new_sst_id) in sst_split_info {
             match branched_ssts.get_mut(object_id) {
                 Some(mut entry) => {
-                    if let Some(parent_new_sst_id) = parent_new_sst_id {
-                        entry.insert(parent_group_id, parent_new_sst_id);
-                    } else {
-                        entry.remove(&parent_group_id);
-                    }
+                    entry.insert(parent_group_id, parent_new_sst_id);
                     entry.insert(target_compaction_group_id, sst_id);
                 }
                 None => {
                     let mut groups = HashMap::from_iter([(target_compaction_group_id, sst_id)]);
-                    if let Some(parent_new_sst_id) = parent_new_sst_id {
-                        groups.insert(parent_group_id, parent_new_sst_id);
-                    }
+                    groups.insert(parent_group_id, parent_new_sst_id);
                     branched_ssts.insert(object_id, groups);
                 }
             }
@@ -637,6 +639,12 @@ impl<S: MetaStore> HummockManager<S> {
                 compact_task::TaskType::SpaceReclaim,
             );
         }
+
+        self.metrics
+            .move_state_table_count
+            .with_label_values(&[&parent_group_id.to_string()])
+            .inc();
+
         Ok(target_compaction_group_id)
     }
 

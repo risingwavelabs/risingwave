@@ -21,8 +21,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
-use tracing::Level;
-use tracing_subscriber::filter::{Directive, Targets};
+use risingwave_common::metrics::MetricsLayer;
+use tracing::level_filters::LevelFilter as Level;
+use tracing_subscriber::filter::{Directive, FilterFn, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, EnvFilter};
@@ -75,22 +76,26 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
 // ===========================================================================
 
 pub struct LoggerSettings {
+    /// The name of the service.
+    name: String,
     /// Enable tokio console output.
     enable_tokio_console: bool,
     /// Enable colorful output in console.
     colorful: bool,
+    /// Override default target settings.
     targets: Vec<(String, tracing::metadata::LevelFilter)>,
 }
 
 impl Default for LoggerSettings {
     fn default() -> Self {
-        Self::new()
+        Self::new("risingwave")
     }
 }
 
 impl LoggerSettings {
-    pub fn new() -> Self {
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
+            name: name.into(),
             enable_tokio_console: false,
             colorful: console::colors_enabled_stderr() && console::colors_enabled(),
             targets: vec![],
@@ -138,7 +143,46 @@ pub fn set_panic_hook() {
 ///   `RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info"`
 /// * `RW_QUERY_LOG_PATH`: the path to generate query log. If set, [`ENABLE_QUERY_LOG_FILE`] is
 ///   turned on.
-pub fn init_risingwave_logger(settings: LoggerSettings) {
+pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Registry) {
+    // Default filter for logging to stdout and tracing.
+    let filter = {
+        let filter = filter::Targets::new()
+            .with_target("aws_sdk_ec2", Level::INFO)
+            .with_target("aws_sdk_s3", Level::INFO)
+            .with_target("aws_config", Level::WARN)
+            // Only enable WARN and ERROR for 3rd-party crates
+            .with_target("aws_endpoint", Level::WARN)
+            .with_target("aws_credential_types::cache::lazy_caching", Level::WARN)
+            .with_target("hyper", Level::WARN)
+            .with_target("h2", Level::WARN)
+            .with_target("tower", Level::WARN)
+            .with_target("tonic", Level::WARN)
+            .with_target("isahc", Level::WARN)
+            .with_target("console_subscriber", Level::WARN)
+            .with_target("reqwest", Level::WARN)
+            .with_target("sled", Level::INFO);
+
+        let filter = configure_risingwave_targets_fmt(filter);
+
+        // For all other crates
+        let filter = filter.with_default(if cfg!(debug_assertions) {
+            Level::DEBUG
+        } else {
+            Level::INFO
+        });
+
+        let filter = settings
+            .targets
+            .into_iter()
+            .fold(filter, |filter, (target, level)| {
+                filter.with_target(target, level)
+            });
+
+        move |additional_targets: Vec<(&str, Level)>| {
+            to_env_filter(filter.clone().with_targets(additional_targets))
+        }
+    };
+
     let mut layers = vec![];
 
     // fmt layer (formatting and logging to stdout)
@@ -152,39 +196,16 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             fmt_layer.boxed()
         };
 
-        let filter = filter::Targets::new()
-            .with_target("aws_sdk_ec2", Level::INFO)
-            .with_target("aws_sdk_s3", Level::INFO)
-            .with_target("aws_config", Level::WARN)
-            // Only enable WARN and ERROR for 3rd-party crates
-            .with_target("aws_endpoint", Level::WARN)
-            .with_target("hyper", Level::WARN)
-            .with_target("h2", Level::WARN)
-            .with_target("tower", Level::WARN)
-            .with_target("tonic", Level::WARN)
-            .with_target("isahc", Level::WARN)
-            .with_target("console_subscriber", Level::WARN)
-            .with_target("reqwest", Level::WARN)
-            .with_target("sled", Level::INFO);
-
-        let filter = configure_risingwave_targets_fmt(filter);
-
-        // Enable DEBUG level for all other crates
-        #[cfg(debug_assertions)]
-        let filter = filter.with_default(Level::DEBUG);
-
-        #[cfg(not(debug_assertions))]
-        let filter = filter.with_default(Level::INFO);
-
-        let filter = settings
-            .targets
-            .into_iter()
-            .fold(filter, |filter, (target, level)| {
-                filter.with_target(target, level)
-            });
-
-        layers.push(fmt_layer.with_filter(to_env_filter(filter)).boxed());
+        layers.push(
+            fmt_layer
+                .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
+                .with_filter(filter(vec![
+                    ("rw_tracing", Level::OFF), // filter out tracing-only events
+                ]))
+                .boxed(),
+        );
     };
+
     let default_query_log_path = "./".to_string();
 
     let query_log_path = std::env::var("RW_QUERY_LOG_PATH");
@@ -273,11 +294,77 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 .build()
                 .unwrap()
                 .block_on(async move {
-                    tracing::info!("serving console subscriber");
+                    println!("serving console subscriber");
                     server.serve().await.unwrap();
                 });
         });
     };
+
+    // Tracing layer
+    #[cfg(not(madsim))]
+    if let Ok(endpoint) = std::env::var("RW_TRACING_ENDPOINT") {
+        println!("tracing enabled, exported to `{endpoint}`");
+
+        use opentelemetry::{sdk, KeyValue};
+        use opentelemetry_otlp::WithExportConfig;
+        use opentelemetry_semantic_conventions::resource;
+
+        let id = format!(
+            "{}-{}",
+            hostname::get()
+                .ok()
+                .and_then(|o| o.into_string().ok())
+                .unwrap_or_default(),
+            std::process::id()
+        );
+
+        let otel_tracer = {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("risingwave-otel")
+                .worker_threads(2)
+                .build()
+                .unwrap();
+            let runtime = Box::leak(Box::new(runtime));
+
+            // Installing the exporter requires a tokio runtime.
+            let _entered = runtime.enter();
+
+            opentelemetry_otlp::new_pipeline()
+                .tracing()
+                .with_exporter(
+                    opentelemetry_otlp::new_exporter()
+                        .tonic()
+                        .with_endpoint(endpoint),
+                )
+                .with_trace_config(sdk::trace::config().with_resource(sdk::Resource::new([
+                    KeyValue::new(
+                        resource::SERVICE_NAME,
+                        // TODO(bugen): better service name
+                        // https://github.com/jaegertracing/jaeger-ui/issues/336
+                        format!("{}-{}", settings.name, id),
+                    ),
+                    KeyValue::new(resource::SERVICE_INSTANCE_ID, id),
+                    KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
+                    KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
+                ])))
+                .install_batch(opentelemetry::runtime::Tokio)
+                .unwrap()
+        };
+
+        let layer = tracing_opentelemetry::layer()
+            .with_tracer(otel_tracer)
+            .with_filter(filter(vec![]));
+
+        layers.push(layer.boxed());
+    }
+
+    // Metrics layer
+    {
+        let filter = filter::Targets::new().with_target("aws_smithy_client::retry", Level::DEBUG);
+
+        layers.push(Box::new(MetricsLayer::new(registry).with_filter(filter)));
+    }
 
     tracing_subscriber::registry().with(layers).init();
 

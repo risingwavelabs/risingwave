@@ -15,16 +15,18 @@
 use std::fmt;
 
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::utils::IndicesDisplay;
+use super::utils::{Distill, IndicesDisplay};
 use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
 };
+use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMapping;
 use crate::OptimizerContextRef;
@@ -47,6 +49,17 @@ impl LogicalNow {
     }
 }
 
+impl Distill for LogicalNow {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let vec = if self.base.ctx.is_explain_verbose() {
+            vec![("output", column_names_pretty(self.schema()))]
+        } else {
+            vec![]
+        };
+
+        Pretty::childless_record("LogicalNow", vec)
+    }
+}
 impl fmt::Display for LogicalNow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();

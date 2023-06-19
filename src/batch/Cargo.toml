@@ -26,7 +26,6 @@ futures-async-stream = { workspace = true }
 hashbrown = { workspace = true }
 hytra = "0.1.2"
 itertools = "0.10"
-minitrace = "0.4"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
