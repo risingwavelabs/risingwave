@@ -38,11 +38,6 @@ struct FragmentAndActors {
     type_flag: u32,
 }
 
-struct FragmentsAndWorkers {
-    fragments: Vec<FragmentAndActors>,
-    workers: Vec<WorkerNode>,
-}
-
 // Get the ids of all parallel unit which are located on unschedulable workers
 fn pu_ids_on_unschedulable_nodes(all_workers: &Vec<WorkerNode>) -> HashSet<u32> {
     let unschedulable_nodes_ids = all_workers
