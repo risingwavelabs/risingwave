@@ -217,6 +217,8 @@ where
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             'backfill_loop: loop {
                 // Each time we break out of the backfill loop, we need to flush
+                // We can't do it while processing the stream barrier, since the immutable reference to
+                // upstream_table is live. So we have to do it here.
                 if let Some(_current_pos) = &current_pos {
                     for chunk in upstream_chunk_buffer.drain(..) {
                         upstream_table.write_chunk(chunk);
@@ -254,8 +256,10 @@ where
                                     // If it is a barrier, switch snapshot and consume
                                     // upstream buffer chunk
 
-                                    // Consume upstream buffer chunk
                                     if let Some(current_pos) = &current_pos {
+                                        // NOTE: We do not consume the chunk here.
+                                        // We still need to flush it to the `state_table`,
+                                        // to ensure the upstream state is replicated.
                                         for chunk in &upstream_chunk_buffer {
                                             cur_barrier_upstream_processed_rows +=
                                                 chunk.cardinality() as u64;
