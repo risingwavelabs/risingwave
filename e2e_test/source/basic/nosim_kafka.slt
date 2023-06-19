@@ -47,7 +47,7 @@ row schema location confluent schema registry 'http://message_queue:8081'
 # Just ignore the kafka key, it works
 statement ok
 CREATE TABLE upsert_avro_json2 (
-  PRIMARY KEY("id")
+  PRIMARY KEY("ID")
 )
 WITH (
 	connector = 'kafka',
