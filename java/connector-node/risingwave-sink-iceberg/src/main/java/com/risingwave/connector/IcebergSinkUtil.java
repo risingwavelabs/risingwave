@@ -61,7 +61,7 @@ public class IcebergSinkUtil {
                         .asRuntimeException();
             case INTERVAL:
                 throw INVALID_ARGUMENT
-                        .withDescription(String.format("Illegal type %s in Delta Lake", typeName))
+                        .withDescription(String.format("Illegal type %s in Iceberg", typeName))
                         .asRuntimeException();
             default:
                 throw INVALID_ARGUMENT
