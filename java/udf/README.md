@@ -191,8 +191,8 @@ The RisingWave Java UDF SDK supports the following data types:
 | SMALLINT  | short, Short        |                    |
 | INT       | int, Integer        |                    |
 | BIGINT    | long, Long          |                    |
-| FLOAT     | float, Float        |                    |
-| DOUBLE    | double, Double      |                    |
+| REAL      | float, Float        |                    |
+| DOUBLE PRECISION | double, Double      |                    |
 | DECIMAL   | BigDecimal          |                    |
 | DATE      | java.time.LocalDate |                    |
 | TIME      | java.time.LocalTime |                    |
