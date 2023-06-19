@@ -33,6 +33,7 @@ use risingwave_storage::StateStore;
 
 use super::state::{create_window_state, EstimatedVecDeque, WindowState};
 use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::over_window::state::{StateEvictHint, StateKey};
 use crate::executor::{
@@ -413,8 +414,15 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             inner: mut this,
         } = self;
 
+        let metrics_info = MetricsInfo::new(
+            this.actor_ctx.streaming_metrics.clone(),
+            this.state_table.table_id(),
+            this.actor_ctx.id,
+            "EowcOverWindow",
+        );
+
         let mut vars = ExecutionVars {
-            partitions: new_unbounded(this.watermark_epoch.clone()),
+            partitions: new_unbounded(this.watermark_epoch.clone(), metrics_info),
             _phantom: PhantomData::<S>,
         };
 

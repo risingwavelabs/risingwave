@@ -16,13 +16,16 @@ use apache_avro::types::Value;
 use apache_avro::{Decimal as AvroDecimal, Schema};
 use chrono::Datelike;
 use itertools::Itertools;
-use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Date, Datum, Interval, ScalarImpl, F32, F64};
+use risingwave_common::types::{DataType, Date, Datum};
 use risingwave_pb::plan_common::ColumnDesc;
 
+use crate::parser::unified::avro::AvroParseOptions;
+
 const RW_DECIMAL_MAX_PRECISION: usize = 28;
+const DBZ_VARIABLE_SCALE_DECIMAL_NAME: &str = "VariableScaleDecimal";
+const DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE: &str = "io.debezium.data";
 
 pub(crate) fn avro_field_to_column_desc(
     name: &str,
@@ -70,14 +73,29 @@ fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
         Schema::Boolean => DataType::Boolean,
         Schema::Float => DataType::Float32,
         Schema::Double => DataType::Float64,
-        Schema::Decimal { .. } => DataType::Decimal,
+        Schema::Decimal { precision, .. } => {
+            if precision > &RW_DECIMAL_MAX_PRECISION {
+                tracing::warn!(
+                    "RisingWave supports decimal precision up to {}, but got {}. Will truncate.",
+                    RW_DECIMAL_MAX_PRECISION,
+                    precision
+                );
+            }
+            DataType::Decimal
+        }
         Schema::Date => DataType::Date,
         Schema::TimestampMillis => DataType::Timestamptz,
         Schema::TimestampMicros => DataType::Timestamptz,
         Schema::Duration => DataType::Interval,
         Schema::Bytes => DataType::Bytea,
         Schema::Enum { .. } => DataType::Varchar,
-        Schema::Record { fields, .. } => {
+        Schema::Record { fields, name, .. } => {
+            if name.name == DBZ_VARIABLE_SCALE_DECIMAL_NAME
+                && name.namespace == Some(DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE.into())
+            {
+                return Ok(DataType::Decimal);
+            }
+
             let struct_fields = fields
                 .iter()
                 .map(|f| avro_type_mapping(&f.schema))
@@ -139,20 +157,24 @@ pub(crate) fn get_field_from_avro_value<'a>(
 
 pub(crate) fn avro_decimal_to_rust_decimal(
     avro_decimal: AvroDecimal,
-    precision: usize,
+    _precision: usize,
     scale: usize,
 ) -> Result<rust_decimal::Decimal> {
-    if precision > RW_DECIMAL_MAX_PRECISION {
-        return Err(RwError::from(ProtocolError(format!(
-            "only support decimal with max precision {} but given avro decimal with precision {}",
-            RW_DECIMAL_MAX_PRECISION, precision
-        ))));
-    }
-
     let negative = !avro_decimal.is_positive();
     let bytes = avro_decimal.to_vec_unsigned();
 
-    let (lo, mid, hi) = match bytes.len() {
+    let (lo, mid, hi) = extract_decimal(bytes);
+    Ok(rust_decimal::Decimal::from_parts(
+        lo,
+        mid,
+        hi,
+        negative,
+        scale as u32,
+    ))
+}
+
+pub(crate) fn extract_decimal(bytes: Vec<u8>) -> (u32, u32, u32) {
+    match bytes.len() {
         len @ 0..=4 => {
             let mut pad = vec![0; 4 - len];
             pad.extend_from_slice(&bytes);
@@ -175,14 +197,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
             (lo, mid, hi)
         }
         _ => unreachable!(),
-    };
-    Ok(rust_decimal::Decimal::from_parts(
-        lo,
-        mid,
-        hi,
-        negative,
-        scale as u32,
-    ))
+    }
 }
 
 pub(crate) fn unix_epoch_days() -> i32 {
@@ -245,85 +260,23 @@ pub(crate) fn extract_inner_field_schema<'a>(
 ///  - Date (the number of days from the unix epoch, 1970-1-1 UTC)
 ///  - Timestamp (the number of milliseconds from the unix epoch,  1970-1-1 00:00:00.000 UTC)
 #[inline]
-pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Datum> {
-    let v = match value {
-        Value::Null => {
-            return Ok(None);
-        }
-        Value::Boolean(b) => ScalarImpl::Bool(b),
-        Value::String(s) => ScalarImpl::Utf8(s.into_boxed_str()),
-        Value::Int(i) => ScalarImpl::Int32(i),
-        Value::Long(i) => ScalarImpl::Int64(i),
-        Value::Float(f) => ScalarImpl::Float32(F32::from(f)),
-        Value::Double(f) => ScalarImpl::Float64(F64::from(f)),
-        Value::Decimal(avro_decimal) => {
-            let (precision, scale) = match value_schema {
-                Schema::Decimal {
-                    precision, scale, ..
-                } => (*precision, *scale),
-                _ => {
-                    return Err(RwError::from(InternalError(
-                        "avro value is and decimal but schema not".to_owned(),
-                    )));
-                }
-            };
-            let decimal = avro_decimal_to_rust_decimal(avro_decimal, precision, scale)?;
-            ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
-        }
-        Value::Date(days) => {
-            ScalarImpl::Date(Date::with_days(days + unix_epoch_days()).map_err(|e| {
-                let err_msg = format!("avro parse error.wrong date value {}, err {:?}", days, e);
-                RwError::from(InternalError(err_msg))
-            })?)
-        }
-        Value::TimestampMicros(us) => ScalarImpl::Int64(us),
-        Value::TimestampMillis(ms) => ScalarImpl::Int64(ms.checked_mul(1000).ok_or_else(|| {
-            RwError::from(InternalError(format!(
-                "avro parse millis overflow, value: {}",
-                ms
-            )))
-        })?),
-        Value::Duration(duration) => {
-            let months = u32::from(duration.months()) as i32;
-            let days = u32::from(duration.days()) as i32;
-            let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
-            ScalarImpl::Interval(Interval::from_month_day_usec(months, days, usecs))
-        }
-        Value::Bytes(value) => ScalarImpl::Bytea(value.into_boxed_slice()),
-        Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol.into_boxed_str()),
-        Value::Record(descs) => {
-            let rw_values = descs
-                .into_iter()
-                .map(|(field_name, field_value)| {
-                    extract_inner_field_schema(value_schema, Some(&field_name))
-                        .and_then(|field_schema| from_avro_value(field_value, field_schema))
-                })
-                .collect::<Result<Vec<Datum>>>()?;
-            ScalarImpl::Struct(StructValue::new(rw_values))
-        }
-        Value::Array(values) => {
-            let item_schema = extract_inner_field_schema(value_schema, None)?;
-            let rw_values = values
-                .into_iter()
-                .map(|item_value| from_avro_value(item_value, item_schema))
-                .collect::<Result<Vec<Datum>>>()?;
-            ScalarImpl::List(ListValue::new(rw_values))
-        }
-        Value::Union(_, value) => {
-            let inner_schema = extract_inner_field_schema(value_schema, None)?;
-            return from_avro_value(*value, inner_schema);
-        }
-        _ => {
-            let err_msg = format!("avro parse error.unsupported value {:?}", value);
-            return Err(RwError::from(InternalError(err_msg)));
-        }
-    };
-
-    Ok(Some(v))
+pub(crate) fn from_avro_value(
+    value: Value,
+    value_schema: &Schema,
+    shape: &DataType,
+) -> Result<Datum> {
+    AvroParseOptions {
+        schema: Some(value_schema),
+        relax_numeric: true,
+    }
+    .parse(&value, Some(shape))
+    .map_err(|err| RwError::from(InternalError(format!("{:?}", err))))
 }
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::{ScalarImpl, Timestamp};
+
     use super::*;
     #[test]
     fn test_convert_decimal() {
@@ -339,16 +292,25 @@ mod tests {
         let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 1).unwrap();
         assert_eq!(rust_decimal, rust_decimal::Decimal::try_from(28.1).unwrap());
     }
-
     #[test]
     fn test_avro_timestamp_micros() {
         let v1 = Value::TimestampMicros(1620000000000);
         let v2 = Value::TimestampMillis(1620000000);
         let value_schema1 = Schema::TimestampMicros;
         let value_schema2 = Schema::TimestampMillis;
-        let datum1 = from_avro_value(v1, &value_schema1).unwrap();
-        let datum2 = from_avro_value(v2, &value_schema2).unwrap();
-        assert_eq!(datum1, Some(ScalarImpl::Int64(1620000000000)));
-        assert_eq!(datum2, Some(ScalarImpl::Int64(1620000000000)));
+        let datum1 = from_avro_value(v1, &value_schema1, &DataType::Timestamp).unwrap();
+        let datum2 = from_avro_value(v2, &value_schema2, &DataType::Timestamp).unwrap();
+        assert_eq!(
+            datum1,
+            Some(ScalarImpl::Timestamp(Timestamp::new(
+                "2021-05-03T00:00:00".parse().unwrap()
+            )))
+        );
+        assert_eq!(
+            datum2,
+            Some(ScalarImpl::Timestamp(Timestamp::new(
+                "2021-05-03T00:00:00".parse().unwrap()
+            )))
+        );
     }
 }

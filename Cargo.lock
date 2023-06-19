@@ -132,7 +132,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.15.0"
-source = "git+https://github.com/risingwavelabs/avro?branch=waruto/modify-decimal#efcc7b9f42d90c96eb8ac71e785cdbba3d32b0dc"
+source = "git+https://github.com/risingwavelabs/avro?branch=idx0dev/resolved_schema#89c2c128de93586465a7ea85b0a1c1a53082bba2"
 dependencies = [
  "byteorder",
  "bzip2",
@@ -5839,9 +5839,11 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
+ "await-tree",
  "clap 4.2.7",
  "madsim-tokio",
  "madsim-tonic",
+ "parking_lot 0.12.1",
  "prometheus",
  "risingwave_common",
  "risingwave_common_service",
@@ -5937,6 +5939,7 @@ dependencies = [
  "maplit",
  "moka",
  "nexmark",
+ "num-bigint",
  "num-traits",
  "parking_lot 0.12.1",
  "prometheus",

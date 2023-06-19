@@ -2650,6 +2650,16 @@ def section_memory_manager(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_ms(
+                    "LRU manager diff between current watermark and evicted watermark time (ms) for actors",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('lru_evicted_watermark_time_diff_ms')}",
+                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]
