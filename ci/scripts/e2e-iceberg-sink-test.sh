@@ -23,10 +23,6 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
 
-download_java_binding "$profile"
-
-export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
-
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
@@ -41,7 +37,7 @@ sleep 1
 # prepare minio iceberg sink
 echo "--- preparing iceberg"
 .risingwave/bin/mcli -C .risingwave/config/mcli mb hummock-minio/iceberg
-wget https://iceberg-ci-spark-dist.s3.amazonaws.com/spark-3.3.1-bin-hadoop3.tgz
+wget https://ci-deps-dist.s3.amazonaws.com/spark-3.3.1-bin-hadoop3.tgz
 tar -xf spark-3.3.1-bin-hadoop3.tgz --no-same-owner
 DEPENDENCIES=org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.0.0,org.apache.hadoop:hadoop-aws:3.3.2
 spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \

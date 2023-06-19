@@ -11,15 +11,22 @@
     </parent>
 
     <artifactId>java-binding</artifactId>
-    
+
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <module.version>1.0-SNAPSHOT</module.version>
+        <jni.loader.version>1.0.0</jni.loader.version>
+        <java.binding.release>false</java.binding.release>
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>org.questdb</groupId>
+            <artifactId>jar-jni</artifactId>
+            <version>${jni.loader.version}</version>
+        </dependency>
         <dependency>
             <groupId>com.risingwave.java</groupId>
             <artifactId>proto</artifactId>
@@ -36,49 +43,54 @@
         </dependency>
     </dependencies>
 
+    <profiles>
+        <profile>
+            <id>no-build-jni-rust</id>
+            <activation>
+                <property>
+                    <name>no-build-rust</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.questdb</groupId>
+                        <artifactId>rust-maven-plugin</artifactId>
+                        <version>${jni.loader.version}</version>
+                        <executions>
+                            <execution>
+                                <id>build-jni-rust</id>
+                                <!--disable the plugin-->
+                                <phase>none</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
     <build>
-        <pluginManagement><!-- lock down plugins versions to avoid using Maven defaults (may be moved to parent pom) -->
-            <plugins>
-                <!-- clean lifecycle, see https://maven.apache.org/ref/current/maven-core/lifecycles.html#clean_Lifecycle -->
-                <plugin>
-                    <artifactId>maven-clean-plugin</artifactId>
-                    <version>3.1.0</version>
-                </plugin>
-                <!-- default lifecycle, jar packaging: see https://maven.apache.org/ref/current/maven-core/default-bindings.html#Plugin_bindings_for_jar_packaging -->
-                <plugin>
-                    <artifactId>maven-resources-plugin</artifactId>
-                    <version>3.0.2</version>
-                </plugin>
-                <plugin>
-                    <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.8.0</version>
-                </plugin>
-                <plugin>
-                    <artifactId>maven-surefire-plugin</artifactId>
-                    <version>2.22.1</version>
-                </plugin>
-                <plugin>
-                    <artifactId>maven-jar-plugin</artifactId>
-                    <version>3.0.2</version>
-                </plugin>
-                <plugin>
-                    <artifactId>maven-install-plugin</artifactId>
-                    <version>2.5.2</version>
-                </plugin>
-                <plugin>
-                    <artifactId>maven-deploy-plugin</artifactId>
-                    <version>2.8.2</version>
-                </plugin>
-                <!-- site lifecycle, see https://maven.apache.org/ref/current/maven-core/lifecycles.html#site_Lifecycle -->
-                <plugin>
-                    <artifactId>maven-site-plugin</artifactId>
-                    <version>3.7.1</version>
-                </plugin>
-                <plugin>
-                    <artifactId>maven-project-info-reports-plugin</artifactId>
-                    <version>3.0.0</version>
-                </plugin>
-            </plugins>
-        </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>org.questdb</groupId>
+                <artifactId>rust-maven-plugin</artifactId>
+                <version>${jni.loader.version}</version>
+                <executions>
+                    <execution>
+                        <id>build-jni-rust</id>
+                        <goals>
+                            <goal>build</goal>
+                        </goals>
+                        <configuration>
+                            <path>../../src/java_binding</path>
+                            <release>${java.binding.release}</release>
+                            <copyTo>${project.build.directory}/classes/risingwave/jni</copyTo>
+                            <copyWithPlatformDir>true</copyWithPlatformDir>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 </project>

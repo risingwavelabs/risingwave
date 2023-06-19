@@ -10,6 +10,7 @@ message StackTraceRequest {}
 message StackTraceResponse {
   map<uint32, string> actor_traces = 1;
   map<string, string> rpc_traces = 2;
+  map<string, string> compaction_task_traces = 3;
 }
 
 message ProfilingRequest {

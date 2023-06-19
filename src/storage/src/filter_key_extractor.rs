@@ -200,7 +200,7 @@ impl MultiFilterKeyExtractor {
         self.id_to_filter_key_extractor.len()
     }
 
-    pub fn get_exsting_table_ids(&self) -> HashSet<u32> {
+    pub fn get_existing_table_ids(&self) -> HashSet<u32> {
         self.id_to_filter_key_extractor.keys().cloned().collect()
     }
 }
