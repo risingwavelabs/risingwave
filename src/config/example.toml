@@ -45,10 +45,10 @@ unique_user_stream_errors = 10
 [streaming.developer]
 stream_connector_message_buffer_size = 16
 stream_unsafe_extreme_cache_size = 10
-stream_chunk_size = 1024
-stream_exchange_initial_permits = 8192
-stream_exchange_batched_permits = 1024
-stream_exchange_concurrent_barriers = 2
+stream_chunk_size = 256
+stream_exchange_initial_permits = 2048
+stream_exchange_batched_permits = 256
+stream_exchange_concurrent_barriers = 1
 
 [storage]
 share_buffers_sync_parallelism = 1

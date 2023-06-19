@@ -790,19 +790,19 @@ mod default {
         }
 
         pub fn stream_chunk_size() -> usize {
-            1024
+            256
         }
 
         pub fn stream_exchange_initial_permits() -> usize {
-            8192
+            2048
         }
 
         pub fn stream_exchange_batched_permits() -> usize {
-            1024
+            256
         }
 
         pub fn stream_exchange_concurrent_barriers() -> usize {
-            2
+            1
         }
     }
 
