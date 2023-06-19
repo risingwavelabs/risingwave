@@ -477,7 +477,9 @@ where
         pk_in_output_indices: PkIndicesRef<'_>,
         pk_order: &[OrderType],
     ) -> StreamChunk {
-        let chunk = chunk.clone(); // FIXME: Temporary workaround.
+        // FIXME: Temporary workaround, we can optimize it later when benchmarking.
+        // We can do so with a `chunk.compact_ref()` instead of `chunk.compact()`.
+        let chunk = chunk.clone();
         let chunk = chunk.compact();
         let (data, ops) = chunk.into_parts();
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
