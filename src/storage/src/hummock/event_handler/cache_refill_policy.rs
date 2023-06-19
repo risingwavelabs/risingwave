@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{Ordering, Reverse};
-use std::collections::binary_heap::PeekMut;
-use std::collections::{BinaryHeap, HashMap};
+use std::cmp::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::try_join_all;
-use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::{group_delta, HummockVersionDelta, SstableInfo};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
@@ -130,8 +128,8 @@ pub struct SstableBlocksInfo {
 impl SstableBlocksInfo {
     pub fn new(sstable: TableHolder) -> Self {
         Self {
-            sstable,
             blocks_in_cache: vec![false; sstable.value().meta.block_metas.len()],
+            sstable,
         }
     }
 }

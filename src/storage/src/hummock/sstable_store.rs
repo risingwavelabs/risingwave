@@ -952,6 +952,7 @@ mod tests {
             holder,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
+            false,
         );
         iter.rewind().await.unwrap();
         for i in x_range {
