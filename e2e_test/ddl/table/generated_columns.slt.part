@@ -113,3 +113,18 @@ drop materialized view mv;
 
 statement ok
 drop source t4;
+
+# create a table with default now
+statement error
+explain create table t (a int, b timestamptz default now());
+
+# create a table with generated column now
+statement error
+CREATE TABLE t (v INT, t timestamptz as now()) WITH (
+  connector = 'datagen',
+  fields.v.kind = 'sequence',
+  fields.v.start = '1',
+  fields.v.end  = '10',
+  datagen.rows.per.second='15',
+  datagen.split.num = '1'
+) ROW FORMAT JSON;

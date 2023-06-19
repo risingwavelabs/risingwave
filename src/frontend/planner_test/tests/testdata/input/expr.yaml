@@ -398,18 +398,6 @@
     select sum(v2) filter (where v1 >= now()) as sum_v2 from t;
   expected_outputs:
   - stream_error
-- name: forbid now in ddl
-  sql: |
-    CREATE TABLE t3 (v INT, t timestamptz as now()) WITH (
-      connector = 'datagen',
-      fields.v.kind = 'sequence',
-      fields.v.start = '1',
-      fields.v.end  = '10',
-      datagen.rows.per.second='15',
-      datagen.split.num = '1'
-    ) ROW FORMAT JSON;
-  expected_outputs:
-  - binder_error
 - name: typo pg_teminate_backend
   sql: |
     select pg_teminate_backend(1);
