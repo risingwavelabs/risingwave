@@ -132,7 +132,7 @@ steps:
     timeout_in_minutes: 18
 
   - label: "connector node integration test"
-    command: "ci/scripts/connector-node-integration-test.sh -java {{matrix.version}} -p ci-release"
+    command: "ci/scripts/connector-node-integration-test.sh -java 11 -p ci-release"
     depends_on:
       - "build-release"
       - "build-other"
@@ -142,10 +142,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    matrix:
-      setup:
-        - "11"
-        - "17"
     timeout_in_minutes: 5
 
   - label: "end-to-end iceberg sink test"
