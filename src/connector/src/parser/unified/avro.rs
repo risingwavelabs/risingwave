@@ -320,3 +320,68 @@ where
         options.parse(value, type_expected)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use apache_avro::Decimal as AvroDecimal;
+    use risingwave_common::types::Decimal;
+
+    use super::*;
+
+    #[test]
+    fn test_decimal_truncate() {
+        let schema = Schema::parse_str(
+            r#"
+            {
+                "type": "bytes",
+                "logicalType": "decimal",
+                "precision": 38,
+                "scale": 18
+            }
+            "#,
+        )
+        .unwrap();
+        let bytes = vec![0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f];
+        let value = Value::Decimal(AvroDecimal::from(bytes));
+        let options = AvroParseOptions::default().with_schema(&schema);
+        let resp = options.parse(&value, Some(&DataType::Decimal)).unwrap();
+        assert_eq!(
+            resp,
+            Some(ScalarImpl::Decimal(Decimal::Normalized(
+                rust_decimal::Decimal::from_str("4.557430887741865791").unwrap()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_variable_scale_decimal() {
+        let schema = Schema::parse_str(
+            r#"
+            {
+                "type": "record",
+                "name": "VariableScaleDecimal",
+                "namespace": "io.debezium.data",
+                "fields": [
+                    {
+                        "name": "scale",
+                        "type": "int"
+                    },
+                    {
+                        "name": "value",
+                        "type": "bytes"
+                    }
+                ]
+            }
+            "#,
+        )
+        .unwrap();
+        let value = Value::Record(vec![
+            ("scale".to_string(), Value::Int(0)),
+            ("value".to_string(), Value::Bytes(vec![0x01, 0x02, 0x03])),
+        ]);
+
+        let options = AvroParseOptions::default().with_schema(&schema);
+        let resp = options.parse(&value, Some(&DataType::Decimal)).unwrap();
+        assert_eq!(resp, Some(ScalarImpl::Decimal(Decimal::from(66051))));
+    }
+}

@@ -93,7 +93,7 @@ message Barrier {
     ResumeMutation resume = 8;
   }
   // Used for tracing.
-  bytes span = 2;
+  map<string, string> tracing_context = 2;
   // Whether this barrier do checkpoint
   bool checkpoint = 9;
 
