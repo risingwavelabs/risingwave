@@ -25,6 +25,8 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::iter_util::ZipEqFast;
 
+use crate::error::StorageResult;
+
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
 
@@ -78,8 +80,8 @@ impl Distribution {
 
 // TODO: GAT-ify this trait or remove this trait
 #[async_trait::async_trait]
-pub trait TableIter<E>: Send {
-    async fn next_row(&mut self) -> Result<Option<OwnedRow>, E>;
+pub trait TableIter: Send {
+    async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 }
 
 pub async fn collect_data_chunk<E, S>(

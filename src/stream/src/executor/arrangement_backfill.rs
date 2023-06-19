@@ -447,7 +447,7 @@ where
                 (Bound::Unbounded, Bound::Unbounded)
             };
         let iterators = upstream_table
-            .iter_all_vnode_ranges(&range_bounds, Default::default())
+            .iter_all_vnodes_with_pk_range(&range_bounds, Default::default())
             .await?;
         let pinned_iter: Vec<_> = iterators.into_iter().map(Box::pin).collect_vec();
         let iter = merge_sort(pinned_iter);

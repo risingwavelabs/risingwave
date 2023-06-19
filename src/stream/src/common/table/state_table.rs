@@ -932,7 +932,7 @@ where
             .map(get_second))
     }
 
-    pub async fn iter_all_vnode_ranges(
+    pub async fn iter_all_vnodes_with_pk_range(
         &self,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
