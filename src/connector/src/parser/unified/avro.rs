@@ -334,7 +334,7 @@ fn avro_decimal_to_rust_decimal(
     ))
 }
 
-pub fn avro_schema_skip_union<'a>(schema: &'a Schema) -> anyhow::Result<&'a Schema> {
+pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
     match schema {
         Schema::Union(union_schema) => {
             let inner_schema = union_schema

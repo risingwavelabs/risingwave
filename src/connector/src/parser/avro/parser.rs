@@ -161,7 +161,7 @@ impl AvroParser {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
         if let Some(resolver) = &self.schema_resolver {
-            let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
+            let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
             let writer_schema = resolver.get(schema_id).await?;
             Ok(Some(from_avro_datum(
                 writer_schema.as_ref(),
