@@ -1687,10 +1687,8 @@ where
 
         let mut queue: VecDeque<FragmentId> = target_plan.keys().cloned().collect();
 
-        // Here we use `target_plan` to determine whether the fragment_id should be added to the
-        // queue. However, this may cause a problem if the user provides two no_shuffle fragment IDs
-        // that are far apart but related in the DAG. We might generate a plan for each of them, but
-        // these plans should be exactly the same.
+        // We trace the upstreams of each downstream under the hierarchy until we reach the top for
+        // every no_shuffle relation.
         while let Some(fragment_id) = queue.pop_front() {
             if !no_shuffle_target_fragment_ids.contains(&fragment_id)
                 && !no_shuffle_source_fragment_ids.contains(&fragment_id)
@@ -1722,32 +1720,10 @@ where
 
                 queue.push_back(*upstream_fragment_id);
             }
-
-            // for downstream
-            if let Some(downstream_fragments) = fragment_dispatcher_map.get(&fragment_id) {
-                // We cannot use `no_shuffle_target_fragment_ids` to determine this because our
-                // downstream may be a no_shuffle target, but it may not be the target we owned.
-                for (downstream_fragment_id, dispatcher_type) in downstream_fragments {
-                    if *dispatcher_type != DispatcherType::NoShuffle {
-                        continue;
-                    }
-
-                    let plan = target_plan.get(&fragment_id).unwrap();
-
-                    if let Some(downstream_plan) = target_plan.get(downstream_fragment_id) {
-                        if downstream_plan != plan {
-                            bail!("Inconsistent NO_SHUFFLE plan, check target worker ids of fragment {} and {}", fragment_id, downstream_fragment_id);
-                        }
-
-                        continue;
-                    }
-
-                    target_plan.insert(*downstream_fragment_id, plan.clone());
-
-                    queue.push_back(*downstream_fragment_id);
-                }
-            }
         }
+
+        target_plan
+            .drain_filter(|fragment_id, _| no_shuffle_target_fragment_ids.contains(fragment_id));
 
         Ok(())
     }

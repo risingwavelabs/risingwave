@@ -24,7 +24,7 @@ use risingwave_pb::meta::get_reschedule_plan_request::{
 };
 use risingwave_pb::meta::{PbGetReschedulePlanResponse, PbReschedule};
 use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::ctl_ext::predicate::identity_contains;
+use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
 
 #[madsim::test]
@@ -239,15 +239,22 @@ join mv5 on mv1.v = mv5.v;",
 
     let reschedules = resp.reschedules;
 
-    let target_plan = reschedules.get(&selected_fragment_id).unwrap();
+    assert_eq!(reschedules.len(), 1);
 
-    for i in 1..chain_fragments.len() as u32 {
-        let fragment_id = chain_fragments[i as usize].inner.fragment_id;
+    let root_materialize_fragment = cluster
+        .locate_one_fragment([
+            identity_contains("materialize"),
+            no_identity_contains("chain"),
+            no_identity_contains("hashJoin"),
+        ])
+        .await?;
 
-        let cloned_plan = reschedules.get(&fragment_id).unwrap();
+    let root_materialize_fragment_id = reschedules.keys().exactly_one().cloned().unwrap();
 
-        assert_eq!(target_plan, cloned_plan);
-    }
+    assert_eq!(
+        root_materialize_fragment_id,
+        root_materialize_fragment.inner.fragment_id
+    );
 
     Ok(())
 }
