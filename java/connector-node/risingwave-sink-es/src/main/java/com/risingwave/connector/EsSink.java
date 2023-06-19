@@ -18,8 +18,8 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
 import io.grpc.Status;
-import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.apache.http.HttpHost;
 import org.elasticsearch.action.ActionListener;
@@ -256,9 +256,11 @@ public class EsSink extends SinkBase {
     @Override
     public void drop() {
         try {
-            bulkProcessor.close();
+            // give processor enough time to finish unfinished work, otherwise we will get an error
+            // in afterbulk
+            bulkProcessor.awaitClose(100, TimeUnit.SECONDS);
             client.close();
-        } catch (IOException e) {
+        } catch (Exception e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(String.format(ERROR_REPORT_TEMPLATE, e.getMessage()))
                     .asRuntimeException();
