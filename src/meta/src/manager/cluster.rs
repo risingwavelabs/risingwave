@@ -188,7 +188,7 @@ where
     ) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
         let mut worker_opt: Option<&mut Worker> = None;
-        for (_, w) in &mut core.workers {
+        for w in core.workers.values_mut() {
             if w.worker_id() == worker_id {
                 worker_opt = Some(w);
                 break;
