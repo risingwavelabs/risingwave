@@ -21,6 +21,7 @@ import org.apache.arrow.vector.complex.StructVector;
 import org.apache.arrow.vector.types.*;
 import org.apache.arrow.vector.types.pojo.*;
 
+import java.lang.invoke.MethodHandles;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
@@ -345,14 +346,16 @@ class TypeUtils {
         } else if (fieldVector instanceof StructVector) {
             var vector = (StructVector) fieldVector;
             vector.allocateNew();
+            var lookup = MethodHandles.lookup();
             for (var field : vector.getField().getChildren()) {
                 // extract field from values
                 var subvalues = new Object[values.length];
                 if (values.length != 0) {
                     try {
                         var javaField = values[0].getClass().getDeclaredField(field.getName());
+                        var varHandle = lookup.unreflectVarHandle(javaField);
                         for (int i = 0; i < values.length; i++) {
-                            subvalues[i] = javaField.get(values[i]);
+                            subvalues[i] = varHandle.get(values[i]);
                         }
                     } catch (NoSuchFieldException | IllegalAccessException e) {
                         throw new RuntimeException(e);
