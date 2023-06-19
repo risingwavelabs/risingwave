@@ -35,10 +35,6 @@ distributor:
         protocols:
           grpc:
             endpoint: "{otlp_host}:{otlp_port}"
-
-query_frontend:
-  search:
-    default_result_limit: 10000 # ??????
     "#
         )
     }
