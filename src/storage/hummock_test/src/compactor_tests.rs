@@ -191,6 +191,7 @@ pub(crate) mod tests {
                 options.sstable_id_remote_fetch_number,
             )),
             task_progress_manager: Default::default(),
+            await_tree_reg: None,
         }
     }
 
@@ -544,12 +545,6 @@ pub(crate) mod tests {
         )
         .await;
 
-        let compact_ctx_existing_table_id = prepare_compactor_and_filter(
-            &storage_existing_table_id,
-            &hummock_meta_client,
-            existing_table_id,
-        );
-
         prepare_data(
             hummock_meta_client.clone(),
             &storage_existing_table_id,
@@ -568,35 +563,14 @@ pub(crate) mod tests {
             ..Default::default()
         };
         // 2. get compact task
-        let mut compact_task = hummock_manager_ref
+        let compact_task = hummock_manager_ref
             .manual_get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 manual_compcation_option,
             )
             .await
-            .unwrap()
             .unwrap();
-
-        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
-        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        // assert compact_task
-        assert_eq!(
-            compact_task
-                .input_ssts
-                .iter()
-                .map(|level| level.table_infos.len())
-                .sum::<usize>(),
-            128
-        );
-
-        // 3. compact
-        let (_tx, rx) = tokio::sync::oneshot::channel();
-        Compactor::compact(
-            Arc::new(compact_ctx_existing_table_id),
-            compact_task.clone(),
-            rx,
-        )
-        .await;
+        assert!(compact_task.is_none());
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
