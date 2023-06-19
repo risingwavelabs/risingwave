@@ -24,7 +24,7 @@ use rand::seq::SliceRandom;
 use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
-use risingwave_simulation::cluster::Configuration;
+use risingwave_simulation::cluster::{Configuration, KillOpts};
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 
 struct ActorOnPu {
@@ -267,6 +267,97 @@ async fn mark_as_unschedulable_is_idempotent(
     Ok(())
 }
 
+async fn restarts_do_not_affect_schedulability(
+    create: &str,
+    select: &str,
+    drop: &str,
+    number_of_nodes: usize,
+) -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+    let sleep_sec = 10;
+
+    let mut cluster =
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
+
+    cluster.run(create).await?;
+    sleep(Duration::from_secs(sleep_sec)).await;
+    let expected = cluster.run(select).await?;
+    cluster.run(drop).await?;
+
+    cluster
+        .mark_rand_nodes_unschedulable(number_of_nodes)
+        .await?;
+    let (_, workers) = get_schedule(cluster.get_cluster_info().await?);
+    let unschedulable_nodes_1: HashSet<u32> = workers
+        .iter()
+        .filter(|w| {
+            w.property
+                .as_ref()
+                .expect("expected proptery")
+                .is_unschedulable
+        })
+        .map(|w| w.id)
+        .collect();
+    let schedulable_nodes_1: HashSet<u32> = workers
+        .iter()
+        .filter(|w| {
+            !w.property
+                .as_ref()
+                .expect("expected proptery")
+                .is_unschedulable
+        })
+        .map(|w| w.id)
+        .collect();
+
+    assert!(!unschedulable_nodes_1.is_empty());
+
+    cluster
+        .kill_node(&KillOpts {
+            kill_compute: true,
+            kill_rate: 1.0,
+            kill_meta: false,
+            kill_frontend: false,
+            kill_compactor: false,
+            restart_delay_secs: 1,
+        })
+        .await;
+    sleep(Duration::from_secs(sleep_sec)).await;
+
+    // expect that unschedulable nodes are still unschedulable after restart
+    let (_, workers) = get_schedule(cluster.get_cluster_info().await?);
+    let unschedulable_nodes_2: HashSet<u32> = workers
+        .iter()
+        .filter(|w| {
+            w.property
+                .as_ref()
+                .expect("expected proptery")
+                .is_unschedulable
+        })
+        .map(|w| w.id)
+        .collect();
+    let schedulable_nodes_2: HashSet<u32> = workers
+        .iter()
+        .filter(|w| {
+            !w.property
+                .as_ref()
+                .expect("expected proptery")
+                .is_unschedulable
+        })
+        .map(|w| w.id)
+        .collect();
+    assert_eq!(unschedulable_nodes_1, unschedulable_nodes_2);
+    assert_eq!(schedulable_nodes_1, schedulable_nodes_2);
+
+    cluster.run(create).await?;
+    sleep(Duration::from_secs(sleep_sec)).await;
+    let got = cluster.run(select).await?;
+    cluster.run(drop).await?;
+    assert_eq!(expected, got);
+    Ok(())
+}
+
 /// a reschedule request moving an actor to an unschedulable node should fail
 async fn invalid_reschedule(
     create: &str,
@@ -413,7 +504,7 @@ macro_rules! test {
             }
             #[madsim::test]
             async fn [< unschedulable_all_nodes_error_2_ $query >]() {
-                use risingwave_simulation::nexmark::queries::q3::*;
+                use risingwave_simulation::nexmark::queries::$query::*;
                 let result = unschedulable_nodes_do_not_get_actors(CREATE, SELECT, DROP, 3)
                     .await;
                 assert!(result.is_err());
@@ -429,8 +520,22 @@ macro_rules! test {
             }
             #[madsim::test]
             async fn [< invalid_reschedule_2_ $query >]() -> Result<()> {
-                use risingwave_simulation::nexmark::queries::q3::*;
+                use risingwave_simulation::nexmark::queries::$query::*;
                 invalid_reschedule(CREATE, SELECT, DROP, 2)
+                    .await
+            }
+
+            // restarts does not affect schedulability status
+            #[madsim::test]
+            async fn [< unschedulable_restarts_1_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                restarts_do_not_affect_schedulability(CREATE, SELECT, DROP, 1)
+                    .await
+            }
+            #[madsim::test]
+            async fn [< unschedulable_restarts_reschedule_2_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::q3::*;
+                restarts_do_not_affect_schedulability(CREATE, SELECT, DROP, 2)
                     .await
             }
         }

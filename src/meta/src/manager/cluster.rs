@@ -107,16 +107,34 @@ where
 
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
             // TODO: update parallelism when the worker exists.
+
+            // activating worker node, should not change schedulability
+            let new_prop = if worker.worker_node.property.is_some() && property.is_some() {
+                let p = property.unwrap();
+                Some(Property {
+                    is_serving: p.is_serving,
+                    is_streaming: p.is_streaming,
+                    is_unschedulable: worker
+                        .worker_node
+                        .property
+                        .as_ref()
+                        .unwrap()
+                        .is_unschedulable,
+                })
+            } else {
+                None
+            };
+
             worker.update_ttl(self.max_heartbeat_interval);
-            if property != worker.worker_node.property {
+            if new_prop != worker.worker_node.property {
                 tracing::info!(
                     "worker {} property updated from {:?} to {:?}",
                     worker.worker_node.id,
                     worker.worker_node.property,
-                    property
+                    new_prop
                 );
-                // TODO: we cannot update schedulability proptery here
-                worker.worker_node.property = property;
+
+                worker.worker_node.property = new_prop;
                 worker.insert(self.env.meta_store()).await?;
             }
             return Ok(worker.to_protobuf());
