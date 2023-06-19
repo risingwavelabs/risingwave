@@ -334,6 +334,21 @@ fn avro_decimal_to_rust_decimal(
     ))
 }
 
+pub fn avro_schema_skip_union<'a>(schema: &'a Schema) -> anyhow::Result<&'a Schema> {
+    match schema {
+        Schema::Union(union_schema) => {
+            let inner_schema = union_schema
+                .variants()
+                .iter()
+                .find(|s| **s != Schema::Null)
+                .ok_or_else(|| {
+                    anyhow::format_err!("illegal avro record schema {:?}", union_schema)
+                })?;
+            Ok(inner_schema)
+        }
+        other => Ok(other),
+    }
+}
 // extract inner filed/item schema of record/array/union
 pub fn avro_extract_field_schema<'a>(
     schema: &'a Schema,
@@ -352,16 +367,7 @@ pub fn avro_extract_field_schema<'a>(
             Ok(&field.schema)
         }
         Schema::Array(schema) => Ok(schema),
-        Schema::Union(union_schema) => {
-            let inner_schema = union_schema
-                .variants()
-                .iter()
-                .find(|s| **s != Schema::Null)
-                .ok_or_else(|| {
-                    anyhow::format_err!("illegal avro record schema {:?}", union_schema)
-                })?;
-            Ok(inner_schema)
-        }
+        Schema::Union(_) => avro_schema_skip_union(schema),
         _ => Err(anyhow::format_err!("avro schema is not a record or array")),
     }
 }

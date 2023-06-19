@@ -26,7 +26,9 @@ use crate::common::UpsertMessage;
 use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::avro::util::avro_schema_to_column_descs;
 use crate::parser::schema_registry::{extract_schema_id, Client};
-use crate::parser::unified::avro::{avro_extract_field_schema, AvroAccess, AvroParseOptions};
+use crate::parser::unified::avro::{
+    avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
+};
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
@@ -83,10 +85,10 @@ impl DebeziumAvroParserConfig {
     }
 
     pub fn map_to_columns(&self) -> anyhow::Result<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(avro_extract_field_schema(
+        avro_schema_to_column_descs(avro_schema_skip_union(avro_extract_field_schema(
             &self.outer_schema,
             Some("before"),
-        )?)
+        )?)?)
     }
 }
 
@@ -262,8 +264,10 @@ mod tests {
 
         let outer_schema = get_outer_schema();
         let expected_inner_schema = Schema::parse_str(inner_shema_str).unwrap();
-        let extracted_inner_schema =
-            avro_extract_field_schema(&outer_schema, Some("before")).unwrap();
+        let extracted_inner_schema = avro_schema_skip_union(
+            avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(&expected_inner_schema, extracted_inner_schema);
     }
 
@@ -293,7 +297,10 @@ mod tests {
     fn test_map_to_columns() {
         let outer_schema = get_outer_schema();
         let columns = avro_schema_to_column_descs(
-            avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
+            avro_schema_skip_union(
+                avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
+            )
+            .unwrap(),
         )
         .unwrap()
         .into_iter()
