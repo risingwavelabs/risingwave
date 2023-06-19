@@ -451,7 +451,7 @@ pub fn trigger_split_stat(
     metrics: &MetaMetrics,
     compaction_group_id: CompactionGroupId,
     member_table_id_len: usize,
-    brnached_ssts: &BTreeMap<
+    branched_ssts: &BTreeMap<
         // SST object id
         HummockSstableObjectId,
         BranchedSstInfo,
@@ -463,7 +463,7 @@ pub fn trigger_split_stat(
         .with_label_values(&[&group_label])
         .set(member_table_id_len as _);
 
-    let branched_sst_count = brnached_ssts
+    let branched_sst_count = branched_ssts
         .values()
         .map(|branched_map| branched_map.iter())
         .flat_map(|branched_map| {
