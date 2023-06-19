@@ -18,7 +18,7 @@ use std::result::Result;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{Stream, TryFutureExt};
+use futures::TryFutureExt;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -27,20 +27,16 @@ use tracing::debug;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::{PgProtocol, TlsConfig};
-use crate::pg_response::{PgResponse, RowSetResult};
+use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Format;
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 pub type SessionId = (i32, i32);
+
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
-pub trait SessionManager<VS, PS, PO>: Send + Sync + 'static
-where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
-{
-    type Session: Session<VS, PS, PO>;
+pub trait SessionManager: Send + Sync + 'static {
+    type Session: Session;
 
     fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
 
@@ -53,26 +49,24 @@ where
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
-#[async_trait::async_trait]
-pub trait Session<VS, PS, PO>: Send + Sync
-where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
-{
+pub trait Session: Send + Sync {
+    type ValuesStream: ValuesStream;
+    type PreparedStatement: Send + Clone + 'static;
+    type Portal: Send + Clone + std::fmt::Display + 'static;
+
     /// The str sql can not use the unparse from AST: There is some problem when dealing with create
     /// view, see  https://github.com/risingwavelabs/risingwave/issues/6801.
-    async fn run_one_query(
+    fn run_one_query(
         self: Arc<Self>,
         sql: Statement,
         format: Format,
-    ) -> Result<PgResponse<VS>, BoxedError>;
+    ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
 
     fn parse(
         self: Arc<Self>,
         sql: Statement,
         params_types: Vec<DataType>,
-    ) -> Result<PS, BoxedError>;
+    ) -> Result<Self::PreparedStatement, BoxedError>;
 
     // TODO: maybe this function should be async and return the notice more timely
     /// try to take the current notices from the session
@@ -80,20 +74,26 @@ where
 
     fn bind(
         self: Arc<Self>,
-        prepare_statement: PS,
+        prepare_statement: Self::PreparedStatement,
         params: Vec<Bytes>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
-    ) -> Result<PO, BoxedError>;
+    ) -> Result<Self::Portal, BoxedError>;
 
-    async fn execute(self: Arc<Self>, portal: PO) -> Result<PgResponse<VS>, BoxedError>;
+    fn execute(
+        self: Arc<Self>,
+        portal: Self::Portal,
+    ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
 
     fn describe_statement(
         self: Arc<Self>,
-        prepare_statement: PS,
+        prepare_statement: Self::PreparedStatement,
     ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError>;
 
-    fn describe_portral(self: Arc<Self>, portal: PO) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
+    fn describe_portral(
+        self: Arc<Self>,
+        portal: Self::Portal,
+    ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
 
     fn user_authenticator(&self) -> &UserAuthenticator;
 
@@ -126,16 +126,11 @@ impl UserAuthenticator {
 }
 
 /// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
-pub async fn pg_serve<VS, PS, PO>(
+pub async fn pg_serve(
     addr: &str,
-    session_mgr: Arc<impl SessionManager<VS, PS, PO>>,
+    session_mgr: Arc<impl SessionManager>,
     ssl_config: Option<TlsConfig>,
-) -> io::Result<()>
-where
-    VS: Stream<Item = RowSetResult> + Unpin + Send + 'static,
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
-{
+) -> io::Result<()> {
     let listener = TcpListener::bind(addr).await.unwrap();
     // accept connections and process them, spawning a new thread for each one
     tracing::info!("Server Listening at {}", addr);
@@ -159,17 +154,14 @@ where
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn handle_connection<S, SM, VS, PS, PO>(
+pub fn handle_connection<S, SM>(
     stream: S,
     session_mgr: Arc<SM>,
     tls_config: Option<TlsConfig>,
 ) -> impl Future<Output = Result<(), anyhow::Error>>
 where
     S: AsyncWrite + AsyncRead + Unpin,
-    SM: SessionManager<VS, PS, PO>,
-    VS: Stream<Item = RowSetResult> + Unpin + Send + 'static,
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
+    SM: SessionManager,
 {
     let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config);
     async {
@@ -207,7 +199,7 @@ mod tests {
     struct MockSessionManager {}
     struct MockSession {}
 
-    impl SessionManager<BoxStream<'static, RowSetResult>, String, String> for MockSessionManager {
+    impl SessionManager for MockSessionManager {
         type Session = MockSession;
 
         fn connect(
@@ -229,8 +221,12 @@ mod tests {
         fn end_session(&self, _session: &Self::Session) {}
     }
 
-    #[async_trait::async_trait]
-    impl Session<BoxStream<'static, RowSetResult>, String, String> for MockSession {
+    impl Session for MockSession {
+        type Portal = String;
+        type PreparedStatement = String;
+        type ValuesStream = BoxStream<'static, RowSetResult>;
+
+        #[expect(clippy::unused_async)]
         async fn run_one_query(
             self: Arc<Self>,
             _sql: Statement,

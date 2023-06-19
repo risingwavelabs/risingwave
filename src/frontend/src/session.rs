@@ -703,7 +703,7 @@ pub struct SessionManagerImpl {
     number: AtomicI32,
 }
 
-impl SessionManager<PgResponseStream, PrepareStatement, Portal> for SessionManagerImpl {
+impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
     fn connect(
@@ -841,10 +841,13 @@ impl SessionManagerImpl {
     }
 }
 
-#[async_trait::async_trait]
-impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
-    /// A copy of run_statement but exclude the parser part so each run must be at most one
-    /// statement. The str sql use the to_string of AST. Consider Reuse later.
+impl Session for SessionImpl {
+    type Portal = Portal;
+    type PreparedStatement = PrepareStatement;
+    type ValuesStream = PgResponseStream;
+
+    /// A copy of `run_statement` but exclude the parser part so each run must be at most one
+    /// statement. The str sql use the `to_string` of AST. Consider Reuse later.
     async fn run_one_query(
         self: Arc<Self>,
         stmt: Statement,
