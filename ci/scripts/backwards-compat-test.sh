@@ -164,15 +164,7 @@ RISEDEV_CONFIGURED=true
 
 ENABLE_MINIO=true
 ENABLE_ETCD=true
-# FIXME: Don't use kafka for now,
-# Until 1.0, then we can re-enable it...
-# This is because previous versions of risedev-tool (from previous releases)
-# fetch kafka from clcdn.apache.org which only maintains the latest few
-# versions of kafka.
-# This comment belongs to a PR for the release of 1.0.
-# In this PR, we also change the source of kafka bin to downloads.apache.org,
-# which maintain old versions of kafka (until 2012).
-# ENABLE_KAFKA=true
+ENABLE_KAFKA=true
 
 # Fetch risingwave binary from release.
 ENABLE_BUILD_RUST=false
@@ -206,7 +198,7 @@ git checkout "${TAG}-rc"
 cargo build -p risedev
 
 echo "--- Setup old release $TAG"
-wget "https://github.com/risingwavelabs/risingwave/releases/download/${TAG}/risingwave-${TAG}-x86_64-unknown-linux.tar.gz"
+git clone --depth 1 --branch v0.18.0-rc "https://${GITHUB_TOKEN}@github.com/risingwavelabs/risingwave/releases/download/${TAG}/risingwave-${TAG}-x86_64-unknown-linux.tar.gz"
 tar -xvf risingwave-${TAG}-x86_64-unknown-linux.tar.gz
 mkdir -p target/debug
 cp risingwave target/debug/risingwave
