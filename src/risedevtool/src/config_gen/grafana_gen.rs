@@ -123,6 +123,7 @@ datasources:
         let filenames = [
             "risingwave-user-dashboard.json",
             "risingwave-dev-dashboard.json",
+            "risingwave-traces.json", // TODO: generate this
         ];
         let generate_path = generate_path.as_ref();
         for filename in filenames {
