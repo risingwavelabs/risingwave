@@ -246,6 +246,23 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 35
+  
+  - label: "connector node integration test"
+    command: "ci/scripts/connector-node-integration-test.sh -java {{matrix.version}} -p ci-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    matrix:
+      setup:
+        - "11"
+        - "17"
+    timeout_in_minutes: 5
 
   - label: "end-to-end iceberg sink test (release mode)"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
