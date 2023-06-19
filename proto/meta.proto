@@ -373,12 +373,12 @@ message GetReschedulePlanRequest {
     repeated uint32 exclude_worker_ids = 2;
   }
 
-  message ResizeStablePolicy {
+  message StableResizePolicy {
     map<uint32, WorkerChanges> fragment_worker_changes = 1;
   }
 
   oneof policy {
-    ResizeStablePolicy resize_stable_policy = 2;
+    StableResizePolicy stable_resize_policy = 2;
   }
 }
 

@@ -26,7 +26,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
-use risingwave_pb::meta::get_reschedule_plan_request::{Policy, ResizeStablePolicy, WorkerChanges};
+use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy, WorkerChanges};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
@@ -1496,9 +1496,9 @@ where
 {
     async fn generate_stable_resize_plan(
         &self,
-        policy: ResizeStablePolicy,
+        policy: StableResizePolicy,
     ) -> MetaResult<HashMap<FragmentId, ParallelUnitReschedule>> {
-        let ResizeStablePolicy {
+        let StableResizePolicy {
             fragment_worker_changes,
         } = policy;
 
@@ -1733,7 +1733,7 @@ where
         policy: Policy,
     ) -> MetaResult<HashMap<FragmentId, ParallelUnitReschedule>> {
         match policy {
-            Policy::ResizeStablePolicy(resize) => self.generate_stable_resize_plan(resize).await,
+            Policy::StableResizePolicy(resize) => self.generate_stable_resize_plan(resize).await,
         }
     }
 }
