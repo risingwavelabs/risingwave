@@ -17,8 +17,14 @@ tar -xzf elasticsearch-7.17.10-linux-x86_64.tar.gz
 # chmod o+x ./elasticsearch-7.17.10
 # chgrp elasticsearch ./elasticsearch-7.17.10
 # su - elasticsearch
+FILE=./elasticsearch-7.17.10/bin/elasticsearch
+if test -f "$FILE"; then
+    echo "$FILE exists."
+else
+    echo "$FILE does not exist."
+fi
 echo "--- starting elasticsearch"
-./elasticsearch-7.17.10/bin/elasticsearch -d
+elasticsearch-7.17.10/bin/elasticsearch -d
 ps -e | grep elas
 
 # su - root
