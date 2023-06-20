@@ -61,6 +61,11 @@ impl ConnectorClient {
         properties: HashMap<String, String>,
         snapshot_done: bool,
     ) -> Result<Streaming<GetEventStreamResponse>> {
+        tracing::info!(
+            "start cdc source properties: {:?}, snapshot_done: {}",
+            properties,
+            snapshot_done
+        );
         Ok(self
             .0
             .to_owned()

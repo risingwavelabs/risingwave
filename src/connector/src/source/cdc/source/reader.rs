@@ -120,7 +120,6 @@ impl CdcSplitReader {
             properties.insert("table.name".into(), table_name);
         }
 
-        tracing::info!("cdc properties: {:?}", properties);
         let cdc_stream = cdc_client
             .start_source_stream(
                 self.source_id,

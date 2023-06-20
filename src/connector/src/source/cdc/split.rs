@@ -102,8 +102,6 @@ impl MySqlCdcSplit {
         let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
             .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
 
-        info!("dbz_offset: {:?}", dbz_offset);
-
         let snapshot_done = match dbz_offset.source_offset.snapshot {
             Some(val) => !val,
             None => true,
