@@ -105,6 +105,16 @@ pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<Timestamp
     Ok(Timestamp(naive))
 }
 
+/// This operation is zone agnostic.
+#[function("subtract(timestamptz, timestamptz) -> interval")]
+pub fn timestamptz_timestamptz_sub(l: i64, r: i64) -> Result<Interval> {
+    let usecs = l.checked_sub(r).ok_or(ExprError::NumericOverflow)?;
+    let interval = Interval::from_month_day_usec(0, 0, usecs);
+    // https://github.com/postgres/postgres/blob/REL_15_3/src/backend/utils/adt/timestamp.c#L2697
+    let interval = interval.justify_hour().ok_or(ExprError::NumericOverflow)?;
+    Ok(interval)
+}
+
 #[function("subtract_with_time_zone(timestamptz, interval, varchar) -> timestamptz")]
 pub fn timestamptz_interval_sub(input: i64, interval: Interval, time_zone: &str) -> Result<i64> {
     timestamptz_interval_add(

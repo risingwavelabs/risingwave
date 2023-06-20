@@ -85,5 +85,20 @@ select '2016-10-31 11:00:00+00:00'::timestamptz - (interval '24 hours' + interva
 ----
 2016-10-29 12:00:00+01:00
 
+# Test case from https://github.com/postgres/postgres/blob/REL_15_3/src/backend/utils/adt/timestamp.c#L2697
+
+statement ok
+SET timezone = 'EST5EDT';
+
+query T
+SELECT ('2005-10-30 13:22:00-05:00'::timestamptz - '2005-10-29 13:22:00-04:00'::timestamptz);
+----
+1 day 01:00:00
+
+query T
+SELECT ('2005-10-29 13:22:00-04:00'::timestamptz + ('2005-10-30 13:22:00-05:00'::timestamptz - '2005-10-29 13:22:00-04:00'::timestamptz)) at time zone 'EST';
+----
+2005-10-30 14:22:00
+
 statement ok
 set timezone = 'UTC';
