@@ -362,16 +362,14 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         // Build final changes partition by partition.
         for (part_key, diff) in diffs {
-            println!("[rc] part_key: {:?}", part_key);
             Self::ensure_partition_in_cache(this, &mut vars.partitions, &part_key).await?;
             let mut partition = vars.partitions.get_mut(&part_key).unwrap();
             let partition_with_diff = DiffBTreeMap::new(&partition.cache, diff);
             let mut part_final_changes = BTreeMap::new();
 
             let yield_change = |key: StateKey, record: Record<OwnedRow>| {
-                println!("[rc] yield key: {:?}, record: {:?}", key.pk.0, record);
-
-                // Buffer the change inside current partition for later mutation of partition cache.
+                // Buffer the change inside current partition for later mutation of state table and
+                // partition cache.
                 part_final_changes.insert(key.clone(), record.clone());
 
                 // Buffer the change at chunk level (may cross partition) for later mutation of
@@ -395,11 +393,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
             Self::build_changes_for_partition(this, partition_with_diff, yield_change)?;
 
-            // Update partition cache.
+            // Update state table and partition cache.
             for (key, record) in part_final_changes {
+                this.state_table.write_record(record.as_ref());
                 match record {
                     Record::Insert { new_row } | Record::Update { new_row, .. } => {
-                        // if `Update`, the update is not a key-change update, so it's save
+                        // If `Update`, the update is not a key-change update, so it's safe to just
+                        // replace the existing item in the cache.
                         partition.cache.insert(key, new_row);
                     }
                     Record::Delete { .. } => {
@@ -409,10 +409,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
             }
         }
 
-        // Materialize changes to state table and yield to downstream.
+        // Yield changes to downstream.
         let mut chunk_builder = ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types());
         for record in final_changes.into_values() {
-            this.state_table.write_record(record.as_ref());
             if let Some(chunk) = chunk_builder.append_record(record) {
                 yield chunk;
             }
