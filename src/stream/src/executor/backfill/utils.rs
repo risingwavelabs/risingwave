@@ -196,3 +196,12 @@ pub(crate) fn update_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) ->
             .into_owned_row(),
     )
 }
+
+// NOTE(kwannoel): ["None" ..] encoding should be appropriate to mark
+// the case where upstream snapshot is empty.
+// This is so we can persist backfill state as "finished".
+// It won't be confused with another case where pk position comprised of nulls,
+// because they both record that backfill is finished.
+pub(crate) fn construct_initial_finished_state(pos_len: usize) -> Option<OwnedRow> {
+    Some(OwnedRow::new(vec![None; pos_len]))
+}

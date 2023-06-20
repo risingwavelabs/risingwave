@@ -33,8 +33,8 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils::{
-    build_temporary_state, check_all_vnode_finished, flush_data, mapping_chunk, mapping_message,
-    mark_chunk_ref, update_pos,
+    build_temporary_state, check_all_vnode_finished, construct_initial_finished_state, flush_data,
+    mapping_chunk, mapping_message, mark_chunk_ref, update_pos,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -380,7 +380,7 @@ where
                     // (there's no epoch before the first epoch).
                     if is_snapshot_empty {
                         current_pos =
-                            Self::construct_initial_finished_state(pk_in_output_indices.len())
+                            construct_initial_finished_state(pk_in_output_indices.len())
                     }
 
                     // We will update current_pos at least once,
@@ -482,17 +482,6 @@ where
             table.commit_no_data_expected(epoch);
         }
         Ok(())
-    }
-
-    // TODO(kwannoel): I'm not sure if ["None" ..] encoding is appropriate
-    // for the case where upstream snapshot is empty, and we want to persist
-    // backfill state as "finished".
-    // Could it be confused with another case where pk position comprised of nulls?
-    // I don't think it will matter,
-    // because they both record that backfill is finished.
-    // We can revisit in future if necessary.
-    fn construct_initial_finished_state(pos_len: usize) -> Option<OwnedRow> {
-        Some(OwnedRow::new(vec![None; pos_len]))
     }
 }
 
