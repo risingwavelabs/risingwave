@@ -137,7 +137,23 @@ gen_seed() {
   fi
 }
 
-# Prefer to use [`generate_deterministic`], it is faster since
+generate_one_deterministic() {
+  SEED=$RANDOM
+  mkdir -p "$OUTDIR/$1"
+  echo "[INFO] Generating For Seed $RANDOM, Query set {%}"
+  MADSIM_TEST_SEED=$RANDOM $MADSIM_BIN \
+    --sqlsmith 30 \
+    --generate-sqlsmith-queries "$OUTDIR/$1" \
+    $TESTDATA \
+    1>>"$LOGDIR/generate_deterministic.stdout.log" \
+    2>"$LOGDIR/generate-$1.log"
+  echo "[INFO] Finished Generating For Seed $RANDOM, Query set $1"
+  echo "[INFO] Extracting Queries For Seed $RANDOM, Query set $1"
+  extract_queries "$LOGDIR/generate-$1.log" "$OUTDIR/$1/queries.sql"
+  echo "[INFO] Extracted Queries For Seed $RANDOM, Query set $1."
+}
+
+# Prefer to use generate_deterministic, it is faster since
 # runs with all-in-one binary.
 generate_deterministic() {
   # Allows us to use other functions defined in this file within `parallel`.
@@ -145,20 +161,11 @@ generate_deterministic() {
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
   echo "" > $LOGDIR/generate_deterministic.stdout.log
-  gen_seed | env_parallel "
-    mkdir -p $OUTDIR/{%}
-    echo '[INFO] Generating For Seed {}'
-    MADSIM_TEST_SEED={} $MADSIM_BIN \
-      --sqlsmith 30 \
-      --generate-sqlsmith-queries $OUTDIR/{%} \
-      $TESTDATA \
-      1>>$LOGDIR/generate_deterministic.stdout.log \
-      2>$LOGDIR/generate-{%}.log
-    echo '[INFO] Finished Generating For Seed {}, Query set {%}'
-    echo '[INFO] Extracting Queries For Seed {}, Query set {%}'
-    extract_queries $LOGDIR/generate-{%}.log $OUTDIR/{%}/queries.sql
-    echo '[INFO] Extracted Queries For Seed {}, Query set {%}.'
-    "
+  for i in $(seq 1 100)
+  do
+    generate_one_deterministic "$i" &
+  done
+  wait
   set -e
 }
 
