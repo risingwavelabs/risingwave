@@ -75,7 +75,7 @@ impl StreamSink {
             Distribution::Single => RequiredDist::single(),
             _ => {
                 match properties.get("connector") {
-                    Some(s) if s == "iceberg" => {
+                    Some(s) if s == "iceberg" || s == "deltalake" => {
                         // iceberg with multiple parallelism will fail easily with concurrent commit
                         // on metadata
                         // TODO: reset iceberg sink to have multiple parallelism
@@ -269,7 +269,7 @@ impl fmt::Display for StreamSink {
             .sink_desc
             .columns
             .iter()
-            .map(|col| col.column_desc.name.clone())
+            .map(|col| col.name_with_hidden())
             .collect_vec()
             .join(", ");
         builder

@@ -334,7 +334,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t, mapping: [0:0], default: [1<-(2:Int32 + 3:Int32)] }
       └─BatchValues { rows: [[1:Int32]] }
-- name: insert to a table with default now
+- name: insert to a table with default now()
   sql: |
     create table t (a int, b timestamptz default now());
     insert into t values (1);

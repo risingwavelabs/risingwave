@@ -37,7 +37,7 @@ mod struct_field;
 mod update;
 mod values;
 
-pub use bind_context::{BindContext, LateralBindContext};
+pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use delete::BoundDelete;
 pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
@@ -55,7 +55,8 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::{TableId, ViewId};
+use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::{CatalogResult, TableId, ViewId};
 use crate::session::{AuthContext, SessionImpl};
 
 pub type ShareId = usize;
@@ -349,6 +350,18 @@ impl Binder {
         let id = self.next_share_id;
         self.next_share_id += 1;
         id
+    }
+
+    fn first_valid_schema(&self) -> CatalogResult<&SchemaCatalog> {
+        self.catalog.first_valid_schema(
+            &self.db_name,
+            &self.search_path,
+            &self.auth_context.user_name,
+        )
+    }
+
+    pub fn set_clause(&mut self, clause: Option<Clause>) {
+        self.context.clause = clause;
     }
 }
 

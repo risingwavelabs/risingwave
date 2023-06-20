@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::rc::Rc;
+
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
@@ -66,7 +68,7 @@ pub fn gen_sink_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: CreateSinkStatement,
-) -> Result<(PlanRef, SinkCatalog)> {
+) -> Result<(Box<Query>, PlanRef, SinkCatalog)> {
     let db_name = session.database();
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
@@ -83,7 +85,7 @@ pub fn gen_sink_plan(
 
     let (dependent_relations, bound) = {
         let mut binder = Binder::new_for_stream(session);
-        let bound = binder.bind_query(*query)?;
+        let bound = binder.bind_query(*query.clone())?;
         (binder.included_relations(), bound)
     };
 
@@ -127,7 +129,7 @@ pub fn gen_sink_plan(
         dependent_relations.into_iter().collect_vec(),
     );
 
-    Ok((sink_plan, sink_catalog))
+    Ok((query, sink_plan, sink_catalog))
 }
 
 pub async fn handle_create_sink(
@@ -139,8 +141,15 @@ pub async fn handle_create_sink(
     session.check_relation_name_duplicated(stmt.sink_name.clone())?;
 
     let (sink, graph) = {
-        let context = OptimizerContext::from_handler_args(handle_args);
-        let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
+        let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
+        let (query, plan, sink) = gen_sink_plan(&session, context.clone(), stmt)?;
+        let has_order_by = !query.order_by.is_empty();
+        if has_order_by {
+            context.warn_to_user(
+                r#"The ORDER BY clause in the CREATE SINK statement has no effect at all."#
+                    .to_string(),
+            );
+        }
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()

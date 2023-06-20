@@ -94,5 +94,10 @@
             <artifactId>risingwave-sink-deltalake</artifactId>
             <scope>provided</scope>
         </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>risingwave-sink-es</artifactId>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
 </project>

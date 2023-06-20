@@ -527,7 +527,7 @@
     └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [t.v1], output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:00:02':Interval) as $expr1], output_watermarks: [$expr1] }
+        └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:02':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
           └─StreamNow { output: [now] }
 - name: and of two now expression condition
   sql: |
@@ -619,3 +619,35 @@
 - name: const_eval of division by 0 error
   sql: select 1 / 0 t1;
   batch_error: 'Expr error: Division by zero'
+- sql: |
+    select * from abs(-1);
+  batch_plan: |
+    BatchValues { rows: [[1:Int32]] }
+  stream_plan: |
+    StreamMaterialize { columns: [abs, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "NoCheck", watermark_columns: [abs] }
+    └─StreamValues { rows: [[Abs(-1:Int32), 0:Int64]] }
+- sql: |
+    select * from range(1,2);
+  batch_plan: |
+    BatchTableFunction { Range(1:Int32, 2:Int32) }
+  stream_error: |-
+    Feature is not yet implemented: LogicalTableFunction::logical_rewrite_for_stream
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    select * from max();
+  binder_error: 'Invalid input syntax: aggregate functions are not allowed in FROM'
+- name: Grafana issue-10134
+  sql: |
+    SELECT * FROM
+    generate_series(
+      array_lower(string_to_array(current_setting('search_path'),','),1),
+      array_upper(string_to_array(current_setting('search_path'),','),1)
+    ) as i,
+    string_to_array(current_setting('search_path'),',') s
+  batch_plan: |
+    BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+    ├─BatchTableFunction { GenerateSeries(1:Int32, 2:Int32) }
+    └─BatchValues { rows: [[ARRAY["$user",  public]:List(Varchar)]] }
+  stream_error: |-
+    Feature is not yet implemented: LogicalTableFunction::logical_rewrite_for_stream
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
