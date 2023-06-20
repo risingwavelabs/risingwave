@@ -32,7 +32,6 @@ use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::filter_key_extractor::{FilterKeyExtractorManager, RemoteTableAccessor};
@@ -72,16 +71,11 @@ pub async fn compactor_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Register to the cluster.
-    let p = Property {
-        is_unschedulable: false,
-        ..Default::default()
-    };
-
     let (meta_client, system_params_reader) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::Compactor,
         &advertise_addr,
-        p,
+        Default::default(),
         &config.meta,
     )
     .await
