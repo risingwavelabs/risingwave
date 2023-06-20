@@ -83,13 +83,18 @@ public class DbzConnectorConfig {
     }
 
     public DbzConnectorConfig(
-            SourceTypeE source, long sourceId, String startOffset, Map<String, String> userProps) {
+            SourceTypeE source,
+            long sourceId,
+            String startOffset,
+            Map<String, String> userProps,
+            boolean snapshotDone) {
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
-            // if offset is specified, we will continue binlog reading from the specified offset
-            if (null != startOffset && !startOffset.isBlank()) {
+            // if snapshot phase is finished and offset is specified, we will continue binlog
+            // reading from the given offset
+            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
                 // 'snapshot.mode=schema_only_recovery' must be configured if binlog offset is
                 // specified.
                 // It only snapshots the schemas, not the data, and continue binlog reading from the
@@ -108,8 +113,9 @@ public class DbzConnectorConfig {
                 postgresProps.setProperty("publication.autocreate.mode", "all_tables");
             }
 
-            // if offset is specified, we will continue reading changes from the specified offset
-            if (null != startOffset && !startOffset.isBlank()) {
+            // if snapshot phase is finished adn offset is specified, we will continue reading
+            // changes from the given offset
+            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
                 postgresProps.setProperty("snapshot.mode", "never");
                 postgresProps.setProperty(
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);

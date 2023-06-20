@@ -59,6 +59,7 @@ impl ConnectorClient {
         source_type: SourceType,
         start_offset: Option<String>,
         properties: HashMap<String, String>,
+        snapshot_done: bool,
     ) -> Result<Streaming<GetEventStreamResponse>> {
         Ok(self
             .0
@@ -68,6 +69,7 @@ impl ConnectorClient {
                 source_type: source_type as _,
                 start_offset: start_offset.unwrap_or_default(),
                 properties,
+                snapshot_done,
             })
             .await
             .inspect_err(|err| {
