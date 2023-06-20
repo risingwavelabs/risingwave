@@ -47,12 +47,12 @@ check_if_failed() {
 
 # Extract queries from file $1, write to file $2
 extract_queries() {
-  QUERIES=$(grep "\[EXECUTING .*\]: " < "$1" | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/')
-  FAILED=$(check_if_failed < "$1")
+  local QUERIES=$(grep "\[EXECUTING .*\]: " < "$1" | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/')
+  local FAILED=$(check_if_failed < "$1")
   if [[ -n "$FAILED" ]]; then
-    FAIL_REASON=$(get_failure_reason < "$1")
+    local FAIL_REASON=$(get_failure_reason < "$1")
     echo_err "[WARN] Cluster crashed while generating queries. see $1 for more information."
-    QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
+    local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
   echo -e "$QUERIES" > "$2"
 }
