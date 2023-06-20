@@ -136,8 +136,8 @@ gen_seed() {
 }
 
 generate_one_deterministic() {
-  SEED=$RANDOM
-  SET_ID=$1
+  local SEED=$RANDOM
+  local SET_ID=$1
   mkdir -p "$OUTDIR/$SET_ID"
   echo "[INFO] Generating For Seed $RANDOM, Query set $SET_ID"
   MADSIM_TEST_SEED=$RANDOM $MADSIM_BIN \
