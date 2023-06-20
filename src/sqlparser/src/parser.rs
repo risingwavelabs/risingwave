@@ -3530,6 +3530,8 @@ impl Parser {
         let distinct = self.parse_all_or_distinct_on()?;
 
         let mut projection = self.parse_comma_separated(Parser::parse_select_item)?;
+
+        // only deals with 'select * except' here
         let index = self.index;
         if self.parse_keyword(Keyword::EXCEPT) {
             if projection.len() == 1 && let SelectItem::Wildcard = projection[0] {
