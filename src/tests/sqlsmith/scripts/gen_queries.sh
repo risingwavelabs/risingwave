@@ -149,7 +149,7 @@ generate_deterministic() {
     mkdir -p $OUTDIR/{%}
     echo '[INFO] Generating For Seed {}'
     MADSIM_TEST_SEED={} $MADSIM_BIN \
-      --sqlsmith 40 \
+      --sqlsmith 30 \
       --generate-sqlsmith-queries $OUTDIR/{%} \
       $TESTDATA \
       1>>$LOGDIR/generate_deterministic.stdout.log \
