@@ -47,24 +47,18 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_simple_table(&mut self) -> (TableWithJoins, Vec<Table>) {
-        let (table_with_joins, table) = self.gen_simple_table_inner();
-        (table_with_joins, vec![table])
-    }
-
-    fn gen_simple_table_inner(&mut self) -> (TableWithJoins, Table) {
-        let (relation, _, table) = self.gen_simple_table_factor();
-
+    fn gen_no_join(&mut self) -> (TableWithJoins, Vec<Table>) {
+        let (relation, table) = self.gen_table_factor();
         (
             TableWithJoins {
                 relation,
                 joins: vec![],
             },
-            table,
+            vec![table],
         )
     }
 
-    fn gen_simple_table_factor(&mut self) -> (TableFactor, Vec<Column>, Table) {
+    fn gen_simple_table_factor(&mut self) -> (TableFactor, Table) {
         let alias = self.gen_table_name_with_prefix("t");
         let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
         let table_factor = TableFactor::Table {
@@ -76,11 +70,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             for_system_time_as_of_proctime: false,
         };
         table.name = alias; // Rename the table.
-        let columns = table.get_qualified_columns();
-        (table_factor, columns, table)
+        (table_factor, table)
     }
 
-    fn gen_table_factor(&mut self) -> (TableFactor, Vec<Column>, Table) {
+    fn gen_table_factor(&mut self) -> (TableFactor, Table) {
         let current_context = self.new_local_context();
         let factor = self.gen_table_factor_inner();
         self.restore_context(current_context);
@@ -89,9 +82,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Generates a table factor, and provides bound columns.
     /// Generated column names should be qualified by table name.
-    fn gen_table_factor_inner(&mut self) -> (TableFactor, Vec<Column>, Table) {
+    fn gen_table_factor_inner(&mut self) -> (TableFactor, Table) {
         // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
-        self.gen_simple_table_factor()
+        match self.rng.gen_range(0..=2) {
+            0 => self.gen_time_window_func(),
+            1 => {
+                if self.can_recurse() {
+                    self.gen_table_subquery()
+                } else {
+                    self.gen_simple_table_factor()
+                }
+            }
+            2 => self.gen_simple_table_factor(),
+            _ => unreachable!(),
+        }
     }
 
     fn gen_equi_join_columns(
@@ -282,8 +286,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Generates t1 JOIN t2 ON ...
     fn gen_simple_join_clause(&mut self) -> Option<(TableWithJoins, Vec<Table>)> {
-        let (left_factor, left_columns, left_table) = self.gen_table_factor();
-        let (right_factor, right_columns, right_table) = self.gen_table_factor();
+        let (left_factor, left_table) = self.gen_table_factor();
+        let left_columns = left_table.get_qualified_columns();
+        let (right_factor, right_table) = self.gen_table_factor();
+        let right_columns = right_table.get_qualified_columns();
         let Some(join_operator) = self.gen_join_operator(
             left_columns,
             left_table.clone(),
@@ -310,7 +316,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_more_joins(&mut self) -> (TableWithJoins, Vec<Table>) {
         // gen left
         let Some((left_table_with_join, mut left_tables)) = self.gen_simple_join_clause() else {
-            return self.gen_simple_table();
+            return self.gen_no_join();
         };
         let left_columns = left_tables
             .iter()
@@ -318,7 +324,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .collect();
 
         // gen right
-        let (right_factor, right_columns, right_table) = self.gen_table_factor();
+        let (right_factor, right_table) = self.gen_table_factor();
+        let right_columns = right_table.get_qualified_columns();
 
         // gen join
         let left_table = left_tables.choose(&mut self.rng).unwrap();
@@ -350,22 +357,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         )
     }
 
-    fn gen_table_subquery(&mut self) -> (TableWithJoins, Vec<Table>) {
+    fn gen_table_subquery(&mut self) -> (TableFactor, Table) {
         let (subquery, columns) = self.gen_local_query();
         let alias = self.gen_table_name_with_prefix("sq");
         let table = Table::new(alias.clone(), columns);
-        let relation = TableWithJoins {
-            relation: TableFactor::Derived {
-                lateral: false,
-                subquery: Box::new(subquery),
-                alias: Some(TableAlias {
-                    name: Ident::new_unchecked(alias),
-                    columns: vec![],
-                }),
-            },
-            joins: vec![],
+        let factor = TableFactor::Derived {
+            lateral: false,
+            subquery: Box::new(subquery),
+            alias: Some(TableAlias {
+                name: Ident::new_unchecked(alias),
+                columns: vec![],
+            }),
         };
 
-        (relation, vec![table])
+        (factor, table)
     }
 }

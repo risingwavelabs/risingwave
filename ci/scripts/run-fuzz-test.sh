@@ -43,7 +43,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     cargo make ci-start ci-3cn-1fe
 
     echo "--- e2e, ci-3cn-1fe, run fuzzing"
-    timeout 20m ./target/debug/sqlsmith test \
+    ./target/debug/sqlsmith test \
       --count "$SQLSMITH_COUNT" \
       --testdata ./src/tests/sqlsmith/tests/testdata
 

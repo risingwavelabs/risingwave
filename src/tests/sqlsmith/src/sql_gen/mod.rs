@@ -174,6 +174,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: false,
+            recursion_weight: 0.3,
         }
     }
 
@@ -187,6 +188,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: true,
+            recursion_weight: 0.3,
         }
     }
 
