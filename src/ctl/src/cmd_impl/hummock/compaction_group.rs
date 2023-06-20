@@ -103,3 +103,15 @@ pub async fn split_compaction_group(
     );
     Ok(())
 }
+
+pub async fn list_compaction_status(context: &CtlContext) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    let (status, assignment, progress) = meta_client.risectl_list_compaction_status().await?;
+    println!("--- LSMtree Status ---");
+    println!("{:#?}", status);
+    println!("--- Task Assignment ---");
+    println!("{:#?}", assignment);
+    println!("--- Task Progress ---");
+    println!("{:#?}", progress);
+    Ok(())
+}

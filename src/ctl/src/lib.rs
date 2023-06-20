@@ -166,6 +166,8 @@ enum HummockCommands {
     ResumeVersionCheckpoint,
     /// Replay version from the checkpoint one to the latest one.
     ReplayVersion,
+    /// List compaction status
+    ListCompactionStatus,
 }
 
 #[derive(Subcommand)]
@@ -341,6 +343,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::ReplayVersion) => {
             cmd_impl::hummock::replay_version(context).await?;
+        }
+        Commands::Hummock(HummockCommands::ListCompactionStatus) => {
+            cmd_impl::hummock::list_compaction_status(context).await?;
         }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?
