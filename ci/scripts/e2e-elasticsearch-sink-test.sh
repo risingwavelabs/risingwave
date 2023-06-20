@@ -11,18 +11,17 @@ shasum -a 512 -c elasticsearch-7.17.10-linux-x86_64.tar.gz.sha512
 tar -xzf elasticsearch-7.17.10-linux-x86_64.tar.gz
 
 # Elasticsearch cannot be run in root
-# groupadd elasticsearch
-# useradd elasticsearch -g elasticsearch -p elasticsearch
-# chown -R elasticsearch:elasticsearch ./elasticsearch-7.17.10
-# chmod o+x ./elasticsearch-7.17.10
-# chgrp elasticsearch ./elasticsearch-7.17.10
-# su - elasticsearch
+groupadd elasticsearch
+useradd elasticsearch -g elasticsearch -p elasticsearch
+chown -R elasticsearch:elasticsearch ./elasticsearch-7.17.10
+chmod o+x ./elasticsearch-7.17.10
+chgrp elasticsearch ./elasticsearch-7.17.10
+su - elasticsearch
 echo "--- starting elasticsearch"
 timeout 20 elasticsearch-7.17.10/bin/elasticsearch -E http.port=9200
 # check status of elasticsearch
 curl http://127.0.0.1:9200
-
-# su - root
+su - root
 
 echo "--- testing sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch_sink.slt'
