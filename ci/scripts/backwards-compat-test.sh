@@ -198,7 +198,7 @@ git checkout "${TAG}-rc"
 cargo build -p risedev
 
 echo "--- Setup old release $TAG"
-git clone --depth 1 --branch v0.18.0-rc "https://${GITHUB_TOKEN}@github.com/risingwavelabs/risingwave/releases/download/${TAG}/risingwave-${TAG}-x86_64-unknown-linux.tar.gz"
+git clone --depth 1 --branch "${TAG}-rc" "https://${GITHUB_TOKEN}@github.com/risingwavelabs/risingwave/releases/download/${TAG}/risingwave-${TAG}-x86_64-unknown-linux.tar.gz"
 tar -xvf risingwave-${TAG}-x86_64-unknown-linux.tar.gz
 mkdir -p target/debug
 cp risingwave target/debug/risingwave
