@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use itertools::Itertools;
@@ -230,12 +229,11 @@ impl Binder {
         let mut is_except = false;
         for item in select_items {
             match item {
-                SelectItem::UnnamedExpr(expr) => {    
+                SelectItem::UnnamedExpr(expr) => {
                     let alias = derive_alias(&expr);
                     let bound = self.bind_expr(expr)?;
                     select_list.push(bound);
                     aliases.push(alias);
-                        
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
                     check_valid_column_name(&alias.real_value())?;
@@ -316,18 +314,21 @@ impl Binder {
                     unreachable!();
                 }
             }
-            let indices: Vec<usize> = select_list.into_iter().map(|expr| {
-                if let ExprImpl::InputRef(inner) = expr {
-                    (*inner).index
-                } else {
-                    unreachable!()
-                }
-            }).collect();
-            let (exprs, names) =
-                Self::iter_bound_columns(self.context.columns[..].iter().filter(|c| {
-                    !c.is_hidden
-                    && !indices.contains(&c.index)
-                }));
+            let indices: Vec<usize> = select_list
+                .into_iter()
+                .map(|expr| {
+                    if let ExprImpl::InputRef(inner) = expr {
+                        inner.index
+                    } else {
+                        unreachable!()
+                    }
+                })
+                .collect();
+            let (exprs, names) = Self::iter_bound_columns(
+                self.context.columns[..]
+                    .iter()
+                    .filter(|c| !c.is_hidden && !indices.contains(&c.index)),
+            );
             reverse_select_list.extend(exprs);
             reverse_aliases.extend(names);
             return Ok((reverse_select_list, reverse_aliases));

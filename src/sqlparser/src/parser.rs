@@ -4251,30 +4251,24 @@ impl Parser {
     pub fn parse_table_or_column(&mut self) -> Result<SelectItem, ParserError> {
         let index = self.index;
 
-        match self.next_token().token {
-            Token::Word(w) => {
-                let mut id_parts = vec![w.to_ident()?];
-                while self.consume_token(&Token::Period) {
-                    let token = self.next_token();
-                    match token.token {
-                        Token::Word(w) => id_parts.push(w.to_ident()?),
-                        unexpected => {
-                            self.index = index;
-                            return self.expected(
-                                "an identifier", 
-                            unexpected.with_location(token.location))
-                        }
+        if let Token::Word(w) = self.next_token().token {
+            let mut id_parts = vec![w.to_ident()?];
+            while self.consume_token(&Token::Period) {
+                let token = self.next_token();
+                match token.token {
+                    Token::Word(w) => id_parts.push(w.to_ident()?),
+                    unexpected => {
+                        self.index = index;
+                        return self
+                            .expected("an identifier", unexpected.with_location(token.location));
                     }
                 }
-                return Ok(SelectItem::Except(Expr::CompoundIdentifier(id_parts)));
             }
-            _ => (),
+            return Ok(SelectItem::Except(Expr::CompoundIdentifier(id_parts)));
         }
+
         self.index = index;
-        return self.expected(
-            "an identifier",
-            self.peek_token()
-        )
+        self.expected("an identifier", self.peek_token())
     }
 
     /// Parse a comma-delimited list of projections after SELECT
