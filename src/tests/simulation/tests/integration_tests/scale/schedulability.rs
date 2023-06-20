@@ -411,7 +411,7 @@ async fn invalid_reschedule(
     let err_msg = result.err().unwrap().to_string();
     assert_eq!(
         err_msg,
-        "gRPC error (Internal error): unable to move actor to node marked as unschedulable"
+        "gRPC error (Internal error): unable to move fragment to unschedulable node"
     );
 
     cluster.run(drop).await?;
