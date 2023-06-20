@@ -241,14 +241,13 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     }
 
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
-        let dbz_stream: BoxStream<'static, _> = gen_debezium_message_stream(
+        let dbz_stream = gen_debezium_message_stream(
             &self.schema,
             &self.pk_indices,
             chunk,
             ts_ms,
             DebeziumAdapterOpts::default(),
-        )
-        .boxed();
+        );
 
         #[for_await]
         for msg in dbz_stream {

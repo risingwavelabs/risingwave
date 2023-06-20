@@ -167,6 +167,8 @@ macro_rules! dispatch_sink {
             SinkImpl::Remote($sink) => $body,
             SinkImpl::UpsertRemote($sink) => $body,
             SinkImpl::BlackHole($sink) => $body,
+            SinkImpl::Kinesis($sink) => $body,
+            SinkImpl::UpsertKinesis($sink) => $body,
         }
     }};
 }

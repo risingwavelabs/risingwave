@@ -35,9 +35,9 @@ impl Default for DebeziumAdapterOpts {
 }
 
 #[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
-pub async fn gen_debezium_message_stream(
-    schema: &Schema,
-    pk_indices: &Vec<usize>,
+pub async fn gen_debezium_message_stream<'a>(
+    schema: &'a Schema,
+    pk_indices: &'a Vec<usize>,
     chunk: StreamChunk,
     ts_ms: u64,
     opts: DebeziumAdapterOpts,
