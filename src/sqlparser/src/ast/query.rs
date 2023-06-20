@@ -311,6 +311,8 @@ pub enum SelectItem {
     QualifiedWildcard(ObjectName),
     /// An unqualified `*`
     Wildcard,
+    /// select * except [ ]
+    Except(Expr),
 }
 
 impl fmt::Display for SelectItem {
@@ -328,6 +330,7 @@ impl fmt::Display for SelectItem {
             ),
             SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
             SelectItem::Wildcard => write!(f, "*"),
+            SelectItem::Except(expr) => write!(f, "EXCEPT {}", expr),
         }
     }
 }

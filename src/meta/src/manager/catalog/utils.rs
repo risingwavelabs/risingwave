@@ -344,6 +344,7 @@ impl QueryRewriter<'_> {
     fn visit_select_item(&self, select_item: &mut SelectItem) {
         match select_item {
             SelectItem::UnnamedExpr(expr)
+            | SelectItem::Except(expr)
             | SelectItem::ExprQualifiedWildcard(expr, _)
             | SelectItem::ExprWithAlias { expr, .. } => self.visit_expr(expr),
             SelectItem::QualifiedWildcard(_) | SelectItem::Wildcard => {}

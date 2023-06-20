@@ -3529,7 +3529,15 @@ impl Parser {
     pub fn parse_select(&mut self) -> Result<Select, ParserError> {
         let distinct = self.parse_all_or_distinct_on()?;
 
-        let projection = self.parse_comma_separated(Parser::parse_select_item)?;
+        let mut projection = self.parse_comma_separated(Parser::parse_select_item)?;
+        let index = self.index;
+        if self.parse_keyword(Keyword::EXCEPT) {
+            if projection.len() == 1 && let SelectItem::Wildcard = projection[0] {
+                projection = self.parse_comma_separated(Parser::parse_table_or_column)?;
+            } else {
+                self.index = index;
+            }
+        }
 
         // Note that for keywords to be properly handled here, they need to be
         // added to `RESERVED_FOR_COLUMN_ALIAS` / `RESERVED_FOR_TABLE_ALIAS`,
@@ -4238,6 +4246,35 @@ impl Parser {
             self.expect_token(&Token::RParen)?;
             Ok((args, order_by))
         }
+    }
+
+    pub fn parse_table_or_column(&mut self) -> Result<SelectItem, ParserError> {
+        let index = self.index;
+
+        match self.next_token().token {
+            Token::Word(w) => {
+                let mut id_parts = vec![w.to_ident()?];
+                while self.consume_token(&Token::Period) {
+                    let token = self.next_token();
+                    match token.token {
+                        Token::Word(w) => id_parts.push(w.to_ident()?),
+                        unexpected => {
+                            self.index = index;
+                            return self.expected(
+                                "an identifier", 
+                            unexpected.with_location(token.location))
+                        }
+                    }
+                }
+                return Ok(SelectItem::Except(Expr::CompoundIdentifier(id_parts)));
+            }
+            _ => (),
+        }
+        self.index = index;
+        return self.expected(
+            "an identifier",
+            self.peek_token()
+        )
     }
 
     /// Parse a comma-delimited list of projections after SELECT

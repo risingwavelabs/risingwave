@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Debug;
 
 use itertools::Itertools;
@@ -226,13 +227,15 @@ impl Binder {
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let mut select_list = vec![];
         let mut aliases = vec![];
+        let mut is_except = false;
         for item in select_items {
             match item {
-                SelectItem::UnnamedExpr(expr) => {
+                SelectItem::UnnamedExpr(expr) => {    
                     let alias = derive_alias(&expr);
                     let bound = self.bind_expr(expr)?;
                     select_list.push(bound);
                     aliases.push(alias);
+                        
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
                     check_valid_column_name(&alias.real_value())?;
@@ -285,7 +288,6 @@ impl Binder {
                         }));
                     select_list.extend(exprs);
                     aliases.extend(names);
-
                     // TODO: we will need to be able to handle wildcard expressions bound to aliases
                     // in the future. We'd then need a `NaturalGroupContext`
                     // bound to each alias to correctly disambiguate column
@@ -294,7 +296,41 @@ impl Binder {
                     // We may need to refactor `NaturalGroupContext` to become span aware in that
                     // case.
                 }
+                SelectItem::Except(expr) => {
+                    is_except = true;
+                    let alias = derive_alias(&expr);
+                    let bound = self.bind_expr(expr)?;
+                    select_list.push(bound);
+                    aliases.push(alias);
+                }
             }
+        }
+        if is_except {
+            let mut reverse_select_list = vec![];
+            let mut reverse_aliases = vec![];
+            let mut indices: HashSet<usize> = HashSet::new();
+            for expr in &select_list {
+                if let ExprImpl::InputRef(inner) = expr {
+                    indices.insert(inner.index);
+                } else {
+                    unreachable!();
+                }
+            }
+            let indices: Vec<usize> = select_list.into_iter().map(|expr| {
+                if let ExprImpl::InputRef(inner) = expr {
+                    (*inner).index
+                } else {
+                    unreachable!()
+                }
+            }).collect();
+            let (exprs, names) =
+                Self::iter_bound_columns(self.context.columns[..].iter().filter(|c| {
+                    !c.is_hidden
+                    && !indices.contains(&c.index)
+                }));
+            reverse_select_list.extend(exprs);
+            reverse_aliases.extend(names);
+            return Ok((reverse_select_list, reverse_aliases));
         }
         Ok((select_list, aliases))
     }
