@@ -84,6 +84,8 @@ pub async fn gen_debezium_message_stream<'a>(
                 yield (event_key_object.clone(), value_obj);
 
                 if opts.gen_tombstone {
+                    // Tomestone event
+                    // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-delete-events
                     yield (event_key_object, None);
                 }
 

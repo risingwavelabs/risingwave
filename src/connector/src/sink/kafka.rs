@@ -252,24 +252,15 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         #[for_await]
         for msg in dbz_stream {
             let (event_key_object, event_object) = msg?;
-            if let (Some(key_obj), Some(obj)) = (event_key_object, event_object) {
-                let key_str = key_obj.to_string();
-                self.send(
-                    BaseRecord::to(self.config.common.topic.as_str())
-                        .key(key_str.as_bytes())
-                        .payload(obj.to_string().as_bytes()),
-                )
-                .await?;
-                // Tomestone event
-                // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-delete-events
-                // if op == Op::Delete {
-                //     self.send(
-                //         BaseRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
-                //             .key(key_str.as_bytes()),
-                //     )
-                //     .await?;
-                // }
+            let key_str = event_key_object.unwrap().to_string();
+            let mut record = BaseRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
+                .key(key_str.as_bytes());
+            let payload;
+            if let Some(value) = event_object {
+                payload = value.to_string();
+                record = record.payload(payload.as_bytes());
             }
+            self.send(record).await?;
         }
         Ok(())
     }
