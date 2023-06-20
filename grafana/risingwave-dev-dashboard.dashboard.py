@@ -154,7 +154,7 @@ def section_compaction(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytesps(
-                    "Commit Flush Bytes(MB/s) by Table",
+                    "Commit Flush Bytes by Table",
                     "The  of bytes that have been written by commit epoch per second.",
                     [
                         panels.target(
