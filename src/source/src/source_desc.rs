@@ -57,6 +57,7 @@ pub struct SourceDescBuilder {
     source_info: PbStreamSourceInfo,
     connector_params: ConnectorParams,
     connector_message_buffer_size: usize,
+    pk_indicies: Vec<usize>,
 }
 
 impl SourceDescBuilder {
@@ -69,6 +70,7 @@ impl SourceDescBuilder {
         source_info: PbStreamSourceInfo,
         connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
+        pk_indicies: Vec<usize>,
     ) -> Self {
         Self {
             columns,
@@ -78,6 +80,7 @@ impl SourceDescBuilder {
             source_info,
             connector_params,
             connector_message_buffer_size,
+            pk_indicies,
         }
     }
 
@@ -89,6 +92,9 @@ impl SourceDescBuilder {
             .collect();
         if let Some(row_id_index) = self.row_id_index {
             columns[row_id_index].is_row_id = true;
+        }
+        for pk_index in &self.pk_indicies {
+            columns[*pk_index].is_pk = true;
         }
         columns
     }
@@ -181,6 +187,7 @@ pub mod test_utils {
         row_id_index: Option<usize>,
         source_info: StreamSourceInfo,
         properties: HashMap<String, String>,
+        pk_indicies: Vec<usize>,
     ) -> SourceDescBuilder {
         let columns = schema
             .fields
@@ -209,6 +216,7 @@ pub mod test_utils {
             source_info,
             connector_params: Default::default(),
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
+            pk_indicies,
         }
     }
 }
