@@ -1607,6 +1607,15 @@ where
         let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
         purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version);
+        for (table_id, stats) in &table_stats_change {
+            let table_id_str = table_id.to_string();
+            let stats_value =
+                std::cmp::max(0, stats.total_key_size + stats.total_value_size);
+            self.metrics
+                .table_write_throughput
+                .with_label_values(&[table_id_str.as_str()])
+                .inc_by(stats_value as u64);
+        }
 
         commit_multi_var!(
             self,

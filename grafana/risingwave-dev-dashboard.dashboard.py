@@ -153,6 +153,17 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytesps(
+                    "Commit Flush Bytes(MB/s) by Table",
+                    "The  of bytes that have been written by commit epoch per second.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_commit_write_throughput')})) by (table_id)",
+                            "write - {{table_id}}",
+                        ),
+                    ],
+                ),
+
                 panels.timeseries_count(
                     "Compactor Core Count To Scale",
                     "The number of CPUs needed to meet the demand of compaction.",
