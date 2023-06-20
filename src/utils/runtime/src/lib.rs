@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use futures::Future;
 use risingwave_common::metrics::MetricsLayer;
+use risingwave_common::util::env_var::is_ci;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{FilterFn, Targets};
 use tracing_subscriber::fmt::time::OffsetTime;
@@ -54,7 +55,7 @@ const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
 fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets {
     targets
         // Other RisingWave crates will follow the default level (`DEBUG` or `INFO` according to
-        // the `debug_assertions` flag).
+        // the `debug_assertions` and `is_ci` flag).
         .with_target("risingwave_stream", Level::DEBUG)
         .with_target("risingwave_storage", Level::DEBUG)
         .with_target("pgwire", Level::ERROR)
@@ -171,7 +172,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
         let filter = configure_risingwave_targets_fmt(filter);
 
         // For all other crates
-        let filter = filter.with_default(if cfg!(debug_assertions) {
+        let filter = filter.with_default(if cfg!(debug_assertions) && !is_ci() {
             Level::DEBUG
         } else {
             Level::INFO
