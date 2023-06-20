@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
 use crate::source::{SplitId, SplitMetaData};
 
@@ -244,55 +243,3 @@ impl DebeziumCdcSplit {
         unreachable!("invalid debezium split")
     }
 }
-
-// impl SplitMetaData for MySqlCdcSplit {
-//     fn id(&self) -> SplitId {
-//         format!("{}", self.inner.split_id).into()
-//     }
-//
-//     fn encode_to_json(&self) -> JsonbVal {
-//         serde_json::to_value(self.clone()).unwrap().into()
-//     }
-//
-//     fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-//         serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
-//     }
-// }
-//
-// impl SplitMetaData for PostgresCdcSplit {
-//     fn id(&self) -> SplitId {
-//         format!("{}", self.inner.split_id).into()
-//     }
-//
-//     fn encode_to_json(&self) -> JsonbVal {
-//         serde_json::to_value(self.clone()).unwrap().into()
-//     }
-//
-//     fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-//         serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
-//     }
-// }
-
-// impl SplitMetaData for CdcSplit {
-//     fn id(&self) -> SplitId {
-//         format!("{}", self.split_id).into()
-//     }
-//
-//     fn encode_to_json(&self) -> JsonbVal {
-//         serde_json::to_value(self.clone()).unwrap().into()
-//     }
-//
-//     fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-//         serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
-//     }
-// }
-
-// impl CdcSplit {
-//     pub fn new(split_id: u32, start_offset: String) -> CdcSplit {
-//         Self {
-//             split_id,
-//             start_offset: Some(start_offset),
-//             snapshot_done: false,
-//         }
-//     }
-// }
