@@ -36,7 +36,7 @@ use risingwave_sqlparser::ast::{
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::table_catalog::TableVersion;
-use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
 use crate::expr::{Expr, ExprImpl};
 use crate::handler::create_source::{
     bind_source_watermark, check_source_schema, try_bind_columns_from_source,
@@ -46,7 +46,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::session::SessionImpl;
+use crate::session::{CheckRelationError, SessionImpl};
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_connection_in_with_option;
 use crate::{Binder, TableCatalog, WithOptions};
@@ -659,16 +659,16 @@ pub async fn handle_create_table(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
-        if if_not_exists {
+    match session.check_relation_name_duplicated(table_name.clone()) {
+        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
             return Ok(PgResponse::empty_result_with_notice(
                 StatementType::CREATE_TABLE,
-                format!("relation \"{}\" already exists, skipping", table_name),
+                format!("relation \"{}\" already exists, skipping", name),
             ));
-        } else {
-            return Err(e);
         }
-    }
+        Err(e) => return Err(e.into()),
+        Ok(_) => {}
+    };
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
