@@ -36,7 +36,7 @@ mvn --batch-mode --update-snapshots clean package -DskipTests
 echo "--- install java"
 apt install sudo -y
 
-if [ "$OPTARG" = "11" ]; then 
+if [ "$VERSION" = "11" ]; then 
   echo "The test imgae default java version is 11, no need to install"
 else
   echo "The test imgae default java version is 11, need to install java 17"
