@@ -139,18 +139,19 @@ gen_seed() {
 
 generate_one_deterministic() {
   SEED=$RANDOM
-  mkdir -p "$OUTDIR/$1"
-  echo "[INFO] Generating For Seed $RANDOM, Query set {%}"
+  SET_ID=$1
+  mkdir -p "$OUTDIR/$SET_ID"
+  echo "[INFO] Generating For Seed $RANDOM, Query set $SET_ID"
   MADSIM_TEST_SEED=$RANDOM $MADSIM_BIN \
     --sqlsmith 30 \
-    --generate-sqlsmith-queries "$OUTDIR/$1" \
+    --generate-sqlsmith-queries "$OUTDIR/$SET_ID" \
     $TESTDATA \
     1>>"$LOGDIR/generate_deterministic.stdout.log" \
-    2>"$LOGDIR/generate-$1.log"
-  echo "[INFO] Finished Generating For Seed $RANDOM, Query set $1"
-  echo "[INFO] Extracting Queries For Seed $RANDOM, Query set $1"
-  extract_queries "$LOGDIR/generate-$1.log" "$OUTDIR/$1/queries.sql"
-  echo "[INFO] Extracted Queries For Seed $RANDOM, Query set $1."
+    2>"$LOGDIR/generate-$SET_ID.log"
+  echo "[INFO] Finished Generating For Seed $RANDOM, Query set $SET_ID"
+  echo "[INFO] Extracting Queries For Seed $RANDOM, Query set $SET_ID"
+  extract_queries "$LOGDIR/generate-$SET_ID.log" "$OUTDIR/$SET_ID/queries.sql"
+  echo "[INFO] Extracted Queries For Seed $RANDOM, Query set $SET_ID."
 }
 
 # Prefer to use generate_deterministic, it is faster since
