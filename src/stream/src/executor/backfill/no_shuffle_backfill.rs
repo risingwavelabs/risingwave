@@ -38,11 +38,12 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{collect_data_chunk, get_second};
 use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorError;
-use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{PkIndices, StreamExecutorResult, Watermark};
+use crate::executor::{
+    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
+    PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
+};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
@@ -664,7 +665,7 @@ impl<S> Executor for BackfillExecutor<S>
 where
     S: StateStore,
 {
-    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
 
@@ -672,7 +673,7 @@ where
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> super::PkIndicesRef<'_> {
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
         &self.info.pk_indices
     }
 

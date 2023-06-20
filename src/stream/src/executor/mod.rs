@@ -56,6 +56,7 @@ pub mod monitor;
 pub mod agg_common;
 pub mod aggregation;
 mod arrangement_backfill;
+mod backfill;
 mod barrier_recv;
 mod batch_query;
 mod chain;
@@ -98,14 +99,13 @@ mod watermark;
 mod watermark_filter;
 mod wrapper;
 
-mod backfill;
 #[cfg(test)]
 mod integration_tests;
 pub mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
-pub use backfill::*;
+pub use backfill::no_shuffle_backfill::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
