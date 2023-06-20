@@ -254,7 +254,7 @@ impl HummockVersionExt for HummockVersion {
 
             for level in &group.levels {
                 for sst in &level.table_infos {
-                    if sst.table_ids.len() > 1 {
+                    if sst.table_ids.is_empty() {
                         // do not calculate size for small state-table.
                         continue;
                     }
@@ -263,7 +263,7 @@ impl HummockVersionExt for HummockVersion {
                             continue;
                         }
                         let entry = table_statistic.entry(*table_id).or_default();
-                        *entry += sst.file_size;
+                        *entry += sst.file_size / (sst.table_ids.len() as u64);
                     }
                 }
             }

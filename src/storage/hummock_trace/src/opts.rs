@@ -134,6 +134,7 @@ pub struct TracedNewLocalOptions {
     pub table_id: TracedTableId,
     pub is_consistent_op: bool,
     pub table_option: TracedTableOption,
+    pub is_replicated: bool,
 }
 
 pub type TracedHummockEpoch = u64;

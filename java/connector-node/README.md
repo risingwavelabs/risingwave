@@ -21,6 +21,11 @@ If you meet problem, you can try the following to skip the unit test:
 mvn clean package -DskipTests=true
 ```
 
+To disable building the rust library, you can try the following:
+```
+mvn clean package -Dno-build-rust
+```
+
 This will create a `.tar.gz` file with the Connector Node and all its dependencies in the `risingwave/java/connector-node/assembly/target` directory. To run the Connector Node, execute the following command:
 
 ```
@@ -35,10 +40,7 @@ Sometimes, you need to specify the shared library path. For example, when progra
 ```
 RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
 CONNECTOR_ROOT=$JAVA_ROOT/connector-node
-# Build shared library file
-cd $RISINGWAVE_ROOT && cargo build -p risingwave_java_binding
-# specify the Djava.library.path, please make sure the shared library you needed exist in /target/debug
-cd ${CONNECTOR_ROOT}/assembly/target && java -classpath "./libs/*" -Djava.library.path=${RISINGWAVE_ROOT}/target/debug com.risingwave.connector.ConnectorService
+cd ${CONNECTOR_ROOT}/assembly/target && java -classpath "./libs/*" com.risingwave.connector.ConnectorService
 ```
 
 ## Docker image

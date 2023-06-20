@@ -30,6 +30,7 @@ use risingwave_object_store::object::{
 };
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
 
 use super::utils::MemoryTracker;
@@ -403,7 +404,7 @@ impl SstableStore {
                         size: (sst.file_size - sst.meta_offset) as usize,
                     };
                     async move {
-                        let now = minstant::Instant::now();
+                        let now = Instant::now();
                         let buf = store
                             .read(&meta_path, Some(loc))
                             .await

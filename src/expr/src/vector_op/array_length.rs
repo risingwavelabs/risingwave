@@ -179,10 +179,10 @@ fn array_length_of_dim(array: ListRef<'_>, d: i32) -> Result<Option<i32>, ExprEr
 /// [1:0]
 ///
 /// statement error
-/// select array_dims(array[]::int[][]); -- would be `[1:0][1:0]` after multidimension support
+/// select array_dims(array[]::int[][]); -- would be `[1:0][1:0]` after multidimensional support
 ///
 /// statement error
-/// select array_dims(array[array[]::int[]]); -- would be `[1:1][1:0]` after multidimension support
+/// select array_dims(array[array[]::int[]]); -- would be `[1:1][1:0]` after multidimensional support
 /// ```
 #[function("array_dims(list) -> varchar")]
 fn array_dims(array: ListRef<'_>, writer: &mut dyn std::fmt::Write) -> Result<(), ExprError> {

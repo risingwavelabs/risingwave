@@ -31,6 +31,10 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave.java</groupId>
+            <artifactId>risingwave-sink-es</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
             <artifactId>risingwave-sink-jdbc</artifactId>
         </dependency>
         <dependency>

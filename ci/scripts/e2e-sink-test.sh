@@ -23,11 +23,6 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
 
-download_java_binding "$profile"
-
-# TODO: Switch to stream_chunk encoding once it's completed, and then remove json encoding as well as this env var.
-export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
-
 # Change process number limit
 echo "--- os limits"
 ulimit -a
