@@ -651,11 +651,23 @@ where
         request: Request<DropConnectionRequest>,
     ) -> Result<Response<DropConnectionResponse>, Status> {
         let req = request.into_inner();
+        let connection = self
+            .catalog_manager
+            .get_connection_by_id(req.connection_id)
+            .await?;
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropConnection(req.connection_id))
+            .run_command(DdlCommand::DropConnection(connection.id))
             .await?;
+
+        // delete AWS vpc endpoint
+        if let Some(connection::Info::PrivateLinkService(svc)) = connection.info
+            && svc.get_provider()? == PbPrivateLinkProvider::Aws {
+            if let Some(aws_cli) = self.aws_client.as_ref() {
+                aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
+            }
+        }
 
         Ok(Response::new(DropConnectionResponse {
             status: None,

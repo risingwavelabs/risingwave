@@ -46,6 +46,26 @@ impl AwsEc2Client {
         }
     }
 
+    pub async fn delete_vpc_endpoint(&self, vpc_endpoint_id: &str) -> MetaResult<()> {
+        let output = self
+            .client
+            .delete_vpc_endpoints()
+            .vpc_endpoint_ids(vpc_endpoint_id)
+            .send()
+            .await?;
+
+        if let Some(ret) = output.unsuccessful() {
+            if ret.len() > 0 {
+                return Err(MetaError::from(anyhow!(
+                    "Failed to delete VPC endpoint {}, error: {:?}",
+                    vpc_endpoint_id,
+                    ret
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// `service_name`: The name of the endpoint service we want to access
     pub async fn create_aws_private_link(
         &self,
