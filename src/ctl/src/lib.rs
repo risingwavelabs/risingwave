@@ -230,16 +230,20 @@ enum MetaCommands {
     /// }
     /// Use ; to separate multiple fragment
     #[clap(verbatim_doc_comment)]
+    #[clap(group(clap::ArgGroup::new("input_group").required(true).args(&["plan", "from"])))]
     Reschedule {
-        /// Plan of reschedule
-        #[clap(long)]
-        plan: String,
-        /// Show the plan only, no actual operation
-        #[clap(long)]
-        dry_run: bool,
+        /// Plan of reschedule, needs to be used with `revision`
+        #[clap(long, requires = "revision")]
+        plan: Option<String>,
         /// Revision of the plan
         #[clap(long)]
-        revision: u64,
+        revision: Option<u64>,
+        /// Reschedule from a specific file
+        #[clap(long, conflicts_with = "revision", value_hint = clap::ValueHint::AnyPath)]
+        from: Option<String>,
+        /// Show the plan only, no actual operation
+        #[clap(long, default_value = "false")]
+        dry_run: bool,
     },
     #[clap(subcommand)]
     Scale(ScaleCommands),
@@ -377,10 +381,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::meta::source_split_info(context).await?
         }
         Commands::Meta(MetaCommands::Reschedule {
-            plan,
+            from,
             dry_run,
+            plan,
             revision,
-        }) => cmd_impl::meta::reschedule(context, plan, dry_run, revision).await?,
+        }) => cmd_impl::meta::reschedule(context, plan, revision, from, dry_run).await?,
         Commands::Meta(MetaCommands::Scale(ScaleCommands::Cordon { id })) => {
             cmd_impl::meta::update_schedulability(context, id, false).await?
         }
