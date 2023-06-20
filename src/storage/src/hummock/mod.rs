@@ -339,6 +339,7 @@ impl HummockStorage {
         &self.hummock_version_reader
     }
 
+    #[cfg(any(test, feature = "test"))]
     pub async fn wait_version_update(&self, old_id: u64) -> u64 {
         use tokio::task::yield_now;
         loop {

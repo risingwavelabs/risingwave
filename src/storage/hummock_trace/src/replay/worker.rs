@@ -49,21 +49,12 @@ impl<G: GlobalReplay> WorkerScheduler<G> {
             replay,
         }
     }
-
-    fn allocate_worker_id(&mut self, record: &Record) -> WorkerId {
-        match record.storage_type() {
-            StorageType::Local(concurrent_id, opts) => {
-                WorkerId::Local(*concurrent_id, opts.table_id)
-            }
-            StorageType::Global => WorkerId::OneShot(record.record_id()),
-        }
-    }
 }
 
 #[async_trait::async_trait]
 impl<G: GlobalReplay + 'static> ReplayWorkerScheduler for WorkerScheduler<G> {
     fn schedule(&mut self, record: Record) {
-        let worker_id = self.allocate_worker_id(&record);
+        let worker_id = allocate_worker_id(&record);
         let handler = self
             .workers
             .entry(worker_id)
@@ -73,7 +64,7 @@ impl<G: GlobalReplay + 'static> ReplayWorkerScheduler for WorkerScheduler<G> {
     }
 
     fn send_result(&mut self, record: Record) {
-        let worker_id = self.allocate_worker_id(&record);
+        let worker_id = allocate_worker_id(&record);
         let Record { operation, .. } = record;
         // Check if the worker with the given ID exists in the workers map and the record contains a
         // Result operation.
@@ -87,7 +78,7 @@ impl<G: GlobalReplay + 'static> ReplayWorkerScheduler for WorkerScheduler<G> {
     }
 
     async fn wait_finish(&mut self, record: Record) {
-        let worker_id = self.allocate_worker_id(&record);
+        let worker_id = allocate_worker_id(&record);
 
         // Check if the worker with the given ID exists in the workers map.
         if let Some(handler) = self.workers.get_mut(&worker_id) {
@@ -415,6 +406,13 @@ impl ReplayWorker {
             Operation::Finish => unreachable!(),
             Operation::Result(_) => unreachable!(),
         }
+    }
+}
+
+fn allocate_worker_id(record: &Record) -> WorkerId {
+    match record.storage_type() {
+        StorageType::Local(concurrent_id, opts) => WorkerId::Local(*concurrent_id, opts.table_id),
+        StorageType::Global => WorkerId::OneShot(record.record_id()),
     }
 }
 

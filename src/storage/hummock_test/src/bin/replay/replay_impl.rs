@@ -15,7 +15,7 @@
 use std::ops::Bound;
 
 use futures::stream::BoxStream;
-use futures::{pin_mut, StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::util::addr::HostAddr;
@@ -53,13 +53,12 @@ where
         Self { inner }
     }
 
-    #[try_stream(ok = ReplayItem, error = TraceError)]
-    pub(crate) async fn into_stream(self) {
-        let inner = self.inner;
-        pin_mut!(inner);
-        while let Ok(Some((key, value))) = inner.try_next().await {
-            yield (key.user_key.table_key.0.into(), value.into())
-        }
+    pub(crate) fn into_stream(self) -> impl Stream<Item = Result<ReplayItem>> {
+        self.inner.map(|item_res| {
+            item_res
+                .map(|(key, value)| (key.user_key.table_key.0.into(), value.into()))
+                .map_err(|_| TraceError::IterFailed("iter failed to retrieve item".to_string()))
+        })
     }
 }
 
@@ -69,7 +68,7 @@ pub(crate) struct LocalReplayIter {
 
 impl LocalReplayIter {
     pub(crate) async fn new(stream: impl StateStoreIterItemStream) -> Self {
-        let mut inner = Vec::new();
+        let mut inner: Vec<_> = Vec::new();
         #[for_await]
         for value in stream {
             let value = value.unwrap();
@@ -86,21 +85,21 @@ impl LocalReplayIter {
     }
 }
 
-pub(crate) struct GlobalReplayInterface {
+pub(crate) struct GlobalReplayImpl {
     store: HummockStorage,
     notifier: NotificationManagerRef<MemStore>,
 }
 
-impl GlobalReplayInterface {
+impl GlobalReplayImpl {
     pub(crate) fn new(store: HummockStorage, notifier: NotificationManagerRef<MemStore>) -> Self {
         Self { store, notifier }
     }
 }
 
-impl GlobalReplay for GlobalReplayInterface {}
+impl GlobalReplay for GlobalReplayImpl {}
 
 #[async_trait::async_trait]
-impl ReplayRead for GlobalReplayInterface {
+impl ReplayRead for GlobalReplayImpl {
     async fn iter(
         &self,
         key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
@@ -138,7 +137,7 @@ impl ReplayRead for GlobalReplayInterface {
 }
 
 #[async_trait::async_trait]
-impl ReplayStateStore for GlobalReplayInterface {
+impl ReplayStateStore for GlobalReplayImpl {
     async fn sync(&self, id: u64) -> Result<usize> {
         let result: SyncResult = self
             .store
@@ -170,7 +169,7 @@ impl ReplayStateStore for GlobalReplayInterface {
 
     async fn new_local(&self, options: TracedNewLocalOptions) -> Box<dyn LocalReplay> {
         let local_storage = self.store.new_local(options.into()).await;
-        Box::new(LocalReplayInterface(local_storage))
+        Box::new(LocalReplayImpl(local_storage))
     }
 
     async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Result<()> {
@@ -196,10 +195,10 @@ impl ReplayStateStore for GlobalReplayInterface {
         Ok(())
     }
 }
-pub(crate) struct LocalReplayInterface(LocalHummockStorage);
+pub(crate) struct LocalReplayImpl(LocalHummockStorage);
 
 #[async_trait::async_trait]
-impl LocalReplay for LocalReplayInterface {
+impl LocalReplay for LocalReplayImpl {
     fn init(&mut self, epoch: u64) {
         self.0.init(epoch);
     }
@@ -232,7 +231,7 @@ impl LocalReplay for LocalReplayInterface {
 }
 
 #[async_trait::async_trait]
-impl LocalReplayRead for LocalReplayInterface {
+impl LocalReplayRead for LocalReplayImpl {
     async fn iter(
         &self,
         key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
@@ -264,7 +263,7 @@ impl LocalReplayRead for LocalReplayInterface {
 }
 
 #[async_trait::async_trait]
-impl ReplayWrite for LocalReplayInterface {
+impl ReplayWrite for LocalReplayImpl {
     fn insert(
         &mut self,
         key: TracedBytes,

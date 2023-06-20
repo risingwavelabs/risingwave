@@ -26,7 +26,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
-use replay_impl::{get_replay_notification_client, GlobalReplayInterface};
+use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, StorageConfig, NO_OVERRIDE,
 };
@@ -152,7 +152,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     )
     .await
     .expect("fail to create a HummockStorage object");
-    let replay_interface = GlobalReplayInterface::new(storage, notifier);
+    let replay_interface = GlobalReplayImpl::new(storage, notifier);
 
     Ok(replay_interface)
 }
