@@ -20,5 +20,4 @@ package com.risingwave.functions;
  * @see ScalarFunction
  * @see TableFunction
  */
-public interface UserDefinedFunction {
-}
+public interface UserDefinedFunction {}
