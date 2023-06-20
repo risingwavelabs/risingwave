@@ -344,17 +344,26 @@ impl FromIntoArrow for Interval {
     type ArrowType = i128;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
-        let (months, days, ns) = arrow_array::types::IntervalMonthDayNanoType::to_parts(value);
+        // XXX: the arrow-rs decoding is incorrect
+        // let (months, days, ns) = arrow_array::types::IntervalMonthDayNanoType::to_parts(value);
+        let months = value as i32;
+        let days = (value >> 32) as i32;
+        let ns = (value >> 64) as i64;
         Interval::from_month_day_usec(months, days, ns / 1000)
     }
 
     fn into_arrow(self) -> Self::ArrowType {
-        arrow_array::types::IntervalMonthDayNanoType::make_value(
-            self.months(),
-            self.days(),
-            // TODO: this may overflow and we need `try_into`
-            self.usecs() * 1000,
-        )
+        // XXX: the arrow-rs encoding is incorrect
+        // arrow_array::types::IntervalMonthDayNanoType::make_value(
+        //     self.months(),
+        //     self.days(),
+        //     // TODO: this may overflow and we need `try_into`
+        //     self.usecs() * 1000,
+        // )
+        let m = self.months() as u128 & u32::MAX as u128;
+        let d = (self.days() as u128 & u32::MAX as u128) << 32;
+        let n = ((self.usecs() * 1000) as u128 & u64::MAX as u128) << 64;
+        (m | d | n) as i128
     }
 }
 
