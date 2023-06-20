@@ -26,7 +26,7 @@ pub fn avro_schema_to_column_descs(schema: &Schema) -> anyhow::Result<Vec<Column
             .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(fields)
     } else {
-        anyhow::bail!("schema invalid, record required");
+        anyhow::bail!("schema invalid, record type required at top level of the schema.");
     }
 }
 

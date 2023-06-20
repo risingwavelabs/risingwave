@@ -410,10 +410,12 @@ pub(crate) fn unix_epoch_days() -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use apache_avro::Decimal as AvroDecimal;
     use risingwave_common::error::{ErrorCode, RwError};
-    use risingwave_common::types::Timestamp;
+    use risingwave_common::types::{Decimal, Timestamp};
 
     use super::*;
+
     #[test]
     fn test_convert_decimal() {
         // 280
@@ -473,14 +475,6 @@ mod tests {
             )))
         );
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use apache_avro::Decimal as AvroDecimal;
-    use risingwave_common::types::Decimal;
-
-    use super::*;
 
     #[test]
     fn test_decimal_truncate() {

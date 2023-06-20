@@ -178,7 +178,7 @@ impl AvroParser {
                 }
             }
         } else {
-            Ok(None)
+            unreachable!("both schema_resolver and reader_schema not exist");
         }
     }
 
