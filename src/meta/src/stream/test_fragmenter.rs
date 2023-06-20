@@ -19,7 +19,6 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{
     ParallelUnit, PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode,
 };

@@ -72,9 +72,9 @@ where
         req: Request<UpdateWorkerNodeSchedulabilityRequest>,
     ) -> Result<Response<UpdateWorkerNodeSchedulabilityResponse>, Status> {
         let inner = req.into_inner();
-        let host = req.get_host()?.clone();
+        let host_addr = inner.get_host()?.clone();
         self.cluster_manager
-            .update_schedulability(host_address, inner.set_is_unschedulable)
+            .update_schedulability(host_addr, inner.set_is_unschedulable)
             .await?;
         Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
             status: None,

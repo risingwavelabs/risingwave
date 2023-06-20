@@ -102,12 +102,11 @@ where
         property: AddNodeProperty,
     ) -> MetaResult<WorkerNode> {
         let worker_node_parallelism = property.worker_node_parallelism as usize;
-        let property = self.parse_property(r#type, property);
+        let mut property = self.parse_property(r#type, property);
         let mut core = self.core.write().await;
 
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
             // TODO: update parallelism when the worker exists.
-
             if let Some(property) = &mut property {
                 property.is_unschedulable = worker
                     .worker_node
@@ -118,15 +117,15 @@ where
             }
 
             worker.update_ttl(self.max_heartbeat_interval);
-            if new_prop != worker.worker_node.property {
+            if property != worker.worker_node.property {
                 tracing::info!(
                     "worker {} property updated from {:?} to {:?}",
                     worker.worker_node.id,
                     worker.worker_node.property,
-                    new_prop
+                    property
                 );
 
-                worker.worker_node.property = new_prop;
+                worker.worker_node.property = property;
                 worker.insert(self.env.meta_store()).await?;
             }
             return Ok(worker.to_protobuf());
@@ -212,12 +211,11 @@ where
             }
             property.is_unschedulable = is_unschedulable;
         } else {
-            return Err(MetaError::invalid_parameter("Worker node does not have property").into());
+            return Err(MetaError::invalid_parameter(
+                "Worker node does not have property",
+            ));
         }
-
-        worker.worker_node.property = Some(new_prop);
         Worker::insert(worker, self.env.meta_store()).await?;
-
         Ok(worker_type)
     }
 
