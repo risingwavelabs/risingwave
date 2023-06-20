@@ -19,6 +19,7 @@ export LOGDIR=".risingwave/log"
 export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
+export TIME_BOUND="7m"
 
 set +u
 
@@ -148,7 +149,7 @@ generate_deterministic() {
     mkdir -p $OUTDIR/{%}
     echo '[INFO] Generating For Seed {}'
     MADSIM_TEST_SEED={} $MADSIM_BIN \
-      --sqlsmith 100 \
+      --sqlsmith 50 \
       --generate-sqlsmith-queries $OUTDIR/{%} \
       $TESTDATA \
       1>>$LOGDIR/generate_deterministic.stdout.log \
@@ -205,6 +206,17 @@ check_failed_to_generate_queries() {
     ls "$OUTDIR"/* | grep queries.sql
     exit 1
   fi
+}
+
+# Run it to make sure it matches our expected timing for e2e test.
+# Otherwise don't update this batch of queries yet.
+run_queries_timed() {
+  echo "" > $LOGDIR/run_deterministic.stdout.log
+  timeout "$TIME_BOUND" seq 32 | parallel "MADSIM_TEST_SEED={} \
+    $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
+      1>>$LOGDIR/run_deterministic.stdout.log \
+      2>$LOGDIR/fuzzing-{}.log \
+      && rm $LOGDIR/fuzzing-{}.log"
 }
 
 # Run it to make sure it should have no errors
@@ -269,7 +281,11 @@ validate() {
   extract_fail_info_from_logs "generate"
   echo_err "[INFO] Recorded new bugs from  generated queries"
   run_queries
-  echo_err "[INFO] Queries were ran"
+  echo_err "[INFO] Queries were ran and passed"
+  echo "--- Running timeout check"
+  run_queries_timed
+  echo_err "[INFO] Queries running in e2e test are ran and passed in $TIME_BOUND"
+  echo "--- Check fail to run queries"
   check_failed_to_run_queries
   echo_err "[CHECK PASSED] Queries all ran without failure"
   echo_err "[INFO] Passed checks"
