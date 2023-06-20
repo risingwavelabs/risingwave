@@ -139,21 +139,17 @@ pub fn set_panic_hook() {
 ///   turned on.
 pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Registry) {
     // Default timer for logging with local time offset.
-    let default_timer = {
-        let timer = OffsetTime::local_rfc_3339().unwrap_or_else(|e| {
-            println!("failed to get local time offset: {e}, falling back to UTC");
-            OffsetTime::new(
-                time::UtcOffset::UTC,
-                time::format_description::well_known::Rfc3339,
-            )
-        });
-
-        move || timer.clone()
-    };
+    let default_timer = OffsetTime::local_rfc_3339().unwrap_or_else(|e| {
+        println!("failed to get local time offset: {e}, falling back to UTC");
+        OffsetTime::new(
+            time::UtcOffset::UTC,
+            time::format_description::well_known::Rfc3339,
+        )
+    });
 
     // Default filter for logging to stdout and tracing.
     let default_filter = {
-        let filter = filter::Targets::new()
+        let mut filter = filter::Targets::new()
             .with_target("aws_sdk_ec2", Level::INFO)
             .with_target("aws_sdk_s3", Level::INFO)
             .with_target("aws_config", Level::WARN)
@@ -169,34 +165,28 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
             .with_target("reqwest", Level::WARN)
             .with_target("sled", Level::INFO);
 
-        let filter = configure_risingwave_targets_fmt(filter);
+        filter = configure_risingwave_targets_fmt(filter);
 
         // For all other crates
-        let filter = filter.with_default(if cfg!(debug_assertions) && !is_ci() {
+        filter = filter.with_default(if cfg!(debug_assertions) && !is_ci() {
             Level::DEBUG
         } else {
             Level::INFO
         });
 
         // Overrides from settings
-        let filter = filter.with_targets(settings.targets);
+        filter = filter.with_targets(settings.targets);
 
         // Overrides from env var
-        let filter = if let Ok(rust_log) = std::env::var(EnvFilter::DEFAULT_ENV) && !rust_log.is_empty() {
-            let rust_log_targets: Targets = rust_log.parse().unwrap();
-
+        if let Ok(rust_log) = std::env::var(EnvFilter::DEFAULT_ENV) && !rust_log.is_empty() {
+            let rust_log_targets: Targets = rust_log.parse().expect("failed to parse `RUST_LOG`");
             if let Some(default_level) = rust_log_targets.default_level() {
-                filter
-                    .with_targets(rust_log_targets)
-                    .with_default(default_level)
-            } else {
-                filter.with_targets(rust_log_targets)
+                filter = filter.with_default(default_level);
             }
-        } else {
-            filter
+            filter = filter.with_targets(rust_log_targets)
         };
 
-        move || filter.clone()
+        filter
     };
 
     let mut layers = vec![];
@@ -205,7 +195,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
     {
         let fmt_layer = tracing_subscriber::fmt::layer()
             .compact()
-            .with_timer(default_timer())
+            .with_timer(default_timer.clone())
             .with_ansi(settings.colorful);
         let fmt_layer = if ENABLE_PRETTY_LOG {
             fmt_layer.pretty().boxed()
@@ -216,7 +206,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
         layers.push(
             fmt_layer
                 .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
-                .with_filter(default_filter().with_target("rw_tracing", Level::OFF)) // filter-out tracing-only events
+                .with_filter(default_filter.clone().with_target("rw_tracing", Level::OFF)) // filter-out tracing-only events
                 .boxed(),
         );
     };
@@ -249,7 +239,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
             .with_level(false)
             .with_file(false)
             .with_target(false)
-            .with_timer(default_timer())
+            .with_timer(default_timer.clone())
             .with_thread_names(true)
             .with_thread_ids(true)
             .with_writer(std::sync::Mutex::new(file))
@@ -285,7 +275,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
             .with_level(false)
             .with_file(false)
             .with_target(false)
-            .with_timer(default_timer())
+            .with_timer(default_timer)
             .with_thread_names(true)
             .with_thread_ids(true)
             .with_writer(std::sync::Mutex::new(file))
@@ -369,7 +359,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
         let layer = tracing_opentelemetry::layer()
             .with_tracer(otel_tracer)
-            .with_filter(default_filter());
+            .with_filter(default_filter);
 
         layers.push(layer.boxed());
     }
