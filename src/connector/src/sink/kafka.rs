@@ -18,6 +18,9 @@ use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
+use futures::stream::BoxStream;
+use futures::{FutureExt, StreamExt};
+use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{BaseRecord, Producer, ThreadedProducer};
@@ -35,6 +38,9 @@ use super::{
     SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
+use crate::sink::utils::{
+    gen_debezium_message_stream, pk_to_json, schema_to_json, DebeziumAdapterOpts,
+};
 use crate::sink::{datum_to_json_object, record_to_json, Result};
 use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
@@ -235,73 +241,18 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     }
 
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
-        let source_field = json!({
-            "db": "RisingWave",
-            "table": "RisingWave",
-        });
+        let dbz_stream: BoxStream<'static, _> = gen_debezium_message_stream(
+            &self.schema,
+            &self.pk_indices,
+            chunk,
+            ts_ms,
+            DebeziumAdapterOpts::default(),
+        )
+        .boxed();
 
-        let mut update_cache: Option<Map<String, Value>> = None;
-        let schema = &self.schema;
-        for (op, row) in chunk.rows() {
-            let event_key_object = Some(json!({
-                "schema": json!({
-                    "type": "struct",
-                    "fields": fields_pk_to_json(&schema.fields, &self.pk_indices),
-                    "optional": false,
-                    "name": "RisingWave.RisingWave.RisingWave.Key",
-                }),
-                "payload": pk_to_json(row, &schema.fields, &self.pk_indices)?,
-            }));
-            let event_object = match op {
-                Op::Insert => Some(json!({
-                    "schema": schema_to_json(schema),
-                    "payload": {
-                        "before": null,
-                        "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
-                        "op": "c",
-                        "ts_ms": ts_ms,
-                        "source": source_field,
-                    }
-                })),
-                Op::Delete => Some(json!({
-                    "schema": schema_to_json(schema),
-                    "payload": {
-                        "before": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
-                        "after": null,
-                        "op": "d",
-                        "ts_ms": ts_ms,
-                        "source": source_field,
-                    }
-                })),
-                Op::UpdateDelete => {
-                    update_cache = Some(record_to_json(
-                        row,
-                        &schema.fields,
-                        TimestampHandlingMode::Milli,
-                    )?);
-                    continue;
-                }
-                Op::UpdateInsert => {
-                    if let Some(before) = update_cache.take() {
-                        Some(json!({
-                            "schema": schema_to_json(schema),
-                            "payload": {
-                                "before": before,
-                                "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
-                                "op": "u",
-                                "ts_ms": ts_ms,
-                                "source": source_field,
-                            }
-                        }))
-                    } else {
-                        warn!(
-                            "not found UpdateDelete in prev row, skipping, row index {:?}",
-                            row.index()
-                        );
-                        continue;
-                    }
-                }
-            };
+        #[for_await]
+        for msg in dbz_stream {
+            let (event_key_object, event_object) = msg?;
             if let (Some(key_obj), Some(obj)) = (event_key_object, event_object) {
                 let key_str = key_obj.to_string();
                 self.send(
@@ -312,13 +263,13 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                 .await?;
                 // Tomestone event
                 // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-delete-events
-                if op == Op::Delete {
-                    self.send(
-                        BaseRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
-                            .key(key_str.as_bytes()),
-                    )
-                    .await?;
-                }
+                // if op == Op::Delete {
+                //     self.send(
+                //         BaseRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
+                //             .key(key_str.as_bytes()),
+                //     )
+                //     .await?;
+                // }
             }
         }
         Ok(())
@@ -463,144 +414,6 @@ impl<const APPEND_ONLY: bool> Debug for KafkaSink<APPEND_ONLY> {
     }
 }
 
-fn pk_to_json(
-    row: RowRef<'_>,
-    schema: &[Field],
-    pk_indices: &[usize],
-) -> Result<Map<String, Value>> {
-    let mut mappings = Map::with_capacity(schema.len());
-    for idx in pk_indices {
-        let field = &schema[*idx];
-        let key = field.name.clone();
-        let value = datum_to_json_object(field, row.datum_at(*idx), TimestampHandlingMode::Milli)
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
-        mappings.insert(key, value);
-    }
-    Ok(mappings)
-}
-
-pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>> {
-    let mut records: Vec<String> = Vec::with_capacity(chunk.capacity());
-    for (_, row) in chunk.rows() {
-        let record = Value::Object(record_to_json(
-            row,
-            &schema.fields,
-            TimestampHandlingMode::Milli,
-        )?);
-        records.push(record.to_string());
-    }
-
-    Ok(records)
-}
-
-fn field_to_json(field: &Field) -> Value {
-    // mapping from 'https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-data-types'
-    let r#type = match field.data_type() {
-        risingwave_common::types::DataType::Boolean => "boolean",
-        risingwave_common::types::DataType::Int16 => "int16",
-        risingwave_common::types::DataType::Int32 => "int32",
-        risingwave_common::types::DataType::Int64 => "int64",
-        risingwave_common::types::DataType::Int256 => "string",
-        risingwave_common::types::DataType::Float32 => "float",
-        risingwave_common::types::DataType::Float64 => "double",
-        // currently, we only support handling decimal as string.
-        // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-decimal-types
-        risingwave_common::types::DataType::Decimal => "string",
-
-        risingwave_common::types::DataType::Varchar => "string",
-
-        risingwave_common::types::DataType::Date => "int32",
-        risingwave_common::types::DataType::Time => "int64",
-        risingwave_common::types::DataType::Timestamp => "int64",
-        risingwave_common::types::DataType::Timestamptz => "string",
-        risingwave_common::types::DataType::Interval => "string",
-
-        risingwave_common::types::DataType::Bytea => "bytes",
-        risingwave_common::types::DataType::Jsonb => "string",
-        risingwave_common::types::DataType::Serial => "int32",
-        // since the original debezium pg support HSTORE via encoded as json string by default,
-        // we do the same here
-        risingwave_common::types::DataType::Struct(_) => "string",
-        risingwave_common::types::DataType::List { .. } => "string",
-    };
-    json!({
-        "field": field.name,
-        "optional": true,
-        "type": r#type,
-    })
-}
-
-fn fields_pk_to_json(fields: &[Field], pk_indices: &[usize]) -> Value {
-    let mut res = Vec::new();
-    for idx in pk_indices {
-        res.push(field_to_json(&fields[*idx]));
-    }
-    json!(res)
-}
-
-fn fields_to_json(fields: &[Field]) -> Value {
-    let mut res = Vec::new();
-
-    fields
-        .iter()
-        .for_each(|field| res.push(field_to_json(field)));
-
-    json!(res)
-}
-
-fn schema_to_json(schema: &Schema) -> Value {
-    let mut schema_fields = Vec::new();
-    schema_fields.push(json!({
-        "type": "struct",
-        "fields": fields_to_json(&schema.fields),
-        "optional": true,
-        "field": "before",
-        "name": "RisingWave.RisingWave.RisingWave.Key",
-    }));
-    schema_fields.push(json!({
-        "type": "struct",
-        "fields": fields_to_json(&schema.fields),
-        "optional": true,
-        "field": "after",
-        "name": "RisingWave.RisingWave.RisingWave.Key",
-    }));
-
-    schema_fields.push(json!({
-        "type": "struct",
-        "optional": false,
-        "name": "RisingWave.RisingWave.RisingWave.Source",
-        "fields": vec![
-            json!({
-                "type": "string",
-                "optional": false,
-                "field": "db"
-            }),
-            json!({
-                "type": "string",
-                "optional": true,
-                "field": "table"
-            })],
-        "field": "source"
-    }));
-    schema_fields.push(json!({
-        "type": "string",
-        "optional": false,
-        "field": "op"
-    }));
-    schema_fields.push(json!({
-        "type": "int64",
-        "optional": false,
-        "field": "ts_ms"
-    }));
-
-    json!({
-        "type": "struct",
-        "fields": schema_fields,
-        "optional": false,
-        "name": "RisingWave.RisingWave.RisingWave.Envelope",
-    })
-}
-
 /// the struct conducts all transactions with Kafka
 pub struct KafkaTransactionConductor {
     properties: KafkaConfig,
@@ -682,6 +495,7 @@ mod test {
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::sink::utils::*;
 
     #[test]
     fn parse_kafka_config() {
