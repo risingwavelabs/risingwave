@@ -897,6 +897,7 @@ impl Binder {
                 | Clause::GroupBy
                 | Clause::Having
                 | Clause::Filter
+                | Clause::GeneratedColumn
                 | Clause::From => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
@@ -915,10 +916,10 @@ impl Binder {
                 self.context.clause,
                 Some(Clause::Where) | Some(Clause::Having)
             ))
-            || self.is_for_ddl()
+            || matches!(self.context.clause, Some(Clause::GeneratedColumn))
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
+                "For creation of materialized views, `NOW()` function is only allowed in {:?} clause",
                 self.context.clause
             ))
             .into());
@@ -939,7 +940,7 @@ impl Binder {
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::From => {
+                Clause::Where | Clause::Values | Clause::From | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
                         clause
@@ -955,7 +956,7 @@ impl Binder {
     fn ensure_table_function_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values => {
+                Clause::Where | Clause::Values | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",
                         clause
