@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 mod enumerator;
-use std::collections::HashMap;
 
 pub use enumerator::S3SplitEnumerator;
 mod source;
 use serde::Deserialize;
 pub use source::S3FileReader;
+
+use crate::source::aws_auth::AwsAuthProps;
 
 pub const S3_CONNECTOR: &str = "s3";
 
@@ -37,21 +38,17 @@ pub struct S3Properties {
     endpoint_url: Option<String>,
 }
 
-impl From<S3Properties> for HashMap<String, String> {
-    fn from(props: S3Properties) -> Self {
-        let mut m = HashMap::with_capacity(5);
-        m.insert("region".to_owned(), props.region_name);
-
-        if props.access.is_some() {
-            m.insert("access_key".to_owned(), props.access.unwrap());
+impl From<&S3Properties> for AwsAuthProps {
+    fn from(props: &S3Properties) -> Self {
+        Self {
+            region: Some(props.region_name.clone()),
+            endpoint: props.endpoint_url.clone(),
+            access_key: props.access.clone(),
+            secret_key: props.secret.clone(),
+            session_token: Default::default(),
+            arn: Default::default(),
+            external_id: Default::default(),
+            profile: Default::default(),
         }
-        if props.secret.is_some() {
-            m.insert("secret_access".to_owned(), props.secret.unwrap());
-        }
-        if props.endpoint_url.is_some() {
-            m.insert("endpoint_url".to_owned(), props.endpoint_url.unwrap());
-        }
-
-        m
     }
 }

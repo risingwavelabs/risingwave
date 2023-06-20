@@ -22,9 +22,10 @@ use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, Pro
 use risingwave_common::error::{Result, RwError};
 use url::Url;
 
-use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
+use crate::aws_utils::{default_conn_config, s3_client};
 use crate::parser::schema_registry::{Client, ConfluentSchema};
 use crate::parser::util::download_from_http;
+use crate::source::aws_auth::AwsAuthProps;
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
@@ -44,8 +45,8 @@ pub(super) async fn read_schema_from_s3(
         }));
     }
     let key = url.path().replace('/', "");
-    let config = AwsConfigV2::from(properties.clone());
-    let sdk_config = config.load_config(None).await;
+    let config = AwsAuthProps::from_iter(properties.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    let sdk_config = config.build_config().await?;
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
     let response = s3_client
         .get_object()
