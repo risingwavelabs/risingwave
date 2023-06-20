@@ -400,7 +400,7 @@ async fn create_mviews(
     let mut mvs_and_base_tables = mvs_and_base_tables;
     let mut mviews = vec![];
     // Generate some mviews
-    for i in 0..10 {
+    for i in 0..20 {
         let (create_sql, table) =
             mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
         tracing::info!("[EXECUTING CREATE MVIEW]: {}", &create_sql);
