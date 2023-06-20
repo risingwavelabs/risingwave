@@ -55,7 +55,7 @@ use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
-use self::task_progress::TaskProgress;
+pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
@@ -520,6 +520,8 @@ impl Compactor {
                                     num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
                                     num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
                                     num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
+                                    num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
+                                    num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
                                 });
                             }
 
@@ -933,6 +935,9 @@ impl Compactor {
                     .map_err(HummockError::sstable_upload_error)??;
                 if let Some(tracker) = tracker_cloned {
                     tracker.inc_ssts_uploaded();
+                    tracker
+                        .num_pending_write_io
+                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 }
                 if context_cloned.is_share_buffer_compact {
                     context_cloned

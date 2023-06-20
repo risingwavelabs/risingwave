@@ -26,7 +26,7 @@ use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::{compact_task, SstableInfo};
 use risingwave_storage::hummock::compactor::{
-    Compactor, ConcatSstableIterator, DummyCompactionFilter, TaskConfig,
+    Compactor, ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
 };
 use risingwave_storage::hummock::iterator::{
     ConcatIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
@@ -247,12 +247,14 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     level1.clone(),
                     KeyRange::inf(),
                     sstable_store.clone(),
+                    Arc::new(TaskProgress::default()),
                 ),
                 ConcatSstableIterator::new(
                     vec![0],
                     level2.clone(),
                     KeyRange::inf(),
                     sstable_store.clone(),
+                    Arc::new(TaskProgress::default()),
                 ),
             ];
             let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
