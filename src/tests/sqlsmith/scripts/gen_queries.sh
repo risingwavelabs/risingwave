@@ -284,7 +284,7 @@ validate() {
   echo_err "[INFO] Queries were ran and passed"
   echo "--- Running timeout check"
   run_queries_timed
-  echo_err "[INFO] Queries running in e2e test are ran and passed in $TIME_BOUND"
+  echo_err "[INFO] pre-generated queries running in e2e deterministic test are ran and passed in $TIME_BOUND"
   echo "--- Check fail to run queries"
   check_failed_to_run_queries
   echo_err "[CHECK PASSED] Queries all ran without failure"
