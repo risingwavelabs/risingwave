@@ -35,6 +35,7 @@ use self::private::Partition;
 use super::diff_btree_map::{Change, DiffBTreeMap};
 use super::state::{create_window_state, StateKey};
 use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::executor::aggregation::ChunkBuilder;
 use crate::executor::over_window::diff_btree_map::PositionType;
 use crate::executor::over_window::window_states::WindowStates;
@@ -567,8 +568,15 @@ impl<S: StateStore> OverWindowExecutor<S> {
             inner: mut this,
         } = self;
 
+        let metrics_info = MetricsInfo::new(
+            this.actor_ctx.streaming_metrics.clone(),
+            this.state_table.table_id(),
+            this.actor_ctx.id,
+            "OverWindow",
+        );
+
         let mut vars = ExecutionVars {
-            partitions: new_unbounded(this.watermark_epoch.clone()),
+            partitions: new_unbounded(this.watermark_epoch.clone(), metrics_info),
             _phantom: PhantomData::<S>,
         };
 
