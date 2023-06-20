@@ -101,7 +101,7 @@ pub(super) mod handlers {
                     .ok_or_else(|| anyhow!("invalid worker type"))
                     .map_err(err)?,
                 None,
-                false,
+                true,
             )
             .await;
         result.sort_unstable_by_key(|n| n.id);
