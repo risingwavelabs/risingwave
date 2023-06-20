@@ -911,16 +911,21 @@ impl Binder {
     }
 
     fn ensure_now_function_allowed(&self) -> Result<()> {
-        if (self.is_for_stream()
+        if self.is_for_stream()
             && !matches!(
                 self.context.clause,
                 Some(Clause::Where) | Some(Clause::Having)
-            ))
-            || matches!(self.context.clause, Some(Clause::GeneratedColumn))
+            )
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "For creation of materialized views, `NOW()` function is only allowed in {:?} clause",
+                "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
                 self.context.clause
+            ))
+            .into());
+        }
+        if matches!(self.context.clause, Some(Clause::GeneratedColumn)) {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Cannot use `NOW()` function in generated columns. Do you want `PROCTIME()`?"
             ))
             .into());
         }
