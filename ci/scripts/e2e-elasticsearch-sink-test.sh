@@ -19,7 +19,7 @@ tar -xzf elasticsearch-7.17.10-linux-x86_64.tar.gz
 # su - elasticsearch
 echo "--- starting elasticsearch"
 ./elasticsearch-7.17.10/bin/elasticsearch -d
-tail /var/log/elasticsearch/elasticsearch.log
+ps -e | grep elas
 
 # su - root
 
