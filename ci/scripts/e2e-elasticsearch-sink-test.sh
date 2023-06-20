@@ -9,7 +9,18 @@ wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.17.10-
 wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.17.10-linux-x86_64.tar.gz.sha512
 shasum -a 512 -c elasticsearch-7.17.10-linux-x86_64.tar.gz.sha512
 tar -xzf elasticsearch-7.17.10-linux-x86_64.tar.gz
-elasticsearch-7.17.10/bin/elasticsearch -Des.insecure.allow.root=true -d
+
+# Elasticsearch cannot be run in root
+groupadd elasticsearch
+useradd elasticsearch -g elasticsearch -p elasticsearch
+chown -R elasticsearch:elasticsearch ./elasticsearch-7.17.10
+chmod o+x ./elasticsearch-7.17.10
+chgrp elasticsearch ./elasticsearch-7.17.10
+su - elasticsearch
+
+./elasticsearch-7.17.10/bin/elasticsearch -d
+
+su - root
 
 echo "--- testing sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch_sink.slt'
