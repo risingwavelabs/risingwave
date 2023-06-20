@@ -635,11 +635,11 @@ mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            2 * 1024 * 1024 * 1024 // 2GB
+            4 * 1024 * 1024 * 1024 // 2GB
         }
 
         pub fn split_group_size_limit() -> u64 {
-            20 * 1024 * 1024 * 1024 // 20GB
+            64 * 1024 * 1024 * 1024 // 20GB
         }
 
         pub fn partition_vnode_count() -> u32 {
