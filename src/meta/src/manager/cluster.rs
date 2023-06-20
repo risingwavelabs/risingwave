@@ -206,22 +206,14 @@ where
             .ok_or_else(|| anyhow!("Worker node does not exist!"))?;
         let worker_type = worker.worker_type();
 
-        let old_prop = match worker.worker_node.get_property() {
-            Ok(p) => p.clone(),
-            Err(_) => {
-                tracing::warn!("worker did not have property");
-                Property {
-                    is_unschedulable: false,
-                    is_serving: true,
-                    is_streaming: true,
-                }
+        if let Some(property) = &mut worker.worker_node.property {
+            if property.is_unschedulable == is_unschedulable {
+                return Ok(worker_type);
             }
-        };
-        let new_prop = Property {
-            is_unschedulable,
-            is_serving: old_prop.is_serving,
-            is_streaming: old_prop.is_streaming,
-        };
+            property.is_unschedulable = is_unschedulable;
+        } else {
+            return Err(MetaError::invalid_parameter("Worker node does not have property").into());
+        }
 
         worker.worker_node.property = Some(new_prop);
         Worker::insert(worker, self.env.meta_store()).await?;
