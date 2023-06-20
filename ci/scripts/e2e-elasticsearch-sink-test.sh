@@ -18,7 +18,7 @@ tar -xzf elasticsearch-7.17.10-linux-x86_64.tar.gz
 # chgrp elasticsearch ./elasticsearch-7.17.10
 # su - elasticsearch
 echo "--- starting elasticsearch"
-elasticsearch-7.17.10/bin/elasticsearch -d
+timeout 20 elasticsearch-7.17.10/bin/elasticsearch -E http.port=9200
 # check status of elasticsearch
 curl http://127.0.0.1:9200
 
