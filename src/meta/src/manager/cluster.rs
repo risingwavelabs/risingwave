@@ -108,7 +108,7 @@ where
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
             // TODO: update parallelism when the worker exists.
 
-           if let Some(property) = &mut property {
+            if let Some(property) = &mut property {
                 property.is_unschedulable = worker
                     .worker_node
                     .property
@@ -205,10 +205,6 @@ where
             .get_mut(&WorkerKey(host_address.clone()))
             .ok_or_else(|| anyhow!("Worker node does not exist!"))?;
         let worker_type = worker.worker_type();
-
-        // TODO
-        // We need to handle the deleting state once we introduce it
-        // if worker_type == WorkerType::ComputeNode && worker.worker_node.state == State::DELETING
 
         let old_prop = match worker.worker_node.get_property() {
             Ok(p) => p.clone(),
