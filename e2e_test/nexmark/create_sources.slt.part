@@ -39,7 +39,7 @@ CREATE SOURCE nexmark (
     nexmark.min.event.gap.in.ns = '100'
 );
 
-STATEMENT ok
+statement ok
 CREATE VIEW PERSON AS
 SELECT (person).id,
        (person).name,
@@ -52,7 +52,7 @@ SELECT (person).id,
 FROM nexmark
 WHERE event_type = 0;
 
- STATEMENT ok
+statement ok
 CREATE VIEW AUCTION AS
 SELECT (auction).id,
        (auction).item_name,
@@ -67,7 +67,7 @@ SELECT (auction).id,
 FROM nexmark
 WHERE event_type = 1;
 
- STATEMENT ok
+statement ok
 CREATE VIEW BID AS
 SELECT (bid).auction,
        (bid).bidder,
