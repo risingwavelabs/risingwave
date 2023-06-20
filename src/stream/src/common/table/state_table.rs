@@ -51,6 +51,7 @@ use tracing::{trace, Instrument};
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
+use crate::common::table::iter_utils::merge_sort;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
@@ -934,11 +935,11 @@ where
             .map(get_second))
     }
 
-    pub async fn iter_all_vnodes_with_pk_range(
+    async fn iter_all_pk_and_val_with_pk_range(
         &self,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<Vec<RowStreamWithPk<'_, S, SD>>> {
+    ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
         let mut vec = Vec::with_capacity(self.vnodes.count_ones());
         for vnode in self.vnodes.iter_vnodes() {
             vec.push(
@@ -946,7 +947,20 @@ where
                     .await?,
             )
         }
-        Ok(vec)
+        let pinned_iter: Vec<_> = vec.into_iter().map(Box::pin).collect_vec();
+        let iter = merge_sort(pinned_iter);
+        Ok(iter)
+    }
+
+    pub async fn iter_all_with_pk_range(
+        &self,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
+        Ok(self
+            .iter_all_pk_and_val_with_pk_range(pk_range, prefetch_options)
+            .await?
+            .map(get_second))
     }
 
     pub async fn iter_key_and_val_with_pk_range(

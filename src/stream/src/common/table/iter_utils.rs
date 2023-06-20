@@ -63,7 +63,7 @@ impl<S> Ord for Node<S> {
     }
 }
 
-#[try_stream(ok=OwnedRow, error=StreamExecutorError)]
+#[try_stream(ok=(Bytes, OwnedRow), error=StreamExecutorError)]
 pub async fn merge_sort<'a, R>(streams: Vec<R>)
 where
     R: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a + Unpin,
@@ -78,9 +78,9 @@ where
         // Note: If the `next` returns `Err`, we'll fail to yield the previous item.
         yield match node.stream.next().await.transpose()? {
             // There still remains data in the stream, take and update the peeked value.
-            Some(new_peeked) => std::mem::replace(&mut node.peeked, new_peeked).1,
+            Some(new_peeked) => std::mem::replace(&mut node.peeked, new_peeked),
             // This stream is exhausted, remove it from the heap.
-            None => PeekMut::pop(node).peeked.1,
+            None => PeekMut::pop(node).peeked,
         };
     }
 }

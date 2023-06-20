@@ -22,7 +22,6 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
@@ -38,7 +37,6 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
-use crate::common::table::iter_utils::merge_sort;
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, PkIndices, StreamExecutorResult, Watermark};
@@ -443,11 +441,9 @@ where
             } else {
                 (Bound::Unbounded, Bound::Unbounded)
             };
-        let iterators = upstream_table
-            .iter_all_vnodes_with_pk_range(&range_bounds, Default::default())
+        let iter = upstream_table
+            .iter_all_with_pk_range(&range_bounds, Default::default())
             .await?;
-        let pinned_iter: Vec<_> = iterators.into_iter().map(Box::pin).collect_vec();
-        let iter = merge_sort(pinned_iter);
         pin_mut!(iter);
         while let Some(data_chunk) = collect_data_chunk(&mut iter, &schema, Some(CHUNK_SIZE))
             .instrument_await("arrangement_backfill_snapshot_read")
