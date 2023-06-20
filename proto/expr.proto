@@ -61,6 +61,8 @@ message ExprNode {
     TO_TIMESTAMP1 = 107;
     // Performs a cast with additional timezone information.
     CAST_WITH_TIME_ZONE = 108;
+    ADD_WITH_TIME_ZONE = 109;
+    SUBTRACT_WITH_TIME_ZONE = 110;
     // other functions
     CAST = 201;
     SUBSTR = 202;
