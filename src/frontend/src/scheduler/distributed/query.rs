@@ -599,7 +599,7 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(0, 0),
             property: Some(Property {
-                is_schedulable: true,
+                is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
             }),
@@ -614,7 +614,7 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(8, 1),
             property: Some(Property {
-                is_schedulable: true,
+                is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
             }),
@@ -629,7 +629,7 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(16, 2),
             property: Some(Property {
-                is_schedulable: true,
+                is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
             }),

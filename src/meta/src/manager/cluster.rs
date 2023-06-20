@@ -102,11 +102,20 @@ where
         property: AddNodeProperty,
     ) -> MetaResult<WorkerNode> {
         let worker_node_parallelism = property.worker_node_parallelism as usize;
-        let property = self.parse_property(r#type, property);
+        let mut property = self.parse_property(r#type, property);
         let mut core = self.core.write().await;
 
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
             // TODO: update parallelism when the worker exists.
+            if let Some(property) = &mut property {
+                property.is_unschedulable = worker
+                    .worker_node
+                    .property
+                    .as_ref()
+                    .unwrap()
+                    .is_unschedulable;
+            }
+
             worker.update_ttl(self.max_heartbeat_interval);
             if property != worker.worker_node.property {
                 tracing::info!(
@@ -115,17 +124,20 @@ where
                     worker.worker_node.property,
                     property
                 );
+
                 worker.worker_node.property = property;
                 worker.insert(self.env.meta_store()).await?;
             }
             return Ok(worker.to_protobuf());
         }
+
         // Generate worker id.
         let worker_id = self
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::Worker }>()
             .await? as WorkerId;
+
         // Generate parallel units.
         let parallel_units = if r#type == WorkerType::ComputeNode {
             self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
@@ -160,9 +172,7 @@ where
             core.update_worker_node(worker.clone());
         }
 
-        worker.worker_node.state = State::Running as i32;
         worker.insert(self.env.meta_store()).await?;
-
         core.update_worker_node(worker.clone());
 
         // Notify frontends of new compute node.
@@ -184,7 +194,7 @@ where
     pub async fn update_schedulability(
         &self,
         worker_id: u32,
-        is_schedulable: bool,
+        is_unschedulable: bool,
     ) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
         let mut worker_opt: Option<&mut Worker> = None;
@@ -197,30 +207,17 @@ where
         let worker = worker_opt.ok_or_else(|| anyhow!("Worker node does not exist!"))?;
         let worker_type = worker.worker_type();
 
-        // TODO
-        // We need to handle the deleting state once we introduce it
-        // if worker_type == WorkerType::ComputeNode && worker.worker_node.state == State::DELETING
-
-        let old_prop = match worker.worker_node.get_property() {
-            Ok(p) => p.clone(),
-            Err(_) => {
-                tracing::warn!("worker did not have property");
-                Property {
-                    is_schedulable: true,
-                    is_serving: true,
-                    is_streaming: true,
-                }
+        if let Some(property) = &mut worker.worker_node.property {
+            if property.is_unschedulable == is_unschedulable {
+                return Ok(worker_type);
             }
-        };
-        let new_prop = Property {
-            is_schedulable,
-            is_serving: old_prop.is_serving,
-            is_streaming: old_prop.is_streaming,
-        };
-
-        worker.worker_node.property = Some(new_prop);
+            property.is_unschedulable = is_unschedulable;
+        } else {
+            return Err(MetaError::invalid_parameter(
+                "Worker node does not have property",
+            ));
+        }
         Worker::insert(worker, self.env.meta_store()).await?;
-
         Ok(worker_type)
     }
 
@@ -403,7 +400,7 @@ where
             Some(Property {
                 is_streaming: worker_property.is_streaming,
                 is_serving: worker_property.is_serving,
-                is_schedulable: worker_property.is_schedulable,
+                is_unschedulable: worker_property.is_unschedulable,
             })
         } else {
             None
@@ -538,7 +535,7 @@ impl ClusterManagerCore {
                 if list_unschedulable {
                     true
                 } else {
-                    w.property.as_ref().map_or(true, |p| p.is_schedulable)
+                    !w.property.as_ref().map_or(false, |p| p.is_unschedulable)
                 }
             })
             .collect_vec()
@@ -653,7 +650,7 @@ mod tests {
                         worker_node_parallelism: fake_parallelism as _,
                         is_streaming: true,
                         is_serving: true,
-                        is_schedulable: true,
+                        is_unschedulable: false,
                     },
                 )
                 .await
@@ -724,7 +721,7 @@ mod tests {
                     worker_node_parallelism: fake_parallelism as _,
                     is_streaming: true,
                     is_serving: true,
-                    is_schedulable: true,
+                    is_unschedulable: false,
                 },
             )
             .await

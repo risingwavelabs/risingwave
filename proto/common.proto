@@ -50,7 +50,7 @@ message WorkerNode {
   message Property {
     bool is_streaming = 1;
     bool is_serving = 2;
-    bool is_schedulable = 3;
+    bool is_unschedulable = 3;
   }
   uint32 id = 1;
   WorkerType type = 2;

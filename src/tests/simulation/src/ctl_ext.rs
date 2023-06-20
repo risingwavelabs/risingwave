@@ -304,7 +304,7 @@ impl Cluster {
     pub async fn update_worker_node_schedulability(
         &self,
         worker_id: u32,
-        is_schedulable: bool,
+        is_unschedulable: bool,
     ) -> Result<()> {
         let _ = self
             .ctl
@@ -312,7 +312,7 @@ impl Cluster {
                 risingwave_ctl::cmd_impl::meta::update_schedulability(
                     &risingwave_ctl::common::CtlContext::default(),
                     worker_id,
-                    is_schedulable,
+                    is_unschedulable,
                 )
                 .await
             })

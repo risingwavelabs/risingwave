@@ -365,26 +365,18 @@ where
         }
 
         // Check if we are trying to move a fragment to a node marked as unschedulable
-        let unschedulable_nodes = worker_nodes
-            .iter()
-            .filter(|(_, w)| !w.get_property().ok().map_or(false, |p| p.is_schedulable))
-            .map(|(_, w)| w)
-            .collect_vec();
-        let unschedulable_pu_ids: HashSet<u32> = unschedulable_nodes
-            .iter()
-            .flat_map(|w| w.get_parallel_units())
-            .map(|pu| pu.id)
+        let unschedulable_pu_ids: HashSet<ParallelUnitId> = worker_nodes
+            .values()
+            .filter(|w| w.property.as_ref().unwrap().is_unschedulable)
+            .flat_map(|w| w.parallel_units.iter().map(|pu| pu.id))
             .collect();
-        let added_pu_ids: HashSet<u32> = reschedule
-            .iter()
-            .flat_map(|(_, pu_r)| pu_r.added_parallel_units.clone())
-            .collect();
-        if !added_pu_ids
-            .intersection(&unschedulable_pu_ids)
-            .collect::<HashSet<&u32>>()
-            .is_empty()
+
+        if reschedule
+            .values()
+            .flat_map(|p| &p.added_parallel_units)
+            .any(|pu| unschedulable_pu_ids.contains(pu))
         {
-            bail!("unable to move actor to node marked as unschedulable");
+            bail!("unable to move fragment to unschedulable node");
         }
 
         // Associating ParallelUnit with Worker

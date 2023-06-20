@@ -34,11 +34,11 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
 pub async fn update_schedulability(
     context: &CtlContext,
     worker_id: u32,
-    is_schedulable: bool,
+    is_unschedulable: bool,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     meta_client
-        .update_schedulability(worker_id, is_schedulable)
+        .update_schedulability(worker_id, is_unschedulable)
         .await?;
     Ok(())
 }
@@ -160,7 +160,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
             "".into()
         } else {
             last_worker_id = Some(worker.id);
-            let cordoned = if !worker.get_property().map_or(true, |p| p.is_schedulable) {
+            let cordoned = if !worker.get_property().map_or(true, |p| p.is_unschedulable) {
                 " (cordoned)"
             } else {
                 ""

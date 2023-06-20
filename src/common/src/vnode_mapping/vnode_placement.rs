@@ -193,7 +193,7 @@ mod tests {
         let mut pu_id_counter: ParallelUnitId = 0;
         let mut pu_to_worker: HashMap<ParallelUnitId, u32> = Default::default();
         let serving_property = Property {
-            is_schedulable: true,
+            is_unschedulable: false,
             is_serving: true,
             is_streaming: false,
         };

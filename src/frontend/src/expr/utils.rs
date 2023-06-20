@@ -523,6 +523,31 @@ impl WatermarkAnalyzer {
                 }
                 _ => WatermarkDerivation::None,
             },
+            ExprType::AddWithTimeZone | ExprType::SubtractWithTimeZone => {
+                // Requires time zone and interval to be literal, at least for now.
+                let time_zone = match &func_call.inputs()[2] {
+                    ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_utf8()),
+                    _ => return WatermarkDerivation::None,
+                };
+                let interval = match &func_call.inputs()[1] {
+                    ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_interval()),
+                    _ => return WatermarkDerivation::None,
+                };
+                // null zone or null interval is treated same as const `interval '1' second`, to be
+                // consistent with other match arms.
+                let zone_without_dst = time_zone.map_or(true, |s| s.eq_ignore_ascii_case("UTC"));
+                let quantitative_only = interval.map_or(true, |v| {
+                    v.months() == 0 && (v.days() == 0 || zone_without_dst)
+                });
+                match (self.visit_expr(&func_call.inputs()[0]), quantitative_only) {
+                    (WatermarkDerivation::Constant, _) => WatermarkDerivation::Constant,
+                    (WatermarkDerivation::Watermark(idx), true) => {
+                        WatermarkDerivation::Watermark(idx)
+                    }
+                    (WatermarkDerivation::Watermark(_), false) => WatermarkDerivation::None,
+                    (WatermarkDerivation::None, _) => WatermarkDerivation::None,
+                }
+            }
             ExprType::Modulus => WatermarkDerivation::None,
             ExprType::DateTrunc => match func_call.inputs().len() {
                 2 => match self.visit_binary_op(func_call.inputs()) {

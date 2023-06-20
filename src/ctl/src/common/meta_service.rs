@@ -55,16 +55,11 @@ Note: the default value of `RW_META_ADDR` is 'http://127.0.0.1:5690'.";
 
     /// Create meta client from options, and register as rise-ctl worker
     pub async fn create_meta_client(&self) -> Result<MetaClient> {
-        let p = Property {
-            is_schedulable: true,
-            ..Default::default()
-        };
-
         let (client, _) = MetaClient::register_new(
             &self.meta_addr,
             WorkerType::RiseCtl,
             &get_new_ctl_identity(),
-            p,
+            Property::default(),
             &MetaConfig::default(),
         )
         .await?;

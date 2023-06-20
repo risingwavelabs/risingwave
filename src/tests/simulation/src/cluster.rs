@@ -390,7 +390,9 @@ impl Cluster {
 
     // mark node as unschedulable
     pub async fn mark_as_unschedulable(&self, worker_node: &WorkerNode) -> Result<()> {
-        self.update_worker_node_schedulability(worker_node.id, false)
+        let addr: risingwave_pb::common::HostAddress =
+            worker_node.clone().host.expect("node does not have host");
+        self.update_worker_node_schedulability(worker_node.id, true)
             .await?;
         Ok(())
     }
@@ -411,7 +413,8 @@ impl Cluster {
     pub async fn mark_rand_nodes_unschedulable(&self, n: usize) -> Result<Vec<WorkerNode>> {
         let rand_nodes = self.get_random_worker_nodes(n).await?;
         for rand_node in rand_nodes.clone() {
-            self.update_worker_node_schedulability(rand_node.id, false)
+            let addr = rand_node.host.expect("expected node to have host");
+            self.update_worker_node_schedulability(rand_node.id, true)
                 .await?;
         }
         Ok(rand_nodes)
