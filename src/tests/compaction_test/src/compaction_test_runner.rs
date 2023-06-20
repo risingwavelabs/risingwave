@@ -34,7 +34,6 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage, TieredCacheMetricsBuilder};
@@ -235,17 +234,12 @@ async fn init_metadata_for_replay(
 
     let meta_config = MetaConfig::default();
     let meta_client: MetaClient;
-
-    let p = Property {
-        is_unschedulable: false,
-        ..Default::default()
-    };
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, p, &meta_config) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
             (meta_client, _) = ret.unwrap();
         },
     }
@@ -255,15 +249,11 @@ async fn init_metadata_for_replay(
 
     let tables = meta_client.risectl_list_state_tables().await?;
 
-    let p = Property {
-        is_unschedulable: false,
-        ..Default::default()
-    };
     let (new_meta_client, _) = MetaClient::register_new(
         new_meta_endpoint,
         WorkerType::RiseCtl,
         advertise_addr,
-        p,
+        Default::default(),
         &meta_config,
     )
     .await?;
@@ -291,16 +281,11 @@ async fn pull_version_deltas(
 ) -> anyhow::Result<Vec<HummockVersionDelta>> {
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-
-    let p = Property {
-        is_unschedulable: false,
-        ..Default::default()
-    };
     let (meta_client, _) = MetaClient::register_new(
         cluster_meta_endpoint,
         WorkerType::RiseCtl,
         advertise_addr,
-        p,
+        Default::default(),
         &MetaConfig::default(),
     )
     .await?;
@@ -346,15 +331,11 @@ async fn start_replay(
 
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let p = Property {
-        is_unschedulable: false,
-        ..Default::default()
-    };
     let (meta_client, system_params) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::RiseCtl,
         &advertise_addr,
-        p,
+        Default::default(),
         &config.meta,
     )
     .await?;
