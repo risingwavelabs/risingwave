@@ -924,9 +924,10 @@ impl Binder {
             .into());
         }
         if matches!(self.context.clause, Some(Clause::GeneratedColumn)) {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
+            return Err(ErrorCode::InvalidInputSyntax(
                 "Cannot use `NOW()` function in generated columns. Do you want `PROCTIME()`?"
-            ))
+                    .to_string(),
+            )
             .into());
         }
         Ok(())
