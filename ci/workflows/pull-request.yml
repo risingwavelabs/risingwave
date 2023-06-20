@@ -132,15 +132,20 @@ steps:
     timeout_in_minutes: 18
     cancel_on_build_failing: true
 
-  - label: "connector node integration test"
-    command: "ci/scripts/connector-node-integration-test.sh -p ci-dev"
+  - label: "connector node integration test Java {{matrix.version}}"
+    command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v {{matrix.version}}"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    matrix:
+      setup:
+        version:
+          - "11"
+          - "17"
+    timeout_in_minutes: 20
 
   - label: "end-to-end iceberg sink test"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"

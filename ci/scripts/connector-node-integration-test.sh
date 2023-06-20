@@ -5,8 +5,14 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-while getopts 'p:' opt; do
+VERSION=11
+
+while getopts 'p:v:' opt; do
     case ${opt} in
+        v ):
+            echo "The java version is $OPTARG"
+            VERSION=$OPTARG
+            ;;
         p )
             profile=$OPTARG
             ;;
@@ -27,8 +33,19 @@ echo "--- build connector node"
 cd ${RISINGWAVE_ROOT}/java
 mvn --batch-mode --update-snapshots clean package -DskipTests
 
-echo "--- install postgresql client"
+echo "--- install java"
 apt install sudo -y
+
+if [ "$OPTARG" = "11" ]; then 
+  echo "The test imgae default java version is 11, no need to install"
+else
+  echo "The test imgae default java version is 11, need to install java 17"
+  sudo apt install openjdk-17-jdk openjdk-17-jre -y
+fi
+java_version=$(java --version 2>&1)
+echo "$java_version"
+
+echo "--- install postgresql client"
 DEBIAN_FRONTEND=noninteractive TZ=America/New_York apt-get -y install tzdata
 sudo apt install postgresql postgresql-contrib libpq-dev -y
 sudo service postgresql start || sudo pg_ctlcluster 14 main start
@@ -56,6 +73,7 @@ sh ./start-service.sh &
 sleep 3
 
 # generate data
+echo "--- starting generate streamchunk data"
 cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
 cargo run --bin data-chunk-payload-convert-generator data/sink_input_new.json > ./data/sink_input
 cargo run --bin data-chunk-payload-generator unit-test > ./data/stream_chunk_data
