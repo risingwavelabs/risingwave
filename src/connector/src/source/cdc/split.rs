@@ -134,7 +134,6 @@ impl PostgresCdcSplit {
         let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
             .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
 
-        info!("dbz_offset: {:?}", dbz_offset);
         let snapshot_done = dbz_offset
             .source_offset
             .last_snapshot_record
