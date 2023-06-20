@@ -21,7 +21,7 @@ use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
 use risingwave_sqlparser::ast::Statement;
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, timeout, Duration};
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Client;
 
@@ -61,6 +61,7 @@ pub async fn run_pre_generated(client: &Client, outdir: &str) {
 /// If we encounter an expected error, just skip.
 /// If we encounter an unexpected error,
 /// Sqlsmith should stop execution, but writeout ddl and queries so far.
+/// If query takes too long -> cancel it, **mark it as error**.
 /// NOTE(noel): It will still fail if DDL creation fails.
 pub async fn generate(
     client: &Client,
@@ -464,10 +465,19 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
 /// For recovery error, just do bounded retry.
 /// For other errors, validate them accordingly, skipping if they are permitted.
 /// Otherwise just return success.
-///
+/// If takes too long return the query which timed out + execution time + timeout error
 /// Returns: Number of skipped queries.
 async fn run_query(client: &Client, query: &str) -> Result<i64> {
-    let response = client.simple_query(query).await;
+    let timeout_duration = 3;
+    let query_task = client.simple_query(query);
+    let result = timeout(Duration::from_secs(timeout_duration), query_task).await;
+    let response = match result {
+        Ok(r) => r,
+        Err(_) => bail!(
+            "[UNEXPECTED ERROR] Query timeout after {timeout_duration}s:\n{:?}",
+            query
+        ),
+    };
     if let Err(e) = &response
     && let Some(e) = e.as_db_error() {
         if is_recovery_in_progress_error(&e.to_string()) {
@@ -480,7 +490,7 @@ async fn run_query(client: &Client, query: &str) -> Result<i64> {
                     return Ok(0);
                 }
             }
-            bail!("Failed to recover after {tries} tries with interval {interval}s")
+            bail!("[UNEXPECTED ERROR] Failed to recover after {tries} tries with interval {interval}s")
         } else {
             return validate_response(response);
         }
