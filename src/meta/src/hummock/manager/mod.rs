@@ -1609,7 +1609,8 @@ where
         purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version);
         for (table_id, stats) in &table_stats_change {
             let table_id_str = table_id.to_string();
-            let stats_value = std::cmp::max(0, stats.total_key_size + stats.total_value_size);
+            let stats_value =
+                std::cmp::max(0, stats.total_key_size + stats.total_value_size) / 1024 / 1024;
             self.metrics
                 .table_write_throughput
                 .with_label_values(&[table_id_str.as_str()])

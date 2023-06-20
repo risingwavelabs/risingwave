@@ -158,7 +158,7 @@ def section_compaction(outer_panels):
                     "The  of bytes that have been written by commit epoch per second.",
                     [
                         panels.target(
-                            f"sum(rate({metric('storage_commit_write_throughput')})) by (table_id)",
+                            f"sum(rate({metric('storage_commit_write_throughput')}[$__rate_interval])) by (table_id)",
                             "write - {{table_id}}",
                         ),
                     ],
