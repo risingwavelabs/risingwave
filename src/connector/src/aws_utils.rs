@@ -124,7 +124,7 @@ pub async fn load_file_descriptor_from_s3(
         )))
     })?;
     let key = location.path().replace('/', "");
-    let config = AwsAuthProps::from_iter(properties.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+    let config = AwsAuthProps::from_pairs(properties.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     let sdk_config = config.build_config().await?;
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
     let response = s3_client
