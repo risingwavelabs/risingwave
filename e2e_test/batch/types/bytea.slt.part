@@ -87,3 +87,13 @@ query T
 SELECT 'De\\678dBeEf'::bytea;
 ----
 \x44655c3637386442654566
+
+query T
+select 'a'::bytea = '\x61';
+----
+t
+
+query T
+select '\x31'::bytea > '1'::bytea;
+----
+f
