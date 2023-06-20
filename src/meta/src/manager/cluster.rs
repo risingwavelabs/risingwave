@@ -172,9 +172,7 @@ where
             core.update_worker_node(worker.clone());
         }
 
-        worker.worker_node.state = State::Running as i32;
         worker.insert(self.env.meta_store()).await?;
-
         core.update_worker_node(worker.clone());
 
         // Notify frontends of new compute node.
