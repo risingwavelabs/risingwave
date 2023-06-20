@@ -113,7 +113,7 @@ public class DbzConnectorConfig {
                 postgresProps.setProperty("publication.autocreate.mode", "all_tables");
             }
 
-            // if snapshot phase is finished adn offset is specified, we will continue reading
+            // if snapshot phase is finished and offset is specified, we will continue reading
             // changes from the given offset
             if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
                 postgresProps.setProperty("snapshot.mode", "never");
