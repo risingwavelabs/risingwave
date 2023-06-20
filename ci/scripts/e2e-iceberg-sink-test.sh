@@ -79,17 +79,6 @@ else
   exit 1
 fi
 
-echo "--- testing elasticsearch sink"
-chmod +x ./ci/scripts/e2e-elasticsearch-sink-test.sh
-./ci/scripts/e2e-elasticsearch-sink-test.sh
-if [ $? -eq 0 ]; then
-  echo "elasticsearch sink check passed"
-else
-  echo "elasticsearch sink test failed"
-  exit 1
-fi
-
-
 echo "--- Kill cluster"
 cargo make ci-kill
 pkill -f connector-node
