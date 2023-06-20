@@ -215,18 +215,16 @@ where
                 // it is typically due to barrier (except the first time).
                 // So we should immediately process barrier if there's one pending.
                 if let Some(barrier) = pending_barrier.clone() {
-                    // If it is a barrier, switch snapshot and consume
-                    // upstream buffer chunk
-
-                    if let Some(current_pos) = &current_pos {
-                        // NOTE: We do not consume the chunk here.
-                        // We still need to flush it to the `state_table`,
-                        // to ensure the upstream state is replicated.
-                        for chunk in &upstream_chunk_buffer {
-                            cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
+                    let upstream_chunk_buffer_is_empty = upstream_chunk_buffer.is_empty();
+                    for chunk in upstream_chunk_buffer.drain(..) {
+                        cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
+                        // Flush downstream.
+                        // If no current_pos, means no snapshot processed yet.
+                        // Also means we don't need propagate any updates <= current_pos.
+                        if let Some(current_pos) = &current_pos {
                             yield Message::Chunk(Self::mapping_chunk(
                                 Self::mark_chunk(
-                                    chunk,
+                                    &chunk,
                                     current_pos,
                                     &pk_in_output_indices,
                                     &pk_order,
@@ -234,11 +232,12 @@ where
                                 &self.output_indices,
                             ));
                         }
+                        // Replicate
+                        upstream_table.write_chunk(chunk);
                     }
-                    if !upstream_chunk_buffer.is_empty() {
-                        for chunk in upstream_chunk_buffer.drain(..) {
-                            upstream_table.write_chunk(chunk);
-                        }
+                    if upstream_chunk_buffer_is_empty {
+                        upstream_table.commit_no_data_expected(barrier.epoch)
+                    } else {
                         upstream_table.commit(barrier.epoch).await?;
                     }
 
