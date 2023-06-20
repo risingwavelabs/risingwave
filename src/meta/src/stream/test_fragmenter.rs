@@ -432,15 +432,10 @@ fn make_cluster_info() -> StreamingClusterInfo {
         })
         .collect();
 
-    let p = Property {
-        is_unschedulable: false,
-        ..Default::default()
-    };
     let worker_nodes = std::iter::once((
         0,
         WorkerNode {
             id: 0,
-            property: Some(p),
             ..Default::default()
         },
     ))
