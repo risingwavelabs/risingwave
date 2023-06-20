@@ -39,6 +39,7 @@ use risingwave_storage::table::{collect_data_chunk, get_second};
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
+use crate::executor::backfill::utils::mark_chunk;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
@@ -266,7 +267,7 @@ where
                                             cur_barrier_upstream_processed_rows +=
                                                 chunk.cardinality() as u64;
                                             yield Message::Chunk(Self::mapping_chunk(
-                                                Self::mark_chunk(
+                                                mark_chunk(
                                                     chunk,
                                                     current_pos,
                                                     &pk_in_output_indices,
@@ -477,36 +478,6 @@ where
         }
 
         yield None;
-    }
-
-    /// Mark chunk:
-    /// For each row of the chunk, forward it to downstream if its pk <= `current_pos`, otherwise
-    /// ignore it. We implement it by changing the visibility bitmap.
-    fn mark_chunk(
-        chunk: StreamChunk,
-        current_pos: &OwnedRow,
-        pk_in_output_indices: PkIndicesRef<'_>,
-        pk_order: &[OrderType],
-    ) -> StreamChunk {
-        let chunk = chunk.compact();
-        let (data, ops) = chunk.into_parts();
-        let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
-        // Use project to avoid allocation.
-        for v in data.rows().map(|row| {
-            match row
-                .project(pk_in_output_indices)
-                .iter()
-                .zip_eq_fast(pk_order.iter().copied())
-                .cmp_by(current_pos.iter(), |(x, order), y| cmp_datum(x, y, order))
-            {
-                Ordering::Less | Ordering::Equal => true,
-                Ordering::Greater => false,
-            }
-        }) {
-            new_visibility.append(v);
-        }
-        let (columns, _) = data.into_parts();
-        StreamChunk::new(ops, columns, Some(new_visibility.finish()))
     }
 
     /// Builds a new stream chunk with `output_indices`.
