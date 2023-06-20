@@ -41,7 +41,6 @@ batch_chunk_size = 1024
 
 [streaming]
 in_flight_barrier_nums = 10000
-enable_jaeger_tracing = false
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
 

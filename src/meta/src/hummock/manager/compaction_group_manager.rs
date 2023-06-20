@@ -639,6 +639,12 @@ impl<S: MetaStore> HummockManager<S> {
                 compact_task::TaskType::SpaceReclaim,
             );
         }
+
+        self.metrics
+            .move_state_table_count
+            .with_label_values(&[&parent_group_id.to_string()])
+            .inc();
+
         Ok(target_compaction_group_id)
     }
 

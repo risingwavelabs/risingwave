@@ -42,6 +42,16 @@ use crate::expr::{
 };
 use crate::utils::Condition;
 
+// Defines system functions that without args, ref: https://www.postgresql.org/docs/current/functions-info.html
+pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
+    "session_user",
+    "user",
+    "current_user",
+    "current_role",
+    "current_schema",
+    "current_timestamp",
+];
+
 impl Binder {
     pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
         let function_name = match f.name.0.as_slice() {
@@ -477,6 +487,32 @@ impl Binder {
             })
         }
 
+        // `SESSION_USER` is the user name of the user that is connected to the database.
+        fn session_user() -> Handle {
+            guard_by_len(
+                0,
+                raw(|binder, _inputs| {
+                    Ok(ExprImpl::literal_varchar(
+                        binder.auth_context.user_name.clone(),
+                    ))
+                }),
+            )
+        }
+
+        // `CURRENT_USER` is the user name of the user that is executing the command,
+        // `CURRENT_ROLE`, `USER` are synonyms for `CURRENT_USER`. Since we don't support
+        // `SET ROLE xxx` for now, they will all returns session user name.
+        fn current_user() -> Handle {
+            guard_by_len(
+                0,
+                raw(|binder, _inputs| {
+                    Ok(ExprImpl::literal_varchar(
+                        binder.auth_context.user_name.clone(),
+                    ))
+                }),
+            )
+        }
+
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
             [
                 (
@@ -723,11 +759,10 @@ impl Binder {
                         DataType::Varchar,
                     ))
                 })),
-                ("session_user", guard_by_len(0, raw(|binder, _inputs| {
-                    Ok(ExprImpl::literal_varchar(
-                        binder.auth_context.user_name.clone(),
-                    ))
-                }))),
+                ("session_user", session_user()),
+                ("current_role", current_user()),
+                ("current_user", current_user()),
+                ("user", current_user()),
                 ("pg_get_userbyid", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
                         let bound_query = binder.bind_get_user_by_id_select(input)?;
@@ -897,6 +932,7 @@ impl Binder {
                 | Clause::GroupBy
                 | Clause::Having
                 | Clause::Filter
+                | Clause::GeneratedColumn
                 | Clause::From => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
@@ -922,6 +958,13 @@ impl Binder {
             ))
             .into());
         }
+        if matches!(self.context.clause, Some(Clause::GeneratedColumn)) {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Cannot use `NOW()` function in generated columns. Do you want `PROCTIME()`?"
+                    .to_string(),
+            )
+            .into());
+        }
         Ok(())
     }
 
@@ -938,7 +981,7 @@ impl Binder {
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::From => {
+                Clause::Where | Clause::Values | Clause::From | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
                         clause
@@ -954,7 +997,7 @@ impl Binder {
     fn ensure_table_function_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values => {
+                Clause::Where | Clause::Values | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",
                         clause

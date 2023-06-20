@@ -14,17 +14,14 @@
 
 package com.risingwave.functions;
 
-import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.vector.VectorSchemaRoot;
-
 import java.lang.invoke.MethodHandle;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.function.Function;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.VectorSchemaRoot;
 
-/**
- * Batch-processing wrapper over a user-defined table function.
- */
+/** Batch-processing wrapper over a user-defined table function. */
 class TableFunctionBatch extends UserDefinedFunctionBatch {
     TableFunction function;
     MethodHandle methodHandle;
@@ -48,15 +45,19 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
         row[0] = this.function;
         var indexes = new ArrayList<Integer>();
         var values = new ArrayList<Object>();
-        Runnable buildChunk = () -> {
-            var fields = this.outputSchema.getFields();
-            var indexVector = TypeUtils.createVector(fields.get(0), this.allocator, indexes.toArray());
-            var valueVector = TypeUtils.createVector(fields.get(1), this.allocator, values.toArray());
-            indexes.clear();
-            values.clear();
-            var outputBatch = VectorSchemaRoot.of(indexVector, valueVector);
-            outputs.add(outputBatch);
-        };
+        Runnable buildChunk =
+                () -> {
+                    var fields = this.outputSchema.getFields();
+                    var indexVector =
+                            TypeUtils.createVector(
+                                    fields.get(0), this.allocator, indexes.toArray());
+                    var valueVector =
+                            TypeUtils.createVector(fields.get(1), this.allocator, values.toArray());
+                    indexes.clear();
+                    values.clear();
+                    var outputBatch = VectorSchemaRoot.of(indexVector, valueVector);
+                    outputs.add(outputBatch);
+                };
         for (int i = 0; i < batch.getRowCount(); i++) {
             // prepare input row
             for (int j = 0; j < row.length - 1; j++) {
