@@ -63,6 +63,11 @@ create function return_all(BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DAT
 returns struct<bool BOOLEAN, i16 SMALLINT, i32 INT, i64 BIGINT, f32 FLOAT4, f64 FLOAT8, decimal DECIMAL, date DATE, time TIME, timestamp TIMESTAMP, interval INTERVAL, varchar VARCHAR, bytea BYTEA, jsonb JSONB>
 language python as return_all using link 'http://localhost:8815';
 
+statement ok
+create function return_all_arrays(BOOLEAN[],SMALLINT[],INT[],BIGINT[],FLOAT4[],FLOAT8[],DECIMAL[],DATE[],TIME[],TIMESTAMP[],INTERVAL[],VARCHAR[],BYTEA[],JSONB[])
+returns struct<bool BOOLEAN[], i16 SMALLINT[], i32 INT[], i64 BIGINT[], f32 FLOAT4[], f64 FLOAT8[], decimal DECIMAL[], date DATE[], time TIME[], timestamp TIMESTAMP[], interval INTERVAL[], varchar VARCHAR[], bytea BYTEA[], jsonb JSONB[]>
+language python as return_all_arrays using link 'http://localhost:8815';
+
 query TTTTT rowsort
 show functions
 ----
@@ -143,9 +148,30 @@ select return_all(
     interval '1 month 2 days 3 seconds',
     'string',
     'bytes'::bytea,
-    '{"key":1}'::jsonb);
+    '{"key":1}'::jsonb
+);
 ----
 (t,1,1,1,1,1,1234567890123456789012345678,2023-06-01,01:02:03.456789,2023-06-01 01:02:03.456789,1 mon 2 days 00:00:03,string,\x6279746573,{"key": 1})
+
+query T
+select return_all_arrays(
+    array[true],
+    array[1 ::smallint],
+    array[1 ::int],
+    array[1 ::bigint],
+    array[1 ::float4],
+    array[1 ::float8],
+    array[1234567890123456789012345678 ::decimal],
+    array[date '2023-06-01'],
+    array[time '01:02:03.456789'],
+    array[timestamp '2023-06-01 01:02:03.456789'],
+    array[interval '1 month 2 days 3 seconds'],
+    array['string'],
+    array['bytes'::bytea],
+    array['{"key":1}'::jsonb]
+);
+----
+({t},{1},{1},{1},{1},{1},{1234567890123456789012345678},{2023-06-01},{01:02:03.456789},{"2023-06-01 01:02:03.456789"},{"1 mon 2 days 00:00:03"},{string},{"\\x6279746573"},{"{\"key\": 1}"})
 
 query I
 select series(5);
@@ -274,3 +300,6 @@ drop function jsonb_array_struct_identity;
 
 statement ok
 drop function return_all;
+
+statement ok
+drop function return_all_types;

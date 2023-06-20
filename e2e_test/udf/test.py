@@ -94,14 +94,54 @@ def jsonb_array_struct_identity(v: Tuple[List[Any], int]) -> Tuple[List[Any], in
     return v
 
 
-ALL_TYPES = "BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB"
+ALL_TYPES = "BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB".split(
+    ","
+)
 
 
 @udf(
-    input_types=ALL_TYPES.split(","),
-    result_type=f"struct<{ALL_TYPES}>",
+    input_types=ALL_TYPES,
+    result_type=f"struct<{','.join(ALL_TYPES)}>",
 )
 def return_all(
+    bool,
+    i16,
+    i32,
+    i64,
+    f32,
+    f64,
+    decimal,
+    date,
+    time,
+    timestamp,
+    interval,
+    varchar,
+    bytea,
+    jsonb,
+):
+    return (
+        bool,
+        i16,
+        i32,
+        i64,
+        f32,
+        f64,
+        decimal,
+        date,
+        time,
+        timestamp,
+        interval,
+        varchar,
+        bytea,
+        jsonb,
+    )
+
+
+@udf(
+    input_types=[t + "[]" for t in ALL_TYPES],
+    result_type=f"struct<{','.join(t + '[]' for t in ALL_TYPES)}>",
+)
+def return_all_arrays(
     bool,
     i16,
     i32,
@@ -150,4 +190,5 @@ if __name__ == "__main__":
     server.add_function(jsonb_array_identity)
     server.add_function(jsonb_array_struct_identity)
     server.add_function(return_all)
+    server.add_function(return_all_arrays)
     server.serve()
