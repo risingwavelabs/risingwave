@@ -23,7 +23,7 @@ use parking_lot::Mutex;
 use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::compact_task::{self, TaskStatus};
+use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::error::SendError;
@@ -73,7 +73,7 @@ impl CompactionRequestChannel {
     pub fn try_sched_compaction(
         &self,
         compaction_group: CompactionGroupId,
-        task_type: compact_task::TaskType,
+        task_type: TaskType,
     ) -> Result<bool, SendError<CompactionRequestChannelItem>> {
         let mut guard = self.scheduled.lock();
         let key = (compaction_group, task_type);
@@ -318,6 +318,7 @@ where
     ) {
         use futures::pin_mut;
         pin_mut!(event_stream);
+        let mut skip_tasks: HashSet<(CompactionGroupId, TaskType)> = HashSet::new();
 
         loop {
             let item = futures::future::select(event_stream.next(), shutdown_rx.clone()).await;
@@ -336,11 +337,17 @@ where
                                     )
                                     .await
                                 {
+                                    skip_tasks.insert((compaction_group, task_type));
                                     self.hummock_manager
                                         .metrics
                                         .compact_skip_frequency
                                         .with_label_values(&["total", "no-compactor"])
                                         .inc();
+                                } else if !skip_tasks.is_empty() {
+                                    for (compaction_group, task_type) in skip_tasks.drain() {
+                                        let _ = sched_channel
+                                            .try_sched_compaction(compaction_group, task_type);
+                                    }
                                 }
                             }
                             SchedulerEvent::DynamicTrigger => {
