@@ -249,6 +249,8 @@ setup() {
     echo "ENABLE_RANDOM_SEED unset, default ENABLE_RANDOM_SEED=false (0)"
     ENABLE_RANDOM_SEED=0
   fi
+  echo "[INFO]: TEST_NUM=$TEST_NUM"
+  echo "[INFO]: ENABLE_RANDOM_SEED=$ENABLE_RANDOM_SEED"
   # -x is too verbose, selectively enable it if needed.
   pushd $RW_HOME
   mkdir -p $LOGDIR
