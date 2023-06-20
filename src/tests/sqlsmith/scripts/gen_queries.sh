@@ -10,7 +10,7 @@
 
 ################# ENV
 
-set -u
+set -euo pipefail
 
 export RUST_LOG="info"
 export OUTDIR=$SNAPSHOT_DIR
@@ -20,8 +20,6 @@ export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
 export TIME_BOUND="6m"
-
-set +u
 
 ################## COMMON
 
@@ -157,8 +155,6 @@ generate_one_deterministic() {
 # Prefer to use generate_deterministic, it is faster since
 # runs with all-in-one binary.
 generate_deterministic() {
-  # Allows us to use other functions defined in this file within `parallel`.
-  . $(which env_parallel.bash)
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
   echo "" > $LOGDIR/generate_deterministic.stdout.log
@@ -248,7 +244,6 @@ check_failed_to_run_queries() {
 ################### TOP LEVEL INTERFACE
 
 setup() {
-  set -euo pipefail
   if [[ -z "$TEST_NUM" ]]; then
     echo "TEST_NUM unset, default to TEST_NUM=100"
     TEST_NUM=100
@@ -259,7 +254,6 @@ setup() {
   fi
   echo "[INFO]: TEST_NUM=$TEST_NUM"
   echo "[INFO]: ENABLE_RANDOM_SEED=$ENABLE_RANDOM_SEED"
-  # -x is too verbose, selectively enable it if needed.
   pushd $RW_HOME
   mkdir -p $LOGDIR
 }
