@@ -45,13 +45,14 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
-use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, get_second, Distribution};
+use risingwave_storage::table::{
+    compute_chunk_vnode, compute_vnode, get_second, merge_sort, Distribution,
+};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
-use crate::common::table::iter_utils::merge_sort;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
