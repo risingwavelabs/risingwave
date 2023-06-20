@@ -535,7 +535,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                     array,
                     a,
                     Decimal128Builder::with_capacity(a.len())
-                        .with_data_type(arrow_schema::DataType::Decimal128(28, max_scale as i8)),
+                        .with_data_type(arrow_schema::DataType::Decimal128(38, max_scale as i8)),
                     |b, v| b.append_option(v.map(|d| decimal_to_i128(d, max_scale))),
                 )
             }
@@ -551,13 +551,13 @@ impl From<&ListArray> for arrow_array::ListArray {
             ArrayImpl::Timestamp(a) => build(
                 array,
                 a,
-                TimestampNanosecondBuilder::with_capacity(a.len()),
+                TimestampMicrosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
             ArrayImpl::Time(a) => build(
                 array,
                 a,
-                Time64NanosecondBuilder::with_capacity(a.len()),
+                Time64MicrosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
             ArrayImpl::Jsonb(a) => build(
@@ -625,7 +625,6 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::test_utils::IntervalTestExt;
 
     #[test]
     fn bool() {
@@ -661,22 +660,15 @@ mod tests {
 
     #[test]
     fn time() {
-        let array = TimeArray::from_iter([
-            None,
-            Time::with_secs_nano(12345, 123456789).ok(),
-            Time::with_secs_nano(1, 0).ok(),
-        ]);
+        let array = TimeArray::from_iter([None, Time::with_micro(24 * 3600 * 1_000_000 - 1).ok()]);
         let arrow = arrow_array::Time64MicrosecondArray::from(&array);
         assert_eq!(TimeArray::from(&arrow), array);
     }
 
     #[test]
     fn timestamp() {
-        let array = TimestampArray::from_iter([
-            None,
-            Timestamp::with_secs_nsecs(12345, 123456789).ok(),
-            Timestamp::with_secs_nsecs(1, 0).ok(),
-        ]);
+        let array =
+            TimestampArray::from_iter([None, Timestamp::with_micros(123456789012345678).ok()]);
         let arrow = arrow_array::TimestampMicrosecondArray::from(&array);
         assert_eq!(TimestampArray::from(&arrow), array);
     }
@@ -685,8 +677,16 @@ mod tests {
     fn interval() {
         let array = IntervalArray::from_iter([
             None,
-            Some(Interval::from_millis(123456789)),
-            Some(Interval::from_millis(-123456789)),
+            Some(Interval::from_month_day_usec(
+                1_000_000,
+                1_000,
+                1_000_000_000,
+            )),
+            Some(Interval::from_month_day_usec(
+                -1_000_000,
+                -1_000,
+                -1_000_000_000,
+            )),
         ]);
         let arrow = arrow_array::IntervalMonthDayNanoArray::from(&array);
         assert_eq!(IntervalArray::from(&arrow), array);

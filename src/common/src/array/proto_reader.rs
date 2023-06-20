@@ -130,7 +130,7 @@ fn read_timestamp(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
     cursor
         .read_i64::<BigEndian>()
         .map_err(|e| anyhow!("Failed to read i64 from Timestamp buffer: {}", e))
-        .and_then(|t| Timestamp::with_macros(t).map_err(|e| anyhow!("{}", e)))
+        .and_then(|t| Timestamp::with_micros(t).map_err(|e| anyhow!("{}", e)))
         .map_err(Into::into)
 }
 
