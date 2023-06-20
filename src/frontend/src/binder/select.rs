@@ -314,16 +314,6 @@ impl Binder {
                     unreachable!();
                 }
             }
-            let indices: Vec<usize> = select_list
-                .into_iter()
-                .map(|expr| {
-                    if let ExprImpl::InputRef(inner) = expr {
-                        inner.index
-                    } else {
-                        unreachable!()
-                    }
-                })
-                .collect();
             let (exprs, names) = Self::iter_bound_columns(
                 self.context.columns[..]
                     .iter()
