@@ -115,7 +115,7 @@ statement ok
 drop source t4;
 
 # create a table with generated column now
-statement error
+statement error QueryError: Bind error: failed to bind expression: now()
 CREATE TABLE t (v INT, t timestamptz as now()) WITH (
   connector = 'datagen',
   fields.v.kind = 'sequence',
