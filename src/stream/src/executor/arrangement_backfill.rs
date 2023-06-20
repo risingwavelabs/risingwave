@@ -35,11 +35,12 @@ use risingwave_common::util::sort_util::{cmp_datum, OrderType};
 use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorError;
-use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Barrier, PkIndices, StreamExecutorResult, Watermark};
+use crate::executor::{
+    expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices,
+    PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
+};
 use crate::task::{ActorId, CreateMviewProgress};
 
 pub struct ArrangementBackfillExecutor<S: StateStore> {
