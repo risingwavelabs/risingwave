@@ -247,11 +247,8 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 35
   
-  - label: "connector node integration test"
-    command: "ci/scripts/connector-node-integration-test.sh -j {{matrix.version}}"
-    depends_on:
-      - "build-release"
-      - "build-other"
+  - label: "connector node integration test Java {{matrix.version}}"
+    command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v {{matrix.version}}"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
@@ -260,9 +257,10 @@ steps:
       - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
-        - "11"
-        - "17"
-    timeout_in_minutes: 5
+        version:
+          - "11"
+          - "17"
+    timeout_in_minutes: 10
 
   - label: "end-to-end iceberg sink test (release mode)"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"

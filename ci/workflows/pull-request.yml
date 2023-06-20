@@ -145,7 +145,7 @@ steps:
         version:
           - "11"
           - "17"
-    timeout_in_minutes: 20
+    timeout_in_minutes: 10
 
   - label: "end-to-end iceberg sink test"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
