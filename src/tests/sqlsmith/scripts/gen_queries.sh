@@ -19,7 +19,7 @@ export LOGDIR=".risingwave/log"
 export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
-export TIME_BOUND="7m"
+export TIME_BOUND="6m"
 
 set +u
 
