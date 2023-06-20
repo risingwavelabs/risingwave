@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{RowRef, StreamChunk};
 use risingwave_common::catalog::Field;
-use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DefaultOrdered;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -32,6 +31,7 @@ use risingwave_expr::function::window::{FrameBounds, WindowFuncCall};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
+use self::private::Partition;
 use super::diff_btree_map::{Change, DiffBTreeMap};
 use super::state::{create_window_state, StateKey};
 use crate::cache::{new_unbounded, ManagedLruCache};
@@ -45,15 +45,53 @@ use crate::executor::{
 };
 use crate::task::AtomicU64Ref;
 
-struct Partition {
-    /// Fully synced table cache for the partition. `StateKey (order key, input pk)` -> table row.
-    cache: BTreeMap<StateKey, OwnedRow>,
-}
+mod private {
+    use std::collections::BTreeMap;
 
-impl EstimateSize for Partition {
-    fn estimated_heap_size(&self) -> usize {
-        // TODO()
-        0
+    use risingwave_common::estimate_size::EstimateSize;
+    use risingwave_common::row::OwnedRow;
+
+    use crate::executor::over_window::state::StateKey;
+
+    pub(super) struct Partition {
+        /// Fully synced table cache for the partition. `StateKey (order key, input pk)` -> table
+        /// row.
+        cache: BTreeMap<StateKey, OwnedRow>,
+        heap_size: usize,
+    }
+
+    impl Partition {
+        pub fn new(cache: BTreeMap<StateKey, OwnedRow>) -> Self {
+            let heap_size = cache
+                .iter()
+                .map(|(key, row)| key.estimated_heap_size() + row.estimated_heap_size())
+                .sum();
+            Self { cache, heap_size }
+        }
+
+        pub fn cache(&self) -> &BTreeMap<StateKey, OwnedRow> {
+            &self.cache
+        }
+
+        pub fn insert(&mut self, key: StateKey, row: OwnedRow) {
+            let key_heap_size = key.estimated_heap_size();
+            self.heap_size += key_heap_size + row.estimated_heap_size();
+            if let Some(old_row) = self.cache.insert(key, row) {
+                self.heap_size -= key_heap_size + old_row.estimated_heap_size();
+            }
+        }
+
+        pub fn remove(&mut self, key: &StateKey) {
+            if let Some(row) = self.cache.remove(key) {
+                self.heap_size -= key.estimated_heap_size() + row.estimated_heap_size();
+            }
+        }
+    }
+
+    impl EstimateSize for Partition {
+        fn estimated_heap_size(&self) -> usize {
+            self.heap_size
+        }
     }
 }
 
@@ -214,12 +252,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             cache_for_partition.insert(this.row_to_state_key(&row)?, row);
         }
 
-        cache.put(
-            partition_key.clone(),
-            Partition {
-                cache: cache_for_partition,
-            },
-        );
+        cache.put(partition_key.clone(), Partition::new(cache_for_partition));
         Ok(())
     }
 
@@ -364,7 +397,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         for (part_key, diff) in diffs {
             Self::ensure_partition_in_cache(this, &mut vars.partitions, &part_key).await?;
             let mut partition = vars.partitions.get_mut(&part_key).unwrap();
-            let partition_with_diff = DiffBTreeMap::new(&partition.cache, diff);
+            let partition_with_diff = DiffBTreeMap::new(partition.cache(), diff);
             let mut part_final_changes = BTreeMap::new();
 
             let yield_change = |key: StateKey, record: Record<OwnedRow>| {
@@ -400,10 +433,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     Record::Insert { new_row } | Record::Update { new_row, .. } => {
                         // If `Update`, the update is not a key-change update, so it's safe to just
                         // replace the existing item in the cache.
-                        partition.cache.insert(key, new_row);
+                        partition.insert(key, new_row);
                     }
                     Record::Delete { .. } => {
-                        partition.cache.remove(&key);
+                        partition.remove(&key);
                     }
                 }
             }
