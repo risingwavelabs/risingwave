@@ -40,13 +40,20 @@ def make_mock_schema():
 def make_mock_schema_stream_chunk():
     schema = connector_service_pb2.TableSchema(
         columns=[
-            connector_service_pb2.TableSchema.Column(name="v1", data_type=1),
-            connector_service_pb2.TableSchema.Column(name="v2", data_type=2),
-            connector_service_pb2.TableSchema.Column(name="v3", data_type=3),
-            connector_service_pb2.TableSchema.Column(name="v4", data_type=4),
-            connector_service_pb2.TableSchema.Column(name="v5", data_type=5),
-            connector_service_pb2.TableSchema.Column(name="v6", data_type=6),
-            connector_service_pb2.TableSchema.Column(name="v7", data_type=7),
+            connector_service_pb2.TableSchema.Column(
+                name="v1", data_type=data_pb2.DataType(type_name=1)),
+            connector_service_pb2.TableSchema.Column(
+                name="v2", data_type=data_pb2.DataType(type_name=2)),
+            connector_service_pb2.TableSchema.Column(
+                name="v3", data_type=data_pb2.DataType(type_name=3)),
+            connector_service_pb2.TableSchema.Column(
+                name="v4", data_type=data_pb2.DataType(type_name=4)),
+            connector_service_pb2.TableSchema.Column(
+                name="v5", data_type=data_pb2.DataType(type_name=5)),
+            connector_service_pb2.TableSchema.Column(
+                name="v6", data_type=data_pb2.DataType(type_name=6)),
+            connector_service_pb2.TableSchema.Column(
+                name="v7", data_type=data_pb2.DataType(type_name=7)),
         ],
         pk_indices=[0]
     )

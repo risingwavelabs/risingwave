@@ -248,7 +248,7 @@ steps:
     timeout_in_minutes: 35
   
   - label: "connector node integration test"
-    command: "ci/scripts/connector-node-integration-test.sh -java {{matrix.version}} -p ci-release"
+    command: "ci/scripts/connector-node-integration-test.sh -j {{matrix.version}}"
     depends_on:
       - "build-release"
       - "build-other"
