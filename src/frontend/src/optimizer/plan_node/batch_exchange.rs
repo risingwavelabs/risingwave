@@ -61,25 +61,15 @@ impl fmt::Display for BatchExchange {
 impl Distill for BatchExchange {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let input_schema = self.input.schema();
-        childless_record(
-            "BatchExchange",
-            vec![
-                (
-                    "order",
-                    Pretty::display(&OrderDisplay {
-                        order: &self.base.order,
-                        input_schema,
-                    }),
-                ),
-                (
-                    "dist",
-                    Pretty::display(&DistributionDisplay {
-                        distribution: &self.base.dist,
-                        input_schema,
-                    }),
-                ),
-            ],
-        )
+        let order = Pretty::display(&OrderDisplay {
+            order: &self.base.order,
+            input_schema,
+        });
+        let dist = Pretty::display(&DistributionDisplay {
+            distribution: &self.base.dist,
+            input_schema,
+        });
+        childless_record("BatchExchange", vec![("order", order), ("dist", dist)])
     }
 }
 
