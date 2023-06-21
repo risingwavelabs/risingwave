@@ -15,12 +15,12 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::values_node::ExprTuple;
 use risingwave_pb::stream_plan::ValuesNode;
 
-use super::utils::{formatter_debug_plan_node, Distill};
+use super::utils::{childless_record, formatter_debug_plan_node, Distill};
 use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::Distribution;
@@ -71,9 +71,9 @@ impl fmt::Display for StreamValues {
     }
 }
 impl Distill for StreamValues {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let data = self.logical.rows_pretty();
-        Pretty::childless_record("StreamValues", vec![("rows", data)])
+        childless_record("StreamValues", vec![("rows", data)])
     }
 }
 

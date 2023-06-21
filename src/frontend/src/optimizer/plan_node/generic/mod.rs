@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 use std::hash::Hash;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::Schema;
 
 use super::{stream, EqJoinPredicate};
@@ -66,17 +66,18 @@ mod limit;
 pub use limit::*;
 
 pub trait DistillUnit {
-    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a>;
+    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;
 }
 
 macro_rules! impl_distill_unit_from_fields {
     ($name:ident, $bound:path) => {
         use std::borrow::Cow;
 
+        use pretty_xmlish::XmlNode;
         use $crate::optimizer::plan_node::generic::DistillUnit;
         impl<PlanRef: $bound> DistillUnit for $name<PlanRef> {
-            fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
-                Pretty::childless_record(name, self.fields_pretty())
+            fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a> {
+                XmlNode::simple_record(name, self.fields_pretty(), vec![])
             }
         }
     };

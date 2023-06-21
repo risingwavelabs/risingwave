@@ -15,14 +15,14 @@
 use std::fmt;
 
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{XmlNode};
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::stream::StreamPlanRef;
-use super::utils::{formatter_debug_plan_node, watermark_pretty, Distill};
+use super::utils::{childless_record, formatter_debug_plan_node, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -78,12 +78,12 @@ impl StreamHopWindow {
 }
 
 impl Distill for StreamHopWindow {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let mut vec = self.logical.fields_pretty();
         if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
             vec.push(("output_watermarks", ow));
         }
-        Pretty::childless_record("StreamHopWindow", vec)
+        childless_record("StreamHopWindow", vec)
     }
 }
 impl fmt::Display for StreamHopWindow {

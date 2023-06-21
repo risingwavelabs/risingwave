@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
+
 use std::fmt;
 
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 
 /// [`Expand`] expand one row multiple times according to `column_subsets` and also keep
@@ -103,8 +104,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for Expand<PlanRef> {
-    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
-        Pretty::childless_record(name, vec![("column_subsets", self.column_subsets_pretty())])
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
+        childless_record(name, vec![("column_subsets", self.column_subsets_pretty())])
     }
 }
 

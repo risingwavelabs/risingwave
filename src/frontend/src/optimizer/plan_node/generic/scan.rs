@@ -17,7 +17,7 @@ use std::rc::Rc;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty};
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;

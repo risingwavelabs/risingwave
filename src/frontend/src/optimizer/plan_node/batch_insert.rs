@@ -14,13 +14,13 @@
 
 use std::fmt;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
 use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr};
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
@@ -47,11 +47,11 @@ impl BatchInsert {
 }
 
 impl Distill for BatchInsert {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let vec = self
             .logical
             .fields_pretty(self.base.ctx.is_explain_verbose());
-        Pretty::childless_record("BatchInsert", vec)
+        childless_record("BatchInsert", vec)
     }
 }
 impl fmt::Display for BatchInsert {
