@@ -372,11 +372,10 @@ where
         let available_parallel_units =
             NonZeroUsize::new(cluster_info.parallel_units.len()).unwrap();
         // Use configured parallel units if no default parallelism is specified.
-        let parallelism =
-            default_parallelism.unwrap_or(match &self.env.opts.default_parallelism {
-                DefaultParallelism::Full => available_parallel_units,
-                DefaultParallelism::Default(num) => *num,
-            });
+        let parallelism = default_parallelism.unwrap_or(match &self.env.opts.default_parallelism {
+            DefaultParallelism::Full => available_parallel_units,
+            DefaultParallelism::Default(num) => *num,
+        });
 
         if parallelism > available_parallel_units {
             return Err(MetaError::unavailable(format!(
