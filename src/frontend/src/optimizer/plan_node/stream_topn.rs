@@ -65,7 +65,7 @@ impl fmt::Display for StreamTopN {
         let name = plan_node_name!("StreamTopN",
             { "append_only", self.input().append_only() },
         );
-        self.logical.fmt_with_name(f, &name)
+        self.logical.fmt_with_name_and_force(f, &name, false).finish()
     }
 }
 impl Distill for StreamTopN {
