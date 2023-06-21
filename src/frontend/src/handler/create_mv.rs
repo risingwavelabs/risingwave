@@ -23,13 +23,14 @@ use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::catalog::CatalogError;
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::SessionImpl;
+use crate::session::{CheckRelationError, SessionImpl};
 use crate::stream_fragmenter::build_graph;
 
 pub(super) fn get_column_names(
@@ -149,16 +150,16 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    if let Err(e) = session.check_relation_name_duplicated(name.clone()) {
-        if if_not_exists {
+    match session.check_relation_name_duplicated(name.clone()) {
+        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
             return Ok(PgResponse::empty_result_with_notice(
                 StatementType::CREATE_MATERIALIZED_VIEW,
                 format!("relation \"{}\" already exists, skipping", name),
             ));
-        } else {
-            return Err(e);
         }
-    }
+        Err(e) => return Err(e.into()),
+        Ok(_) => {}
+    };
 
     let (table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
