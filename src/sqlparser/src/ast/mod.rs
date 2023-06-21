@@ -1917,9 +1917,8 @@ pub enum FunctionArgExpr {
     ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
     QualifiedWildcard(ObjectName),
-    /// An unqualified `*`
-    Wildcard,
-    Except(Vec<Expr>),
+    /// An unqualified `*` or `* with (columns)`
+    WildcardOrWithExcept(Option<Vec<Expr>>),
 }
 
 impl fmt::Display for FunctionArgExpr {
@@ -1937,9 +1936,8 @@ impl fmt::Display for FunctionArgExpr {
                 )
             }
             FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            FunctionArgExpr::Wildcard => f.write_str("*"),
-            FunctionArgExpr::Except(exprs) => {
-                write!(
+            FunctionArgExpr::WildcardOrWithExcept(w) => match w {
+                Some(exprs) => write!(
                     f,
                     "EXCEPT ({})",
                     exprs
@@ -1948,8 +1946,9 @@ impl fmt::Display for FunctionArgExpr {
                         .collect::<Vec<String>>()
                         .as_slice()
                         .join(", ")
-                )
-            }
+                ),
+                None => f.write_str("*"),
+            },
         }
     }
 }

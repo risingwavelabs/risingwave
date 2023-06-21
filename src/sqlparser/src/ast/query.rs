@@ -309,10 +309,8 @@ pub enum SelectItem {
     ExprWithAlias { expr: Expr, alias: Ident },
     /// `alias.*` or even `schema.table.*`
     QualifiedWildcard(ObjectName),
-    /// An unqualified `*`
-    Wildcard,
-    /// select * except ( test )
-    Except(Vec<Expr>),
+    /// An unqualified `*`, or `* except (exprs)`
+    WildcardOrWithExcept(Option<Vec<Expr>>),
 }
 
 impl fmt::Display for SelectItem {
@@ -329,18 +327,20 @@ impl fmt::Display for SelectItem {
                     .format_with("", |i, f| f(&format_args!(".{i}")))
             ),
             SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            SelectItem::Wildcard => write!(f, "*"),
-            SelectItem::Except(exprs) => {
-                write!(
-                    f,
-                    "* EXCEPT ({})",
-                    exprs
-                        .iter()
-                        .map(|v| v.to_string())
-                        .collect::<Vec<String>>()
-                        .as_slice()
-                        .join(", ")
-                )
+            SelectItem::WildcardOrWithExcept(w) => {
+                match w {
+                    Some(exprs) => write!(
+                        f,
+                        "* EXCEPT ({})",
+                        exprs
+                            .iter()
+                            .map(|v| v.to_string())
+                            .collect::<Vec<String>>()
+                            .as_slice()
+                            .join(", ")
+                    ),
+                    None => write!(f, "*"),
+                }
             }
         }
     }
