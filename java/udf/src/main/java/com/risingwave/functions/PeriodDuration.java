@@ -14,10 +14,16 @@
 
 package com.risingwave.functions;
 
-/**
- * Base interface for all user-defined functions.
- *
- * @see ScalarFunction
- * @see TableFunction
- */
-public interface UserDefinedFunction {}
+import java.time.Duration;
+import java.time.Period;
+
+/** Combination of Period and Duration. */
+public class PeriodDuration extends org.apache.arrow.vector.PeriodDuration {
+    public PeriodDuration(Period period, Duration duration) {
+        super(period, duration);
+    }
+
+    PeriodDuration(org.apache.arrow.vector.PeriodDuration base) {
+        super(base.getPeriod(), base.getDuration());
+    }
+}

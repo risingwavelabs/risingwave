@@ -58,6 +58,11 @@ statement ok
 create function jsonb_array_struct_identity(struct<v jsonb[], len int>) returns struct<v jsonb[], len int>
 language python as jsonb_array_struct_identity using link 'http://localhost:8815';
 
+statement ok
+create function return_all(BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB)
+returns struct<bool BOOLEAN, i16 SMALLINT, i32 INT, i64 BIGINT, f32 FLOAT4, f64 FLOAT8, decimal DECIMAL, date DATE, time TIME, timestamp TIMESTAMP, interval INTERVAL, varchar VARCHAR, bytea BYTEA, jsonb JSONB>
+language python as return_all using link 'http://localhost:8815';
+
 query TTTTT rowsort
 show functions
 ----
@@ -71,6 +76,7 @@ jsonb_access jsonb, integer jsonb python http://localhost:8815
 jsonb_array_identity jsonb[] jsonb[] python http://localhost:8815
 jsonb_array_struct_identity struct<v jsonb[],len integer> struct<v jsonb[],len integer> python http://localhost:8815
 jsonb_concat jsonb[] jsonb python http://localhost:8815
+return_all boolean, smallint, integer, bigint, real, double precision, numeric, date, time without time zone, timestamp without time zone, interval, varchar, bytea, jsonb struct<bool boolean,i16 smallint,i32 integer,i64 bigint,f32 real,f64 double precision,decimal numeric,date date,time time without time zone,timestamp timestamp without time zone,interval interval,varchar varchar,bytea bytea,jsonb jsonb> python http://localhost:8815
 series integer integer python http://localhost:8815
 split varchar struct<word varchar,length integer> python http://localhost:8815
 
@@ -121,6 +127,25 @@ query T
 select jsonb_array_struct_identity(ROW(ARRAY[null, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb], 4)::struct<v jsonb[], len int>);
 ----
 ({NULL,1,"\"str\"","{}"},4)
+
+query T
+select return_all(
+    true,
+    1 ::smallint,
+    1 ::int,
+    1 ::bigint,
+    1 ::float4,
+    1 ::float8,
+    1234567890123456789012345678 ::decimal,
+    date '2023-06-01',
+    time '01:02:03.456789',
+    timestamp '2023-06-01 01:02:03.456789',
+    interval '1 month 2 days 3 seconds',
+    'string',
+    'bytes'::bytea,
+    '{"key":1}'::jsonb);
+----
+(t,1,1,1,1,1,1234567890123456789012345678,2023-06-01,01:02:03.456789,2023-06-01 01:02:03.456789,1 mon 2 days 00:00:03,string,\x6279746573,{"key": 1})
 
 query I
 select series(5);
@@ -246,3 +271,6 @@ drop function jsonb_array_identity;
 
 statement ok
 drop function jsonb_array_struct_identity;
+
+statement ok
+drop function return_all;

@@ -34,7 +34,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates query expression and returns its
     /// query schema as well.
     pub(crate) fn gen_query(&mut self) -> (Query, Vec<Column>) {
-        if self.can_recurse() {
+        if self.rng.gen_bool(0.3) {
             self.gen_complex_query()
         } else {
             self.gen_simple_query()
@@ -62,7 +62,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         )
     }
 
-    /// Generates a simple query which will not recurse.
+    /// This query can still recurse, but it is "simpler"
+    /// does not have "with" clause, "order by".
+    /// Which makes it more unlikely to recurse.
     fn gen_simple_query(&mut self) -> (Query, Vec<Column>) {
         let num_select_items = self.rng.gen_range(1..=4);
         let with_tables = vec![];
