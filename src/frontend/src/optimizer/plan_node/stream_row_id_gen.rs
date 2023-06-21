@@ -14,8 +14,10 @@
 
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::utils::Distill;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Distribution;
@@ -62,6 +64,12 @@ impl fmt::Display for StreamRowIdGen {
             "StreamRowIdGen {{ row_id_index: {} }}",
             self.row_id_index
         )
+    }
+}
+impl Distill for StreamRowIdGen {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let fields = vec![("row_id_index", Pretty::debug(&self.row_id_index))];
+        Pretty::childless_record("StreamRowIdGen", fields)
     }
 }
 

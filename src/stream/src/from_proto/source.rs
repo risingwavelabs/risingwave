@@ -62,6 +62,16 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 source.get_info()?.clone(),
                 params.env.connector_params(),
                 params.env.config().developer.connector_message_buffer_size,
+                // `pk_indices` is used to ensure that a message will be skipped instead of parsed
+                // with null pk when the pk column is missing.
+                //
+                // Currently pk_indices for source is always empty since pk information is not
+                // passed via `StreamSource` so null pk may be emitted to downstream.
+                //
+                // TODO: use the correct information to fill in pk_dicies.
+                // We should consdier add back the "pk_column_ids" field removed by #8841 in
+                // StreamSource
+                params.pk_indices.clone(),
             );
 
             let column_ids: Vec<_> = source

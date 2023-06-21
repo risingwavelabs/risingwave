@@ -120,8 +120,13 @@ async fn test_table_materialize() -> StreamResult<()> {
         "fields.v1.seed" => "12345",
     ));
     let row_id_index: usize = 0;
-    let source_builder =
-        create_source_desc_builder(&schema, Some(row_id_index), source_info, properties);
+    let source_builder = create_source_desc_builder(
+        &schema,
+        Some(row_id_index),
+        source_info,
+        properties,
+        vec![row_id_index],
+    );
 
     // Ensure the source exists.
     let source_desc = source_builder.build().await.unwrap();
