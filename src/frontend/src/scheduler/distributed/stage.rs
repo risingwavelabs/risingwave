@@ -657,7 +657,7 @@ impl StageRunner {
 
         self.worker_node_manager
             .manager
-            .get_streaming_fragment_mapping(&fragment_id)
+            .get_streaming_fragment_mapping(fragment_id)
     }
 
     fn choose_worker(
