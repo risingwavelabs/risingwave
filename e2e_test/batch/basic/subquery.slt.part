@@ -86,9 +86,6 @@ select * except (t1.x, t2.y), * except (t1.y, t2.x) from t1 join t2 on t1.y = t2
 2 2 2 2
 2 NULL 2 2
 
-query II 
-select * except (t1)
-
 statement ok
 drop table t1;
 
