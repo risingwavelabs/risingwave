@@ -13,20 +13,28 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::ops::Bound;
 
+use await_tree::InstrumentAwait;
+use futures::Stream;
+use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum, OrderType};
+use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
-use crate::executor::{Message, PkIndicesRef, StreamExecutorResult, Watermark};
+use crate::executor::{
+    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
+};
 
 pub(crate) fn mark_chunk(
     chunk: StreamChunk,
@@ -204,4 +212,49 @@ pub(crate) fn update_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) ->
 // because they both record that backfill is finished.
 pub(crate) fn construct_initial_finished_state(pos_len: usize) -> Option<OwnedRow> {
     Some(OwnedRow::new(vec![None; pos_len]))
+}
+
+pub(crate) fn compute_bounds(
+    pk_indices: &[usize],
+    current_pos: Option<OwnedRow>,
+) -> Option<(Bound<OwnedRow>, Bound<OwnedRow>)> {
+    // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
+    // scan. Otherwise, use Excluded.
+    if let Some(current_pos) = current_pos {
+        // If `current_pos` is an empty row which means upstream mv contains only one row and it
+        // has been consumed. The iter interface doesn't support
+        // `Excluded(empty_row)` range bound, so we can simply return `None`.
+        if current_pos.is_empty() {
+            assert!(pk_indices.is_empty());
+            return None;
+        }
+
+        Some((Bound::Excluded(current_pos), Bound::Unbounded))
+    } else {
+        Some((Bound::Unbounded, Bound::Unbounded))
+    }
+}
+
+#[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
+pub(crate) async fn iter_chunks<'a, S, E>(
+    mut iter: S,
+    upstream_table_schema: &'a Schema,
+    chunk_size: usize,
+) where
+    StreamExecutorError: From<E>,
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin + 'a,
+{
+    while let Some(data_chunk) =
+        collect_data_chunk(&mut iter, upstream_table_schema, Some(chunk_size))
+            .instrument_await("backfill_snapshot_read")
+            .await?
+    {
+        if data_chunk.cardinality() != 0 {
+            let ops = vec![Op::Insert; data_chunk.capacity()];
+            let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+            yield Some(stream_chunk);
+        }
+    }
+
+    yield None;
 }

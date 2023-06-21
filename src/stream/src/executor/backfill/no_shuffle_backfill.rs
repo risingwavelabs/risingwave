@@ -21,7 +21,7 @@ use await_tree::InstrumentAwait;
 use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
@@ -40,8 +40,9 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils::{
-    build_temporary_state, check_all_vnode_finished, construct_initial_finished_state, flush_data,
-    mapping_chunk, mapping_message, mark_chunk, update_pos,
+    build_temporary_state, check_all_vnode_finished, compute_bounds,
+    construct_initial_finished_state, flush_data, iter_chunks, mapping_chunk, mapping_message,
+    mark_chunk, update_pos,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -437,22 +438,14 @@ where
         current_pos: Option<OwnedRow>,
         ordered: bool,
     ) {
-        // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
-        // scan. Otherwise, use Excluded.
-        let range_bounds = if let Some(current_pos) = current_pos {
-            // If `current_pos` is an empty row which means upstream mv contains only one row and it
-            // has been consumed. The iter interface doesn't support
-            // `Excluded(empty_row)` range bound, so we can simply return `None`.
-            if current_pos.is_empty() {
-                assert!(upstream_table.pk_indices().is_empty());
-                yield None;
-                return Ok(());
-            }
+        // FIXME(kwannoel): `let-else` pattern does not work with `yield` for some reason.
+        let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
+        if range_bounds.is_none() {
+            yield None;
+            return Ok(());
+        }
+        let range_bounds = range_bounds.unwrap();
 
-            (Bound::Excluded(current_pos), Bound::Unbounded)
-        } else {
-            (Bound::Unbounded, Bound::Unbounded)
-        };
         // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
         // together with the upstream mv.
         let iter = upstream_table
@@ -468,19 +461,10 @@ where
 
         pin_mut!(iter);
 
-        while let Some(data_chunk) =
-            collect_data_chunk(&mut iter, upstream_table.schema(), Some(CHUNK_SIZE))
-                .instrument_await("backfill_snapshot_read")
-                .await?
-        {
-            if data_chunk.cardinality() != 0 {
-                let ops = vec![Op::Insert; data_chunk.capacity()];
-                let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-                yield Some(stream_chunk);
-            }
+        #[for_await]
+        for chunk in iter_chunks(iter, upstream_table.schema(), CHUNK_SIZE) {
+            yield chunk?;
         }
-
-        yield None;
     }
 
     /// Schema
