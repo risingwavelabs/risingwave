@@ -65,7 +65,7 @@ extract_queries() {
 }
 
 extract_ddl() {
-  grep "\[EXECUTING CREATE .*\]: " | sed -E 's/^.*\[EXECUTING CREATE .*\]: (.*)$/\1;/' | pg_format || true
+  grep "\[EXECUTING CREATE .*\]: " | sed -E 's/^.*\[EXECUTING CREATE .*\]: (.*)$/\1;/' | $PG_FORMAT || true
 }
 
 extract_inserts() {
@@ -85,7 +85,7 @@ extract_global_session() {
 }
 
 extract_failing_query() {
-  grep "\[EXECUTING .*\]: " | tail -n 1 | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/' | pg_format || true
+  grep "\[EXECUTING .*\]: " | tail -n 1 | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/' | $PG_FORMAT || true
 }
 
 # Extract fail info from [`generate-*.log`] in log dir
@@ -324,6 +324,12 @@ check_failed_to_run_queries() {
 ################### TOP LEVEL INTERFACE
 
 setup() {
+  echo "--- Installing pg_format"
+  wget https://github.com/darold/pgFormatter/archive/refs/tags/v5.5.tar.gz
+  tar -xvf pgFormatter-5.5.tar.gz
+  export PG_FORMAT="$PWD/pgFormatter-5.5/pg_format"
+
+  echo "--- Configuring Test variables"
   if [[ -z "$TEST_NUM" ]]; then
     echo "TEST_NUM unset, default to TEST_NUM=100"
     TEST_NUM=100
