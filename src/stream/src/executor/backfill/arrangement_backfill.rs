@@ -37,6 +37,11 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
+/// Similar to [`BackfillExecutor`].
+/// Main differences:
+/// - [`ArrangementBackfillExecutor`] can reside on a different CN, so it can be scaled
+///   independently.
+/// - To synchronize upstream shared buffer, it is initialized with a [`ReplicatedStateTable`].
 pub struct ArrangementBackfillExecutor<S: StateStore> {
     /// Upstream table
     upstream_table: StateTable<S>,
