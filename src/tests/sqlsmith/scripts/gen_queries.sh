@@ -140,7 +140,7 @@ generate_one_deterministic() {
   local SET_ID=$1
   mkdir -p "$OUTDIR/$SET_ID"
   echo "[INFO] Generating For Seed $RANDOM, Query set $SET_ID"
-  MADSIM_TEST_SEED=$RANDOM $MADSIM_BIN \
+  timeout 1m MADSIM_TEST_SEED=$RANDOM $MADSIM_BIN \
     --sqlsmith 30 \
     --generate-sqlsmith-queries "$OUTDIR/$SET_ID" \
     $TESTDATA \
@@ -168,7 +168,7 @@ generate_deterministic() {
     echo_err "--- Generating for Queries $start - $end"
     for SET_ID in $(seq $start $end)
     do
-        timeout 1m generate_one_deterministic "$SET_ID" &
+        generate_one_deterministic "$SET_ID" &
     done
     wait
   done
