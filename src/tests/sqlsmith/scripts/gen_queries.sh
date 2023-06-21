@@ -296,7 +296,7 @@ check_failed_to_generate_queries() {
 # Otherwise don't update this batch of queries yet.
 run_queries_timed() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
-  timeout "$TIME_BOUND" seq 64 | parallel "MADSIM_TEST_SEED={} \
+  timeout "$TIME_BOUND" seq 64 | parallel --jobs 14 "MADSIM_TEST_SEED={} \
     $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
@@ -306,7 +306,7 @@ run_queries_timed() {
 # Run it to make sure it should have no errors
 run_queries() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
-  seq $TEST_NUM | parallel "MADSIM_TEST_SEED={} \
+  seq $TEST_NUM | parallel --jobs 14 "MADSIM_TEST_SEED={} \
     $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
@@ -368,6 +368,7 @@ validate() {
   echo_err "[CHECK PASSED] All queries at least have CREATE TABLE"
   extract_fail_info_from_logs "generate"
   echo_err "[INFO] Recorded new bugs from  generated queries"
+  echo "--- Running all queries check"
   run_queries
   echo_err "[INFO] Queries were ran and passed"
   echo "--- Running timeout check"
