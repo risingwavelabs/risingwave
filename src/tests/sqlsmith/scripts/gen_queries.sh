@@ -172,7 +172,7 @@ generate_deterministic() {
 
   local timeout=1
 
-  for i in $(seq 0 3)
+  for i in $(seq 0 20)
   do
     local batch_size=5
     local start="$((i * $batch_size + 1))"
@@ -182,7 +182,7 @@ generate_deterministic() {
     do
         generate_one_deterministic "$SET_ID" &
     done
-    timeout "$((batch_size * timeout))m" wait
+    wait
     kill $(jobs -p)
   done
   echo_err "[INFO] Finished generation"
