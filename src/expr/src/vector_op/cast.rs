@@ -23,12 +23,11 @@ use risingwave_common::array::{
 };
 use risingwave_common::cast::{
     parse_naive_date, parse_naive_datetime, parse_naive_time, str_to_bytea as str_to_bytea_common,
-    str_with_time_zone_to_timestamptz,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, IntoOrdered, JsonbRef, ScalarImpl, StructType, Time,
-    Timestamp, ToText, F32, F64,
+    Timestamp, Timestamptz, ToText, F32, F64,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr_macro::{build_function, function};
@@ -268,9 +267,7 @@ pub fn literal_parsing(
         DataType::Timestamp => str_to_timestamp(s)?.into(),
         // We only handle the case with timezone here, and leave the implicit session timezone case
         // for later phase.
-        DataType::Timestamptz => str_with_time_zone_to_timestamptz(s)
-            .map_err(|err| ExprError::Parse(err.into()))?
-            .into(),
+        DataType::Timestamptz => str_parse::<Timestamptz>(s)?.into(),
         DataType::Time => str_to_time(s)?.into(),
         DataType::Interval => str_parse::<Interval>(s)?.into(),
         // Not processing list or struct literal right now. Leave it for later phase (normal backend

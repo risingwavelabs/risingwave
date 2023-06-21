@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use num_traits::Zero;
-use risingwave_common::types::{Date, Interval, Timestamp};
+use risingwave_common::types::{Date, Interval, Timestamp, Timestamptz};
 use risingwave_expr_macro::function;
 
 use crate::Result;
@@ -41,10 +41,8 @@ pub fn tumble_start_date_time(timestamp: Timestamp, window_size: Interval) -> Re
 }
 
 #[function("tumble_start(timestamptz, interval) -> timestamptz")]
-pub fn tumble_start_timestamptz(timestamp_micro_second: i64, window_size: Interval) -> Result<i64> {
-    let timestamp_micro_second = timestamp_micro_second;
-    let window_size = window_size;
-    get_window_start(timestamp_micro_second, window_size)
+pub fn tumble_start_timestamptz(tz: Timestamptz, window_size: Interval) -> Result<Timestamptz> {
+    get_window_start(tz.timestamp_micros(), window_size).map(Timestamptz::from_micros)
 }
 
 /// The common part of PostgreSQL function `timestamp_bin` and `timestamptz_bin`.
@@ -98,11 +96,12 @@ fn get_window_start_with_offset(
 
 #[function("tumble_start(timestamptz, interval, interval) -> timestamptz")]
 pub fn tumble_start_offset_timestamptz(
-    timestamp_micro_second: i64,
+    tz: Timestamptz,
     window_size: Interval,
     offset: Interval,
-) -> Result<i64> {
-    get_window_start_with_offset(timestamp_micro_second, window_size, offset)
+) -> Result<Timestamptz> {
+    get_window_start_with_offset(tz.timestamp_micros(), window_size, offset)
+        .map(Timestamptz::from_micros)
 }
 
 #[cfg(test)]

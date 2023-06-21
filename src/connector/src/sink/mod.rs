@@ -23,7 +23,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use base64::engine::general_purpose;
 use base64::Engine as _;
-use chrono::{Datelike, NaiveDateTime, Timelike};
+use chrono::{Datelike, Timelike};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
@@ -321,12 +321,10 @@ fn datum_to_json_object(
         (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
             json!(v.to_text())
         }
-        (DataType::Timestamptz, ScalarRefImpl::Int64(v)) => {
+        (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
             // risingwave's timestamp with timezone is stored in UTC and does not maintain the
             // timezone info and the time is in microsecond.
-            let secs = v.div_euclid(1_000_000);
-            let nsecs = v.rem_euclid(1_000_000) * 1000;
-            let parsed = NaiveDateTime::from_timestamp_opt(secs, nsecs as u32).unwrap();
+            let parsed = v.to_datetime_utc().naive_utc();
             let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
             json!(v)
         }
@@ -387,7 +385,6 @@ fn datum_to_json_object(
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::cast::str_with_time_zone_to_timestamptz;
     use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
 
     use super::*;
@@ -436,14 +433,13 @@ mod tests {
         );
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
-        let tstz_str = "2018-01-26T18:30:09.453Z";
-        let tstz_inner = str_with_time_zone_to_timestamptz(tstz_str).unwrap();
+        let tstz_inner = "2018-01-26T18:30:09.453Z".parse().unwrap();
         let tstz_value = datum_to_json_object(
             &Field {
                 data_type: DataType::Timestamptz,
                 ..mock_field.clone()
             },
-            Some(ScalarImpl::Int64(tstz_inner).as_scalar_ref_impl()),
+            Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
         )
         .unwrap();

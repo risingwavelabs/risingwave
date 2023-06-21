@@ -14,11 +14,10 @@
 
 use std::fmt::Write;
 
-use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
 use num_traits::CheckedNeg;
-use risingwave_common::cast::{str_to_timestamp, str_with_time_zone_to_timestamptz};
-use risingwave_common::types::{CheckedAdd, Interval, IntoOrdered, Timestamp, F64};
+use risingwave_common::cast::str_to_timestamp;
+use risingwave_common::types::{CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
@@ -33,16 +32,17 @@ fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
 }
 
 #[function("to_timestamp(float64) -> timestamptz")]
-pub fn f64_sec_to_timestamptz(elem: F64) -> Result<i64> {
+pub fn f64_sec_to_timestamptz(elem: F64) -> Result<Timestamptz> {
     // TODO(#4515): handle +/- infinity
-    (elem.0 * 1e6)
+    let micros = (elem.0 * 1e6)
         .into_ordered()
         .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)
+        .map_err(|_| ExprError::NumericOutOfRange)?;
+    Ok(Timestamptz::from_micros(micros))
 }
 
 #[function("at_time_zone(timestamp, varchar) -> timestamptz")]
-pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<i64> {
+pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Timestamptz> {
     let time_zone = lookup_time_zone(time_zone)?;
     // https://www.postgresql.org/docs/current/datetime-invalid-input.html
     // Special cases:
@@ -63,15 +63,17 @@ pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<i64> 
             ),
         })?;
     let usec = instant_local.timestamp_micros();
-    Ok(usec)
+    Ok(Timestamptz::from_micros(usec))
 }
 
 #[function("cast_with_time_zone(timestamptz, varchar) -> varchar")]
-pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write) -> Result<()> {
+pub fn timestamptz_to_string(
+    elem: Timestamptz,
+    time_zone: &str,
+    writer: &mut dyn Write,
+) -> Result<()> {
     let time_zone = lookup_time_zone(time_zone)?;
-    let secs = elem.div_euclid(1_000_000);
-    let nsecs = elem.rem_euclid(1_000_000) * 1000;
-    let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
+    let instant_utc = elem.to_datetime_utc();
     let instant_local = instant_utc.with_timezone(&time_zone);
     write!(
         writer,
@@ -85,8 +87,8 @@ pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write)
 // Tries to interpret the string with a timezone, and if failing, tries to interpret the string as a
 // timestamp and then adjusts it with the session timezone.
 #[function("cast_with_time_zone(varchar, varchar) -> timestamptz")]
-pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
-    str_with_time_zone_to_timestamptz(elem).or_else(|_| {
+pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<Timestamptz> {
+    elem.parse().or_else(|_| {
         timestamp_at_time_zone(
             str_to_timestamp(elem).map_err(|err| ExprError::Parse(err.into()))?,
             time_zone,
@@ -95,18 +97,20 @@ pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
 }
 
 #[function("at_time_zone(timestamptz, varchar) -> timestamp")]
-pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<Timestamp> {
+pub fn timestamptz_at_time_zone(input: Timestamptz, time_zone: &str) -> Result<Timestamp> {
     let time_zone = lookup_time_zone(time_zone)?;
-    let secs = input.div_euclid(1_000_000);
-    let nsecs = input.rem_euclid(1_000_000) * 1000;
-    let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
+    let instant_utc = input.to_datetime_utc();
     let instant_local = instant_utc.with_timezone(&time_zone);
     let naive = instant_local.naive_local();
     Ok(Timestamp(naive))
 }
 
 #[function("subtract_with_time_zone(timestamptz, interval, varchar) -> timestamptz")]
-pub fn timestamptz_interval_sub(input: i64, interval: Interval, time_zone: &str) -> Result<i64> {
+pub fn timestamptz_interval_sub(
+    input: Timestamptz,
+    interval: Interval,
+    time_zone: &str,
+) -> Result<Timestamptz> {
     timestamptz_interval_add(
         input,
         interval.checked_neg().ok_or(ExprError::NumericOverflow)?,
@@ -115,7 +119,11 @@ pub fn timestamptz_interval_sub(input: i64, interval: Interval, time_zone: &str)
 }
 
 #[function("add_with_time_zone(timestamptz, interval, varchar) -> timestamptz")]
-pub fn timestamptz_interval_add(input: i64, interval: Interval, time_zone: &str) -> Result<i64> {
+pub fn timestamptz_interval_add(
+    input: Timestamptz,
+    interval: Interval,
+    time_zone: &str,
+) -> Result<Timestamptz> {
     // A month may have 28-31 days, a day may have 23 or 25 hours during Daylight Saving switch.
     // So their interpretation depends on the local time of a specific zone.
     let qualitative = interval.truncate_day();
@@ -136,26 +144,26 @@ pub fn timestamptz_interval_add(input: i64, interval: Interval, time_zone: &str)
 // Retained mostly for backward compatibility with old query plans. The signature is also useful for
 // binder type inference.
 #[function("add(timestamptz, interval) -> timestamptz")]
-pub fn timestamptz_interval_add_legacy(l: i64, r: Interval) -> Result<i64> {
+pub fn timestamptz_interval_add_legacy(l: Timestamptz, r: Interval) -> Result<Timestamptz> {
     timestamptz_interval_quantitative(l, r, i64::checked_add)
 }
 
 #[function("subtract(timestamptz, interval) -> timestamptz")]
-pub fn timestamptz_interval_sub_legacy(l: i64, r: Interval) -> Result<i64> {
+pub fn timestamptz_interval_sub_legacy(l: Timestamptz, r: Interval) -> Result<Timestamptz> {
     timestamptz_interval_quantitative(l, r, i64::checked_sub)
 }
 
 #[function("add(interval, timestamptz) -> timestamptz")]
-pub fn interval_timestamptz_add_legacy(l: Interval, r: i64) -> Result<i64> {
+pub fn interval_timestamptz_add_legacy(l: Interval, r: Timestamptz) -> Result<Timestamptz> {
     timestamptz_interval_add_legacy(r, l)
 }
 
 #[inline(always)]
 fn timestamptz_interval_quantitative(
-    l: i64,
+    l: Timestamptz,
     r: Interval,
     f: fn(i64, i64) -> Option<i64>,
-) -> Result<i64> {
+) -> Result<Timestamptz> {
     // Without session TimeZone, we cannot add month/day in local time. See #5826.
     if r.months() != 0 || r.days() != 0 {
         return Err(ExprError::UnsupportedFunction(
@@ -163,7 +171,8 @@ fn timestamptz_interval_quantitative(
         ));
     }
     let delta_usecs = r.usecs();
-    f(l, delta_usecs).ok_or(ExprError::NumericOutOfRange)
+    let usecs = f(l.timestamp_micros(), delta_usecs).ok_or(ExprError::NumericOutOfRange)?;
+    Ok(Timestamptz::from_micros(usecs))
 }
 
 #[cfg(test)]
@@ -258,7 +267,7 @@ mod tests {
     fn test_timestamptz_to_and_from_string() {
         let str1 = "0001-11-15 15:35:40.999999+08:00";
         let timestamptz1 = str_to_timestamptz(str1, "UTC").unwrap();
-        assert_eq!(timestamptz1, -62108094259000001);
+        assert_eq!(timestamptz1.timestamp_micros(), -62108094259000001);
 
         let mut writer = String::new();
         timestamptz_to_string(timestamptz1, "UTC", &mut writer).unwrap();
@@ -270,7 +279,7 @@ mod tests {
 
         let str2 = "1969-12-31 23:59:59.999999+00:00";
         let timestamptz2 = str_to_timestamptz(str2, "UTC").unwrap();
-        assert_eq!(timestamptz2, -1);
+        assert_eq!(timestamptz2.timestamp_micros(), -1);
 
         let mut writer = String::new();
         timestamptz_to_string(timestamptz2, "UTC", &mut writer).unwrap();

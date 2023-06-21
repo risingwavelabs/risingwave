@@ -74,7 +74,7 @@ impl Expression for ProcTimeExpression {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::DataChunk;
-    use risingwave_common::types::ScalarRefImpl;
+    use risingwave_common::types::Timestamptz;
     use risingwave_common::util::epoch::{Epoch, EpochPair};
 
     use super::*;
@@ -93,10 +93,11 @@ mod tests {
             .await
             .unwrap();
 
-        let time_us = curr_epoch.as_unix_millis() * 1000;
-        let time_datum = Some(ScalarRefImpl::Int64(time_us as i64));
         for datum_ref in array.iter() {
-            assert_eq!(datum_ref, time_datum)
+            assert_eq!(
+                datum_ref,
+                Some(Timestamptz::from_millis(curr_epoch.as_unix_millis() as i64).into())
+            );
         }
     }
 }

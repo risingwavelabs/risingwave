@@ -835,10 +835,10 @@ impl ScalarImpl {
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
                     .into(),
             ),
-            DataType::Timestamptz => Self::Int64(
+            DataType::Timestamptz => Self::Timestamptz(
                 chrono::DateTime::<chrono::Utc>::from_sql(&Type::TIMESTAMPTZ, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
-                    .timestamp_micros(),
+                    .into(),
             ),
             DataType::Interval => Self::Interval(
                 Interval::from_sql(&Type::INTERVAL, bytes)
@@ -927,13 +927,11 @@ impl ScalarImpl {
             DataType::Timestamp => Self::Timestamp(Timestamp::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
-            DataType::Timestamptz => Self::Int64(
-                chrono::DateTime::<chrono::Utc>::from_str(str)
-                    .map_err(|_| {
-                        ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-                    })?
-                    .timestamp_micros(),
-            ),
+            DataType::Timestamptz => {
+                Self::Timestamptz(Timestamptz::from_str(str).map_err(|_| {
+                    ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
+                })?)
+            }
             DataType::Interval => Self::Interval(Interval::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
@@ -1293,7 +1291,10 @@ mod tests {
                     ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(23333333, 2333)),
                     DataType::Timestamp,
                 ),
-                DataTypeName::Timestamptz => (ScalarImpl::Int64(233333333), DataType::Timestamptz),
+                DataTypeName::Timestamptz => (
+                    ScalarImpl::Timestamptz(Timestamptz::from_micros(233333333)),
+                    DataType::Timestamptz,
+                ),
                 DataTypeName::Interval => (
                     ScalarImpl::Interval(Interval::from_month_day_usec(2, 3, 3333)),
                     DataType::Interval,

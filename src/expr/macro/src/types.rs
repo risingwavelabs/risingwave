@@ -14,27 +14,27 @@
 
 //! This module provides utility functions for SQL data type conversion and manipulation.
 
-//  name        data type   variant     array type      owned type      ref type        primitive?
+//  name        data type   variant     array type          owned type      ref type    primitive
 const TYPE_MATRIX: &str = "
-    boolean     Boolean     Bool        BoolArray       bool            bool            _
-    int16       Int16       Int16       I16Array        i16             i16             y
-    int32       Int32       Int32       I32Array        i32             i32             y
-    int64       Int64       Int64       I64Array        i64             i64             y
-    int256      Int256      Int256      Int256Array     Int256          Int256Ref<'_>   _
-    float32     Float32     Float32     F32Array        F32             F32             y
-    float64     Float64     Float64     F64Array        F64             F64             y
-    decimal     Decimal     Decimal     DecimalArray    Decimal         Decimal         y
-    serial      Serial      Serial      SerialArray     Serial          Serial          y
-    date        Date        Date        DateArray       Date            Date            y
-    time        Time        Time        TimeArray       Time            Time            y
-    timestamp   Timestamp   Timestamp   TimestampArray  Timestamp       Timestamp       y
-    timestamptz Timestamptz Int64       I64Array        i64             i64             y
-    interval    Interval    Interval    IntervalArray   Interval        Interval        y
-    varchar     Varchar     Utf8        Utf8Array       Box<str>        &str            _
-    bytea       Bytea       Bytea       BytesArray      Box<[u8]>       &[u8]           _
-    jsonb       Jsonb       Jsonb       JsonbArray      JsonbVal        JsonbRef<'_>    _
-    list        List        List        ListArray       ListValue       ListRef<'_>     _
-    struct      Struct      Struct      StructArray     StructValue     StructRef<'_>   _
+    boolean     Boolean     Bool        BoolArray           bool            bool            _
+    int16       Int16       Int16       I16Array            i16             i16             y
+    int32       Int32       Int32       I32Array            i32             i32             y
+    int64       Int64       Int64       I64Array            i64             i64             y
+    int256      Int256      Int256      Int256Array         Int256          Int256Ref<'_>   _
+    float32     Float32     Float32     F32Array            F32             F32             y
+    float64     Float64     Float64     F64Array            F64             F64             y
+    decimal     Decimal     Decimal     DecimalArray        Decimal         Decimal         y
+    serial      Serial      Serial      SerialArray         Serial          Serial          y
+    date        Date        Date        DateArray           Date            Date            y
+    time        Time        Time        TimeArray           Time            Time            y
+    timestamp   Timestamp   Timestamp   TimestampArray      Timestamp       Timestamp       y
+    timestamptz Timestamptz Timestamptz TimestamptzArray    Timestamptz     Timestamptz     y
+    interval    Interval    Interval    IntervalArray       Interval        Interval        y
+    varchar     Varchar     Utf8        Utf8Array           Box<str>        &str            _
+    bytea       Bytea       Bytea       BytesArray          Box<[u8]>       &[u8]           _
+    jsonb       Jsonb       Jsonb       JsonbArray          JsonbVal        JsonbRef<'_>    _
+    list        List        List        ListArray           ListValue       ListRef<'_>     _
+    struct      Struct      Struct      StructArray         StructValue     StructRef<'_>   _
 ";
 
 /// Maps a data type to its corresponding data type name.

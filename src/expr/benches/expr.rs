@@ -53,7 +53,8 @@ fn bench_expr(c: &mut Criterion) {
             DateArray::from_iter((1..=CHUNK_SIZE).map(|_| Date::default())).into_ref(),
             TimeArray::from_iter((1..=CHUNK_SIZE).map(|_| Time::default())).into_ref(),
             TimestampArray::from_iter((1..=CHUNK_SIZE).map(|_| Timestamp::default())).into_ref(),
-            I64Array::from_iter(1..=CHUNK_SIZE as i64).into_ref(),
+            TimestamptzArray::from_iter((1..=CHUNK_SIZE).map(|_| Timestamptz::default()))
+                .into_ref(),
             IntervalArray::from_iter((1..=CHUNK_SIZE).map(|i| Interval::from_days(i as _)))
                 .into_ref(),
             Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some)).into_ref(),

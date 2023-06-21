@@ -350,11 +350,11 @@ impl FromIntoArrow for Timestamptz {
     type ArrowType = i64;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
-        Timestamptz(value)
+        Timestamptz::from_micros(value)
     }
 
     fn into_arrow(self) -> Self::ArrowType {
-        self.0
+        self.timestamp_micros()
     }
 }
 

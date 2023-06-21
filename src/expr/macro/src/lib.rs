@@ -312,7 +312,7 @@ mod utils;
 /// | date        | `date`             | `Date`        | `Date`             | yes        |
 /// | time        | `time`             | `Time`        | `Time`             | yes        |
 /// | timestamp   | `timestamp`        | `Timestamp`   | `Timestamp`        | yes        |
-/// | timestamptz | `timestamptz`      | `i64`         | `i64`              | yes        |
+/// | timestamptz | `timestamptz`      | `Timestamptz` | `Timestamptz`      | yes        |
 /// | interval    | `interval`         | `Interval`    | `Interval`         | yes        |
 /// | varchar     | `varchar`          | `Box<str>`    | `&str`             | no         |
 /// | bytea       | `bytea`            | `Box<[u8]>`   | `&[u8]`            | no         |

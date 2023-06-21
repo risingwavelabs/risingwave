@@ -277,7 +277,7 @@ mod test {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, Date, Interval, ScalarImpl};
+    use risingwave_common::types::{DataType, Date, Interval, ScalarImpl, Timestamptz};
     use url::Url;
 
     use super::{
@@ -403,18 +403,18 @@ mod test {
                     assert_eq!(row[i], Some(ScalarImpl::Float64(f64_val.into())));
                 }
                 Value::Date(days) => {
-                    let date = Some(ScalarImpl::Date(
-                        Date::with_days(days + unix_epoch_days()).unwrap(),
-                    ));
-                    assert_eq!(row[i], date);
+                    assert_eq!(
+                        row[i],
+                        Some(ScalarImpl::Date(
+                            Date::with_days(days + unix_epoch_days()).unwrap(),
+                        ))
+                    );
                 }
                 Value::TimestampMillis(millis) => {
-                    let millis = Some(ScalarImpl::Int64(millis * 1000));
-                    assert_eq!(row[i], millis);
+                    assert_eq!(row[i], Some(Timestamptz::from_millis(millis).into()));
                 }
                 Value::TimestampMicros(micros) => {
-                    let micros = Some(ScalarImpl::Int64(micros));
-                    assert_eq!(row[i], micros);
+                    assert_eq!(row[i], Some(Timestamptz::from_micros(micros).into()));
                 }
                 Value::Bytes(bytes) => {
                     assert_eq!(row[i], Some(ScalarImpl::Bytea(bytes.into_boxed_slice())));
@@ -423,10 +423,10 @@ mod test {
                     let months = u32::from(duration.months()) as i32;
                     let days = u32::from(duration.days()) as i32;
                     let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
-                    let duration = Some(ScalarImpl::Interval(Interval::from_month_day_usec(
-                        months, days, usecs,
-                    )));
-                    assert_eq!(row[i], duration);
+                    assert_eq!(
+                        row[i],
+                        Some(Interval::from_month_day_usec(months, days, usecs).into())
+                    );
                 }
                 _ => {
                     unreachable!()

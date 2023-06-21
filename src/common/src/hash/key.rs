@@ -515,13 +515,13 @@ impl HashKeyDe for Time {
 
 impl HashKeySer<'_> for Timestamptz {
     fn serialize_into(self, mut buf: impl BufMut) {
-        buf.put_i64_ne(self.0);
+        buf.put_i64_ne(self.timestamp_micros());
     }
 }
 
 impl HashKeyDe for Timestamptz {
     fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
-        Timestamptz(buf.get_i64_ne())
+        Timestamptz::from_micros(buf.get_i64_ne())
     }
 }
 

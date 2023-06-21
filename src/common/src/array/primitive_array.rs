@@ -262,10 +262,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     }
 
     fn with_type(capacity: usize, ty: DataType) -> Self {
-        // Timestamptz shares the same underlying type as Int64
-        assert!(
-            ty == T::DATA_TYPE || ty == DataType::Timestamptz && T::DATA_TYPE == DataType::Int64
-        );
+        assert_eq!(ty, T::DATA_TYPE);
         Self::new(capacity)
     }
 

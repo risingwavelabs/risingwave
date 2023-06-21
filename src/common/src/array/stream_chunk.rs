@@ -358,6 +358,7 @@ impl StreamChunkTestExt for StreamChunk {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// //    TZ: Timestamptz
     /// //   SRL: Serial
     /// // {i,f}: struct
     /// ```

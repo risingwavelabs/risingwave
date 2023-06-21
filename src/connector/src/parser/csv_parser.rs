@@ -15,10 +15,10 @@
 use std::str::FromStr;
 
 use anyhow::anyhow;
-use risingwave_common::cast::{str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz};
+use risingwave_common::cast::{str_to_date, str_to_timestamp};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{Datum, Decimal, ScalarImpl};
+use risingwave_common::types::{Datum, Decimal, ScalarImpl, Timestamptz};
 
 use super::ByteStreamSourceParser;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
@@ -96,7 +96,7 @@ impl CsvParser {
             DataType::Date => str_to_date(v.as_str())?.into(),
             DataType::Time => str_to_date(v.as_str())?.into(),
             DataType::Timestamp => str_to_timestamp(v.as_str())?.into(),
-            DataType::Timestamptz => str_with_time_zone_to_timestamptz(v.as_str())?.into(),
+            DataType::Timestamptz => ScalarImpl::Timestamptz(to_rust_type!(v, Timestamptz).into()),
             _ => {
                 return Err(RwError::from(InternalError(format!(
                     "CSV data source not support type {}",

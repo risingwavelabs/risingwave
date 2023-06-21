@@ -12,18 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
 
-use crate::types::{Date, Time, Timestamp};
+use crate::types::{Date, Time, Timestamp, Timestamptz};
 
 type Result<T> = std::result::Result<T, String>;
 
-pub const PARSE_ERROR_STR_WITH_TIME_ZONE_TO_TIMESTAMPTZ: &str = concat!(
-    "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
-    , "\nFor example: '2021-04-01 00:00:00+00:00'"
-);
 pub const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 pub const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}][Z] or HH:MM)";
@@ -90,13 +86,6 @@ pub fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
     }
 }
 
-#[inline(always)]
-pub fn str_with_time_zone_to_timestamptz(elem: &str) -> Result<i64> {
-    elem.parse::<DateTime<Utc>>()
-        .map(|ret| ret.timestamp_micros())
-        .map_err(|_| PARSE_ERROR_STR_WITH_TIME_ZONE_TO_TIMESTAMPTZ.to_string())
-}
-
 /// Converts UNIX epoch time to timestamp in microseconds.
 ///
 /// The input UNIX epoch time is interpreted as follows:
@@ -108,15 +97,15 @@ pub fn str_with_time_zone_to_timestamptz(elem: &str) -> Result<i64> {
 ///
 /// This would cause no problem for timestamp in [1973-03-03 09:46:40, 5138-11-16 09:46:40).
 #[inline]
-pub fn i64_to_timestamptz(t: i64) -> Result<i64> {
+pub fn i64_to_timestamptz(t: i64) -> Result<Timestamptz> {
     const E11: i64 = 100_000_000_000;
     const E14: i64 = 100_000_000_000_000;
     const E17: i64 = 100_000_000_000_000_000;
     match t {
-        0..E11 => Ok(t * 1_000_000), // s
-        E11..E14 => Ok(t * 1_000),   // ms
-        E14..E17 => Ok(t),           // us
-        E17.. => Ok(t / 1_000),      // ns
+        0..E11 => Ok(Timestamptz::from_secs(t)),         // s
+        E11..E14 => Ok(Timestamptz::from_millis(t)),     // ms
+        E14..E17 => Ok(Timestamptz::from_micros(t)),     // us
+        E17.. => Ok(Timestamptz::from_micros(t / 1000)), // ns
         _ => Err(ERROR_INT_TO_TIMESTAMP.to_string()),
     }
 }
@@ -157,10 +146,10 @@ pub fn i64_to_timestamptz(t: i64) -> Result<i64> {
 /// ```
 #[inline]
 pub fn i64_to_timestamp(t: i64) -> Result<Timestamp> {
-    let us = i64_to_timestamptz(t)?;
+    let tz = i64_to_timestamptz(t)?;
     Ok(Timestamp::from_timestamp_uncheck(
-        us / 1_000_000,
-        (us % 1_000_000) as u32 * 1000,
+        tz.timestamp(),
+        tz.timestamp_subsec_nanos(),
     ))
 }
 
@@ -246,10 +235,6 @@ mod tests {
 
     #[test]
     fn parse_str() {
-        assert_eq!(
-            str_with_time_zone_to_timestamptz("2022-08-03 10:34:02Z").unwrap(),
-            str_with_time_zone_to_timestamptz("2022-08-03 02:34:02-08:00").unwrap()
-        );
         str_to_timestamp("1999-01-08 04:02").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
         assert_eq!(
@@ -260,10 +245,6 @@ mod tests {
         str_to_time("04:05").unwrap();
         str_to_time("04:05:06").unwrap();
 
-        assert_eq!(
-            str_with_time_zone_to_timestamptz("1999-01-08 04:05:06").unwrap_err(),
-            PARSE_ERROR_STR_WITH_TIME_ZONE_TO_TIMESTAMPTZ.to_string()
-        );
         assert_eq!(
             str_to_timestamp("1999-01-08 04:05:06AA").unwrap_err(),
             PARSE_ERROR_STR_TO_TIMESTAMP.to_string()
