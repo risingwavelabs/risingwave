@@ -170,7 +170,7 @@ generate_deterministic() {
   echo_err "[INFO] Generating"
   echo "" > $LOGDIR/generate_deterministic.stdout.log
 
-  for i in $(seq 0 10)
+  for i in $(seq 0 9)
   do
     local batch_size=10
     local start="$((i * $batch_size + 1))"

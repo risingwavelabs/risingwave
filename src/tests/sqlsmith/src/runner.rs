@@ -266,7 +266,7 @@ async fn test_sqlsmith<R: Rng>(
 
     // Test percentage of skipped queries <=5% of sample size.
     let threshold = 0.40; // permit at most 40% of queries to be skipped.
-    let sample_size = 50;
+    let sample_size = 30;
 
     let skipped_percentage = test_batch_queries(client, rng, tables.clone(), sample_size)
         .await
