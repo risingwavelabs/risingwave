@@ -71,6 +71,23 @@ NULL 1
 NULL 2
 NULL NULL
 
+query II 
+select * except (b,d) from (select t1.x as a, t1.y as b, t2.x as c, t2.y as d from t1 join t2 on t1.x = t2.x where t1.x=1);
+----
+1 1
+1 1
+1 1
+1 1
+
+query II 
+select * except (t1.x, t2.y), * except (t1.y, t2.x) from t1 join t2 on t1.y = t2.y where exists(select * from t3 where t1.x = t3.x and t2.y = t3.y) order by t2.x;
+----
+2 1 2 2
+2 2 2 2
+2 NULL 2 2
+
+query II 
+select * except (t1)
 
 statement ok
 drop table t1;
