@@ -63,7 +63,7 @@ impl AwsEc2Client {
             })?;
 
         if let Some(ret) = output.unsuccessful() {
-            if ret.len() > 0 {
+            if !ret.is_empty() {
                 return Err(MetaError::from(anyhow!(
                     "Failed to delete VPC endpoint {}, error: {:?}",
                     vpc_endpoint_id,
