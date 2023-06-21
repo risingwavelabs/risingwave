@@ -78,7 +78,7 @@ impl Distill for StreamSimpleAgg {
         let name = plan_node_name!("StreamSimpleAgg",
             { "append_only", self.input().append_only() },
         );
-        Pretty::childless_record(&name, self.logical.fields_pretty())
+        Pretty::childless_record(name, self.logical.fields_pretty())
     }
 }
 

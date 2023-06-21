@@ -73,7 +73,7 @@ impl Distill for StreamTopN {
         let name = plan_node_name!("StreamTopN",
             { "append_only", self.input().append_only() },
         );
-        self.logical.distill_with_name(&name)
+        self.logical.distill_with_name(name)
     }
 }
 
