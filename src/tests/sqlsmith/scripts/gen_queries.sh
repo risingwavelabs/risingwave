@@ -158,7 +158,12 @@ generate_deterministic() {
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
   echo "" > $LOGDIR/generate_deterministic.stdout.log
-  for i in $(seq 1 100)
+  for i in $(seq 1 50)
+  do
+    generate_one_deterministic "$i" &
+  done
+  # NOTE(kwannoel): Do in batches otherwise seems like server will crash
+  for i in $(seq 51 100)
   do
     generate_one_deterministic "$i" &
   done
