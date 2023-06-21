@@ -21,13 +21,24 @@ pub fn length(s: &str) -> i32 {
 }
 
 #[function("octet_length(varchar) -> int32")]
-pub fn octet_length(s: &str) -> i32 {
+pub fn octet_length_str(s: &str) -> i32 {
     s.as_bytes().len() as i32
 }
 
+#[function("length(bytea) -> int32")]
+#[function("octet_length(bytea) -> int32")]
+pub fn octet_length_bytea(s: &[u8]) -> i32 {
+    s.len() as i32
+}
+
 #[function("bit_length(varchar) -> int32")]
-pub fn bit_length(s: &str) -> i32 {
-    octet_length(s) * 8
+pub fn bit_length_str(s: &str) -> i32 {
+    octet_length_str(s) * 8
+}
+
+#[function("bit_length(bytea) -> int32")]
+pub fn bit_length_bytea(s: &[u8]) -> i32 {
+    octet_length_bytea(s) * 8
 }
 
 #[cfg(test)]
@@ -49,7 +60,7 @@ mod tests {
         let cases = [("hello world", 11), ("你好", 6), ("😇哈哈hhh", 13)];
 
         for (s, expected) in cases {
-            assert_eq!(octet_length(s), expected);
+            assert_eq!(octet_length_str(s), expected);
         }
     }
 
@@ -62,7 +73,7 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            assert_eq!(bit_length(s), expected);
+            assert_eq!(bit_length_str(s), expected);
         }
     }
 }
