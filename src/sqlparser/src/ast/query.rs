@@ -312,7 +312,7 @@ pub enum SelectItem {
     /// An unqualified `*`
     Wildcard,
     /// select * except ( test )
-    Except(Vec<Expr>)
+    Except(Vec<Expr>),
 }
 
 impl fmt::Display for SelectItem {
@@ -333,7 +333,7 @@ impl fmt::Display for SelectItem {
             SelectItem::Except(exprs) => {
                 write!(
                     f,
-                    "* EXCEPT {}",
+                    "* EXCEPT ({})",
                     exprs
                         .iter()
                         .map(|v| v.to_string())

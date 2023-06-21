@@ -29,8 +29,8 @@
   - stream_plan
   - batch_plan
 - sql: |
-    create table t (v1 int, v2 double precision);
-    select * except v1 from t;
+    create table t (v1 int, v2 int, v3 int);
+    select * except (v1, v2) from t;
   expected_outputs:
   - stream_plan
   - batch_plan

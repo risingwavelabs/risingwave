@@ -301,13 +301,13 @@ impl Binder {
                             indices.insert(inner.index);
                         } else {
                             unreachable!();
-                        }                        
+                        }
                     }
                     let (exprs, names) = Self::iter_bound_columns(
                         self.context.columns[..]
                             .iter()
                             .filter(|c| !c.is_hidden && !indices.contains(&c.index)),
-                    );           
+                    );
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
