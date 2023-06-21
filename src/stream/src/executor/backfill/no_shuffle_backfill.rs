@@ -12,43 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
-use std::ops::Bound;
 use std::pin::pin;
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
 use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
-use futures_async_stream::{for_await, try_stream};
-use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::BitmapBuilder;
+use futures_async_stream::try_stream;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::{cmp_datum, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::{collect_data_chunk, get_second};
+use risingwave_storage::table::get_second;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    build_temporary_state, check_all_vnode_finished, compute_bounds,
-    construct_initial_finished_state, flush_data, iter_chunks, mapping_chunk, mapping_message,
-    mark_chunk, update_pos,
+    check_all_vnode_finished, compute_bounds, construct_initial_finished_state, iter_chunks,
+    mapping_chunk, mapping_message, mark_chunk, update_pos,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
-    PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
+    PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 

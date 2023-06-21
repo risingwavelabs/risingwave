@@ -12,34 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
 use std::pin::pin;
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
 use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
-use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils::{
-    build_temporary_state, check_all_vnode_finished, construct_initial_finished_state, flush_data,
+    check_all_vnode_finished, compute_bounds, construct_initial_finished_state, iter_chunks,
     mapping_chunk, mapping_message, mark_chunk_ref, persist_state, update_pos,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
-    Message, PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    Message, PkIndices, PkIndicesRef, StreamExecutorError,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -425,39 +419,22 @@ where
         upstream_table: &StateTable<S>,
         current_pos: Option<OwnedRow>,
     ) {
-        // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
-        // scan. Otherwise, use Excluded.
-        let range_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) =
-            if let Some(current_pos) = current_pos {
-                // If `current_pos` is an empty row which means upstream mv contains only one row
-                // and it has been consumed. The iter interface doesn't support
-                // `Excluded(empty_row)` range bound, so we can simply return `None`.
-                if current_pos.is_empty() {
-                    assert!(upstream_table.pk_indices().is_empty());
-                    yield None;
-                    return Ok(());
-                }
-
-                (Bound::Excluded(current_pos), Bound::Unbounded)
-            } else {
-                (Bound::Unbounded, Bound::Unbounded)
-            };
+        // FIXME(kwannoel): `let-else` pattern does not work in generator.
+        let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
+        if range_bounds.is_none() {
+            yield None;
+            return Ok(());
+        }
+        let range_bounds = range_bounds.unwrap();
         let iter = upstream_table
             .iter_all_with_pk_range(&range_bounds, Default::default())
             .await?;
         pin_mut!(iter);
-        while let Some(data_chunk) = collect_data_chunk(&mut iter, &schema, Some(CHUNK_SIZE))
-            .instrument_await("arrangement_backfill_snapshot_read")
-            .await?
-        {
-            if data_chunk.cardinality() != 0 {
-                let ops = vec![Op::Insert; data_chunk.capacity()];
-                let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-                yield Some(stream_chunk);
-            }
-        }
 
-        yield None;
+        #[for_await]
+        for chunk in iter_chunks(iter, &schema, CHUNK_SIZE) {
+            yield chunk?;
+        }
     }
 }
 
