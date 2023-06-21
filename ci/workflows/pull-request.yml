@@ -134,6 +134,9 @@ steps:
 
   - label: "connector node integration test Java {{matrix.version}}"
     command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v {{matrix.version}}"
+    depends_on:
+      - "build"
+      - "build-other"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env

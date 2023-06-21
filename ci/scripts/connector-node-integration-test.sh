@@ -29,10 +29,6 @@ shift $((OPTIND -1))
 
 RISINGWAVE_ROOT=${PWD}
 
-echo "--- build connector node"
-cd ${RISINGWAVE_ROOT}/java
-mvn --batch-mode --update-snapshots clean package -DskipTests
-
 echo "--- install java"
 apt install sudo -y
 
@@ -44,6 +40,10 @@ else
 fi
 java_version=$(java --version 2>&1)
 echo "$java_version"
+
+# echo "--- build connector node"
+# cd ${RISINGWAVE_ROOT}/java
+# mvn --batch-mode --update-snapshots clean package -DskipTests
 
 echo "--- install postgresql client"
 DEBIAN_FRONTEND=noninteractive TZ=America/New_York apt-get -y install tzdata
@@ -68,7 +68,9 @@ ${MC_PATH} config host add minio http://127.0.0.1:9000 minioadmin minioadmin
 
 echo "--- starting connector-node service"
 cd ${RISINGWAVE_ROOT}/java/connector-node/assembly/target/
-tar xvf risingwave-connector-1.0.0.tar.gz > /dev/null
+# tar xvf risingwave-connector-1.0.0.tar.gz > /dev/null
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+tar xvf risingwave-connector.tar.gz > /dev/null
 sh ./start-service.sh &
 sleep 3
 
