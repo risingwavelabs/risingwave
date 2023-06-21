@@ -22,7 +22,9 @@ use risingwave_pb::meta::get_reschedule_plan_request::{
 };
 use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
 use risingwave_stream::task::FragmentId;
+use serde_yaml;
 
+use crate::cmd_impl::meta::ReschedulePayload;
 use crate::common::CtlContext;
 use crate::ScaleResizeCommands;
 
@@ -70,7 +72,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         exclude_workers,
         include_workers,
         generate,
-        output: _,
+        output,
         yes,
         fragments,
     } = resize;
@@ -159,9 +161,26 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
     );
 
     if generate {
-        // todo, This needs to be implemented together with the --from option of the reschedule
-        // command.
-        println!("{:#?}", reschedules);
+        let payload = ReschedulePayload {
+            reschedule_revision: revision,
+            reschedule_plan: reschedules
+                .into_iter()
+                .map(|(fragment_id, reschedule)| (fragment_id, reschedule.into()))
+                .collect(),
+        };
+
+        if let Some(output) = output.as_ref() {
+            println!("Writing plan to file: {}", output);
+            let writer = std::fs::File::create(output)?;
+            serde_yaml::to_writer(writer, &payload)?;
+            println!("Writing plan to file: {} done", output);
+            println!("You can use the `risectl meta reschedule --from {}` command to execute the generated plan", output);
+        } else {
+            println!("Option `--output` is not provided, the result plan will be output to the current command line.");
+            println!("#=========== Payload ==============#");
+            serde_yaml::to_writer(std::io::stdout(), &payload)?;
+            println!("#=========== Payload ==============#");
+        }
     } else {
         if !yes {
             match Confirm::new("Will perform actions on the cluster, are you sure?")
