@@ -346,9 +346,6 @@ impl Compactor {
                 _ = &mut shutdown_rx => {
                     tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
                     task_status = TaskStatus::ManualCanceled;
-                    for abort_handle in abort_handles {
-                        abort_handle.abort();
-                    }
                     break;
                 }
                 future_result = buffered.next() => {
@@ -381,6 +378,9 @@ impl Compactor {
         }
 
         if task_status != TaskStatus::Success {
+            for abort_handle in abort_handles {
+                abort_handle.abort();
+            }
             output_ssts.clear();
         }
         // Sort by split/key range index.
