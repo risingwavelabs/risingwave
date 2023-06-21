@@ -12,8 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod eowc;
-mod state;
-mod window_states;
+package com.risingwave.functions;
 
-pub use eowc::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
+import java.time.Duration;
+import java.time.Period;
+
+/** Combination of Period and Duration. */
+public class PeriodDuration extends org.apache.arrow.vector.PeriodDuration {
+    public PeriodDuration(Period period, Duration duration) {
+        super(period, duration);
+    }
+
+    PeriodDuration(org.apache.arrow.vector.PeriodDuration base) {
+        super(base.getPeriod(), base.getDuration());
+    }
+}

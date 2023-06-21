@@ -16,11 +16,11 @@ use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::utils::{formatter_debug_plan_node, Distill, TableCatalogBuilder};
+use super::utils::{childless_record, formatter_debug_plan_node, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
@@ -42,9 +42,9 @@ impl fmt::Display for StreamSort {
     }
 }
 impl Distill for StreamSort {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = vec![("sort_column_index", Pretty::debug(&self.sort_column_index))];
-        Pretty::childless_record("StreamSort", fields)
+        childless_record("StreamSort", fields)
     }
 }
 

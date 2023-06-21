@@ -33,7 +33,7 @@ services:
     container_name: mysql
   message_queue:
     extends:
-      file: ../../docker/docker-compose-with-minio.yml
+      file: ../../docker/docker-compose.yml
       service: message_queue
   debezium:
     image: debezium/connect:1.9

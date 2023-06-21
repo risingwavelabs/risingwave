@@ -17,7 +17,7 @@ use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema,
 };
@@ -164,16 +164,23 @@ impl TableCatalogBuilder {
 
 /// See also [`super::generic::DistillUnit`].
 pub trait Distill {
-    fn distill<'a>(&self) -> Pretty<'a>;
+    fn distill<'a>(&self) -> XmlNode<'a>;
+}
+
+pub(super) fn childless_record<'a>(
+    name: impl Into<Str<'a>>,
+    fields: StrAssocArr<'a>,
+) -> XmlNode<'a> {
+    XmlNode::simple_record(name, fields, Default::default())
 }
 
 macro_rules! impl_distill_by_unit {
     ($ty:ty, $core:ident, $name:expr) => {
-        use pretty_xmlish::Pretty;
+        use pretty_xmlish::XmlNode;
         use $crate::optimizer::plan_node::generic::DistillUnit;
         use $crate::optimizer::plan_node::utils::Distill;
         impl Distill for $ty {
-            fn distill<'a>(&self) -> Pretty<'a> {
+            fn distill<'a>(&self) -> XmlNode<'a> {
                 self.$core.distill_with_name($name)
             }
         }
