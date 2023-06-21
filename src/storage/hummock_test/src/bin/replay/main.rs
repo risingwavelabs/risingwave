@@ -45,7 +45,8 @@ use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, Ob
 use risingwave_storage::opts::StorageOpts;
 use serde::{Deserialize, Serialize};
 
-const SST_OFFSET: u64 = 2147383647;
+// use a large offset to avoid collision with real sstables
+const SST_OFFSET: u64 = 2147383647000;
 
 #[derive(Parser, Debug)]
 struct Args {

@@ -48,7 +48,7 @@ pub struct MockHummockMetaClient {
     hummock_manager: Arc<HummockManager<MemStore>>,
     context_id: HummockContextId,
     compact_context_id: AtomicU32,
-    // used for hummock replay
+    // used for hummock replay to avoid collision with existing sst files
     sst_offset: u64,
 }
 
