@@ -154,6 +154,9 @@ pub struct MetaMetrics {
     pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
+
+    /// Write throughput of commit epoch for each stable
+    pub table_write_throughput: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -517,6 +520,13 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let table_write_throughput = register_int_counter_vec_with_registry!(
+            "storage_commit_write_throughput",
+            "The number of compactions from one level to another level that have been skipped.",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
 
         let move_state_table_count = register_int_counter_vec_with_registry!(
             "storage_move_state_table_count",
@@ -596,6 +606,7 @@ impl MetaMetrics {
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
+            table_write_throughput,
             move_state_table_count,
             state_table_count,
             branched_sst_count,

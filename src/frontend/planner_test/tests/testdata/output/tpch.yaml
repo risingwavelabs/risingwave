@@ -2306,7 +2306,7 @@
                         └─BatchScan { table: partsupp, columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [ps_partkey, value], stream_key: [ps_partkey], pk_columns: [value, ps_partkey], pk_conflict: "NoCheck" }
-    └─StreamDynamicFilter { predicate: (sum($expr1) > $expr3), output: [partsupp.ps_partkey, sum($expr1)] }
+    └─StreamDynamicFilter { predicate: (sum($expr1) > $expr3), output: ["partsupp.ps_partkey", "sum($expr1)"] }
       ├─StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
       | └─StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1), count] }
       |   └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
@@ -2345,7 +2345,7 @@
     Fragment 0
     StreamMaterialize { columns: [ps_partkey, value], stream_key: [ps_partkey], pk_columns: [value, ps_partkey], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
-    └── StreamDynamicFilter { predicate: (sum($expr1) > $expr3), output: [partsupp.ps_partkey, sum($expr1)] }
+    └── StreamDynamicFilter { predicate: (sum($expr1) > $expr3), output: ["partsupp.ps_partkey", "sum($expr1)"] }
         ├── left table: 0
         ├── right table: 1
         ├── StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
@@ -4385,7 +4385,7 @@
     └─StreamHashAgg { group_key: [$expr2], aggs: [count, sum(customer.c_acctbal)] }
       └─StreamExchange { dist: HashShard($expr2) }
         └─StreamProject { exprs: [Substr(customer.c_phone, 1:Int32, 2:Int32) as $expr2, customer.c_acctbal, customer.c_custkey] }
-          └─StreamDynamicFilter { predicate: (customer.c_acctbal > $expr1), output: [customer.c_phone, customer.c_acctbal, customer.c_custkey] }
+          └─StreamDynamicFilter { predicate: (customer.c_acctbal > $expr1), output: ["customer.c_phone", "customer.c_acctbal", "customer.c_custkey"] }
             ├─StreamHashJoin { type: LeftAnti, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_phone, customer.c_acctbal, customer.c_custkey] }
             | ├─StreamExchange { dist: HashShard(customer.c_custkey) }
             | | └─StreamFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }

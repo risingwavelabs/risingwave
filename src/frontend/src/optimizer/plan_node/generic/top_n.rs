@@ -15,15 +15,17 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::{FunctionalDependencySet, Order, OrderDisplay};
 use crate::TableCatalog;
+
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TopN<PlanRef> {
@@ -148,7 +150,7 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for TopN<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let mut vec = Vec::with_capacity(5);
         let input_schema = self.input.schema();
         let order_d = Pretty::display(&OrderDisplay {
@@ -164,7 +166,7 @@ impl<PlanRef: GenericPlanRef> DistillUnit for TopN<PlanRef> {
         if !self.group_key.is_empty() {
             vec.push(("group_key", Pretty::debug(&self.group_key)));
         }
-        Pretty::childless_record(name, vec)
+        childless_record(name, vec)
     }
 }
 

@@ -15,12 +15,13 @@
 use std::fmt;
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
 
-use super::utils::formatter_debug_plan_node;
+use super::utils::{childless_record, formatter_debug_plan_node, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -93,6 +94,35 @@ impl StreamTemporalJoin {
     }
 }
 
+impl Distill for StreamTemporalJoin {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.logical.join_type)));
+
+        let concat_schema = self.logical.concat_schema();
+        vec.push((
+            "predicate",
+            Pretty::debug(&EqJoinPredicateDisplay {
+                eq_join_predicate: self.eq_join_predicate(),
+                input_schema: &concat_schema,
+            }),
+        ));
+
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+            vec.push(("output_watermarks", ow));
+        }
+
+        if verbose {
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema)
+                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            vec.push(("output", data));
+        }
+
+        childless_record("StreamTemporalJoin", vec)
+    }
+}
+
 impl fmt::Display for StreamTemporalJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = formatter_debug_plan_node!(f, "StreamTemporalJoin");
@@ -110,7 +140,7 @@ impl fmt::Display for StreamTemporalJoin {
         );
 
         let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
+        if watermark_columns.count_ones(..) > 0 {
             let schema = self.schema();
             builder.field(
                 "output_watermarks",
