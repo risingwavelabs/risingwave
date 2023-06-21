@@ -163,7 +163,7 @@ mod tests {
 
         let source_stream = table_dml_handle
             .stream_reader(ACTOR_ID1)
-            .into_stream_for_source_reader_test();
+            .into_data_stream_for_test();
 
         let mut write_handle1 = table_dml_handle.write_handle(TEST_TRANSACTION_ID1).unwrap();
         let mut write_handle2 = table_dml_handle.write_handle(TEST_TRANSACTION_ID2).unwrap();

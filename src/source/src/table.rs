@@ -145,7 +145,7 @@ pub struct WriteHandle {
 impl Drop for WriteHandle {
     fn drop(&mut self) {
         if self.txn_state == TxnState::Begin {
-            let _ = self.rollback();
+            let _ = self.rollback_inner();
         }
     }
 }
@@ -170,13 +170,17 @@ impl WriteHandle {
         self.write_txn_msg(TxnMsg::Data(self.txn_id, chunk))
     }
 
-    pub fn end(&mut self) -> Result<oneshot::Receiver<usize>> {
+    pub fn end(mut self) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_state, TxnState::Begin);
         self.txn_state = TxnState::Committed;
         self.write_txn_msg(TxnMsg::End(self.txn_id))
     }
 
-    pub fn rollback(&mut self) -> Result<oneshot::Receiver<usize>> {
+    pub fn rollback(mut self) -> Result<oneshot::Receiver<usize>> {
+        self.rollback_inner()
+    }
+
+    fn rollback_inner(&mut self) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_state, TxnState::Begin);
         self.txn_state = TxnState::Rollback;
         self.write_txn_msg(TxnMsg::Rollback(self.txn_id))
@@ -212,7 +216,7 @@ pub struct TableStreamReader {
 
 impl TableStreamReader {
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
-    pub async fn into_stream_for_source_reader_test(mut self) {
+    pub async fn into_data_stream_for_test(mut self) {
         while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
             match txn_msg {

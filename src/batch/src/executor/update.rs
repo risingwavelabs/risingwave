@@ -142,24 +142,12 @@ impl UpdateExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = match data_chunk {
-                Ok(data_chunk) => data_chunk,
-                Err(err) => {
-                    write_handle.rollback()?;
-                    return Err(err);
-                }
-            };
+            let data_chunk = data_chunk?;
 
             let updated_data_chunk = {
                 let mut columns = Vec::with_capacity(self.exprs.len());
                 for expr in &mut self.exprs {
-                    let column = match expr.eval(&data_chunk).await {
-                        Ok(column) => column,
-                        Err(err) => {
-                            write_handle.rollback()?;
-                            return Err(err.into());
-                        }
-                    };
+                    let column = expr.eval(&data_chunk).await?;
                     columns.push(column);
                 }
 
@@ -247,7 +235,6 @@ impl BoxedExecutorBuilder for UpdateExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_common::array::Array;
     use risingwave_common::catalog::{
@@ -255,7 +242,6 @@ mod tests {
     };
     use risingwave_common::hash::ActorId;
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::util::worker_util::WorkerNodeId;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_source::dml_manager::DmlManager;
@@ -333,39 +319,39 @@ mod tests {
             );
         });
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
+        reader.next().await.unwrap()?.into_begin().unwrap();
 
         // Read
         // As we set the chunk size to 5, we'll get 2 chunks. Note that the update records for one
         // row cannot be cut into two chunks, so the first chunk will actually have 6 rows.
         for updated_rows in [1..=3, 4..=5] {
-            assert_matches!(reader.next().await.unwrap()?, TxnMsg::Data(_, chunk) => {
-                assert_eq!(
-                    chunk.ops().chunks(2).collect_vec(),
-                    vec![&[Op::UpdateDelete, Op::UpdateInsert]; updated_rows.clone().count()]
-                );
+            let txn_msg = reader.next().await.unwrap()?;
+            let chunk = txn_msg.as_stream_chunk().unwrap();
+            assert_eq!(
+                chunk.ops().chunks(2).collect_vec(),
+                vec![&[Op::UpdateDelete, Op::UpdateInsert]; updated_rows.clone().count()]
+            );
 
-                assert_eq!(
-                    chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
-                    updated_rows
-                        .clone()
-                        .flat_map(|i| [i * 2 - 1, i * 2]) // -1, +2, -3, +4, ...
-                        .map(Some)
-                        .collect_vec()
-                );
+            assert_eq!(
+                chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
+                updated_rows
+                    .clone()
+                    .flat_map(|i| [i * 2 - 1, i * 2]) // -1, +2, -3, +4, ...
+                    .map(Some)
+                    .collect_vec()
+            );
 
-                assert_eq!(
-                    chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
-                    updated_rows
-                        .clone()
-                        .flat_map(|i| [i * 2, i * 2 - 1]) // -2, +1, -4, +3, ...
-                        .map(Some)
-                        .collect_vec()
-                );
-            });
+            assert_eq!(
+                chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
+                updated_rows
+                    .clone()
+                    .flat_map(|i| [i * 2, i * 2 - 1]) // -2, +1, -4, +3, ...
+                    .map(Some)
+                    .collect_vec()
+            );
         }
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
+        reader.next().await.unwrap()?.into_end().unwrap();
 
         handle.await.unwrap();
 

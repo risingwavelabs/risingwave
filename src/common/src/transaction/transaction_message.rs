@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+use enum_as_inner::EnumAsInner;
 
 use crate::array::StreamChunk;
 use crate::transaction::transaction_id::TxnId;
 use crate::transaction::transaction_message::TxnMsg::{Begin, Data, End, Rollback};
 
+#[derive(Debug, EnumAsInner)]
 pub enum TxnMsg {
     Begin(TxnId),
     Data(TxnId, StreamChunk),
@@ -39,19 +40,6 @@ impl TxnMsg {
         match self {
             Begin(_) | End(_) | Rollback(_) => None,
             Data(_, chunk) => Some(chunk),
-        }
-    }
-}
-
-impl fmt::Debug for TxnMsg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Begin(txn_id) => write!(f, "Begin {{ txn_id: {} }}", txn_id,),
-            Data(txn_id, chunk) => {
-                write!(f, "Data {{ txn_id: {}, chunk: \n{:?}\n }}", txn_id, chunk,)
-            }
-            End(txn_id) => write!(f, "End {{ txn_id: {} }}", txn_id,),
-            Rollback(txn_id) => write!(f, "Rollback {{ txn_id: {} }}", txn_id,),
         }
     }
 }

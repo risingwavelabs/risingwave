@@ -201,7 +201,7 @@ impl DmlExecutor {
                                         txn_buffer.overflow = true;
                                     }
                                 }
-                                None => unreachable!("Receive an unexpected transaction data message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id),
+                                None => panic!("Receive an unexpected transaction data message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id),
                             };
                         }
                     }

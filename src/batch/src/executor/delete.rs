@@ -122,13 +122,7 @@ impl DeleteExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = match data_chunk {
-                Ok(data_chunk) => data_chunk,
-                Err(err) => {
-                    write_handle.rollback()?;
-                    return Err(err);
-                }
-            };
+            let data_chunk = data_chunk?;
             if self.returning {
                 yield data_chunk.clone();
             }
@@ -193,7 +187,6 @@ impl BoxedExecutorBuilder for DeleteExecutor {
 mod tests {
     use std::sync::Arc;
 
-    use assert_matches::assert_matches;
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::Array;
@@ -202,7 +195,6 @@ mod tests {
     };
     use risingwave_common::hash::ActorId;
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::util::worker_util::WorkerNodeId;
     use risingwave_source::dml_manager::DmlManager;
 
@@ -271,23 +263,23 @@ mod tests {
         });
 
         // Read
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
+        reader.next().await.unwrap()?.into_begin().unwrap();
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Data(_, chunk) => {
-            assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
+        let txn_msg = reader.next().await.unwrap()?;
+        let chunk = txn_msg.as_stream_chunk().unwrap();
+        assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
 
-            assert_eq!(
-                chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
-                vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
-            );
+        assert_eq!(
+            chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
+            vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+        );
 
-            assert_eq!(
-                chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
-                vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-            );
-        });
+        assert_eq!(
+            chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
+            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+        );
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
+        reader.next().await.unwrap()?.into_end().unwrap();
 
         handle.await.unwrap();
 

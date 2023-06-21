@@ -117,6 +117,8 @@ impl DmlManager {
         Ok(handle)
     }
 
+    /// Unregister a new DML reader for a table.
+    /// By providing an actor id, we can unregister the specific changes sender of a `DMLExecutor`.
     pub fn unregister_changes_sender(&self, table_id: TableId, actor_id: ActorId) {
         let table_readers = self.table_readers.write();
         let table_reader = table_readers.get(&table_id).unwrap();
