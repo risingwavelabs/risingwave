@@ -3,11 +3,12 @@ extend = "common.toml"
 [env]
 JAEGER_SYSTEM = "${SYSTEM}"
 JAEGER_DOWNLOAD_PATH = "${PREFIX_TMP}/jaeger.tar.gz"
-JAEGER_VERSION = "1.30.0"
+JAEGER_VERSION = "1.46.0"
 JAEGER_RELEASE = "jaeger-${JAEGER_VERSION}-${JAEGER_SYSTEM}"
 JAEGER_DOWNLOAD_TAR_GZ = "https://github.com/jaegertracing/jaeger/releases/download/v${JAEGER_VERSION}/${JAEGER_RELEASE}.tar.gz"
 
 [tasks.download-jaeger]
+private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_COMPUTE_TRACING" ] }

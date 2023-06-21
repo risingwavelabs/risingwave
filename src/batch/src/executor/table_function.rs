@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -53,8 +53,11 @@ impl TableFunctionExecutor {
         #[for_await]
         for chunk in self.table_function.eval(&dummy_chunk).await {
             let chunk = chunk?;
-            // remove the first column
-            yield chunk.split_column_at(1).1;
+            // remove the first column and expand the second column if its data type is struct
+            yield match chunk.column_at(1).as_ref() {
+                ArrayImpl::Struct(struct_array) => struct_array.into(),
+                _ => chunk.split_column_at(1).1,
+            };
         }
     }
 }

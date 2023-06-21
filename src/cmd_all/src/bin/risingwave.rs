@@ -108,14 +108,14 @@ impl Component {
         fn parse_opts<T: FromArgMatches>(matches: &ArgMatches) -> T {
             T::from_arg_matches(matches).map_err(|e| e.exit()).unwrap()
         }
-
+        let registry = prometheus::Registry::new();
         match self {
-            Self::Compute => compute(parse_opts(matches)),
-            Self::Meta => meta(parse_opts(matches)),
-            Self::Frontend => frontend(parse_opts(matches)),
-            Self::Compactor => compactor(parse_opts(matches)),
-            Self::Ctl => ctl(parse_opts(matches)),
-            Self::Playground => playground(parse_opts(matches)),
+            Self::Compute => compute(parse_opts(matches), registry),
+            Self::Meta => meta(parse_opts(matches), registry),
+            Self::Frontend => frontend(parse_opts(matches), registry),
+            Self::Compactor => compactor(parse_opts(matches), registry),
+            Self::Ctl => ctl(parse_opts(matches), registry),
+            Self::Playground => playground(parse_opts(matches), registry),
         }
     }
 
@@ -188,10 +188,10 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn playground(opts: PlaygroundOpts) {
-    let settings = risingwave_rt::LoggerSettings::new()
+fn playground(opts: PlaygroundOpts, registry: prometheus::Registry) {
+    let settings = risingwave_rt::LoggerSettings::new("playground")
         .enable_tokio_console(false)
         .with_target("risingwave_storage", Level::WARN);
-    risingwave_rt::init_risingwave_logger(settings);
+    risingwave_rt::init_risingwave_logger(settings, registry);
     risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
 }

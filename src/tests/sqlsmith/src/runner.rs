@@ -198,6 +198,7 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
     tracing::info!("Passed stream queries");
 
     drop_tables(&mviews, testdata, client).await;
+    tracing::info!("[EXECUTION SUCCESS]");
 }
 
 fn generate_rng(seed: Option<u64>) -> impl Rng {

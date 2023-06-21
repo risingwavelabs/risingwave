@@ -15,9 +15,11 @@
 use std::cell::RefCell;
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_common::error::ErrorCode::NotImplemented;
 use risingwave_common::error::Result;
 
+use super::utils::Distill;
 use super::{
     generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
     ToBatch, ToStream,
@@ -74,6 +76,10 @@ impl LogicalShare {
     ) -> fmt::Result {
         write!(f, "{} {{ id = {} }}", name, &base.id.0)
     }
+
+    pub(super) fn pretty_fields<'a>(base: &PlanBase, name: &'a str) -> Pretty<'a> {
+        Pretty::childless_record(name, vec![("id", Pretty::debug(&base.id.0))])
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalShare {
@@ -106,6 +112,11 @@ impl LogicalShare {
 impl fmt::Display for LogicalShare {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Self::fmt_with_name(&self.base, f, "LogicalShare")
+    }
+}
+impl Distill for LogicalShare {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        Self::pretty_fields(&self.base, "LogicalShare")
     }
 }
 

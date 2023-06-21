@@ -45,10 +45,10 @@ mod common;
 mod csv_parser;
 mod debezium;
 mod json_parser;
-mod macros;
 mod maxwell;
 mod protobuf;
 mod schema_registry;
+mod unified;
 mod util;
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {

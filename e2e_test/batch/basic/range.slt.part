@@ -113,3 +113,19 @@ SELECT * FROM range(0.1::numeric, 2.1::numeric, 0.5::numeric)
 0.6
 1.1
 1.6
+
+# test table function with aliases
+query I
+SELECT alias from range(1,2) alias;
+----
+1
+
+query I
+SELECT alias.alias from range(1,2) alias;
+----
+1
+
+query I
+SELECT alias.col from range(1,2) alias(col);
+----
+1
