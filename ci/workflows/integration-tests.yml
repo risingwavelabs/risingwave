@@ -99,10 +99,6 @@ steps:
           - "protobuf"
       adjustments:
         - with:
-            testcase: "twitter-pulsar"
-            format: "protobuf"
-          skip: true
-        - with:
             testcase: "debezium-mongo"
             format: "protobuf"
           skip: true
