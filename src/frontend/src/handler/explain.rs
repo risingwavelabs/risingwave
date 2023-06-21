@@ -200,7 +200,7 @@ async fn do_handle_explain(
             ExplainType::Physical => {
                 // if explain trace is on, the plan has been in the rows
                 if !explain_trace && let Ok(plan) = &plan {
-                    let output = plan.explain_to_string()?;
+                    let output = plan.explain_to_string();
                     blocks.push(output);
                 }
             }

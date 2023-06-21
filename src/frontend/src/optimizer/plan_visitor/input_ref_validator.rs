@@ -55,7 +55,7 @@ impl InputRefValidator {
             panic!(
                 "Input references are inconsistent with the input schema: {}, plan:\n{}",
                 err,
-                plan.explain_to_string().expect("failed to explain")
+                plan.explain_to_string()
             );
         }
     }

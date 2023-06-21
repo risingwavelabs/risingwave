@@ -275,7 +275,7 @@ fn gen_batch_plan_fragmenter(
 
     tracing::trace!(
         "Generated query plan: {:?}, query_mode:{:?}",
-        plan.explain_to_string()?,
+        plan.explain_to_string(),
         query_mode
     );
     let worker_node_manager_reader = WorkerNodeSelector::new(
