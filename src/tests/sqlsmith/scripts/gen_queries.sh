@@ -146,7 +146,7 @@ generate_one_deterministic() {
   local SET_ID=$1
   mkdir -p "$OUTDIR/$SET_ID"
   echo "[INFO] Generating For Seed $RANDOM, Query set $SET_ID"
-  if MADSIM_TEST_SEED=$RANDOM timeout 2m "$MADSIM_BIN" \
+  if MADSIM_TEST_SEED=$RANDOM timeout 3m "$MADSIM_BIN" \
     --sqlsmith 30 \
     --generate-sqlsmith-queries "$OUTDIR/$SET_ID" \
     $TESTDATA \
@@ -162,29 +162,54 @@ generate_one_deterministic() {
     buildkite-agent artifact upload "$LOGDIR/generate-$SET_ID.log"
   fi
 }
+#
+## Prefer to use generate_deterministic, it is faster since
+## runs with all-in-one binary.
+#generate_deterministic() {
+#  # Even if fails early, it should still generate some queries, do not exit script.
+#  set +e
+#  echo_err "[INFO] Generating"
+#  echo "" > $LOGDIR/generate_deterministic.stdout.log
+#
+#  for i in $(seq 0 9)
+#  do
+#    local batch_size=10
+#    local start="$((i * $batch_size + 1))"
+#    local end=$((start - 1 + $batch_size))
+#    echo_err "--- Generating for Queries $start - $end"
+#    for SET_ID in $(seq $start $end)
+#    do
+#        generate_one_deterministic "$SET_ID" &
+#    done
+#    wait
+#  done
+#  echo_err "[INFO] Finished generation"
+#
+#  set -e
+#}
 
-# Prefer to use generate_deterministic, it is faster since
+# Prefer to use [`generate_deterministic`], it is faster since
 # runs with all-in-one binary.
 generate_deterministic() {
+  # Allows us to use other functions defined in this file within `parallel`.
+  . $(which env_parallel.bash)
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
-  echo_err "[INFO] Generating"
   echo "" > $LOGDIR/generate_deterministic.stdout.log
-
-  for i in $(seq 0 9)
-  do
-    local batch_size=10
-    local start="$((i * $batch_size + 1))"
-    local end=$((start - 1 + $batch_size))
-    echo_err "--- Generating for Queries $start - $end"
-    for SET_ID in $(seq $start $end)
-    do
-        generate_one_deterministic "$SET_ID" &
-    done
-    wait
-  done
-  echo_err "[INFO] Finished generation"
-
+  gen_seed | env_parallel --jobs 14 "
+    mkdir -p $OUTDIR/{%}
+    echo '[INFO] Generating For Seed {}'
+    MADSIM_TEST_SEED={} timeout 3m $MADSIM_BIN \
+      --sqlsmith 100 \
+      --generate-sqlsmith-queries $OUTDIR/{%} \
+      $TESTDATA \
+      1>>$LOGDIR/generate_deterministic.stdout.log \
+      2>$LOGDIR/generate-{%}.log
+    echo '[INFO] Finished Generating For Seed {}, Query set {%}'
+    echo '[INFO] Extracting Queries For Seed {}, Query set {%}'
+    extract_queries $LOGDIR/generate-{%}.log $OUTDIR/{%}/queries.sql
+    echo '[INFO] Extracted Queries For Seed {}, Query set {%}.'
+    "
   set -e
 }
 
