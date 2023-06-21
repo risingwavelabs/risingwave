@@ -113,11 +113,6 @@ struct OverrideConfigOpts {
     #[override_opts(path = storage.file_cache.dir)]
     pub file_cache_dir: Option<String>,
 
-    /// Enable reporting tracing information to jaeger.
-    #[clap(long, env = "RW_ENABLE_JAEGER_TRACING", default_missing_value = None)]
-    #[override_opts(path = streaming.enable_jaeger_tracing)]
-    pub enable_jaeger_tracing: Option<bool>,
-
     /// Enable async stack tracing through `await-tree` for risectl.
     #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
@@ -178,7 +173,10 @@ use std::pin::Pin;
 use crate::server::compute_node_serve;
 
 /// Start compute node
-pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: ComputeNodeOpts,
+    registry: prometheus::Registry,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
@@ -200,7 +198,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         tracing::info!("advertise addr is {}", advertise_addr);
 
         let (join_handle_vec, _shutdown_send) =
-            compute_node_serve(listen_addr, advertise_addr, opts).await;
+            compute_node_serve(listen_addr, advertise_addr, opts, registry).await;
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();

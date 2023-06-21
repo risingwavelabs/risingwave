@@ -42,8 +42,18 @@ use crate::expr::{
 };
 use crate::utils::Condition;
 
+// Defines system functions that without args, ref: https://www.postgresql.org/docs/current/functions-info.html
+pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
+    "session_user",
+    "user",
+    "current_user",
+    "current_role",
+    "current_schema",
+    "current_timestamp",
+];
+
 impl Binder {
-    pub(super) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
+    pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
         let function_name = match f.name.0.as_slice() {
             [name] => name.real_value(),
             [schema, name] => {
@@ -114,18 +124,10 @@ impl Binder {
 
         // user defined function
         // TODO: resolve schema name
-        if let Some(func) = self
-            .catalog
-            .first_valid_schema(
-                &self.db_name,
-                &self.search_path,
-                &self.auth_context.user_name,
-            )?
-            .get_function_by_name_args(
-                &function_name,
-                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-            )
-        {
+        if let Some(func) = self.first_valid_schema()?.get_function_by_name_args(
+            &function_name,
+            &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
+        ) {
             use crate::catalog::function_catalog::FunctionKind::*;
             match &func.kind {
                 Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
@@ -159,8 +161,14 @@ impl Binder {
             ))
             .into());
         }
+        if kind == AggKind::Mode && !f.args.is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "no arguments are expected in mode agg".to_string(),
+            )
+            .into());
+        }
         self.ensure_aggregate_allowed()?;
-        let inputs: Vec<ExprImpl> = if f.within_group.is_some() {
+        let mut inputs: Vec<ExprImpl> = if f.within_group.is_some() {
             f.within_group
                 .iter()
                 .map(|x| self.bind_function_expr_arg(FunctionArgExpr::Expr(x.expr.clone())))
@@ -173,6 +181,15 @@ impl Binder {
                 .flatten_ok()
                 .try_collect()?
         };
+        if kind == AggKind::PercentileCont {
+            inputs[0] = inputs
+                .iter()
+                .exactly_one()
+                .unwrap()
+                .clone()
+                .cast_implicit(DataType::Float64)?;
+        }
+
         if f.distinct {
             match &kind {
                 AggKind::Count if inputs.is_empty() => {
@@ -280,13 +297,23 @@ impl Binder {
                 .cast_implicit(DataType::Float64)?
                 .fold_const()
             {
-                Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
+                if casted
+                    .clone()
+                    .is_some_and(|x| !(0.0..=1.0).contains(&Into::<f64>::into(*x.as_float64())))
+                {
+                    Err(ErrorCode::InvalidInputSyntax(format!(
+                        "arg in {} must between 0 and 1",
+                        kind
+                    ))
+                    .into())
+                } else {
+                    Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
+                }
             } else {
-                Err(ErrorCode::InvalidInputSyntax(format!(
-                    "arg in {} must be double precision",
-                    kind
-                ))
-                .into())
+                Err(
+                    ErrorCode::InvalidInputSyntax(format!("arg in {} must be float64", kind))
+                        .into(),
+                )
             }
         } else {
             Ok(vec![])
@@ -458,6 +485,32 @@ impl Binder {
                 binder.ensure_proctime_function_allowed()?;
                 raw_call(ExprType::Proctime)(binder, inputs)
             })
+        }
+
+        // `SESSION_USER` is the user name of the user that is connected to the database.
+        fn session_user() -> Handle {
+            guard_by_len(
+                0,
+                raw(|binder, _inputs| {
+                    Ok(ExprImpl::literal_varchar(
+                        binder.auth_context.user_name.clone(),
+                    ))
+                }),
+            )
+        }
+
+        // `CURRENT_USER` is the user name of the user that is executing the command,
+        // `CURRENT_ROLE`, `USER` are synonyms for `CURRENT_USER`. Since we don't support
+        // `SET ROLE xxx` for now, they will all returns session user name.
+        fn current_user() -> Handle {
+            guard_by_len(
+                0,
+                raw(|binder, _inputs| {
+                    Ok(ExprImpl::literal_varchar(
+                        binder.auth_context.user_name.clone(),
+                    ))
+                }),
+            )
         }
 
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
@@ -651,12 +704,7 @@ impl Binder {
                 }))),
                 ("current_schema", guard_by_len(0, raw(|binder, _inputs| {
                     return Ok(binder
-                        .catalog
-                        .first_valid_schema(
-                            &binder.db_name,
-                            &binder.search_path,
-                            &binder.auth_context.user_name,
-                        )
+                        .first_valid_schema()
                         .map(|schema| ExprImpl::literal_varchar(schema.name()))
                         .unwrap_or_else(|_| ExprImpl::literal_null(DataType::Varchar)));
                 }))),
@@ -711,11 +759,10 @@ impl Binder {
                         DataType::Varchar,
                     ))
                 })),
-                ("session_user", guard_by_len(0, raw(|binder, _inputs| {
-                    Ok(ExprImpl::literal_varchar(
-                        binder.auth_context.user_name.clone(),
-                    ))
-                }))),
+                ("session_user", session_user()),
+                ("current_role", current_user()),
+                ("current_user", current_user()),
+                ("user", current_user()),
                 ("pg_get_userbyid", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
                         let bound_query = binder.bind_get_user_by_id_select(input)?;
@@ -884,7 +931,8 @@ impl Binder {
                 | Clause::Values
                 | Clause::GroupBy
                 | Clause::Having
-                | Clause::Filter => {
+                | Clause::Filter
+                | Clause::From => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
                         clause
@@ -925,7 +973,7 @@ impl Binder {
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values => {
+                Clause::Where | Clause::Values | Clause::From => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
                         clause
@@ -948,7 +996,7 @@ impl Binder {
                     ))
                     .into());
                 }
-                Clause::GroupBy | Clause::Having | Clause::Filter => {}
+                Clause::GroupBy | Clause::Having | Clause::Filter | Clause::From => {}
             }
         }
         Ok(())

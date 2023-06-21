@@ -15,9 +15,11 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{ColumnDesc, INITIAL_TABLE_VERSION_ID};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::utils::Distill;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -48,10 +50,10 @@ impl StreamDml {
         }
     }
 
-    fn column_names(&self) -> Vec<String> {
+    fn column_names(&self) -> Vec<&str> {
         self.column_descs
             .iter()
-            .map(|column_desc| column_desc.name.clone())
+            .map(|column_desc| column_desc.name.as_str())
             .collect()
     }
 }
@@ -63,6 +65,17 @@ impl fmt::Display for StreamDml {
             "StreamDml {{ columns: {} }}",
             format_args!("[{}]", &self.column_names().join(", "))
         )
+    }
+}
+impl Distill for StreamDml {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let col = self
+            .column_names()
+            .iter()
+            .map(|n| Pretty::from(n.to_string()))
+            .collect();
+        let col = Pretty::Array(col);
+        Pretty::childless_record("StreamDml", vec![("columns", col)])
     }
 }
 

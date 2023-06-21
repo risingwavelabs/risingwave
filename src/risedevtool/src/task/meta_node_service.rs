@@ -21,7 +21,7 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_hummock_backend, HummockInMemoryStrategy, MetaNodeConfig};
+use crate::{add_hummock_backend, add_jaeger_endpoint, HummockInMemoryStrategy, MetaNodeConfig};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -159,6 +159,9 @@ impl MetaNodeService {
 
         cmd.arg("--data-directory").arg("hummock_001");
 
+        let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
+        add_jaeger_endpoint(provide_jaeger, cmd)?;
+
         Ok(())
     }
 }
@@ -184,7 +187,7 @@ impl Task for MetaNodeService {
         if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
             cmd.env(
-                "_RJEM_MALLOC_CONF",
+                "MALLOC_CONF",
                 "prof:true,lg_prof_interval:32,lg_prof_sample:19,prof_prefix:meta-node",
             );
         }
