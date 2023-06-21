@@ -159,6 +159,7 @@ generate_one_deterministic() {
     echo "[INFO] Extracted Queries For Seed $RANDOM, Query set $SET_ID."
   else
     echo "[ERROR] Query timed out For Seed $RANDOM, Query set $SET_ID"
+    buildkite-agent upload "$LOGDIR/generate-$SET_ID.log"
   fi
 }
 
