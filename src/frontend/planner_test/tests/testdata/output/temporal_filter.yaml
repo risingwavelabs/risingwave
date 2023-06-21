@@ -6,11 +6,11 @@
   stream_plan: |
     StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [t1.ts, t1._row_id] }
-      └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [$expr1], output: [t1.ts, $expr1, t1._row_id] }
+      └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [$expr1], output: ["t1.ts", "$expr1", "t1._row_id"] }
         ├─StreamProject { exprs: [t1.ts, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
         | └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
-          └─StreamNow { output: [now] }
+          └─StreamNow { output: ["now"] }
 - name: Temporal filter works on complex columns on LHS (part 2)
   sql: |
     create table t1 (ts timestamp with time zone, time_to_live interval);
@@ -18,11 +18,11 @@
   stream_plan: |
     StreamMaterialize { columns: [ts, time_to_live, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [t1.ts, t1.time_to_live, t1._row_id] }
-      └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [$expr1], output: [t1.ts, t1.time_to_live, $expr1, t1._row_id] }
+      └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [$expr1], output: ["t1.ts", "t1.time_to_live", "$expr1", "t1._row_id"] }
         ├─StreamProject { exprs: [t1.ts, t1.time_to_live, AddWithTimeZone(t1.ts, (t1.time_to_live * 1.5:Decimal), 'UTC':Varchar) as $expr1, t1._row_id] }
         | └─StreamTableScan { table: t1, columns: [t1.ts, t1.time_to_live, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
-          └─StreamNow { output: [now] }
+          └─StreamNow { output: ["now"] }
 - name: Temporal filter works on complex columns on LHS (part 2, flipped)
   sql: |
     create table t1 (ts timestamp with time zone, additional_time_to_live interval);
@@ -30,12 +30,12 @@
   stream_plan: |
     StreamMaterialize { columns: [ts, additional_time_to_live, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, t1._row_id] }
-      └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [t1.ts, t1.additional_time_to_live, $expr1, t1._row_id] }
+      └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: ["t1.ts", "t1.additional_time_to_live", "$expr1", "t1._row_id"] }
         ├─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, AddWithTimeZone(t1.ts, (t1.additional_time_to_live * 1.5:Decimal), 'UTC':Varchar) as $expr1, t1._row_id] }
         | └─StreamTableScan { table: t1, columns: [t1.ts, t1.additional_time_to_live, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
-            └─StreamNow { output: [now] }
+            └─StreamNow { output: ["now"] }
 - name: Temporal filter fails without `now()` in lower bound
   sql: |-
     create table t1 (ts timestamp with time zone);
@@ -47,21 +47,21 @@
     select * from t1 where ts < now() - interval '1 hour' and ts >= now() - interval '2 hour';
   stream_plan: |
     StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
-    └─StreamDynamicFilter { predicate: (t1.ts < $expr2), output: [t1.ts, t1._row_id] }
-      ├─StreamDynamicFilter { predicate: (t1.ts >= $expr1), output_watermarks: [t1.ts], output: [t1.ts, t1._row_id] }
+    └─StreamDynamicFilter { predicate: (t1.ts < $expr2), output: ["t1.ts", "t1._row_id"] }
+      ├─StreamDynamicFilter { predicate: (t1.ts >= $expr1), output_watermarks: [t1.ts], output: ["t1.ts", "t1._row_id"] }
       | ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       | └─StreamExchange { dist: Broadcast }
       |   └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
-      |     └─StreamNow { output: [now] }
+      |     └─StreamNow { output: ["now"] }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
-          └─StreamNow { output: [now] }
+          └─StreamNow { output: ["now"] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
-    └── StreamDynamicFilter { predicate: (t1.ts < $expr2), output: [t1.ts, t1._row_id] } { left table: 0, right table: 1 }
-        ├── StreamDynamicFilter { predicate: (t1.ts >= $expr1), output_watermarks: [t1.ts], output: [t1.ts, t1._row_id] }
+    └── StreamDynamicFilter { predicate: (t1.ts < $expr2), output: ["t1.ts", "t1._row_id"] } { left table: 0, right table: 1 }
+        ├── StreamDynamicFilter { predicate: (t1.ts >= $expr1), output_watermarks: [t1.ts], output: ["t1.ts", "t1._row_id"] }
         │   ├── left table: 2
         │   ├── right table: 3
         │   ├── Chain { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -73,11 +73,11 @@
 
     Fragment 1
     StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
-    └──  StreamNow { output: [now] } { state table: 5 }
+    └──  StreamNow { output: ["now"] } { state table: 5 }
 
     Fragment 2
     StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
-    └──  StreamNow { output: [now] } { state table: 6 }
+    └──  StreamNow { output: ["now"] } { state table: 6 }
 
     Table 0
     ├── columns: [ t1_ts, t1__row_id ]

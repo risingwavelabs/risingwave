@@ -24,7 +24,7 @@
     select v1 from t1 order by v1 limit 3 offset 3;
   stream_plan: |
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [v1, t1._row_id], pk_conflict: "NoCheck" }
-    └─StreamAppendOnlyTopN { order: "[t1.v1 ASC]", limit: 3, offset: 3 }
+    └─StreamTopN [append_only] { order: "[t1.v1 ASC]", limit: 3, offset: 3 }
       └─StreamExchange { dist: Single }
         └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
 - sql: |
@@ -33,7 +33,7 @@
   stream_plan: |
     StreamMaterialize { columns: [max_v1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [max(max(t1.v1))] }
-      └─StreamAppendOnlySimpleAgg { aggs: [max(max(t1.v1)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [max(max(t1.v1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [max(t1.v1)] }
             └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }

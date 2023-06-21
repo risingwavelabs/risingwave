@@ -113,3 +113,14 @@ drop materialized view mv;
 
 statement ok
 drop source t4;
+
+# create a table with generated column now
+statement error QueryError: Bind error: failed to bind expression: now()
+CREATE TABLE t (v INT, t timestamptz as now()) WITH (
+  connector = 'datagen',
+  fields.v.kind = 'sequence',
+  fields.v.start = '1',
+  fields.v.end  = '10',
+  datagen.rows.per.second='15',
+  datagen.split.num = '1'
+) ROW FORMAT JSON;

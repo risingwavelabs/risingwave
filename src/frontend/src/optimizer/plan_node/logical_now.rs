@@ -14,14 +14,13 @@
 
 use std::fmt;
 
-use itertools::Itertools;
 use pretty_xmlish::Pretty;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::utils::{Distill, IndicesDisplay};
+use super::utils::Distill;
 use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
@@ -67,13 +66,7 @@ impl fmt::Display for LogicalNow {
 
         if verbose {
             // For now, output all columns from the left side. Make it explicit here.
-            builder.field(
-                "output",
-                &IndicesDisplay {
-                    indices: &(0..self.schema().fields.len()).collect_vec(),
-                    input_schema: self.schema(),
-                },
-            );
+            builder.field("output", &self.schema().names_str());
         }
 
         builder.finish()

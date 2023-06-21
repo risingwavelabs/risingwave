@@ -1517,7 +1517,7 @@
               └─BatchScan { table: bid, columns: [bid.auction], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: "NoCheck" }
-    └─StreamDynamicFilter { predicate: (count(bid.auction) >= $expr1), output: [auction.id, auction.item_name, count(bid.auction)] }
+    └─StreamDynamicFilter { predicate: (count(bid.auction) >= $expr1), output: ["auction.id", "auction.item_name", "count(bid.auction)"] }
       ├─StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
       | └─StreamHashAgg { group_key: [auction.id, auction.item_name], aggs: [count(bid.auction), count] }
       |   └─StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
@@ -1536,7 +1536,7 @@
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
-    └── StreamDynamicFilter { predicate: (count(bid.auction) >= $expr1), output: [auction.id, auction.item_name, count(bid.auction)] } { left table: 0, right table: 1 }
+    └── StreamDynamicFilter { predicate: (count(bid.auction) >= $expr1), output: ["auction.id", "auction.item_name", "count(bid.auction)"] } { left table: 0, right table: 1 }
         ├── StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
         │   └── StreamHashAgg { group_key: [auction.id, auction.item_name], aggs: [count(bid.auction), count] } { result table: 2, state tables: [], distinct tables: [] }
         │       └── StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all } { left table: 3, right table: 5, left degree table: 4, right degree table: 6 }
