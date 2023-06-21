@@ -172,9 +172,6 @@ where
             core.update_worker_node(worker.clone());
         }
 
-        worker.insert(self.env.meta_store()).await?;
-        core.update_worker_node(worker.clone());
-
         // Notify frontends of new compute node.
         // Always notify because a running worker's property may have been changed.
         if worker.worker_type() == WorkerType::ComputeNode {
