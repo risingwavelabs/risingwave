@@ -28,10 +28,11 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum, OrderType};
+use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableInner;
 use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
@@ -116,8 +117,8 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
 /// TODO: In the future we will support partial backfill recovery.
 /// When that is done, this logic may need to be rewritten to handle
 /// partially complete states per vnode.
-pub(crate) async fn check_all_vnode_finished<S: StateStore>(
-    state_table: &StateTable<S>,
+pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED: bool>(
+    state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
     state_len: usize,
 ) -> StreamExecutorResult<bool> {
     debug_assert!(!state_table.vnode_bitmap().is_empty());
@@ -146,8 +147,8 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore>(
 }
 
 /// Flush the data
-pub(crate) async fn flush_data<S: StateStore>(
-    table: &mut StateTable<S>,
+pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
+    table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     epoch: EpochPair,
     old_state: &mut Option<Vec<Datum>>,
     current_partial_state: &mut [Datum],
@@ -264,9 +265,9 @@ pub(crate) async fn iter_chunks<'a, S, E>(
 ///
 /// For `current_pos` and `old_pos` are just pk of upstream.
 /// They should be strictly increasing.
-pub(crate) async fn persist_state<S: StateStore>(
+pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
     epoch: EpochPair,
-    table: &mut StateTable<S>,
+    table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
     current_pos: &Option<OwnedRow>,
     old_state: &mut Option<Vec<Datum>>,

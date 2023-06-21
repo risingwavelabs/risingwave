@@ -25,7 +25,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, iter_chunks,
     mapping_chunk, mapping_message, mark_chunk_ref, persist_state, update_pos,
@@ -44,13 +44,13 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// - To synchronize upstream shared buffer, it is initialized with a [`ReplicatedStateTable`].
 pub struct ArrangementBackfillExecutor<S: StateStore> {
     /// Upstream table
-    upstream_table: StateTable<S>,
+    upstream_table: ReplicatedStateTable<S>,
 
     /// Upstream with the same schema with the upstream table.
     upstream: BoxedExecutor,
 
     /// Internal state table for persisting state of backfill state.
-    state_table: StateTable<S>,
+    state_table: ReplicatedStateTable<S>,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
@@ -73,9 +73,9 @@ where
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     pub fn new(
-        upstream_table: StateTable<S>,
+        upstream_table: ReplicatedStateTable<S>,
         upstream: BoxedExecutor,
-        state_table: StateTable<S>,
+        state_table: ReplicatedStateTable<S>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
@@ -421,7 +421,7 @@ where
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read(
         schema: Arc<Schema>,
-        upstream_table: &StateTable<S>,
+        upstream_table: &ReplicatedStateTable<S>,
         current_pos: Option<OwnedRow>,
     ) {
         // FIXME(kwannoel): `let-else` pattern does not work in generator.
