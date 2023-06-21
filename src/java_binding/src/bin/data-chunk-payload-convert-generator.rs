@@ -14,6 +14,7 @@
 use std::env;
 use std::fs::File;
 use std::io::{Read, Write};
+use std::process::exit;
 
 use prost::Message;
 use risingwave_common::array::{Op, StreamChunk};
@@ -46,6 +47,10 @@ fn convert_to_op(value: u32) -> Option<Op> {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    if args.len() <= 1 {
+        println!("No input file name");
+        exit(0);
+    }
     // Read the JSON file
     let mut file = File::open(&args[1]).expect("Failed to open file");
     let mut contents = String::new();
