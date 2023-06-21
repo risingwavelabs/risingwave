@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use pretty_xmlish::{XmlNode};
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;

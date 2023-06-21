@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use pretty_xmlish::{XmlNode};
+use pretty_xmlish::XmlNode;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;

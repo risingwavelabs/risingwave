@@ -15,7 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use pretty_xmlish::{XmlNode};
+use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::values_node::ExprTuple;
 use risingwave_pb::stream_plan::ValuesNode;

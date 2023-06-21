@@ -16,7 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use pretty_xmlish::{XmlNode};
+use pretty_xmlish::XmlNode;
 use risingwave_common::error::Result;
 
 use super::utils::{childless_record, Distill};

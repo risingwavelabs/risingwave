@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use pretty_xmlish::{XmlNode};
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::FieldDisplay;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;

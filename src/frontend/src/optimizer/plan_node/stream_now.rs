@@ -15,7 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use pretty_xmlish::{XmlNode};
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
