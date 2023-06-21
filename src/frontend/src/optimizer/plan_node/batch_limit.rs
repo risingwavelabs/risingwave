@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LimitNode;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
@@ -69,12 +68,6 @@ impl BatchLimit {
     }
 }
 
-impl fmt::Display for BatchLimit {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchLimit")
-    }
-}
-
 impl PlanTreeNodeUnary for BatchLimit {
     fn input(&self) -> PlanRef {
         self.logical.input.clone()
@@ -87,6 +80,8 @@ impl PlanTreeNodeUnary for BatchLimit {
     }
 }
 impl_plan_tree_node_for_unary! {BatchLimit}
+impl_distill_by_unit!(BatchLimit, logical, "BatchLimit");
+
 impl ToDistributedBatch for BatchLimit {
     fn to_distributed(&self) -> Result<PlanRef> {
         self.two_phase_limit(self.input().to_distributed()?)

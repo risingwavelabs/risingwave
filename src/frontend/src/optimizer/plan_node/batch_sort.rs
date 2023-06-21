@@ -14,12 +14,12 @@
 
 use std::fmt;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortNode;
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, OrderDisplay};
@@ -56,12 +56,12 @@ impl fmt::Display for BatchSort {
 }
 
 impl Distill for BatchSort {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let data = Pretty::display(&OrderDisplay {
             order: self.order(),
             input_schema: self.input.schema(),
         });
-        Pretty::childless_record("BatchSort", vec![("order", data)])
+        childless_record("BatchSort", vec![("order", data)])
     }
 }
 
