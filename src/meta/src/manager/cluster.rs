@@ -194,15 +194,11 @@ where
         is_unschedulable: bool,
     ) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
-        let mut worker_opt: Option<&mut Worker> = None;
-        for w in core.workers.values_mut() {
-            if w.worker_id() == worker_id {
-                worker_opt = Some(w);
-                break;
-            }
-        }
-        // TODO:refactor
-        let worker = worker_opt.ok_or_else(|| anyhow!("Worker node does not exist!"))?;
+        let worker = core
+            .workers
+            .values_mut()
+            .find(|w| w.worker_id() == worker_id)
+            .ok_or_else(|| anyhow!("Worker node does not exist!"))?;
         let worker_type = worker.worker_type();
 
         if let Some(property) = &mut worker.worker_node.property {
