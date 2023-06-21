@@ -78,10 +78,12 @@ sleep 3
 # generate data
 echo "--- starting generate streamchunk data"
 cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-download-and-decompress-artifact data-chunk-payload-convert-generator ./
-download-and-decompress-artifact data-chunk-payload-generator ./
-./data-chunk-payload-convert-generator data/sink_input_new.json > ./data/sink_input
-./data-chunk-payload-generator unit-test > ./data/stream_chunk_data
+GENERATOR=data-chunk-payload-generator-$profile
+CONVERTOR=data-chunk-payload-convert-generator-$profile
+download-and-decompress-artifact $GENERATOR ./
+download-and-decompress-artifact $CONVERTOR ./
+./$CONVERTOR data/sink_input_new.json > ./data/sink_input
+./$GENERATOR unit-test > ./data/stream_chunk_data
 # cargo run --bin data-chunk-payload-convert-generator data/sink_input_new.json > ./data/sink_input
 # cargo run --bin data-chunk-payload-generator unit-test > ./data/stream_chunk_data
 
