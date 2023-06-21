@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# NOTE(kwannoel): This script currently does not work locally...
+# It has been adapted for CI use.
+
 # USAGE: Script for generating queries via sqlsmith.
 # These queries can be used for fuzz testing.
 # Requires `$SNAPSHOT_DIR` to be set,
@@ -234,11 +237,11 @@ generate_deterministic() {
       $TESTDATA \
       1>>$LOGDIR/generate_deterministic.stdout.log \
       2>$LOGDIR/generate-{1}.log;
-    EXIT_CODE="$?"
-    if [[ $EXIT_CODE -eq 0 ]];
+    EXIT_CODE="$?";
+    if [[ \$EXIT_CODE -eq 0 ]];
     then
       echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
-    elif [[ $EXIT_CODE -eq 124 ]];
+    elif [[ \$EXIT_CODE -eq 124 ]];
     then
       echo '[ERROR] Query Timeout For Seed {2}, Query set {1}'
       buildkite-agent artifact upload '$LOGDIR/generate-{1}.log'
