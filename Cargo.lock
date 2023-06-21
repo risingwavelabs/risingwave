@@ -5148,7 +5148,9 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d378290cd658b119ce87621931ef448017ef1a0044d7b681159d779e7e07b8f6"
 dependencies = [
+ "once_cell",
  "prost",
+ "prost-build",
  "prost-types",
 ]
 
