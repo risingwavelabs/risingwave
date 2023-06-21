@@ -37,8 +37,11 @@ echo_err() {
 # TODO(kwannoel): Write tests for these
 
 # Get reason for generation crash.
+# -m1 means that grep will early exit returning exit code 141, so we just ignore it for simplicity.
 get_failure_reason() {
+  set +e
   cat "$1" | tac | grep -B 10000 -m1 "\[EXECUTING" | tac | tail -n+2
+  set -e
 }
 
 check_if_failed() {
