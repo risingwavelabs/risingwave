@@ -643,13 +643,20 @@ impl StageRunner {
         &self,
         table_id: &TableId,
     ) -> SchedulerResult<ParallelUnitMapping> {
-        let fragment_id = self
+        let guard = self
             .catalog_reader
-            .read_guard()
+            .read_guard();
+
+        let table = guard
             .get_table_by_id(table_id)
-            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?
-            .dml_fragment_id
-            .unwrap();
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
+
+        let fragment_id = match table.dml_fragment_id.as_ref() {
+            Some(dml_fragment_id) => dml_fragment_id,
+            // Backward compatibility for those table without `dml_fragment_id`.
+            None => &table.fragment_id,
+        };
+
         self.worker_node_manager
             .manager
             .get_streaming_fragment_mapping(&fragment_id)
