@@ -157,6 +157,7 @@ generate_one_deterministic() {
 generate_deterministic() {
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
+  echo_err "[INFO] Generating"
   echo "" > $LOGDIR/generate_deterministic.stdout.log
 
   for i in $(seq 0 3)
@@ -164,12 +165,14 @@ generate_deterministic() {
     local batch_size=25;
     local start="$((i * $batch_size + 1))"
     local end=$((start - 1 + $batch_size))
+    echo_err "--- Generating for Queries $start - $end"
     for j in $(seq $start $end)
     do
         generate_one_deterministic "$j" &
     done
     wait
   done
+  echo_err "[INFO] Finished generation"
 
   set -e
 }
@@ -278,9 +281,7 @@ build() {
 }
 
 generate() {
-  echo_err "[INFO] Generating"
   generate_deterministic
-  echo_err "[INFO] Finished generation"
 }
 
 validate() {
