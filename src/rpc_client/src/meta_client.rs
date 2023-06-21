@@ -950,6 +950,22 @@ impl MetaClient {
             .collect();
         Ok(mappings)
     }
+
+    pub async fn risectl_list_compaction_status(
+        &self,
+    ) -> Result<(
+        Vec<CompactStatus>,
+        Vec<CompactTaskAssignment>,
+        Vec<CompactTaskProgress>,
+    )> {
+        let req = RiseCtlListCompactionStatusRequest {};
+        let resp = self.inner.rise_ctl_list_compaction_status(req).await?;
+        Ok((
+            resp.compaction_statuses,
+            resp.task_assignment,
+            resp.task_progress,
+        ))
+    }
 }
 
 #[async_trait]
@@ -1570,6 +1586,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_resume_version_checkpoint, RiseCtlResumeVersionCheckpointRequest, RiseCtlResumeVersionCheckpointResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
+            ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
