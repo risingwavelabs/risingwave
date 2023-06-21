@@ -96,14 +96,20 @@ extract_fail_info_from_logs() {
       echo_err "[WARN] $LOGFILE Encountered bug."
 
       REASON=$(get_failure_reason "$LOGFILE")
+      echo_err "[INFO] extracted fail reason for $LOGFILE"
       SEED=$(echo "$LOGFILENAME" | sed -E "s/${LOGFILE_PREFIX}\-(.*)\.log/\1/")
 
       DDL=$(extract_ddl < "$LOGFILE")
+      echo_err "[INFO] extracted ddl for $LOGFILE"
       GLOBAL_SESSION=$(extract_global_session < "$LOGFILE")
+      echo_err "[INFO] extracted global var for $LOGFILE"
       INSERTS=$(extract_inserts < "$LOGFILE")
       UPDATES=$(extract_updates < "$LOGFILE")
+      echo_err "[INFO] extracted dml for $LOGFILE"
       TEST_SESSION=$(extract_last_session < "$LOGFILE")
+      echo_err "[INFO] extracted session var for $LOGFILE"
       QUERY=$(extract_failing_query < "$LOGFILE")
+      echo_err "[INFO] extracted failing query for $LOGFILE"
 
       FAIL_DIR="$OUTDIR/failed/$SEED"
       mkdir -p "$FAIL_DIR"
