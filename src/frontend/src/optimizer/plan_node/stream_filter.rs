@@ -50,8 +50,6 @@ impl StreamFilter {
     }
 }
 
-impl_distill_by_unit!(StreamFilter, logical, "StreamFilter");
-
 impl PlanTreeNodeUnary for StreamFilter {
     fn input(&self) -> PlanRef {
         self.logical.input.clone()
@@ -65,6 +63,7 @@ impl PlanTreeNodeUnary for StreamFilter {
 }
 
 impl_plan_tree_node_for_unary! { StreamFilter }
+impl_distill_by_unit!(StreamFilter, logical, "StreamFilter");
 
 impl StreamNode for StreamFilter {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
