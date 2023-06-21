@@ -98,13 +98,13 @@ mod tests {
         let opts2 = TracedNewLocalOptions::for_test(2);
         let opts3 = TracedNewLocalOptions::for_test(3);
 
-        let storage_type1 = StorageType::Local(0, opts1);
-        let storage_type2 = StorageType::Local(1, opts2);
-        let storage_type3 = StorageType::Local(2, opts3);
+        let storage_type1 = StorageType::Local(0, 1);
+        let storage_type2 = StorageType::Local(1, 2);
+        let storage_type3 = StorageType::Local(2, 3);
         let storage_type4 = StorageType::Global;
 
         let actor_1 = vec![
-            (0, Operation::NewLocalStorage(opts1)),
+            (0, Operation::NewLocalStorage(opts1, 1)),
             (
                 1,
                 Operation::get(
@@ -135,7 +135,7 @@ mod tests {
         .map(|(record_id, op)| Ok(Record::new(storage_type1, record_id, op)));
 
         let actor_2 = vec![
-            (4, Operation::NewLocalStorage(opts2)),
+            (4, Operation::NewLocalStorage(opts2, 2)),
             (
                 5,
                 Operation::get(
@@ -166,7 +166,7 @@ mod tests {
         .map(|(record_id, op)| Ok(Record::new(storage_type2, record_id, op)));
 
         let actor_3 = vec![
-            (8, Operation::NewLocalStorage(opts3)),
+            (8, Operation::NewLocalStorage(opts3, 3)),
             (
                 9,
                 Operation::get(

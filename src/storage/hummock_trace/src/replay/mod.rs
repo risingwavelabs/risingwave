@@ -31,7 +31,7 @@ pub(crate) use worker::*;
 use crate::error::Result;
 #[cfg(test)]
 use crate::TraceError;
-use crate::{Record, TracedBytes, TracedNewLocalOptions, TracedReadOptions, TracedTableId};
+use crate::{LocalStorageId, Record, TracedBytes, TracedNewLocalOptions, TracedReadOptions};
 
 pub type ReplayItem = (TracedBytes, TracedBytes);
 pub trait ReplayItemStream = Stream<Item = ReplayItem> + Send;
@@ -49,7 +49,7 @@ pub(crate) type ReplayRequest = Option<ReplayGroup>;
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub(crate) enum WorkerId {
     // local storage worker
-    Local(u64, TracedTableId),
+    Local(u64, LocalStorageId),
     // for global store
     OneShot(u64),
 }

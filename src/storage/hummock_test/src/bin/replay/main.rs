@@ -147,7 +147,6 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         notification_client,
         key_filter_manager,
         state_store_stats,
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
         compactor_metrics,
     )
     .await

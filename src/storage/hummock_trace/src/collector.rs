@@ -293,8 +293,12 @@ impl TraceSpan {
     pub fn new_local_storage_span(
         option: TracedNewLocalOptions,
         storage_type: StorageType,
+        local_storage_id: u64,
     ) -> MayTraceSpan {
-        Self::new_global_op(Operation::NewLocalStorage(option), storage_type)
+        Self::new_global_op(
+            Operation::NewLocalStorage(option, local_storage_id),
+            storage_type,
+        )
     }
 
     pub fn new_drop_storage_span(storage_type: StorageType) -> MayTraceSpan {
@@ -373,11 +377,12 @@ impl Drop for TraceSpan {
 
 pub type RecordMsg = Option<Record>;
 pub type ConcurrentId = u64;
+pub type LocalStorageId = u64;
 
 #[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, Hash, Eq)]
 pub enum StorageType {
     Global,
-    Local(ConcurrentId, TracedNewLocalOptions),
+    Local(ConcurrentId, LocalStorageId),
 }
 
 task_local! {
@@ -392,7 +397,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{MockTraceWriter, TracedTableId, TracedTableOption};
+    use crate::MockTraceWriter;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_new_spans_concurrent() {
@@ -461,21 +466,8 @@ mod tests {
             let tx = GLOBAL_COLLECTOR.tx();
             let generator = generator.clone();
             let handle = tokio::spawn(async move {
-                let _span = TraceSpan::new_with_op(
-                    tx,
-                    generator.next(),
-                    op,
-                    StorageType::Local(
-                        0,
-                        TracedNewLocalOptions {
-                            table_id: TracedTableId { table_id: 0 },
-                            is_consistent_op: false,
-                            table_option: TracedTableOption {
-                                retention_seconds: None,
-                            },
-                        },
-                    ),
-                );
+                let _span =
+                    TraceSpan::new_with_op(tx, generator.next(), op, StorageType::Local(0, 0));
             });
             handles.push(handle);
         }

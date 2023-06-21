@@ -22,7 +22,8 @@ use tokio::task::JoinHandle;
 
 use super::{GlobalReplay, LocalReplay, ReplayRequest, WorkerId, WorkerResponse};
 use crate::{
-    Operation, OperationResult, Record, RecordId, ReplayItem, Result, StorageType, TraceResult,
+    LocalStorageId, Operation, OperationResult, Record, RecordId, ReplayItem, Result, StorageType,
+    TraceResult, TracedNewLocalOptions,
 };
 
 #[async_trait::async_trait]
@@ -133,6 +134,7 @@ impl ReplayWorker {
             HashMap::new();
         let mut local_storages = LocalStorages::new();
         let mut should_shutdown = false;
+        let mut local_storage_opts_map = HashMap::new();
 
         while let Some(Some(record)) = req_rx.recv().await {
             Self::handle_record(
@@ -141,6 +143,7 @@ impl ReplayWorker {
                 &mut res_rx,
                 &mut iters_map,
                 &mut local_storages,
+                &mut local_storage_opts_map,
                 &mut should_shutdown,
             )
             .await;
@@ -161,6 +164,7 @@ impl ReplayWorker {
         res_rx: &mut UnboundedReceiver<OperationResult>,
         iters_map: &mut HashMap<RecordId, BoxStream<'static, Result<ReplayItem>>>,
         local_storages: &mut LocalStorages,
+        local_storage_opts_map: &mut HashMap<LocalStorageId, TracedNewLocalOptions>,
         should_shutdown: &mut bool,
     ) {
         let Record {
@@ -181,8 +185,9 @@ impl ReplayWorker {
                         let epoch = epoch.unwrap();
                         replay.get(key, epoch, read_options).await
                     }
-                    StorageType::Local(_, new_local_opts) => {
-                        assert_eq!(new_local_opts.table_id, read_options.table_id);
+                    StorageType::Local(_, local_storage_id) => {
+                        let opts = local_storage_opts_map.get(&local_storage_id).unwrap();
+                        assert_eq!(opts.table_id, read_options.table_id);
                         let s = local_storages.get_mut(&storage_type).unwrap();
                         s.get(key, read_options).await
                     }
@@ -232,8 +237,9 @@ impl ReplayWorker {
                         let epoch = epoch.unwrap();
                         replay.iter(key_range, epoch, read_options).await
                     }
-                    StorageType::Local(_, new_local_opts) => {
-                        assert_eq!(new_local_opts.table_id, read_options.table_id);
+                    StorageType::Local(_, id) => {
+                        let opts = local_storage_opts_map.get(&id).unwrap();
+                        assert_eq!(opts.table_id, read_options.table_id);
                         let s = local_storages.get_mut(&storage_type).unwrap();
                         s.iter(key_range, read_options).await
                     }
@@ -276,8 +282,9 @@ impl ReplayWorker {
                     panic!("expect iter_next result, but got {:?}", res);
                 }
             }
-            Operation::NewLocalStorage(new_local_opts) => {
+            Operation::NewLocalStorage(new_local_opts, id) => {
                 assert_ne!(storage_type, StorageType::Global);
+                local_storage_opts_map.insert(id, new_local_opts);
                 let local_storage = replay.new_local(new_local_opts).await;
                 local_storages.insert(storage_type, local_storage);
             }
@@ -411,7 +418,7 @@ impl ReplayWorker {
 
 fn allocate_worker_id(record: &Record) -> WorkerId {
     match record.storage_type() {
-        StorageType::Local(concurrent_id, opts) => WorkerId::Local(*concurrent_id, opts.table_id),
+        StorageType::Local(concurrent_id, id) => WorkerId::Local(*concurrent_id, *id),
         StorageType::Global => WorkerId::OneShot(record.record_id()),
     }
 }
@@ -531,6 +538,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_record() {
         let mut iters_map = HashMap::new();
+        let mut local_storage_opts_map = HashMap::new();
         let mut local_storages = LocalStorages::new();
         let (res_tx, mut res_rx) = unbounded_channel();
         let get_table_id = 12;
@@ -543,7 +551,7 @@ mod tests {
 
         let iter_local_opts = TracedNewLocalOptions::for_test(iter_table_id);
         let mut should_exit = false;
-        let get_storage_type = StorageType::Local(0, new_local_opts);
+        let get_storage_type = StorageType::Local(0, 0);
         let record = Record::new(get_storage_type, 1, op);
         let mut mock_replay = MockGlobalReplayInterface::new();
 
@@ -587,12 +595,13 @@ mod tests {
             Record::new(
                 get_storage_type,
                 0,
-                Operation::NewLocalStorage(new_local_opts),
+                Operation::NewLocalStorage(new_local_opts, 0),
             ),
             &replay,
             &mut res_rx,
             &mut iters_map,
             &mut local_storages,
+            &mut local_storage_opts_map,
             &mut should_exit,
         )
         .await;
@@ -609,6 +618,7 @@ mod tests {
             &mut res_rx,
             &mut iters_map,
             &mut local_storages,
+            &mut local_storage_opts_map,
             &mut should_exit,
         )
         .await;
@@ -622,18 +632,19 @@ mod tests {
             read_options: iter_read_options,
         };
 
-        let iter_storage_type = StorageType::Local(0, iter_local_opts);
+        let iter_storage_type = StorageType::Local(0, 1);
 
         ReplayWorker::handle_record(
             Record::new(
                 iter_storage_type,
                 2,
-                Operation::NewLocalStorage(iter_local_opts),
+                Operation::NewLocalStorage(iter_local_opts, 1),
             ),
             &replay,
             &mut res_rx,
             &mut iters_map,
             &mut local_storages,
+            &mut local_storage_opts_map,
             &mut should_exit,
         )
         .await;
@@ -649,6 +660,7 @@ mod tests {
             &mut res_rx,
             &mut iters_map,
             &mut local_storages,
+            &mut local_storage_opts_map,
             &mut should_exit,
         )
         .await;
@@ -671,6 +683,7 @@ mod tests {
             &mut res_rx,
             &mut iters_map,
             &mut local_storages,
+            &mut local_storage_opts_map,
             &mut should_exit,
         )
         .await;
