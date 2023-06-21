@@ -196,11 +196,22 @@ impl SessionTimezone {
             }
             // `date_trunc(field_string, input_timestamptz)`
             // => `date_trunc(field_string, input_timestamptz, zone_string)`
-            ExprType::DateTrunc => {
+            ExprType::DateTrunc | ExprType::Extract | ExprType::DatePart => {
                 if !(inputs.len() == 2 && inputs[1].return_type() == DataType::Timestamptz) {
                     return None;
                 }
                 assert_eq!(inputs[0].return_type(), DataType::Varchar);
+                if let ExprImpl::Literal(lit) = &inputs[0]
+                    && matches!(func_type, ExprType::Extract | ExprType::DatePart)
+                    && lit
+                        .get_data()
+                        .as_ref()
+                        .map_or(true, |v| v.as_utf8().eq_ignore_ascii_case("epoch"))
+                {
+                    // No need to rewrite when field is `null` or `epoch`.
+                    // This is optional but avoids false warning in common case.
+                    return None;
+                }
                 let mut new_inputs = inputs.clone();
                 new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
                 Some(FunctionCall::new(func_type, new_inputs).unwrap().into())

@@ -32,6 +32,14 @@ fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
     })
 }
 
+pub fn timestamptz_view(usecs: i64, time_zone: &str) -> Result<chrono::DateTime<Tz>> {
+    let time_zone = lookup_time_zone(time_zone)?;
+    let secs = usecs.div_euclid(1_000_000);
+    let nsecs = usecs.rem_euclid(1_000_000) * 1000;
+    let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
+    Ok(instant_utc.with_timezone(&time_zone))
+}
+
 #[function("to_timestamp(float64) -> timestamptz")]
 pub fn f64_sec_to_timestamptz(elem: F64) -> Result<i64> {
     // TODO(#4515): handle +/- infinity
@@ -68,11 +76,7 @@ pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<i64> 
 
 #[function("cast_with_time_zone(timestamptz, varchar) -> varchar")]
 pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write) -> Result<()> {
-    let time_zone = lookup_time_zone(time_zone)?;
-    let secs = elem.div_euclid(1_000_000);
-    let nsecs = elem.rem_euclid(1_000_000) * 1000;
-    let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
-    let instant_local = instant_utc.with_timezone(&time_zone);
+    let instant_local = timestamptz_view(elem, time_zone)?;
     write!(
         writer,
         "{}",
@@ -96,11 +100,7 @@ pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
 
 #[function("at_time_zone(timestamptz, varchar) -> timestamp")]
 pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<Timestamp> {
-    let time_zone = lookup_time_zone(time_zone)?;
-    let secs = input.div_euclid(1_000_000);
-    let nsecs = input.rem_euclid(1_000_000) * 1000;
-    let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
-    let instant_local = instant_utc.with_timezone(&time_zone);
+    let instant_local = timestamptz_view(input, time_zone)?;
     let naive = instant_local.naive_local();
     Ok(Timestamp(naive))
 }

@@ -86,4 +86,38 @@ select '2016-10-31 11:00:00+00:00'::timestamptz - (interval '24 hours' + interva
 2016-10-29 12:00:00+01:00
 
 statement ok
+set timezone = 'pst8pdt';
+
+query RRRRRT
+select
+	extract(epoch from '2023-06-01 00:00:00Z'::timestamptz),
+	extract(day from '2023-06-01 00:00:00Z'::timestamptz),
+	round(extract(julian from '2023-06-01 00:00:00Z'::timestamptz), 5),
+	date_part('epoch', '2023-06-01 00:00:00Z'::timestamptz),
+	date_part('day', '2023-06-01 00:00:00Z'::timestamptz),
+	abs(date_part('julian', '2023-06-01 00:00:00Z'::timestamptz) - 2460096.70833) < 1e-5;
+----
+1685577600.000000 31 2460096.70833 1685577600 31 t
+
+query RRRR
+select
+	extract(timezone from '2023-06-01 00:00:00Z'::timestamptz),
+	extract(timezone_hour from '2023-01-01 00:00:00Z'::timestamptz),
+	date_part('timezone', '2023-06-01 00:00:00Z'::timestamptz),
+	date_part('timezone_hour', '2023-01-01 00:00:00Z'::timestamptz);
+----
+-25200 -8 -25200 -8
+
+statement ok
 set timezone = 'UTC';
+
+query RRRRRR
+select
+	extract(epoch from '2023-06-01 00:00:00Z'::timestamptz),
+	extract(day from '2023-06-01 00:00:00Z'::timestamptz),
+	round(extract(julian from '2023-06-01 00:00:00Z'::timestamptz), 5),
+	date_part('epoch', '2023-06-01 00:00:00Z'::timestamptz),
+	date_part('day', '2023-06-01 00:00:00Z'::timestamptz),
+	date_part('julian', '2023-06-01 00:00:00Z'::timestamptz);
+----
+1685577600.000000 1 2460097.00000 1685577600 1 2460097
