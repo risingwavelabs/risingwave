@@ -254,6 +254,7 @@ impl Compactor {
         assert_ne!(parallelism, 0, "splits cannot be empty");
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
+        let mut abort_handles = vec![];
         let task_progress_guard =
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
@@ -335,6 +336,7 @@ impl Compactor {
                     .left_future(),
             };
             let handle = tokio::spawn(traced);
+            abort_handles.push(handle.abort_handle());
             compaction_futures.push(handle);
         }
 
@@ -344,6 +346,9 @@ impl Compactor {
                 _ = &mut shutdown_rx => {
                     tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
                     task_status = TaskStatus::ManualCanceled;
+                    for abort_handle in abort_handles {
+                        abort_handle.abort();
+                    }
                     break;
                 }
                 future_result = buffered.next() => {
