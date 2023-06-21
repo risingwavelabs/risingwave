@@ -37,7 +37,7 @@ mod struct_field;
 mod update;
 mod values;
 
-pub use bind_context::{BindContext, LateralBindContext};
+pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use delete::BoundDelete;
 pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
@@ -358,6 +358,10 @@ impl Binder {
             &self.search_path,
             &self.auth_context.user_name,
         )
+    }
+
+    pub fn set_clause(&mut self, clause: Option<Clause>) {
+        self.context.clause = clause;
     }
 }
 

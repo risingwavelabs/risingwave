@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(let_chains)]
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
@@ -211,16 +213,20 @@ enum MetaCommands {
     /// }
     /// Use ; to separate multiple fragment
     #[clap(verbatim_doc_comment)]
+    #[clap(group(clap::ArgGroup::new("input_group").required(true).args(&["plan", "from"])))]
     Reschedule {
-        /// Plan of reschedule
-        #[clap(long)]
-        plan: String,
-        /// Show the plan only, no actual operation
-        #[clap(long)]
-        dry_run: bool,
+        /// Plan of reschedule, needs to be used with `revision`
+        #[clap(long, requires = "revision")]
+        plan: Option<String>,
         /// Revision of the plan
         #[clap(long)]
-        revision: u64,
+        revision: Option<u64>,
+        /// Reschedule from a specific file
+        #[clap(long, conflicts_with = "revision", value_hint = clap::ValueHint::AnyPath)]
+        from: Option<String>,
+        /// Show the plan only, no actual operation
+        #[clap(long, default_value = "false")]
+        dry_run: bool,
     },
     /// backup meta by taking a meta snapshot
     BackupMeta,
@@ -229,6 +235,9 @@ enum MetaCommands {
 
     /// List all existing connections in the catalog
     ListConnections,
+
+    /// List fragment to parallel units mapping for serving
+    ListServingFragmentMapping,
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -353,15 +362,19 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Meta(MetaCommands::Reschedule {
             plan,
-            dry_run,
             revision,
-        }) => cmd_impl::meta::reschedule(context, plan, dry_run, revision).await?,
+            from,
+            dry_run,
+        }) => cmd_impl::meta::reschedule(context, plan, revision, from, dry_run).await?,
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
         }
         Commands::Meta(MetaCommands::ListConnections) => {
             cmd_impl::meta::list_connections(context).await?
+        }
+        Commands::Meta(MetaCommands::ListServingFragmentMapping) => {
+            cmd_impl::meta::list_serving_fragment_mappings(context).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,

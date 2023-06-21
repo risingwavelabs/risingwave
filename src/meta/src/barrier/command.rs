@@ -19,7 +19,6 @@ use futures::future::try_join_all;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -35,6 +34,7 @@ use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
+use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
@@ -212,8 +212,8 @@ pub struct CommandContext<S: MetaStore> {
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
     pub info: Arc<BarrierActorInfo>,
 
-    pub prev_epoch: Epoch,
-    pub curr_epoch: Epoch,
+    pub prev_epoch: TracedEpoch,
+    pub curr_epoch: TracedEpoch,
 
     pub command: Command,
 
@@ -228,8 +228,8 @@ impl<S: MetaStore> CommandContext<S> {
         fragment_manager: FragmentManagerRef<S>,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
-        prev_epoch: Epoch,
-        curr_epoch: Epoch,
+        prev_epoch: TracedEpoch,
+        curr_epoch: TracedEpoch,
         command: Command,
         checkpoint: bool,
         source_manager: SourceManagerRef<S>,
@@ -543,7 +543,7 @@ where
                 // execution of the next command of `Update`, as some newly created operators may
                 // immediately initialize their states on that barrier.
                 Some(Mutation::Pause(..)) => {
-                    self.wait_epoch_commit(self.prev_epoch.0).await?;
+                    self.wait_epoch_commit(self.prev_epoch.value().0).await?;
                 }
 
                 _ => {}

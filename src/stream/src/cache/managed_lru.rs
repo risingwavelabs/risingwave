@@ -24,6 +24,7 @@ use std::sync::Arc;
 use lru::{DefaultHasher, KeyRef, LruCache};
 use prometheus::IntGauge;
 use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::util::epoch::Epoch;
 
 use crate::common::metrics::MetricsInfo;
 
@@ -40,6 +41,8 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     kv_heap_size: usize,
     /// The metrics of memory usage
     memory_usage_metrics: IntGauge,
+    // The metrics of evicted watermark time
+    lru_evicted_watermark_time_diff_ms: IntGauge,
     // Metrics info
     metrics_info: MetricsInfo,
     /// The size reported last time
@@ -53,6 +56,10 @@ impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
 
         info.metrics
             .stream_memory_usage
+            .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
+            .unwrap();
+        info.metrics
+            .lru_evicted_watermark_time_diff_ms
             .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
             .unwrap();
     }
@@ -74,12 +81,24 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 &metrics_info.actor_id,
                 &metrics_info.desc,
             ]);
+        memory_usage_metrics.set(0.into());
+
+        let lru_evicted_watermark_time_diff_ms = metrics_info
+            .metrics
+            .lru_evicted_watermark_time_diff_ms
+            .with_label_values(&[
+                &metrics_info.table_id,
+                &metrics_info.actor_id,
+                &metrics_info.desc,
+            ]);
+        lru_evicted_watermark_time_diff_ms.set(watermark_epoch.load(Ordering::Relaxed) as _);
 
         Self {
             inner,
             watermark_epoch,
             kv_heap_size: 0,
             memory_usage_metrics,
+            lru_evicted_watermark_time_diff_ms,
             metrics_info,
             last_reported_size_bytes: 0,
         }
@@ -87,14 +106,12 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
     /// Evict epochs lower than the watermark
     pub fn evict(&mut self) {
-        let epoch = self.watermark_epoch.load(Ordering::Relaxed);
-        self.evict_by_epoch(epoch);
+        self.evict_by_epoch(self.load_cur_epoch());
     }
 
     /// Evict epochs lower than the watermark, except those entry which touched in this epoch
     pub fn evict_except_cur_epoch(&mut self) {
-        let epoch = self.watermark_epoch.load(Ordering::Relaxed);
-        let epoch = min(epoch, self.inner.current_epoch());
+        let epoch = min(self.load_cur_epoch(), self.inner.current_epoch());
         self.evict_by_epoch(epoch);
     }
 
@@ -103,6 +120,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         while let Some((key, value)) = self.inner.pop_lru_by_epoch(epoch) {
             self.kv_heap_size_dec(key.estimated_size() + value.estimated_size());
         }
+        self.report_evicted_watermark_time(epoch);
     }
 
     pub fn update_epoch(&mut self, epoch: u64) {
@@ -224,6 +242,16 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         } else {
             false
         }
+    }
+
+    fn report_evicted_watermark_time(&self, epoch: u64) {
+        self.lru_evicted_watermark_time_diff_ms.set(
+            (Epoch(self.load_cur_epoch()).physical_time() - Epoch(epoch).physical_time()) as _,
+        );
+    }
+
+    fn load_cur_epoch(&self) -> u64 {
+        self.watermark_epoch.load(Ordering::Relaxed)
     }
 }
 

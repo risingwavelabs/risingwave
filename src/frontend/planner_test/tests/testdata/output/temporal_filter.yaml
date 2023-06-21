@@ -7,7 +7,7 @@
     StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [t1.ts, t1._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [$expr1], output: ["t1.ts", "$expr1", "t1._row_id"] }
-        ├─StreamProject { exprs: [t1.ts, (AtTimeZone((AtTimeZone(t1.ts, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '01:00:00':Interval) as $expr1, t1._row_id] }
+        ├─StreamProject { exprs: [t1.ts, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
         | └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamNow { output: ["now"] }
@@ -19,7 +19,7 @@
     StreamMaterialize { columns: [ts, time_to_live, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [t1.ts, t1.time_to_live, t1._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [$expr1], output: ["t1.ts", "t1.time_to_live", "$expr1", "t1._row_id"] }
-        ├─StreamProject { exprs: [t1.ts, t1.time_to_live, (AtTimeZone((AtTimeZone(t1.ts, 'UTC':Varchar) + DateTrunc('day':Varchar, (t1.time_to_live * 1.5:Decimal))), 'UTC':Varchar) + ((t1.time_to_live * 1.5:Decimal) - DateTrunc('day':Varchar, (t1.time_to_live * 1.5:Decimal)))) as $expr1, t1._row_id] }
+        ├─StreamProject { exprs: [t1.ts, t1.time_to_live, AddWithTimeZone(t1.ts, (t1.time_to_live * 1.5:Decimal), 'UTC':Varchar) as $expr1, t1._row_id] }
         | └─StreamTableScan { table: t1, columns: [t1.ts, t1.time_to_live, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamNow { output: ["now"] }
@@ -31,10 +31,10 @@
     StreamMaterialize { columns: [ts, additional_time_to_live, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, t1._row_id] }
       └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: ["t1.ts", "t1.additional_time_to_live", "$expr1", "t1._row_id"] }
-        ├─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, (AtTimeZone((AtTimeZone(t1.ts, 'UTC':Varchar) + DateTrunc('day':Varchar, (t1.additional_time_to_live * 1.5:Decimal))), 'UTC':Varchar) + ((t1.additional_time_to_live * 1.5:Decimal) - DateTrunc('day':Varchar, (t1.additional_time_to_live * 1.5:Decimal)))) as $expr1, t1._row_id] }
+        ├─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, AddWithTimeZone(t1.ts, (t1.additional_time_to_live * 1.5:Decimal), 'UTC':Varchar) as $expr1, t1._row_id] }
         | └─StreamTableScan { table: t1, columns: [t1.ts, t1.additional_time_to_live, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
-          └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:15:00':Interval) as $expr2], output_watermarks: [$expr2] }
+          └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:15:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
             └─StreamNow { output: ["now"] }
 - name: Temporal filter fails without `now()` in lower bound
   sql: |-
@@ -51,10 +51,10 @@
       ├─StreamDynamicFilter { predicate: (t1.ts >= $expr1), output_watermarks: [t1.ts], output: ["t1.ts", "t1._row_id"] }
       | ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       | └─StreamExchange { dist: Broadcast }
-      |   └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '02:00:00':Interval) as $expr1], output_watermarks: [$expr1] }
+      |   └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
       |     └─StreamNow { output: ["now"] }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '01:00:00':Interval) as $expr2], output_watermarks: [$expr2] }
+        └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
           └─StreamNow { output: ["now"] }
   stream_dist_plan: |+
     Fragment 0
@@ -72,18 +72,28 @@
         └──  StreamExchange Broadcast from 2
 
     Fragment 1
-    StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '02:00:00':Interval) as $expr1], output_watermarks: [$expr1] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
     └──  StreamNow { output: ["now"] } { state table: 5 }
 
     Fragment 2
-    StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '01:00:00':Interval) as $expr2], output_watermarks: [$expr2] }
+    StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
     └──  StreamNow { output: ["now"] } { state table: 6 }
 
-    Table 0 { columns: [ t1_ts, t1__row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 0
+    ├── columns: [ t1_ts, t1__row_id ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
 
     Table 1 { columns: [ $expr2 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 2 { columns: [ t1_ts, t1__row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 2
+    ├── columns: [ t1_ts, t1__row_id ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
 
     Table 3 { columns: [ $expr1 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -99,5 +109,10 @@
 
     Table 6 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 4294967294 { columns: [ ts, t1._row_id ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 4294967294
+    ├── columns: [ ts, t1._row_id ]
+    ├── primary key: [ $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
 

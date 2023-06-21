@@ -19,10 +19,14 @@ await-tree = { workspace = true }
 console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+hostname = "0.3"
+opentelemetry-otlp = { version = "0.12" }
+opentelemetry-semantic-conventions = "0.11"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.11", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
 risingwave_common = { path = "../../common" }
+time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -33,7 +37,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs"
 ] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3.16", features = ["fmt", "parking_lot", "std", "time", "local-time"] }
+tracing-opentelemetry = "0.19"
+tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std", "time", "local-time"] }
 
 [target.'cfg(not(madsim))'.dependencies]
+opentelemetry = { version = "0.19", default-features = false, features = ["rt-tokio"] }
 workspace-hack = { path = "../../workspace-hack" }

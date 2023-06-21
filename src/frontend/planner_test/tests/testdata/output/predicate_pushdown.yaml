@@ -266,7 +266,7 @@
       | └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: ["t1.v1", "t1._row_id"] }
       |   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       |   └─StreamExchange { dist: Broadcast }
-      |     └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '01:00:00':Interval) as $expr1], output_watermarks: [$expr1] }
+      |     └─StreamProject { exprs: [AddWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
       |       └─StreamNow { output: ["now"] }
       └─StreamExchange { dist: HashShard(t2.v2) }
         └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
@@ -304,7 +304,7 @@
       ├─StreamFilter { predicate: (t1.v2 > 5:Int32) }
       | └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '00:30:00':Interval) as $expr1], output_watermarks: [$expr1] }
+        └─StreamProject { exprs: [AddWithTimeZone(now, '00:30:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
           └─StreamNow { output: ["now"] }
 - name: eq-predicate derived condition other side pushdown in inner join
   sql: |
