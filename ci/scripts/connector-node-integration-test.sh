@@ -67,6 +67,7 @@ MC_PATH=${PWD}/mc
 ${MC_PATH} config host add minio http://127.0.0.1:9000 minioadmin minioadmin
 
 echo "--- starting connector-node service"
+mkdir -p ${RISINGWAVE_ROOT}/java/connector-node/assembly/target/
 cd ${RISINGWAVE_ROOT}/java/connector-node/assembly/target/
 # tar xvf risingwave-connector-1.0.0.tar.gz > /dev/null
 buildkite-agent artifact download risingwave-connector.tar.gz ./
