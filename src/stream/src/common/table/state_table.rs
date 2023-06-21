@@ -193,9 +193,9 @@ where
 
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
         let new_local_options = if IS_REPLICATED {
-            NewLocalOptions::new(table_id, is_consistent_op, table_option)
-        } else {
             NewLocalOptions::new_replicated(table_id, is_consistent_op, table_option)
+        } else {
+            NewLocalOptions::new(table_id, is_consistent_op, table_option)
         };
         let local_state_store = store.new_local(new_local_options).await;
 
