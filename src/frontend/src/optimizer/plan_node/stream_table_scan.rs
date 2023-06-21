@@ -95,6 +95,7 @@ impl StreamTableScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
+        index_table_catalog: Rc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
         chain_type: ChainType,
@@ -102,6 +103,7 @@ impl StreamTableScan {
         let logical_index_scan = self.logical.to_index_scan(
             index_name,
             index_table_desc,
+            index_table_catalog,
             primary_to_secondary_mapping,
             function_mapping,
         );

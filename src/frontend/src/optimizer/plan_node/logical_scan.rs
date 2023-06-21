@@ -38,6 +38,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::{Cardinality, Order};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::TableCatalog;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,6 +66,7 @@ impl LogicalScan {
         table_name: String, // explain-only
         is_sys_table: bool,
         table_desc: Rc<TableDesc>,
+        table_catalog: Rc<TableCatalog>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
@@ -75,6 +77,7 @@ impl LogicalScan {
             is_sys_table,
             (0..table_desc.columns.len()).collect(),
             table_desc,
+            table_catalog,
             indexes,
             ctx,
             Condition::true_cond(),
@@ -104,6 +107,11 @@ impl LogicalScan {
     /// Get a reference to the logical scan's table desc.
     pub fn table_desc(&self) -> &TableDesc {
         self.core.table_desc.as_ref()
+    }
+
+    /// Get a reference to the logical scan's table catalog.
+    pub fn table_catalog(&self) -> &TableCatalog {
+        self.core.table_catalog.as_ref()
     }
 
     /// Get the descs of the output columns.
@@ -189,6 +197,7 @@ impl LogicalScan {
             let index_scan = self.core.to_index_scan(
                 &index.name,
                 index.index_table.table_desc().into(),
+                index.index_table.into(),
                 p2s_mapping,
                 index.function_mapping(),
             );
@@ -245,6 +254,7 @@ impl LogicalScan {
             self.is_sys_table(),
             self.required_col_idx().to_vec(),
             self.core.table_desc.clone(),
+            self.core.table_catalog.clone(),
             self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
@@ -280,6 +290,7 @@ impl LogicalScan {
             self.is_sys_table(),
             output_col_idx,
             self.core.table_desc.clone(),
+            self.core.table_catalog.clone(),
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             self.predicate().clone(),

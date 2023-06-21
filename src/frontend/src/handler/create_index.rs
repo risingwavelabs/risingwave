@@ -40,6 +40,7 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot}
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{CheckRelationError, SessionImpl};
 use crate::stream_fragmenter::build_graph;
+use crate::TableCatalog;
 
 pub(crate) fn gen_create_index_plan(
     session: &SessionImpl,
@@ -182,6 +183,7 @@ pub(crate) fn gen_create_index_plan(
     let materialize = assemble_materialize(
         table_name,
         table_desc.clone(),
+        table.into(),
         context,
         index_table_name.clone(),
         &index_columns_ordered_expr,
@@ -307,6 +309,7 @@ fn build_index_item(
 fn assemble_materialize(
     table_name: String,
     table_desc: Rc<TableDesc>,
+    table_catalog: Rc<TableCatalog>,
     context: OptimizerContextRef,
     index_name: String,
     index_columns: &[(ExprImpl, OrderType)],
@@ -324,6 +327,7 @@ fn assemble_materialize(
         table_name,
         false,
         table_desc.clone(),
+        table_catalog,
         // Index table has no indexes.
         vec![],
         context,

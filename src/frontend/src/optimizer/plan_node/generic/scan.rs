@@ -28,6 +28,7 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
+use crate::TableCatalog;
 
 /// [`Scan`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Educe)]
@@ -38,8 +39,11 @@ pub struct Scan {
     /// Include `output_col_idx` and columns required in `predicate`
     pub required_col_idx: Vec<usize>,
     pub output_col_idx: Vec<usize>,
-    // Descriptor of the table
+    /// Descriptor of the table
+    /// Stored as a field so we don't have to re-compute it each time.
     pub table_desc: Rc<TableDesc>,
+    /// Table Catalog of the upstream table that the descriptor is derived from.
+    pub table_catalog: Rc<TableCatalog>,
     // Descriptors of all indexes on this table
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
@@ -169,6 +173,7 @@ impl Scan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
+        index_table_catalog: Rc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
     ) -> Self {
@@ -219,6 +224,7 @@ impl Scan {
             false,
             new_output_col_idx,
             index_table_desc,
+            index_table_catalog,
             vec![],
             self.ctx.clone(),
             new_predicate,
@@ -234,6 +240,7 @@ impl Scan {
         is_sys_table: bool,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
+        table_catalog: Rc<TableCatalog>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
@@ -262,6 +269,7 @@ impl Scan {
             required_col_idx,
             output_col_idx,
             table_desc,
+            table_catalog,
             indexes,
             predicate,
             chunk_size: None,

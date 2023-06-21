@@ -55,6 +55,7 @@ impl Planner {
             sys_table.sys_table_catalog.name().to_string(),
             true,
             Rc::new(sys_table.sys_table_catalog.table_desc()),
+            sys_table.sys_table_catalog,
             vec![],
             self.ctx(),
             false,
