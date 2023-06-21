@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroUsize;
+
 use itertools::Itertools;
+use risingwave_common::config::DefaultParallelism;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{Connection, Database, Function, Schema, Source, Table, View};
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
@@ -22,8 +25,8 @@ use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
-    IdCategory, IndexId, MetaSrvEnv, NotificationVersion, SchemaId, SinkId, SourceId, StreamingJob,
-    TableId, ViewId,
+    IdCategory, IndexId, MetaSrvEnv, NotificationVersion, SchemaId, SinkId, SourceId,
+    StreamingClusterInfo, StreamingJob, TableId, ViewId,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::storage::MetaStore;
@@ -355,6 +358,36 @@ where
         Ok(fragment_graph)
     }
 
+    fn resolve_stream_parallelism(
+        &self,
+        default_parallelism: Option<NonZeroUsize>,
+        cluster_info: &StreamingClusterInfo,
+    ) -> MetaResult<NonZeroUsize> {
+        if cluster_info.parallel_units.is_empty() {
+            return Err(MetaError::unavailable(
+                "No available parallel units to schedule".to_string(),
+            ));
+        }
+
+        let available_parallel_units =
+            NonZeroUsize::new(cluster_info.parallel_units.len()).unwrap();
+        // Use configured parallel units if no default parallelism is specified.
+        let parallelism =
+            default_parallelism.unwrap_or_else(|| match &self.env.opts.default_parallelism {
+                DefaultParallelism::Full => available_parallel_units,
+                DefaultParallelism::Default(num) => *num,
+            });
+
+        if parallelism > available_parallel_units {
+            return Err(MetaError::unavailable(format!(
+                "Not enough parallel units to schedule, required: {}, available: {}",
+                parallelism, available_parallel_units
+            )));
+        }
+
+        Ok(parallelism)
+    }
+
     /// `build_stream_job` builds a streaming job and returns the context and table fragments.
     async fn build_stream_job(
         &self,
@@ -387,6 +420,9 @@ where
 
         // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
+        let default_parallelism =
+            self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
+
         let actor_graph_builder =
             ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
 
@@ -662,6 +698,8 @@ where
 
         // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
+        let default_parallelism =
+            self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
         let actor_graph_builder =
             ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -106,7 +107,6 @@ where
         let mut core = self.core.write().await;
 
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
-            // TODO: update parallelism when the worker exists.
             if let Some(property) = &mut property {
                 property.is_unschedulable = worker
                     .worker_node
@@ -117,6 +117,41 @@ where
             }
 
             worker.update_ttl(self.max_heartbeat_interval);
+            let current_parallelism = worker.worker_node.parallel_units.len();
+            if current_parallelism == worker_node_parallelism
+                && worker.worker_node.property == property
+            {
+                return Ok(worker.to_protobuf());
+            }
+            match current_parallelism.cmp(&worker_node_parallelism) {
+                Ordering::Less => {
+                    tracing::info!(
+                        "worker {} parallelism updated from {} to {}",
+                        worker.worker_node.id,
+                        current_parallelism,
+                        worker_node_parallelism
+                    );
+                    let parallel_units = self
+                        .generate_cn_parallel_units(
+                            worker_node_parallelism - current_parallelism,
+                            worker.worker_id(),
+                        )
+                        .await?;
+                    worker.worker_node.parallel_units.extend(parallel_units);
+                }
+                Ordering::Greater => {
+                    // Simply reject the request if the worker registered with a smaller
+                    // parallelism.
+                    return Err(MetaError::invalid_worker(
+                        worker.worker_id(),
+                        format!(
+                            "parallelism is less than current, current is {}, but received {}",
+                            current_parallelism, worker_node_parallelism
+                        ),
+                    ));
+                }
+                Ordering::Equal => {}
+            }
             if property != worker.worker_node.property {
                 tracing::info!(
                     "worker {} property updated from {:?} to {:?}",
@@ -126,8 +161,9 @@ where
                 );
 
                 worker.worker_node.property = property;
-                worker.insert(self.env.meta_store()).await?;
             }
+
+            worker.insert(self.env.meta_store()).await?;
             return Ok(worker.to_protobuf());
         }
 
@@ -260,7 +296,10 @@ where
                 return Ok(());
             }
         }
-        Err(MetaError::invalid_worker(worker_id))
+        Err(MetaError::invalid_worker(
+            worker_id,
+            "worker not found".into(),
+        ))
     }
 
     pub async fn start_heartbeat_checker(

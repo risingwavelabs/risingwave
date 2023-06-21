@@ -15,6 +15,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use risingwave_common::config::DefaultParallelism;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
@@ -77,6 +78,8 @@ pub struct MetaOpts {
     pub max_idle_ms: u64,
     /// Whether run in compaction detection test mode
     pub compaction_deterministic_test: bool,
+    /// Default parallelism of units for all streaming jobs.
+    pub default_parallelism: DefaultParallelism,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
@@ -146,6 +149,7 @@ impl MetaOpts {
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
+            default_parallelism: DefaultParallelism::Full,
             vacuum_interval_sec: 30,
             hummock_version_checkpoint_interval_sec: 30,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
