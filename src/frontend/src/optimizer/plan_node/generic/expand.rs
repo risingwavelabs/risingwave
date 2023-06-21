@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::fmt;
 
 use itertools::Itertools;
@@ -102,7 +103,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for Expand<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
         Pretty::childless_record(name, vec![("column_subsets", self.column_subsets_pretty())])
     }
 }
