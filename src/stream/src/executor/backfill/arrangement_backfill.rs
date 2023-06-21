@@ -239,6 +239,8 @@ where
                         upstream_table.commit(barrier.epoch).await?;
                     }
 
+                    // TODO(kwannoel): use different counters, otherwise both
+                    // backfill + arrangement backfill executors can't co-exist in same cluster.
                     self.metrics
                         .backfill_snapshot_read_row_count
                         .with_label_values(&[
