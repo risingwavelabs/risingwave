@@ -313,6 +313,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         ))
     }
 
+    /// Generates three-way join.
     fn gen_more_joins(&mut self) -> (TableWithJoins, Vec<Table>) {
         // gen left
         let Some((left_table_with_join, mut left_tables)) = self.gen_simple_join_clause() else {
