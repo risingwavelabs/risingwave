@@ -14,20 +14,18 @@
 
 package com.example;
 
+import com.google.gson.Gson;
+import com.risingwave.functions.DataTypeHint;
+import com.risingwave.functions.ScalarFunction;
+import com.risingwave.functions.TableFunction;
+import com.risingwave.functions.UdfServer;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
-import java.util.stream.Stream;
 import java.util.stream.IntStream;
-
-import com.google.gson.Gson;
-
-import com.risingwave.functions.DataTypeHint;
-import com.risingwave.functions.ScalarFunction;
-import com.risingwave.functions.TableFunction;
-import com.risingwave.functions.UdfServer;
+import java.util.stream.Stream;
 
 public class UdfExample {
     public static void main(String[] args) throws IOException {
@@ -95,8 +93,9 @@ public class UdfExample {
         }
 
         static String intToIpAddr(int addr) {
-            return String.format("%d.%d.%d.%d", (addr >> 24) & 0xff, (addr >> 16) & 0xff, (addr >> 8) & 0xff,
-                    addr & 0xff);
+            return String.format(
+                    "%d.%d.%d.%d",
+                    (addr >> 24) & 0xff, (addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff);
         }
     }
 
@@ -119,11 +118,13 @@ public class UdfExample {
         static Gson gson = new Gson();
 
         public @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB") String json, int index) {
-            if (json == null)
+            if (json == null) {
                 return null;
+            }
             var array = gson.fromJson(json, Object[].class);
-            if (index >= array.length || index < 0)
+            if (index >= array.length || index < 0) {
                 return null;
+            }
             var obj = array[index];
             return gson.toJson(obj);
         }
@@ -131,8 +132,9 @@ public class UdfExample {
 
     public static class JsonbConcat implements ScalarFunction {
         public @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB[]") String[] jsons) {
-            if (jsons == null)
+            if (jsons == null) {
                 return null;
+            }
             return "[" + String.join(",", jsons) + "]";
         }
     }
@@ -167,12 +169,15 @@ public class UdfExample {
         }
 
         public Iterator<Row> eval(String str) {
-            return Stream.of(str.split(" ")).map(s -> {
-                Row row = new Row();
-                row.word = s;
-                row.length = s.length();
-                return row;
-            }).iterator();
+            return Stream.of(str.split(" "))
+                    .map(
+                            s -> {
+                                Row row = new Row();
+                                row.word = s;
+                                row.length = s.length();
+                                return row;
+                            })
+                    .iterator();
         }
     }
 }

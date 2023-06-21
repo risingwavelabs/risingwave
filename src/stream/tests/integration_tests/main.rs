@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // tests
-mod eowc;
+mod eowc_over_window;
 mod hash_agg;
 mod project_set;
 
