@@ -131,14 +131,33 @@ extract_fail_info_from_logs() {
 
 ################# Generate
 
+#
+## Generate $TEST_NUM number of seeds.
+## if `ENABLE_RANDOM_SEED=1`, we will generate random seeds.
+#gen_seed() {
+#  if [[ $ENABLE_RANDOM_SEED -eq 1 ]]; then
+#    seq 1 32768 | shuf | tail -n "$TEST_NUM"
+#  else
+#    seq 1 32678 | tail -n "$TEST_NUM"
+#  fi
+#}
+#
+
 # Generate $TEST_NUM number of seeds.
 # if `ENABLE_RANDOM_SEED=1`, we will generate random seeds.
+# sample output:
+# 1 12329
+# 2 22929
+# 3 22921
 gen_seed() {
-  if [[ $ENABLE_RANDOM_SEED -eq 1 ]]; then
-    seq 1 32768 | shuf | tail -n "$TEST_NUM"
-  else
-    seq 1 32678 | tail -n "$TEST_NUM"
-  fi
+  for i in $(seq 1 100)
+  do
+    if [[ $ENABLE_RANDOM_SEED -eq 1 ]]; then
+      echo "$i $RANDOM"
+    else
+      echo "$i $i"
+    fi
+  done
 }
 
 generate_one_deterministic() {
@@ -196,19 +215,24 @@ generate_deterministic() {
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
   echo "" > $LOGDIR/generate_deterministic.stdout.log
-  gen_seed | env_parallel --jobs 14 "
+  gen_seed | env_parallel --colsep --jobs 14 "
     mkdir -p $OUTDIR/{%}
-    echo '[INFO] Generating For Seed {}'
-    MADSIM_TEST_SEED={} timeout 3m $MADSIM_BIN \
+    echo '[INFO] Generating For Seed {2}, Query Set{1}'
+    if MADSIM_TEST_SEED={2} timeout 3m $MADSIM_BIN \
       --sqlsmith 100 \
-      --generate-sqlsmith-queries $OUTDIR/{%} \
+      --generate-sqlsmith-queries $OUTDIR/{1} \
       $TESTDATA \
       1>>$LOGDIR/generate_deterministic.stdout.log \
-      2>$LOGDIR/generate-{%}.log
-    echo '[INFO] Finished Generating For Seed {}, Query set {%}'
-    echo '[INFO] Extracting Queries For Seed {}, Query set {%}'
-    extract_queries $LOGDIR/generate-{%}.log $OUTDIR/{%}/queries.sql
-    echo '[INFO] Extracted Queries For Seed {}, Query set {%}.'
+      2>$LOGDIR/generate-{1}.log;
+    then
+      echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
+      echo '[INFO] Extracting Queries For Seed {2}, Query set {1}'
+      extract_queries $LOGDIR/generate-{%}.log $OUTDIR/{1}/queries.sql
+      echo '[INFO] Extracted Queries For Seed {2}, Query set {1}.'
+    else
+      echo '[ERROR] Query timed out For Seed {2}, Query set {1}'
+      buildkite-agent artifact upload '$LOGDIR/generate-{1}.log'
+    fi
     "
   set -e
 }
