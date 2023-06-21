@@ -36,7 +36,7 @@ fn create_equi_expr(left: String, right: String) -> Expr {
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
-        let range = if self.can_recurse() { 1 } else { 10 };
+        let range = if self.can_recurse() { 10 } else { 1 };
         match self.rng.gen_range(0..=range) {
             0..=1 => self.gen_no_join(),
             2..=6 => self
