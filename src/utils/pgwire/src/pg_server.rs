@@ -263,6 +263,7 @@ mod tests {
             Ok(String::new())
         }
 
+        #[expect(clippy::unused_async)]
         async fn execute(
             self: Arc<Self>,
             _portal: String,
