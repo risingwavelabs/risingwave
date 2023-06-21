@@ -16,12 +16,13 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::stream::StreamPlanRef;
-use super::utils::formatter_debug_plan_node;
+use super::utils::{formatter_debug_plan_node, watermark_fields_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -38,16 +39,28 @@ pub struct StreamProject {
     watermark_derivations: Vec<(usize, usize)>,
 }
 
+impl Distill for StreamProject {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let schema = self.schema();
+        let mut vec = self.logical.fields_pretty(schema);
+        let watermark_derivations = &self.watermark_derivations;
+        if !watermark_derivations.is_empty() {
+            let wc = watermark_derivations.iter().map(|(_, i)| *i);
+            vec.push(("output_watermarks", watermark_fields_pretty(wc, schema)));
+        }
+        Pretty::childless_record("StreamProject", vec)
+    }
+}
 impl fmt::Display for StreamProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = formatter_debug_plan_node!(f, "StreamProject");
         self.logical
             .fmt_fields_with_builder(&mut builder, self.schema());
-        if !self.watermark_derivations.is_empty() {
+        let watermark_derivations = &self.watermark_derivations;
+        if !watermark_derivations.is_empty() {
             builder.field(
                 "output_watermarks",
-                &self
-                    .watermark_derivations
+                &watermark_derivations
                     .iter()
                     .map(|(_, idx)| FieldDisplay(self.schema().fields.get(*idx).unwrap()))
                     .collect_vec(),

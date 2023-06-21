@@ -34,7 +34,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use super::RwPgResponse;
-use crate::binder::{bind_data_type, bind_struct_field};
+use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::expr::{Expr, ExprImpl};
@@ -256,6 +256,7 @@ pub fn bind_sql_column_constraints(
         for option_def in column.options {
             match option_def.option {
                 ColumnOption::GeneratedColumns(expr) => {
+                    binder.set_clause(Some(Clause::GeneratedColumn));
                     let idx = binder
                         .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
                     let expr_impl = binder.bind_expr(expr)?;
@@ -272,6 +273,7 @@ pub fn bind_sql_column_constraints(
                             expr: Some(expr_impl.to_expr_proto()),
                         }),
                     );
+                    binder.set_clause(None);
                 }
                 ColumnOption::DefaultColumns(expr) => {
                     let idx = binder

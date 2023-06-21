@@ -145,6 +145,17 @@ impl TopNHeap {
         }
     }
 
+    // Only used for swapping out the heap in hashmap, due to a bug in hashmap which forbids us from
+    // using `into_iter`. We should remove this after Hashmap upgraded and fixed the bug.
+    pub fn empty() -> Self {
+        Self {
+            heap: MemMonitoredHeap::with_capacity(0, MemoryContext::none()),
+            limit: 0,
+            offset: 0,
+            with_ties: false,
+        }
+    }
+
     pub fn push(&mut self, elem: HeapElem) {
         if self.heap.len() < self.limit + self.offset {
             self.heap.push(elem);
