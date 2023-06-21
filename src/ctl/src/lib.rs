@@ -197,6 +197,7 @@ enum TableCommands {
 }
 
 #[derive(clap::Args, Debug)]
+#[clap(group(clap::ArgGroup::new("workers_group").required(true).args(&["include_workers", "exclude_workers"])))]
 pub struct ScaleResizeCommands {
     /// The worker ids that needs to be excluded during scheduling
     #[clap(long, value_delimiter = ',', value_name = "id,...")]

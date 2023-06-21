@@ -51,7 +51,6 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
 
     println!("Cluster info fetched, revision: {}", revision);
     println!("Table fragments: {}", table_fragments.len());
-
     println!("Worker nodes: {}", worker_nodes.len());
 
     let streaming_worker_map = worker_nodes
@@ -78,30 +77,20 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
     } = resize;
 
     let worker_changes = match (exclude_workers, include_workers) {
-        (None, None) => WorkerChanges {
-            include_worker_ids: streaming_worker_map.keys().cloned().collect(),
-            exclude_worker_ids: vec![],
-        },
+        (None, None) => unreachable!(),
         (exclude, include) => {
-            if let Some(exclude) = exclude.as_ref() {
-                for worker_id in exclude {
-                    if !streaming_worker_map.contains_key(worker_id) {
-                        anyhow::bail!("Invalid worker id: {}", worker_id);
-                    }
-                }
-            }
+            let exclude_worker_ids = exclude.unwrap_or_default();
+            let include_worker_ids = include.unwrap_or_default();
 
-            if let Some(include) = include.as_ref() {
-                for worker_id in include {
-                    if !streaming_worker_map.contains_key(worker_id) {
-                        anyhow::bail!("Invalid worker id: {}", worker_id);
-                    }
+            for worker_id in exclude_worker_ids.iter().chain(include_worker_ids.iter()) {
+                if !streaming_worker_map.contains_key(worker_id) {
+                    anyhow::bail!("Invalid worker id: {}", worker_id);
                 }
             }
 
             WorkerChanges {
-                include_worker_ids: include.unwrap_or_default(),
-                exclude_worker_ids: exclude.unwrap_or_default(),
+                include_worker_ids,
+                exclude_worker_ids,
             }
         }
     };
@@ -203,8 +192,9 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         let (success, next_revision) = meta_client.reschedule(reschedules, revision).await?;
         if !success {
             println!("Failed to execute plan, current revision is {}", revision);
-            return Ok(());
+            exit(1);
         }
+
         println!(
             "Successfully executed plan, current revision is {}",
             next_revision
