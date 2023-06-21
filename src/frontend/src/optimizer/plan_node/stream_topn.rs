@@ -15,9 +15,11 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use pretty_xmlish::Pretty;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::TopNLimit;
+use super::generic::{TopNLimit, DistillUnit};
+use super::utils::Distill;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -60,11 +62,22 @@ impl StreamTopN {
 
 impl fmt::Display for StreamTopN {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.input().append_only() {
-            self.logical.fmt_with_name(f, "StreamAppendOnlyTopN")
+        let name = if self.input().append_only() {
+            "StreamAppendOnlyTopN"
         } else {
-            self.logical.fmt_with_name(f, "StreamTopN")
-        }
+            "StreamTopN"
+        };
+        self.logical.fmt_with_name(f, name)
+    }
+}
+impl Distill for StreamTopN {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let name = if self.input().append_only() {
+            "StreamAppendOnlyTopN"
+        } else {
+            "StreamTopN"
+        };
+        self.logical.distill_with_name(name)
     }
 }
 
