@@ -219,6 +219,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Provide recursion bounds.
     pub(crate) fn can_recurse(&mut self) -> bool {
-        self.rng.gen_bool(self.recursion_weight)
+        if self.recursion_weight <= 0.0 {
+            return false;
+        }
+        let can_recurse = self.rng.gen_bool(self.recursion_weight);
+        if can_recurse {
+            self.recursion_weight *= 0.9;
+            if self.recursion_weight < 0.05 {
+                self.recursion_weight = 0.0;
+            }
+        }
+        can_recurse
     }
 }
