@@ -65,7 +65,7 @@ use crate::Result;
 /// statement ok
 /// drop table t;
 /// ```
-#[build_aggregate("percentile_disc(*) -> *")]
+#[build_aggregate("percentile_disc(*) -> auto")]
 fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
     let fraction: Option<f64> = agg.direct_args[0]
         .literal()

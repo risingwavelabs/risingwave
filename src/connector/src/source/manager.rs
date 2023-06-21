@@ -29,6 +29,8 @@ pub struct SourceColumnDesc {
     pub is_row_id: bool,
 
     pub is_meta: bool,
+    // `is_pk` is used to indicate whether the column is part of the primary key columns.
+    pub is_pk: bool,
 }
 
 impl SourceColumnDesc {
@@ -47,6 +49,7 @@ impl SourceColumnDesc {
             fields: vec![],
             is_row_id: false,
             is_meta: false,
+            is_pk: false,
         }
     }
 
@@ -66,6 +69,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             fields: c.field_descs.clone(),
             is_row_id: false,
             is_meta,
+            is_pk: false,
         }
     }
 }
