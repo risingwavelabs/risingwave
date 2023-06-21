@@ -232,7 +232,7 @@ generate_deterministic() {
   gen_seed | env_parallel --colsep ' ' --jobs 14 "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
-    MADSIM_TEST_SEED={2} timeout 3m $MADSIM_BIN \
+    MADSIM_TEST_SEED={2} timeout 2m $MADSIM_BIN \
       --sqlsmith 100 \
       --generate-sqlsmith-queries $OUTDIR/{1} \
       $TESTDATA \
