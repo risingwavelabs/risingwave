@@ -170,8 +170,6 @@ generate_deterministic() {
   echo_err "[INFO] Generating"
   echo "" > $LOGDIR/generate_deterministic.stdout.log
 
-  local timeout=1
-
   for i in $(seq 0 20)
   do
     local batch_size=5
