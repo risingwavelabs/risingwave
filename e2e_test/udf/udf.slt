@@ -155,23 +155,23 @@ select return_all(
 
 query T
 select return_all_arrays(
-    array[true],
-    array[1 ::smallint],
-    array[1 ::int],
-    array[1 ::bigint],
-    array[1 ::float4],
-    array[1 ::float8],
-    array[1234567890123456789012345678 ::decimal],
-    array[date '2023-06-01'],
-    array[time '01:02:03.456789'],
-    array[timestamp '2023-06-01 01:02:03.456789'],
-    array[interval '1 month 2 days 3 seconds'],
-    array['string'],
-    array['bytes'::bytea],
-    array['{"key":1}'::jsonb]
+    array[null, true],
+    array[null, 1 ::smallint],
+    array[null, 1 ::int],
+    array[null, 1 ::bigint],
+    array[null, 1 ::float4],
+    array[null, 1 ::float8],
+    array[null, 1234567890123456789012345678 ::decimal],
+    array[null, date '2023-06-01'],
+    array[null, time '01:02:03.456789'],
+    array[null, timestamp '2023-06-01 01:02:03.456789'],
+    array[null, interval '1 month 2 days 3 seconds'],
+    array[null, 'string'],
+    array[null, 'bytes'::bytea],
+    array[null, '{"key":1}'::jsonb]
 );
 ----
-({t},{1},{1},{1},{1},{1},{1234567890123456789012345678},{2023-06-01},{01:02:03.456789},{"2023-06-01 01:02:03.456789"},{"1 mon 2 days 00:00:03"},{string},{"\\x6279746573"},{"{\"key\": 1}"})
+({NULL,t},{NULL,1},{NULL,1},{NULL,1},{NULL,1},{NULL,1},{NULL,1234567890123456789012345678},{NULL,2023-06-01},{NULL,01:02:03.456789},{NULL,"2023-06-01 01:02:03.456789"},{NULL,"1 mon 2 days 00:00:03"},{NULL,string},{NULL,"\\x6279746573"},{NULL,"{\"key\": 1}"})
 
 query I
 select series(5);
