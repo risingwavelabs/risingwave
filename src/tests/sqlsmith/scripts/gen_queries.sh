@@ -140,16 +140,20 @@ generate_one_deterministic() {
   local SET_ID=$1
   mkdir -p "$OUTDIR/$SET_ID"
   echo "[INFO] Generating For Seed $RANDOM, Query set $SET_ID"
-  MADSIM_TEST_SEED=$RANDOM timeout 1m $MADSIM_BIN \
+  if MADSIM_TEST_SEED=$RANDOM timeout 1m "$MADSIM_BIN" \
     --sqlsmith 30 \
     --generate-sqlsmith-queries "$OUTDIR/$SET_ID" \
     $TESTDATA \
     1>>"$LOGDIR/generate_deterministic.stdout.log" \
     2>"$LOGDIR/generate-$SET_ID.log"
-  echo "[INFO] Finished Generating For Seed $RANDOM, Query set $SET_ID"
-  echo "[INFO] Extracting Queries For Seed $RANDOM, Query set $SET_ID"
-  extract_queries "$LOGDIR/generate-$SET_ID.log" "$OUTDIR/$SET_ID/queries.sql"
-  echo "[INFO] Extracted Queries For Seed $RANDOM, Query set $SET_ID."
+  then
+    echo "[INFO] Finished Generating For Seed $RANDOM, Query set $SET_ID"
+    echo "[INFO] Extracting Queries For Seed $RANDOM, Query set $SET_ID"
+    extract_queries "$LOGDIR/generate-$SET_ID.log" "$OUTDIR/$SET_ID/queries.sql"
+    echo "[INFO] Extracted Queries For Seed $RANDOM, Query set $SET_ID."
+  else
+    echo "[ERROR] Query timed out For Seed $RANDOM, Query set $SET_ID"
+  fi
 }
 
 # Prefer to use generate_deterministic, it is faster since

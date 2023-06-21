@@ -118,7 +118,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_with(&mut self) -> (Option<With>, Vec<Table>) {
-        match self.rng.gen_bool(0.4) {
+        match self.rng.gen_bool(0.2) {
             true => (None, vec![]),
             false => {
                 let (with, tables) = self.gen_with_inner();
