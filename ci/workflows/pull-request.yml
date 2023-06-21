@@ -59,6 +59,7 @@ steps:
     command: "ci/scripts/e2e-test.sh -p ci-dev"
     depends_on:
       - "build"
+      - "build-other"
       - "docslt"
     plugins:
       - docker-compose#v4.9.0:
@@ -79,7 +80,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 12
+    timeout_in_minutes: 15
 
   - label: "end-to-end test for opendal (parallel)"
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-dev"

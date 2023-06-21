@@ -55,20 +55,13 @@ impl Task for JaegerService {
         let mut cmd = self.jaeger()?;
         cmd.arg("--admin.http.host-port")
             .arg("127.0.0.1:14269")
-            .arg("--collector.grpc-server.host-port")
-            .arg("127.0.0.1:14250")
-            .arg("--collector.http-server.host-port")
-            .arg("127.0.0.1:14268")
-            .arg("--collector.queue-size")
-            .arg("65536")
+            .arg("--collector.otlp.grpc.host-port")
+            .arg(format!(
+                "{}:{}",
+                self.config.otlp_address, self.config.otlp_port
+            ))
             .arg("--http-server.host-port")
             .arg("127.0.0.1:5778")
-            .arg("--processor.jaeger-binary.server-host-port")
-            .arg("127.0.0.1:6832")
-            .arg("--processor.jaeger-compact.server-host-port")
-            .arg("127.0.0.1:6831")
-            .arg("--processor.zipkin-compact.server-host-port")
-            .arg("127.0.0.1:5775")
             .arg("--query.grpc-server.host-port")
             .arg("127.0.0.1:16685")
             .arg("--query.http-server.host-port")

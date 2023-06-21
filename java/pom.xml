@@ -311,6 +311,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.0.0-M7</version>
                 <configuration>
+                    <enableAssertions>true</enableAssertions>
                     <environmentVariables>
                         <_JAVA_OPTIONS>
                             --add-opens=java.base/java.lang=ALL-UNNAMED

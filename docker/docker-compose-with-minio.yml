@@ -23,14 +23,18 @@ services:
     ports: []
     depends_on:
       - meta-node-0
+      - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: aws.env
+    environment:
+      RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: compactor-0
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/6660; exit $?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/6660; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -58,14 +62,18 @@ services:
     ports: []
     depends_on:
       - meta-node-0
+      - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: aws.env
+    environment:
+      RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: compute-node-0
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5688; exit $?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5688; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -141,11 +149,13 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: frontend-node-0
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/4566; exit $?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/4566; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -168,7 +178,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/3001; exit $?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/3001; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -191,7 +201,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+s3-compatible://bucket-name"
+      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"
@@ -207,12 +217,58 @@ services:
       - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: aws.env
+    environment:
+      RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: meta-node-0
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5690; exit $?;'
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5690; exit $$?;'
+      interval: 1s
+      timeout: 5s
+      retries: 5
+  minio-0:
+    image: "quay.io/minio/minio:latest"
+    command:
+      - server
+      - "--address"
+      - "0.0.0.0:9301"
+      - "--console-address"
+      - "0.0.0.0:9400"
+      - /data
+    expose:
+      - "9301"
+      - "9400"
+    ports:
+      - "9301:9301"
+      - "9400:9400"
+    depends_on: []
+    volumes:
+      - "minio-0:/data"
+    entrypoint: "
+
+      /bin/sh -c '
+
+      set -e
+
+      mkdir -p \"/data/hummock001\"
+
+      /usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"
+
+      '"
+    environment:
+      MINIO_CI_CD: "1"
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+      MINIO_PROMETHEUS_URL: "http://prometheus-0:9500"
+      MINIO_ROOT_PASSWORD: hummockadmin
+      MINIO_ROOT_USER: hummockadmin
+    container_name: minio-0
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/9301; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -238,7 +294,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - sh -c 'printf "GET /-/healthy HTTP/1.0\n\n" | nc localhost 9500; exit $?;'
+        - sh -c 'printf "GET /-/healthy HTTP/1.0\n\n" | nc localhost 9500; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -291,6 +347,8 @@ volumes:
   etcd-0:
     external: false
   grafana-0:
+    external: false
+  minio-0:
     external: false
   prometheus-0:
     external: false
