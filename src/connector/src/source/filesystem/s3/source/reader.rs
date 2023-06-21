@@ -27,7 +27,8 @@ use tokio::io::BufReader;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
-use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
+use crate::aws_auth::AwsAuthProps;
+use crate::aws_utils::{default_conn_config, s3_client};
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReader, MAX_CHUNK_SIZE};
 use crate::source::filesystem::file_common::FsSplit;
@@ -153,8 +154,9 @@ impl SplitReader for S3FileReader {
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let config = AwsConfigV2::from(HashMap::from(props.clone()));
-        let sdk_config = config.load_config(None).await;
+        let config = AwsAuthProps::from(&props);
+
+        let sdk_config = config.build_config().await?;
 
         let bucket_name = props.bucket_name;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));

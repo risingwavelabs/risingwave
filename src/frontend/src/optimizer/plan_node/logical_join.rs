@@ -18,7 +18,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
@@ -26,7 +26,7 @@ use risingwave_pb::stream_plan::ChainType;
 use super::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
 };
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
     StreamHashJoin, StreamProject, ToBatch, ToStream,
@@ -57,7 +57,7 @@ pub struct LogicalJoin {
 }
 
 impl Distill for LogicalJoin {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("type", Pretty::debug(&self.join_type())));
@@ -75,7 +75,7 @@ impl Distill for LogicalJoin {
             vec.push(("output", data));
         }
 
-        Pretty::childless_record("LogicalJoin", vec)
+        childless_record("LogicalJoin", vec)
     }
 }
 impl fmt::Display for LogicalJoin {

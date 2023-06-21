@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::fmt;
 use std::hash::Hash;
 
 use educe::Educe;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::TableVersionId;
 
 use super::DistillUnit;
 use crate::catalog::TableId;
 use crate::expr::{ExprImpl, ExprRewriter};
+use crate::optimizer::plan_node::utils::childless_record;
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
@@ -81,13 +81,13 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
 }
 
 impl<PlanRef: Eq + Hash> DistillUnit for Update<PlanRef> {
-    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let mut vec = Vec::with_capacity(if self.returning { 3 } else { 2 });
         vec.push(("table", Pretty::Text(self.table_name.clone().into())));
         vec.push(("exprs", Pretty::debug(&self.exprs)));
         if self.returning {
             vec.push(("returning", Pretty::display(&true)));
         }
-        Pretty::childless_record(name, vec)
+        childless_record(name, vec)
     }
 }

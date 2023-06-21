@@ -12,22 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(io_error_other)]
-#![feature(lint_reasons)]
-#![feature(trait_alias)]
-#![feature(result_option_inspect)]
-#![feature(iterator_try_collect)]
-#![feature(trusted_len)]
-#![feature(async_fn_in_trait)]
-#![feature(return_position_impl_trait_in_trait)]
-#![expect(clippy::doc_markdown, reason = "FIXME: later")]
+package com.risingwave.functions;
 
-pub mod error;
-pub mod error_or_notice;
-pub mod pg_extended;
-pub mod pg_field_descriptor;
-pub mod pg_message;
-pub mod pg_protocol;
-pub mod pg_response;
-pub mod pg_server;
-pub mod types;
+import java.time.Duration;
+import java.time.Period;
+
+/** Combination of Period and Duration. */
+public class PeriodDuration extends org.apache.arrow.vector.PeriodDuration {
+    public PeriodDuration(Period period, Duration duration) {
+        super(period, duration);
+    }
+
+    PeriodDuration(org.apache.arrow.vector.PeriodDuration base) {
+        super(base.getPeriod(), base.getDuration());
+    }
+}
