@@ -52,6 +52,7 @@ extract_queries() {
   if [[ -n "$FAILED" ]]; then
     local FAIL_REASON=$(get_failure_reason "$1")
     echo_err "[WARN] Cluster crashed while generating queries. see $1 for more information."
+    buildkite-agent artifact upload "$1"
     local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
   echo -e "$QUERIES" > "$2"
@@ -93,7 +94,6 @@ extract_fail_info_from_logs() {
     echo_err "[INFO] Checked $LOGFILE for bugs"
     if [[ -n "$FAILED" ]]; then
       echo_err "[WARN] $LOGFILE Encountered bug."
-      buildkite-agent artifact upload "$LOGFILE"
 
       REASON=$(get_failure_reason "$LOGFILE")
       SEED=$(echo "$LOGFILENAME" | sed -E "s/${LOGFILE_PREFIX}\-(.*)\.log/\1/")
@@ -166,9 +166,9 @@ generate_deterministic() {
     local start="$((i * $batch_size + 1))"
     local end=$((start - 1 + $batch_size))
     echo_err "--- Generating for Queries $start - $end"
-    for j in $(seq $start $end)
+    for SET_ID in $(seq $start $end)
     do
-        generate_one_deterministic "$j" &
+        timeout 1m generate_one_deterministic "$SET_ID" &
     done
     wait
   done
