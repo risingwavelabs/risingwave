@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::hash::Hash;
 
 use pretty_xmlish::Pretty;
@@ -65,14 +66,16 @@ mod limit;
 pub use limit::*;
 
 pub trait DistillUnit {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a>;
+    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a>;
 }
 
 macro_rules! impl_distill_unit_from_fields {
     ($name:ident, $bound:path) => {
+        use std::borrow::Cow;
+
         use $crate::optimizer::plan_node::generic::DistillUnit;
         impl<PlanRef: $bound> DistillUnit for $name<PlanRef> {
-            fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+            fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
                 Pretty::childless_record(name, self.fields_pretty())
             }
         }
