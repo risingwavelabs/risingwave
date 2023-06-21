@@ -58,6 +58,7 @@ extract_queries() {
   if [[ -n "$FAILED" ]]; then
     local FAIL_REASON=$(get_failure_reason "$1")
     echo_err "[WARN] Cluster crashed while generating queries. see $1 for more information."
+    buildkite-agent artifact upload "$1"
     local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
   echo -e "$QUERIES" > "$2"
@@ -237,19 +238,8 @@ generate_deterministic() {
       $TESTDATA \
       1>>$LOGDIR/generate_deterministic.stdout.log \
       2>$LOGDIR/generate-{1}.log;
-    EXIT_CODE="$?";
-    if [[ \$EXIT_CODE -eq 0 ]];
-    then
-      echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
-    elif [[ \$EXIT_CODE -eq 124 ]];
-    then
-      echo '[ERROR] Query Timeout For Seed {2}, Query set {1}'
-      buildkite-agent artifact upload '$LOGDIR/generate-{1}.log'
-    else
-      echo '[ERROR] Query Failed For Seed {2}, Query set {1}'
-      buildkite-agent artifact upload '$LOGDIR/generate-{1}.log'
-    fi
-    echo '[INFO] Extracting Queries For Seed {2}, Query set {1}'
+    echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
+    echo '[INFO] Extracting Queries For Seed {2}, Query set {1}.'
     extract_queries $LOGDIR/generate-{1}.log $OUTDIR/{1}/queries.sql
     echo '[INFO] Extracted Queries For Seed {2}, Query set {1}.'
     "
