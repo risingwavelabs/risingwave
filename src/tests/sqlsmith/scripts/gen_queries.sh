@@ -52,7 +52,6 @@ extract_queries() {
   if [[ -n "$FAILED" ]]; then
     local FAIL_REASON=$(get_failure_reason "$1")
     echo_err "[WARN] Cluster crashed while generating queries. see $1 for more information."
-    buildkite-agent artifact upload "$1"
     local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
   echo -e "$QUERIES" > "$2"
@@ -165,20 +164,28 @@ generate_one_deterministic() {
   local SET_ID=$1
   mkdir -p "$OUTDIR/$SET_ID"
   echo "[INFO] Generating For Seed $RANDOM, Query set $SET_ID"
-  if MADSIM_TEST_SEED=$RANDOM timeout 3m "$MADSIM_BIN" \
+  MADSIM_TEST_SEED=$RANDOM timeout 3m "$MADSIM_BIN" \
     --sqlsmith 30 \
     --generate-sqlsmith-queries "$OUTDIR/$SET_ID" \
     $TESTDATA \
     1>>"$LOGDIR/generate_deterministic.stdout.log" \
     2>"$LOGDIR/generate-$SET_ID.log"
+  local EXIT_CODE="$?"
+  if [[ $EXIT_CODE -eq 0 ]];
   then
     echo "[INFO] Finished Generating For Seed $RANDOM, Query set $SET_ID"
     echo "[INFO] Extracting Queries For Seed $RANDOM, Query set $SET_ID"
     extract_queries "$LOGDIR/generate-$SET_ID.log" "$OUTDIR/$SET_ID/queries.sql"
     echo "[INFO] Extracted Queries For Seed $RANDOM, Query set $SET_ID."
-  else
-    echo "[ERROR] Query timed out For Seed $RANDOM, Query set $SET_ID"
+  elif [[ $EXIT_CODE -eq 124 ]]
+  then
+    echo "[ERROR] Query timeout for Seed $RANDOM, Query set $SET_ID"
     buildkite-agent artifact upload "$LOGDIR/generate-$SET_ID.log"
+    echo "[INFO] Uploaded failure logs: $LOGDIR/generate-$SET_ID.log"
+  else
+    echo "[ERROR] Query failed For Seed $RANDOM, Query set $SET_ID"
+    buildkite-agent artifact upload "$LOGDIR/generate-$SET_ID.log"
+    echo "[INFO] Uploaded failure logs: $LOGDIR/generate-$SET_ID.log"
   fi
 }
 #
@@ -218,21 +225,27 @@ generate_deterministic() {
   gen_seed | env_parallel --colsep ' ' --jobs 14 "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
-    if MADSIM_TEST_SEED={2} timeout 3m $MADSIM_BIN \
+    MADSIM_TEST_SEED={2} timeout 3m $MADSIM_BIN \
       --sqlsmith 100 \
       --generate-sqlsmith-queries $OUTDIR/{1} \
       $TESTDATA \
       1>>$LOGDIR/generate_deterministic.stdout.log \
       2>$LOGDIR/generate-{1}.log;
+    EXIT_CODE="$?"
+    if [[ $EXIT_CODE -eq 0 ]];
     then
       echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
-      echo '[INFO] Extracting Queries For Seed {2}, Query set {1}'
-      extract_queries $LOGDIR/generate-{1}.log $OUTDIR/{1}/queries.sql
-      echo '[INFO] Extracted Queries For Seed {2}, Query set {1}.'
+    elif [[ $EXIT_CODE -eq 124 ]];
+    then
+      echo '[ERROR] Query Timeout For Seed {2}, Query set {1}'
+      buildkite-agent artifact upload '$LOGDIR/generate-{1}.log'
     else
-      echo '[ERROR] Query timed out For Seed {2}, Query set {1}'
+      echo '[ERROR] Query Failed For Seed {2}, Query set {1}'
       buildkite-agent artifact upload '$LOGDIR/generate-{1}.log'
     fi
+    echo '[INFO] Extracting Queries For Seed {2}, Query set {1}'
+    extract_queries $LOGDIR/generate-{1}.log $OUTDIR/{1}/queries.sql
+    echo '[INFO] Extracted Queries For Seed {2}, Query set {1}.'
     "
   set -e
 }
