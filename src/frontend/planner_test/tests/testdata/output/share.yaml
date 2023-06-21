@@ -34,7 +34,7 @@
   stream_plan: |
     StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
-      └─StreamAppendOnlySimpleAgg { aggs: [sum0(count), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count] }
             └─StreamHashJoin [append_only] { type: Inner, predicate: id = id, output: [_row_id, id, _row_id] }
@@ -196,7 +196,7 @@
   stream_plan: |
     StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
-      └─StreamAppendOnlySimpleAgg { aggs: [sum0(count), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count] }
             └─StreamHashJoin [append_only] { type: Inner, predicate: id = id, output: [_row_id, id, _row_id] }
