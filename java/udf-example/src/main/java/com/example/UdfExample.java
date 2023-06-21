@@ -232,10 +232,21 @@ public class UdfExample {
             public @DataTypeHint("JSONB[]") String[] jsonb;
         }
 
-        public Row eval(Boolean[] bool, Short[] i16, Integer[] i32, Long[] i64, Float[] f32, Double[] f64,
+        public Row eval(
+                Boolean[] bool,
+                Short[] i16,
+                Integer[] i32,
+                Long[] i64,
+                Float[] f32,
+                Double[] f64,
                 BigDecimal[] decimal,
-                LocalDate[] date, LocalTime[] time, LocalDateTime[] timestamp, PeriodDuration[] interval,
-                String[] str, byte[][] bytes, @DataTypeHint("JSONB[]") String[] jsonb) {
+                LocalDate[] date,
+                LocalTime[] time,
+                LocalDateTime[] timestamp,
+                PeriodDuration[] interval,
+                String[] str,
+                byte[][] bytes,
+                @DataTypeHint("JSONB[]") String[] jsonb) {
             var row = new Row();
             row.bool = bool;
             row.i16 = i16;

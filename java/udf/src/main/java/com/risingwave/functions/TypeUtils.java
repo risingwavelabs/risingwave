@@ -75,9 +75,10 @@ class TypeUtils {
         } else if (typeStr.startsWith("STRUCT")) {
             // extract "STRUCT<INT, VARCHAR, ...>"
             var typeList = typeStr.substring(7, typeStr.length() - 1);
-            var fields = Arrays.stream(typeList.split(","))
-                    .map(s -> stringToField(s.trim(), ""))
-                    .collect(Collectors.toList());
+            var fields =
+                    Arrays.stream(typeList.split(","))
+                            .map(s -> stringToField(s.trim(), ""))
+                            .collect(Collectors.toList());
             return new Field(name, FieldType.nullable(new ArrowType.Struct()), fields);
         } else {
             throw new IllegalArgumentException("Unsupported type: " + typeStr);
@@ -88,8 +89,8 @@ class TypeUtils {
      * Convert a Java class to an Arrow type.
      *
      * @param param The Java class.
-     * @param hint  An optional DataTypeHint annotation.
-     * @param name  The name of the field.
+     * @param hint An optional DataTypeHint annotation.
+     * @param name The name of the field.
      * @return The Arrow type.
      */
     static Field classToField(Class<?> param, DataTypeHint hint, String name) {
@@ -162,7 +163,8 @@ class TypeUtils {
         if (!Iterator.class.isAssignableFrom(type)) {
             throw new IllegalArgumentException("Table function must return Iterator");
         }
-        var typeArguments = ((ParameterizedType) method.getGenericReturnType()).getActualTypeArguments();
+        var typeArguments =
+                ((ParameterizedType) method.getGenericReturnType()).getActualTypeArguments();
         type = (Class<?>) typeArguments[0];
         var rowIndex = Field.nullable("row_index", new ArrowType.Int(32, true));
         return new Schema(Arrays.asList(rowIndex, classToField(type, hint, "")));
@@ -309,37 +311,39 @@ class TypeUtils {
             var vector = (ListVector) fieldVector;
             vector.allocateNew();
             if (vector.getDataVector() instanceof BitVector) {
-                TypeUtils.<BitVector, Boolean>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, val ? 1 : 0));
+                TypeUtils.<BitVector, Boolean>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val ? 1 : 0));
             } else if (vector.getDataVector() instanceof SmallIntVector) {
-                TypeUtils.<SmallIntVector, Short>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, val));
+                TypeUtils.<SmallIntVector, Short>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
             } else if (vector.getDataVector() instanceof IntVector) {
-                TypeUtils.<IntVector, Integer>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, val));
+                TypeUtils.<IntVector, Integer>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
             } else if (vector.getDataVector() instanceof BigIntVector) {
-                TypeUtils.<BigIntVector, Long>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, val));
+                TypeUtils.<BigIntVector, Long>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
             } else if (vector.getDataVector() instanceof Float4Vector) {
-                TypeUtils.<Float4Vector, Float>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, val));
+                TypeUtils.<Float4Vector, Float>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
             } else if (vector.getDataVector() instanceof Float8Vector) {
-                TypeUtils.<Float8Vector, Double>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, val));
+                TypeUtils.<Float8Vector, Double>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
             } else if (vector.getDataVector() instanceof DecimalVector) {
-                TypeUtils.<DecimalVector, BigDecimal>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, val));
+                TypeUtils.<DecimalVector, BigDecimal>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
             } else if (vector.getDataVector() instanceof DateDayVector) {
-                TypeUtils.<DateDayVector, LocalDate>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, (int) val.toEpochDay()));
+                TypeUtils.<DateDayVector, LocalDate>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, (int) val.toEpochDay()));
             } else if (vector.getDataVector() instanceof TimeMicroVector) {
-                TypeUtils.<TimeMicroVector, LocalTime>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, val.toNanoOfDay() / 1000));
+                TypeUtils.<TimeMicroVector, LocalTime>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val.toNanoOfDay() / 1000));
             } else if (vector.getDataVector() instanceof TimeStampMicroVector) {
-                TypeUtils.<TimeStampMicroVector, LocalDateTime>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, timestampToMicros(val)));
+                TypeUtils.<TimeStampMicroVector, LocalDateTime>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, timestampToMicros(val)));
             } else if (vector.getDataVector() instanceof IntervalMonthDayNanoVector) {
-                TypeUtils.<IntervalMonthDayNanoVector, PeriodDuration>fillListVector(vector, values,
+                TypeUtils.<IntervalMonthDayNanoVector, PeriodDuration>fillListVector(
+                        vector,
+                        values,
                         (vec, i, val) -> {
                             var months = (int) val.getPeriod().toTotalMonths();
                             var days = val.getPeriod().getDays();
@@ -347,14 +351,14 @@ class TypeUtils {
                             vec.set(i, months, days, nanos);
                         });
             } else if (vector.getDataVector() instanceof VarCharVector) {
-                TypeUtils.<VarCharVector, String>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, val.getBytes()));
+                TypeUtils.<VarCharVector, String>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val.getBytes()));
             } else if (vector.getDataVector() instanceof LargeVarCharVector) {
-                TypeUtils.<LargeVarCharVector, String>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, val.getBytes()));
+                TypeUtils.<LargeVarCharVector, String>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val.getBytes()));
             } else if (vector.getDataVector() instanceof VarBinaryVector) {
-                TypeUtils.<VarBinaryVector, byte[]>fillListVector(vector, values,
-                        (vec, i, val) -> vec.set(i, val));
+                TypeUtils.<VarBinaryVector, byte[]>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
             } else {
                 throw new IllegalArgumentException("Unsupported type: " + fieldVector.getClass());
             }
@@ -389,13 +393,13 @@ class TypeUtils {
     }
 
     @FunctionalInterface
-    static interface TriFunction<T, U, V> {
+    interface TriFunction<T, U, V> {
         void apply(T t, U u, V v);
     }
 
     @SuppressWarnings("unchecked")
-    static <V extends FieldVector, T> void fillListVector(ListVector vector, Object[] values,
-            TriFunction<V, Integer, T> set) {
+    static <V extends FieldVector, T> void fillListVector(
+            ListVector vector, Object[] values, TriFunction<V, Integer, T> set) {
         var innerVector = (V) vector.getDataVector();
         int ii = 0;
         for (int i = 0; i < values.length; i++) {
@@ -421,10 +425,7 @@ class TypeUtils {
         return date * 24 * 3600 * 1000 * 1000 + time / 1000;
     }
 
-    /**
-     * Return a function that converts the object get from input array to the
-     * correct type.
-     */
+    /** Return a function that converts the object get from input array to the correct type. */
     static Function<Object, Object> processFunc(Field field, Class<?> targetClass) {
         var inner = processFunc0(field, targetClass);
         return obj -> obj == null ? null : inner.apply(obj);
@@ -443,7 +444,8 @@ class TypeUtils {
         } else if (field.getType() instanceof ArrowType.Time && targetClass == LocalTime.class) {
             // object is Long
             return obj -> LocalTime.ofNanoOfDay((long) obj * 1000);
-        } else if (field.getType() instanceof ArrowType.Interval && targetClass == PeriodDuration.class) {
+        } else if (field.getType() instanceof ArrowType.Interval
+                && targetClass == PeriodDuration.class) {
             // object is arrow PeriodDuration
             return obj -> new PeriodDuration((org.apache.arrow.vector.PeriodDuration) obj);
         } else if (field.getType() instanceof ArrowType.List) {
@@ -458,9 +460,11 @@ class TypeUtils {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Integer[]::new);
             } else if (subfield.getType().equals(new ArrowType.Int(64, true))) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Long[]::new);
-            } else if (subfield.getType().equals(new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE))) {
+            } else if (subfield.getType()
+                    .equals(new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE))) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Float[]::new);
-            } else if (subfield.getType().equals(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE))) {
+            } else if (subfield.getType()
+                    .equals(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE))) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Double[]::new);
             } else if (subfield.getType() instanceof ArrowType.Decimal) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(BigDecimal[]::new);
