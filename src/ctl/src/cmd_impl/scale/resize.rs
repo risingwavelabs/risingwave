@@ -50,7 +50,6 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
     }
 
     println!("Cluster info fetched, revision: {}", revision);
-    println!("Table fragments: {}", table_fragments.len());
     println!("Worker nodes: {}", worker_nodes.len());
 
     let streaming_worker_map = worker_nodes
@@ -144,6 +143,14 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         exit(1);
     }
 
+    if reschedules.is_empty() {
+        println!(
+            "No reschedule plan generated, no action required, current revision is {}",
+            revision
+        );
+        return Ok(());
+    }
+
     println!(
         "Successfully generated plan, current revision is {}",
         revision
@@ -174,10 +181,11 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         if !yes {
             match Confirm::new("Will perform actions on the cluster, are you sure?")
                 .with_default(false)
-                .with_help_message("Use the --yes or -y option to skip this prompt")
+                .with_help_message("Use the --generate flag to view the generated plan. Use the --yes or -y option to skip this prompt")
+                .with_placeholder("no")
                 .prompt()
             {
-                Ok(true) => {}
+                Ok(true) => println!("Processing..."),
                 Ok(false) => {
                     println!("Abort.");
                     exit(1);
