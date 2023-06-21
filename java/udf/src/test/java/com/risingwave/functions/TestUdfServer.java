@@ -106,10 +106,21 @@ public class TestUdfServer {
             public @DataTypeHint("JSONB") String jsonb;
         }
 
-        public Row eval(Boolean bool, Short i16, Integer i32, Long i64, Float f32, Double f64,
+        public Row eval(
+                Boolean bool,
+                Short i16,
+                Integer i32,
+                Long i64,
+                Float f32,
+                Double f64,
                 BigDecimal decimal,
-                LocalDate date, LocalTime time, LocalDateTime timestamp, PeriodDuration interval,
-                String str, byte[] bytes, @DataTypeHint("JSONB") String jsonb) {
+                LocalDate date,
+                LocalTime time,
+                LocalDateTime timestamp,
+                PeriodDuration interval,
+                String str,
+                byte[] bytes,
+                @DataTypeHint("JSONB") String jsonb) {
             var row = new Row();
             row.bool = bool;
             row.i16 = i16;
@@ -179,11 +190,17 @@ public class TestUdfServer {
         var c9 = new TimeStampMicroVector("", allocator);
         c9.allocateNew(2);
         var ts = LocalDateTime.of(2023, 1, 1, 1, 2, 3);
-        c9.set(0, ts.toLocalDate().toEpochDay() * 24 * 3600 * 1000000 + ts.toLocalTime().toNanoOfDay() / 1000);
+        c9.set(
+                0,
+                ts.toLocalDate().toEpochDay() * 24 * 3600 * 1000000
+                        + ts.toLocalTime().toNanoOfDay() / 1000);
         c9.setValueCount(2);
 
-        var c10 = new IntervalMonthDayNanoVector("", FieldType.nullable(MinorType.INTERVALMONTHDAYNANO.getType()),
-                allocator);
+        var c10 =
+                new IntervalMonthDayNanoVector(
+                        "",
+                        FieldType.nullable(MinorType.INTERVALMONTHDAYNANO.getType()),
+                        allocator);
         c10.allocateNew(2);
         c10.set(0, 1000, 2000, 3000);
         c10.setValueCount(2);

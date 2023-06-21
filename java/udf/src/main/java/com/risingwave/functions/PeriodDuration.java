@@ -17,9 +17,7 @@ package com.risingwave.functions;
 import java.time.Duration;
 import java.time.Period;
 
-/**
- * Combination of Period and Duration.
- */
+/** Combination of Period and Duration. */
 public class PeriodDuration extends org.apache.arrow.vector.PeriodDuration {
     public PeriodDuration(Period period, Duration duration) {
         super(period, duration);

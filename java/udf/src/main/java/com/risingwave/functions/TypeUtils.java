@@ -14,13 +14,6 @@
 
 package com.risingwave.functions;
 
-import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.vector.*;
-import org.apache.arrow.vector.complex.ListVector;
-import org.apache.arrow.vector.complex.StructVector;
-import org.apache.arrow.vector.types.*;
-import org.apache.arrow.vector.types.pojo.*;
-
 import java.lang.invoke.MethodHandles;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -36,6 +29,12 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.StructVector;
+import org.apache.arrow.vector.types.*;
+import org.apache.arrow.vector.types.pojo.*;
 
 class TypeUtils {
     /** Convert a string to an Arrow type. */
@@ -76,9 +75,10 @@ class TypeUtils {
         } else if (typeStr.startsWith("STRUCT")) {
             // extract "STRUCT<INT, VARCHAR, ...>"
             var typeList = typeStr.substring(7, typeStr.length() - 1);
-            var fields = Arrays.stream(typeList.split(","))
-                    .map(s -> stringToField(s.trim(), ""))
-                    .collect(Collectors.toList());
+            var fields =
+                    Arrays.stream(typeList.split(","))
+                            .map(s -> stringToField(s.trim(), ""))
+                            .collect(Collectors.toList());
             return new Field(name, FieldType.nullable(new ArrowType.Struct()), fields);
         } else {
             throw new IllegalArgumentException("Unsupported type: " + typeStr);
@@ -89,8 +89,8 @@ class TypeUtils {
      * Convert a Java class to an Arrow type.
      *
      * @param param The Java class.
-     * @param hint  An optional DataTypeHint annotation.
-     * @param name  The name of the field.
+     * @param hint An optional DataTypeHint annotation.
+     * @param name The name of the field.
      * @return The Arrow type.
      */
     static Field classToField(Class<?> param, DataTypeHint hint, String name) {
@@ -163,7 +163,8 @@ class TypeUtils {
         if (!Iterator.class.isAssignableFrom(type)) {
             throw new IllegalArgumentException("Table function must return Iterator");
         }
-        var typeArguments = ((ParameterizedType) method.getGenericReturnType()).getActualTypeArguments();
+        var typeArguments =
+                ((ParameterizedType) method.getGenericReturnType()).getActualTypeArguments();
         type = (Class<?>) typeArguments[0];
         var rowIndex = Field.nullable("row_index", new ArrowType.Int(32, true));
         return new Schema(Arrays.asList(rowIndex, classToField(type, hint, "")));
@@ -361,10 +362,7 @@ class TypeUtils {
         fieldVector.setValueCount(values.length);
     }
 
-    /**
-     * Return a function that converts the object get from input array to the
-     * correct type.
-     */
+    /** Return a function that converts the object get from input array to the correct type. */
     static Function<Object, Object> processFunc(Field field, Class<?> targetClass) {
         if (field.getType() instanceof ArrowType.Utf8 && targetClass == String.class) {
             // object is org.apache.arrow.vector.util.Text
@@ -378,21 +376,27 @@ class TypeUtils {
         } else if (field.getType() instanceof ArrowType.Time && targetClass == LocalTime.class) {
             // object is Long
             return obj -> obj == null ? null : LocalTime.ofNanoOfDay((long) obj * 1000);
-        } else if (field.getType() instanceof ArrowType.Interval && targetClass == PeriodDuration.class) {
+        } else if (field.getType() instanceof ArrowType.Interval
+                && targetClass == PeriodDuration.class) {
             // object is arrow PeriodDuration
-            return obj -> obj == null ? null : new PeriodDuration((org.apache.arrow.vector.PeriodDuration) obj);
+            return obj ->
+                    obj == null
+                            ? null
+                            : new PeriodDuration((org.apache.arrow.vector.PeriodDuration) obj);
         } else if (field.getType() instanceof ArrowType.List) {
             // object is org.apache.arrow.vector.util.JsonStringArrayList
             var subfield = field.getChildren().get(0);
             var subfunc = processFunc(subfield, targetClass.getComponentType());
             if (subfield.getType() instanceof ArrowType.Utf8) {
-                return obj -> obj == null
-                        ? null
-                        : ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
+                return obj ->
+                        obj == null
+                                ? null
+                                : ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
             } else if (subfield.getType() instanceof ArrowType.LargeUtf8) {
-                return obj -> obj == null
-                        ? null
-                        : ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
+                return obj ->
+                        obj == null
+                                ? null
+                                : ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
             }
             throw new IllegalArgumentException("Unsupported type: " + field.getType());
         } else if (field.getType() instanceof ArrowType.Struct) {
