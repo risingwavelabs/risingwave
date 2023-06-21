@@ -20,8 +20,8 @@ use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::{TopNLimit, DistillUnit};
-use super::utils::{plan_node_name, Distill, watermark_pretty};
+use super::generic::{DistillUnit, TopNLimit};
+use super::utils::{plan_node_name, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Order;
 use crate::stream_fragmenter::BuildFragmentGraphState;
