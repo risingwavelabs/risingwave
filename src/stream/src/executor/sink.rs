@@ -25,15 +25,15 @@ use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl, SinkWriter};
+use risingwave_connector::sink::catalog::{SinkId, SinkType};
+use risingwave_connector::sink::{build_sink, Sink, SinkConfig, SinkImpl, SinkWriter};
 use risingwave_connector::{dispatch_sink, ConnectorParams};
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
 use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream, PkIndices};
+use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     input: BoxedExecutor,
@@ -48,33 +48,11 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
     log_reader: F::Reader,
     log_writer: F::Writer,
+    connector_params: ConnectorParams,
 }
 
 struct SinkMetrics {
     sink_commit_duration_metrics: Histogram,
-}
-
-fn build_sink(
-    config: SinkConfig,
-    columns: &[ColumnCatalog],
-    pk_indices: PkIndices,
-    connector_params: ConnectorParams,
-    sink_type: SinkType,
-    sink_id: u64,
-) -> StreamExecutorResult<SinkImpl> {
-    // The downstream sink can only see the visible columns.
-    let schema: Schema = columns
-        .iter()
-        .filter_map(|column| (!column.is_hidden).then(|| column.column_desc.clone().into()))
-        .collect();
-    Ok(SinkImpl::new(
-        config,
-        schema,
-        pk_indices,
-        connector_params,
-        sink_type,
-        sink_id,
-    )?)
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -103,7 +81,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         columns: Vec<ColumnCatalog>,
         pk_indices: Vec<usize>,
         sink_type: SinkType,
-        sink_id: u64,
+        sink_id: SinkId,
         actor_context: ActorContextRef,
         log_store_factory: F,
     ) -> StreamExecutorResult<Self> {
@@ -112,7 +90,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             config.clone(),
             &columns,
             pk_indices.clone(),
-            connector_params,
             sink_type,
             sink_id,
         )?;
@@ -133,6 +110,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             actor_context,
             log_reader,
             log_writer,
+            connector_params,
         })
     }
 
@@ -156,7 +134,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         );
 
         dispatch_sink!(self.sink, sink, {
-            let consume_log_stream = Self::execute_consume_log(sink, self.log_reader, sink_metrics);
+            let consume_log_stream = Self::execute_consume_log(
+                sink,
+                self.log_reader,
+                sink_metrics,
+                self.connector_params,
+            );
             select(consume_log_stream.into_stream(), write_log_stream).boxed()
         })
     }
@@ -234,9 +217,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink: S,
         mut log_reader: R,
         sink_metrics: SinkMetrics,
+        connector_params: ConnectorParams,
     ) -> StreamExecutorResult<Message> {
         log_reader.init().await?;
-        let mut sink_writer = sink.new_writer().await?;
+        let mut sink_writer = sink.new_writer(connector_params).await?;
 
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
@@ -425,7 +409,7 @@ mod test {
             columns.clone(),
             pk.clone(),
             SinkType::ForceAppendOnly,
-            0,
+            0.into(),
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )
@@ -513,7 +497,7 @@ mod test {
             columns,
             pk.clone(),
             SinkType::ForceAppendOnly,
-            0,
+            0.into(),
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )

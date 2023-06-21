@@ -27,7 +27,7 @@ use bytes::Bytes;
 use chrono::{Datelike, NaiveDateTime, Timelike};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
@@ -37,7 +37,8 @@ use serde_json::{json, Map, Value};
 use thiserror::Error;
 pub use tracing;
 
-use self::catalog::{SinkCatalog, SinkType};
+use self::catalog::SinkType;
+use crate::sink::catalog::SinkId;
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
@@ -55,8 +56,12 @@ pub trait Sink {
     type Writer: SinkWriter;
     type Coordinator: SinkCoordinator;
 
-    async fn new_writer(&self) -> Result<Self::Writer>;
-    async fn new_coordinator(&self) -> Result<Option<Self::Coordinator>> {
+    async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()>;
+    async fn new_writer(&self, connector_params: ConnectorParams) -> Result<Self::Writer>;
+    async fn new_coordinator(
+        &self,
+        _connector_rpc_endpoint: Option<String>,
+    ) -> Result<Option<Self::Coordinator>> {
         Ok(None)
     }
 }
@@ -118,8 +123,12 @@ impl Sink for BlackHoleSink {
     type Coordinator = NoSinkCoordinator;
     type Writer = Self;
 
-    async fn new_writer(&self) -> Result<Self::Writer> {
+    async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {
         Ok(Self)
+    }
+
+    async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -174,6 +183,21 @@ impl SinkConfig {
     }
 }
 
+pub fn build_sink(
+    config: SinkConfig,
+    columns: &[ColumnCatalog],
+    pk_indices: Vec<usize>,
+    sink_type: SinkType,
+    sink_id: SinkId,
+) -> Result<SinkImpl> {
+    // The downstream sink can only see the visible columns.
+    let schema: Schema = columns
+        .iter()
+        .filter_map(|column| (!column.is_hidden).then(|| column.column_desc.clone().into()))
+        .collect();
+    SinkImpl::new(config, schema, pk_indices, sink_type, sink_id)
+}
+
 #[derive(Debug)]
 pub enum SinkImpl {
     Redis(RedisSink),
@@ -201,9 +225,8 @@ impl SinkImpl {
         cfg: SinkConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
-        connector_params: ConnectorParams,
         sink_type: SinkType,
-        sink_id: u64,
+        sink_id: SinkId,
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, schema)?),
@@ -213,37 +236,11 @@ impl SinkImpl {
                 pk_indices,
                 sink_type.is_append_only(),
             )),
-            SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(
-                cfg,
-                schema,
-                pk_indices,
-                connector_params,
-                sink_id,
-            )),
+            SinkConfig::Remote(cfg) => {
+                SinkImpl::Remote(RemoteSink::new(cfg, schema, pk_indices, sink_id, sink_type))
+            }
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
         })
-    }
-
-    pub async fn validate(
-        cfg: SinkConfig,
-        sink_catalog: SinkCatalog,
-        connector_rpc_endpoint: Option<String>,
-    ) -> Result<()> {
-        match cfg {
-            SinkConfig::Redis(cfg) => RedisSink::new(cfg, sink_catalog.schema()).map(|_| ()),
-            SinkConfig::Kafka(cfg) => {
-                KafkaSink::validate(
-                    *cfg,
-                    sink_catalog.downstream_pk_indices(),
-                    sink_catalog.sink_type.is_append_only(),
-                )
-                .await
-            }
-            SinkConfig::Remote(cfg) => {
-                RemoteSink::validate(cfg, sink_catalog, connector_rpc_endpoint).await
-            }
-            SinkConfig::BlackHole => Ok(()),
-        }
     }
 }
 

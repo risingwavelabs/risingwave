@@ -40,7 +40,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 use tonic::{Status, Streaming};
 
-use super::catalog::SinkCatalog;
+use crate::sink::catalog::{SinkId, SinkType};
 use crate::sink::{
     record_to_json, NoSinkCoordinator, Result, Sink, SinkError, SinkWriter, TimestampHandlingMode,
 };
@@ -83,8 +83,8 @@ pub struct RemoteSink {
     config: RemoteConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
-    connector_params: ConnectorParams,
-    sink_id: u64,
+    sink_id: SinkId,
+    sink_type: SinkType,
 }
 
 impl RemoteSink {
@@ -92,30 +92,42 @@ impl RemoteSink {
         config: RemoteConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
-        connector_params: ConnectorParams,
-        sink_id: u64,
+        sink_id: SinkId,
+        sink_type: SinkType,
     ) -> Self {
         Self {
             config,
             schema,
             pk_indices,
-            connector_params,
             sink_id,
+            sink_type,
         }
     }
+}
 
-    pub async fn validate(
-        config: RemoteConfig,
-        sink_catalog: SinkCatalog,
-        connector_rpc_endpoint: Option<String>,
-    ) -> Result<()> {
+#[async_trait]
+impl Sink for RemoteSink {
+    type Coordinator = NoSinkCoordinator;
+    type Writer = RemoteSinkWriter;
+
+    async fn new_writer(&self, connector_params: ConnectorParams) -> Result<Self::Writer> {
+        RemoteSinkWriter::new(
+            self.config.clone(),
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            connector_params,
+            self.sink_id,
+        )
+        .await
+    }
+
+    async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()> {
         // FIXME: support struct and array in stream sink
-        let columns = sink_catalog
-            .columns
+        let columns = self.schema.fields
             .iter()
-            .map(|column| {
+            .map(|field| {
                 if matches!(
-                column.column_desc.data_type,
+                field.data_type,
                 DataType::Int16
                     | DataType::Int32
                     | DataType::Int64
@@ -134,20 +146,20 @@ impl RemoteSink {
                     | DataType::List(_)
             ) {
                     Ok( Column {
-                        name: column.column_desc.name.clone(),
-                        data_type: Some(column.column_desc.data_type.to_protobuf()),
+                        name: field.name.clone(),
+                        data_type: Some(field.data_type.to_protobuf()),
                     })
                 } else {
                     Err(SinkError::Remote(format!(
                         "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, List, Bytea and Varchar, got {:?}: {:?}",
-                        column.column_desc.name,
-                        column.column_desc.data_type
+                        field.name,
+                        field.data_type
                     )))
                 }
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let address = connector_rpc_endpoint.ok_or_else(|| {
+        let address = connector_rpc_endpoint.clone().ok_or_else(|| {
             SinkError::Remote("connector sink endpoint not specified".parse().unwrap())
         })?;
         let host_addr = HostAddr::try_from(&address).map_err(SinkError::from)?;
@@ -159,40 +171,19 @@ impl RemoteSink {
         })?;
         let table_schema = TableSchema {
             columns,
-            pk_indices: sink_catalog
-                .downstream_pk_indices()
-                .iter()
-                .map(|i| *i as _)
-                .collect_vec(),
+            pk_indices: self.pk_indices.iter().map(|i| *i as u32).collect_vec(),
         };
 
         // We validate a remote sink's accessibility as well as the pk.
         client
             .validate_sink_properties(
-                config.connector_type,
-                config.properties,
+                self.config.connector_type.clone(),
+                self.config.properties.clone(),
                 Some(table_schema),
-                sink_catalog.sink_type.to_proto(),
+                self.sink_type.to_proto(),
             )
             .await
             .map_err(SinkError::from)
-    }
-}
-
-#[async_trait]
-impl Sink for RemoteSink {
-    type Coordinator = NoSinkCoordinator;
-    type Writer = RemoteSinkWriter;
-
-    async fn new_writer(&self) -> Result<Self::Writer> {
-        RemoteSinkWriter::new(
-            self.config.clone(),
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            self.connector_params.clone(),
-            self.sink_id,
-        )
-        .await
     }
 }
 
@@ -238,7 +229,7 @@ impl RemoteSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
-        sink_id: u64,
+        sink_id: SinkId,
     ) -> Result<Self> {
         let address = connector_params.connector_rpc_endpoint.ok_or_else(|| {
             SinkError::Remote("connector sink endpoint not specified".parse().unwrap())
@@ -267,7 +258,7 @@ impl RemoteSinkWriter {
         let (request_sender, mut response) = client
             .start_sink_stream(
                 config.connector_type.clone(),
-                sink_id,
+                sink_id.sink_id as u64,
                 config.properties.clone(),
                 table_schema,
                 connector_params.sink_payload_format,

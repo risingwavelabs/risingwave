@@ -39,6 +39,7 @@ use crate::sink::{datum_to_json_object, record_to_json, NoSinkCoordinator, Resul
 use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
+    ConnectorParams,
 };
 
 pub const KAFKA_SINK: &str = "kafka";
@@ -160,26 +161,6 @@ impl KafkaSink {
             is_append_only,
         }
     }
-
-    pub async fn validate(
-        config: KafkaConfig,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-    ) -> Result<()> {
-        // For upsert Kafka sink, the primary key must be defined.
-        if !is_append_only && pk_indices.is_empty() {
-            return Err(SinkError::Config(anyhow!(
-                "primary key not defined for {} kafka sink (please define in `primary_key` field)",
-                config.r#type
-            )));
-        }
-
-        // Try Kafka connection.
-        // TODO: Reuse the conductor instance we create during validation.
-        KafkaTransactionConductor::new(config).await?;
-
-        Ok(())
-    }
 }
 
 #[async_trait::async_trait]
@@ -187,7 +168,7 @@ impl Sink for KafkaSink {
     type Coordinator = NoSinkCoordinator;
     type Writer = KafkaSinkWriter;
 
-    async fn new_writer(&self) -> Result<Self::Writer> {
+    async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {
         KafkaSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
@@ -195,6 +176,22 @@ impl Sink for KafkaSink {
             self.is_append_only,
         )
         .await
+    }
+
+    async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {
+        // For upsert Kafka sink, the primary key must be defined.
+        if !self.is_append_only && self.pk_indices.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "primary key not defined for {} kafka sink (please define in `primary_key` field)",
+                self.config.r#type
+            )));
+        }
+
+        // Try Kafka connection.
+        // TODO: Reuse the conductor instance we create during validation.
+        KafkaTransactionConductor::new(self.config.clone()).await?;
+
+        Ok(())
     }
 }
 

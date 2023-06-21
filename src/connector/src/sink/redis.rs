@@ -17,6 +17,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
 use crate::sink::{NoSinkCoordinator, Result, Sink, SinkWriter};
+use crate::ConnectorParams;
 
 #[derive(Clone, Debug)]
 pub struct RedisConfig;
@@ -35,7 +36,11 @@ impl Sink for RedisSink {
     type Coordinator = NoSinkCoordinator;
     type Writer = RedisSinkWriter;
 
-    async fn new_writer(&self) -> Result<Self::Writer> {
+    async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {
+        todo!()
+    }
+
+    async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {
         todo!()
     }
 }
