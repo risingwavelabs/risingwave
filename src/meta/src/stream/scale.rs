@@ -1665,6 +1665,10 @@ where
 
         Self::clone_no_shuffle_plan(&mut target_plan, &actor_map, &fragment_map)?;
 
+        target_plan.drain_filter(|_, plan| {
+            plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty()
+        });
+
         Ok(target_plan)
     }
 
