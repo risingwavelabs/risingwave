@@ -185,20 +185,25 @@ select * from series(10);
 
 The RisingWave Java UDF SDK supports the following data types:
 
-| SQL Type  | Java Type          | Notes              |
-| --------- | ------------------ | ------------------ |
-| SMALLINT  | short, Short       |                    |
-| INT       | int, Integer       |                    |
-| BIGINT    | long, Long         |                    |
-| FLOAT     | float, Float       |                    |
-| DOUBLE    | double, Double     |                    |
-| DECIMAL   | BigDecimal         |                    |
-| VARCHAR   | String             |                    |
-| BYTEA     | byte[]             |                    |
-| JSONB     | String             | Use `@DataTypeHint("JSONB") String` as the type. See [example](#jsonb). |
-| JSONB[]   | String[]           | Use `@DataTypeHint("JSONB[]") String[]` as the type. |
-| STRUCT<>  | user-defined class | Define a data class as the type. See [example](#struct-type). |
-| ...others |                    | Not supported yet. |
+| SQL Type         | Java Type                               | Notes              |
+| ---------------- | --------------------------------------- | ------------------ |
+| BOOLEAN          | boolean, Boolean                        |                    |
+| SMALLINT         | short, Short                            |                    |
+| INT              | int, Integer                            |                    |
+| BIGINT           | long, Long                              |                    |
+| REAL             | float, Float                            |                    |
+| DOUBLE PRECISION | double, Double                          |                    |
+| DECIMAL          | BigDecimal                              |                    |
+| DATE             | java.time.LocalDate                     |                    |
+| TIME             | java.time.LocalTime                     |                    |
+| TIMESTAMP        | java.time.LocalDateTime                 |                    |
+| INTERVAL         | com.risingwave.functions.PeriodDuration |                    |
+| VARCHAR          | String                                  |                    |
+| BYTEA            | byte[]                                  |                    |
+| JSONB            | String                                  | Use `@DataTypeHint("JSONB") String` as the type. See [example](#jsonb). |
+| JSONB[]          | String[]                                | Use `@DataTypeHint("JSONB[]") String[]` as the type.                    |
+| STRUCT<>         | user-defined class                      | Define a data class as the type. See [example](#struct-type).           |
+| ...others        |                                         | Not supported yet. |
 
 ### JSONB
 

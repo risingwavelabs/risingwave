@@ -17,11 +17,12 @@ use std::ops::BitAnd;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::UnionNode;
 
-use super::utils::formatter_debug_plan_node;
+use super::utils::{childless_record, formatter_debug_plan_node, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanRef};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -78,6 +79,15 @@ impl fmt::Display for StreamUnion {
         };
 
         builder.finish()
+    }
+}
+impl Distill for StreamUnion {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let mut vec = self.logical.fields_pretty();
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+            vec.push(("output_watermarks", ow));
+        }
+        childless_record("StreamUnion", vec)
     }
 }
 

@@ -624,7 +624,7 @@ mod tests {
             "fields.sequence_int.end" => "11111",
         ));
         let source_desc_builder =
-            create_source_desc_builder(&schema, row_id_index, source_info, properties);
+            create_source_desc_builder(&schema, row_id_index, source_info, properties, vec![]);
         let split_state_store = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             MemoryStateStore::new(),
@@ -706,7 +706,7 @@ mod tests {
         ));
 
         let source_desc_builder =
-            create_source_desc_builder(&schema, row_id_index, source_info, properties);
+            create_source_desc_builder(&schema, row_id_index, source_info, properties, vec![]);
         let mem_state_store = MemoryStateStore::new();
 
         let column_ids = vec![ColumnId::from(0)];

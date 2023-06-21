@@ -26,8 +26,8 @@ use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService,
-    OpendalConfig, PrometheusService, PubsubService, RedisService, ServiceConfig, Task,
+    FrontendService, GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig,
+    PrometheusService, PubsubService, RedisService, ServiceConfig, Task, TempoService,
     ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
@@ -106,7 +106,7 @@ fn task_main(
             ServiceConfig::Frontend(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Compactor(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
+            ServiceConfig::Tempo(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Pubsub(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
@@ -238,21 +238,16 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("dashboard http://{}:{}/", c.address, c.port));
             }
-            ServiceConfig::Jaeger(c) => {
+            ServiceConfig::Tempo(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = JaegerService::new(c.clone())?;
+                let mut service = TempoService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = risedev::ConfigureGrpcNodeTask::new(
-                    c.dashboard_address.clone(),
-                    c.dashboard_port,
-                    false,
-                )?;
+                let mut task =
+                    risedev::ConfigureGrpcNodeTask::new(c.listen_address.clone(), c.port, false)?;
                 task.execute(&mut ctx)?;
-                ctx.pb.set_message(format!(
-                    "dashboard http://{}:{}/",
-                    c.dashboard_address, c.dashboard_port
-                ));
+                ctx.pb
+                    .set_message(format!("api http://{}:{}/", c.listen_address, c.port));
             }
             ServiceConfig::AwsS3(c) => {
                 let mut ctx =

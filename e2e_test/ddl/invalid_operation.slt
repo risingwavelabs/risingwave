@@ -40,22 +40,22 @@ drop view not_exists.not_exists;
 
 # 3. drop relation in another database
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop table not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop materialized view not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop index not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop source not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop sink not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop view not_exists.not_exists.not_exists;
 
 # 4. Relation exists, but the DROP type is wrong.

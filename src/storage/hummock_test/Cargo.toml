@@ -31,7 +31,6 @@ risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_storage = { path = "..", features = ["test"] }
-risingwave_tracing = { path = "../../tracing" }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
 [target.'cfg(not(madsim))'.dependencies]
