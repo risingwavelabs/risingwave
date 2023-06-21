@@ -60,6 +60,8 @@ struct TaskHeartbeat {
     num_ssts_sealed: u32,
     num_ssts_uploaded: u32,
     num_progress_key: u64,
+    num_pending_read_io: u64,
+    num_pending_write_io: u64,
     create_time: Instant,
     expire_at: u64,
 }
@@ -338,6 +340,8 @@ impl CompactorManager {
                     num_ssts_sealed,
                     num_ssts_uploaded,
                     num_progress_key,
+                    num_pending_read_io,
+                    num_pending_write_io,
                 } in heartbeats.values()
                 {
                     let task_duration_too_long =
@@ -351,13 +355,17 @@ impl CompactorManager {
                             let (need_quota, total_file_count, total_key_count) =
                                 estimate_state_for_compaction(task);
                             tracing::info!(
-                                "CompactionGroupId {} Task {} duration too long create_time {:?} num_ssts_sealed {} num_ssts_uploaded {} num_progress_key {} need_quota {} total_file_count {} total_key_count {} target_level {} base_level {} target_sub_level_id {} task_type {}",
+                                "CompactionGroupId {} Task {} duration too long create_time {:?} num_ssts_sealed {} num_ssts_uploaded {} num_progress_key {} \
+                                pending_read_io_count {} pending_write_io_count {} need_quota {} total_file_count {} total_key_count {} target_level {} \
+                                base_level {} target_sub_level_id {} task_type {}",
                                 task.compaction_group_id,
                                 task.task_id,
                                 create_time,
                                 num_ssts_sealed,
                                 num_ssts_uploaded,
                                 num_progress_key,
+                                num_pending_read_io,
+                                num_pending_write_io,
                                 need_quota,
                                 total_file_count,
                                 total_key_count,
@@ -388,6 +396,8 @@ impl CompactorManager {
                 num_ssts_sealed: 0,
                 num_ssts_uploaded: 0,
                 num_progress_key: 0,
+                num_pending_read_io: 0,
+                num_pending_write_io: 0,
                 create_time: Instant::now(),
                 expire_at: now + self.task_expiry_seconds,
             },
@@ -427,6 +437,8 @@ impl CompactorManager {
                         task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
                         task_ref.num_progress_key = progress.num_progress_key;
                     }
+                    task_ref.num_pending_read_io = progress.num_pending_read_io;
+                    task_ref.num_pending_write_io = progress.num_pending_write_io;
                 }
             }
         }
@@ -458,6 +470,22 @@ impl CompactorManager {
 
     pub fn total_running_cpu_core_num(&self) -> u32 {
         self.policy.read().total_running_cpu_core_num()
+    }
+
+    pub fn get_progress(&self) -> Vec<CompactTaskProgress> {
+        self.task_heartbeats
+            .read()
+            .values()
+            .flat_map(|m| m.values())
+            .map(|hb| CompactTaskProgress {
+                task_id: hb.task.task_id,
+                num_ssts_sealed: hb.num_ssts_sealed,
+                num_ssts_uploaded: hb.num_ssts_uploaded,
+                num_progress_key: hb.num_progress_key,
+                num_pending_read_io: hb.num_pending_read_io,
+                num_pending_write_io: hb.num_pending_write_io,
+            })
+            .collect()
     }
 }
 
@@ -516,9 +544,7 @@ mod tests {
             context_id,
             &vec![CompactTaskProgress {
                 task_id: expired[0].1.task_id,
-                num_ssts_sealed: 0,
-                num_ssts_uploaded: 0,
-                num_progress_key: 0,
+                ..Default::default()
             }],
         );
         assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
@@ -531,6 +557,7 @@ mod tests {
                 num_ssts_sealed: 1,
                 num_ssts_uploaded: 1,
                 num_progress_key: 100,
+                ..Default::default()
             }],
         );
         assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
@@ -543,6 +570,7 @@ mod tests {
                 num_ssts_sealed: 1,
                 num_ssts_uploaded: 1,
                 num_progress_key: 100,
+                ..Default::default()
             }],
         );
         assert_eq!(compactor_manager.get_expired_tasks().len(), 0);

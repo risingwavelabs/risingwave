@@ -214,6 +214,7 @@ where
     ///
     /// Returns Ok(false) if there is no worker available.
     pub async fn start_full_gc(&self, sst_retention_time: Duration) -> Result<bool> {
+        self.hummock_manager.metrics.full_gc_trigger_count.inc();
         // Set a minimum sst_retention_time to avoid deleting SSTs of on-going write op.
         let sst_retention_time = cmp::max(
             sst_retention_time,
@@ -246,6 +247,7 @@ where
             tracing::info!("SST full scan returns no SSTs.");
             return Ok(0);
         }
+        let metrics = &self.hummock_manager.metrics;
         let spin_interval =
             Duration::from_secs(self.env.opts.collect_gc_watermark_spin_interval_sec);
         let watermark = collect_global_gc_watermark(
@@ -253,20 +255,27 @@ where
             spin_interval,
         )
         .await?;
-        let sst_number = object_ids.len();
+        metrics.full_gc_last_object_id_watermark.set(watermark as _);
+        let candidate_sst_number = object_ids.len();
+        metrics
+            .full_gc_candidate_object_count
+            .observe(candidate_sst_number as _);
         // 1. filter by watermark
         let object_ids = object_ids
             .into_iter()
             .filter(|s| *s < watermark)
             .collect_vec();
         // 2. filter by version
-        let number = self
+        let selected_sst_number = self
             .hummock_manager
             .extend_objects_to_delete_from_scan(&object_ids)
             .await;
+        metrics
+            .full_gc_selected_object_count
+            .observe(selected_sst_number as _);
         tracing::info!("GC watermark is {}. SST full scan returns {} SSTs. {} remains after filtered by GC watermark. {} remains after filtered by hummock version.",
-            watermark, sst_number, object_ids.len(), number);
-        Ok(number)
+            watermark, candidate_sst_number, object_ids.len(), selected_sst_number);
+        Ok(selected_sst_number)
     }
 }
 
@@ -287,7 +296,7 @@ where
     let workers = vec![
         cluster_manager.list_active_streaming_compute_nodes().await,
         cluster_manager
-            .list_worker_node(WorkerType::Compactor, Some(Running))
+            .list_worker_node(WorkerType::Compactor, Some(Running), true)
             .await,
     ]
     .concat();

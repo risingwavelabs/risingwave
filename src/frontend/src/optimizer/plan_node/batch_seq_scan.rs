@@ -16,7 +16,7 @@ use std::fmt;
 use std::ops::Bound;
 
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
@@ -25,7 +25,7 @@ use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::PbColumnDesc;
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
@@ -180,22 +180,11 @@ fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -
 }
 
 impl Distill for BatchSeqScan {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
-        vec.push(("table", Pretty::display(&self.logical.table_name)));
-        vec.push((
-            "columns",
-            Pretty::Array(
-                match verbose {
-                    true => self.logical.column_names_with_table_prefix(),
-                    false => self.logical.column_names(),
-                }
-                .into_iter()
-                .map(Pretty::from)
-                .collect(),
-            ),
-        ));
+        vec.push(("table", Pretty::from(self.logical.table_name.clone())));
+        vec.push(("columns", self.logical.columns_pretty(verbose)));
 
         if !self.scan_ranges.is_empty() {
             let range_strs = self.scan_ranges_as_strs(verbose);
@@ -213,7 +202,7 @@ impl Distill for BatchSeqScan {
             vec.push(("distribution", dist));
         }
 
-        Pretty::childless_record("BatchScan", vec)
+        childless_record("BatchScan", vec)
     }
 }
 

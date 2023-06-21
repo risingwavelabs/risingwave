@@ -35,6 +35,7 @@ use duration_str::parse_std;
 use risingwave_pb::connector_service::SinkPayloadFormat;
 use serde::de;
 
+pub mod aws_auth;
 pub mod aws_utils;
 pub mod error;
 mod macros;

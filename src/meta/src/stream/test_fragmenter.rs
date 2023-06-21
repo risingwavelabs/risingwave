@@ -430,6 +430,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
             )
         })
         .collect();
+
     let worker_nodes = std::iter::once((
         0,
         WorkerNode {

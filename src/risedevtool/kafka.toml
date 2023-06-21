@@ -2,10 +2,11 @@ extend = "common.toml"
 
 [env]
 KAFKA_DOWNLOAD_PATH = "${PREFIX_TMP}/kafka.tgz"
-KAFKA_VERSION = "3.2.3"
+KAFKA_VERSION = "3.4.1"
 KAFKA_SCALA_VERSION = "2.13"
 KAFKA_RELEASE = "kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}"
-KAFKA_DOWNLOAD_TGZ = "https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
+KAFKA_DOWNLOAD_RECENT_TGZ = "https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
+KAFKA_DOWNLOAD_ARCHIVE_TGZ = "https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"
 
 [tasks.download-kafka]
 private = true
@@ -20,7 +21,8 @@ if [ -d "${PREFIX_BIN}/kafka" ]; then
     exit 0
 fi
 echo "Kafka not found, download ${KAFKA_RELEASE}"
-curl -fL -o "${KAFKA_DOWNLOAD_PATH}" "${KAFKA_DOWNLOAD_TGZ}"
+curl -fL -o "${KAFKA_DOWNLOAD_PATH}" "${KAFKA_DOWNLOAD_RECENT_TGZ}" \
+ || curl -fL -o "${KAFKA_DOWNLOAD_PATH}" "${KAFKA_DOWNLOAD_ARCHIVE_TGZ}"
 tar -xf "${KAFKA_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 mv "${PREFIX_TMP}/${KAFKA_RELEASE}" "${PREFIX_BIN}/kafka"
 rm ${KAFKA_DOWNLOAD_PATH}

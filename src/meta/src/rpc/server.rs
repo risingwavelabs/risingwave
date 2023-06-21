@@ -36,6 +36,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
+use risingwave_pb::meta::serving_service_server::ServingServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
@@ -51,10 +52,10 @@ use super::intercept::MetricsMiddlewareLayer;
 use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
+use super::service::serving_service::ServingServiceImpl;
 use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
-use crate::batch::ServingVnodeMapping;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
@@ -72,10 +73,11 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
 use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
+use crate::serving::ServingVnodeMapping;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
-use crate::{batch, hummock, MetaError, MetaResult};
+use crate::{hummock, serving, MetaError, MetaResult};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -358,7 +360,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             .unwrap(),
     );
     let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
-    batch::on_meta_start(
+    serving::on_meta_start(
         env.notification_manager_ref(),
         cluster_manager.clone(),
         fragment_manager.clone(),
@@ -538,6 +540,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let backup_srv = BackupServiceImpl::new(backup_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone());
     let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
+    let serving_srv =
+        ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -577,10 +581,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .await,
     );
     sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
-    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await);
-    sub_tasks.push(HummockManager::start_lsm_stat_report(hummock_manager).await);
+    sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager).await);
     sub_tasks.push(
-        batch::start_serving_vnode_mapping_worker(
+        serving::start_serving_vnode_mapping_worker(
             env.notification_manager_ref(),
             cluster_manager.clone(),
             fragment_manager.clone(),
@@ -687,6 +690,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(BackupServiceServer::new(backup_srv))
         .add_service(SystemParamsServiceServer::new(system_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
+        .add_service(ServingServiceServer::new(serving_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 res = svc_shutdown_rx.changed() => {

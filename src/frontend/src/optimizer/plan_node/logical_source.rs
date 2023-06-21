@@ -19,6 +19,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
@@ -26,6 +27,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 
 use super::stream_watermark_filter::StreamWatermarkFilter;
+use super::utils::{childless_record, Distill};
 use super::{
     generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject,
     PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource, ToBatch,
@@ -34,6 +36,7 @@ use super::{
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -170,14 +173,6 @@ impl LogicalSource {
         })
     }
 
-    pub(super) fn column_names(&self) -> Vec<String> {
-        self.schema()
-            .fields()
-            .iter()
-            .map(|f| f.name.clone())
-            .collect()
-    }
-
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
     }
@@ -245,12 +240,28 @@ impl fmt::Display for LogicalSource {
                 f,
                 "LogicalSource {{ source: {}, columns: [{}], time_range: [{:?}] }}",
                 catalog.name,
-                self.column_names().join(", "),
+                self.schema().names_str().join(", "),
                 self.core.kafka_timestamp_range,
             )
         } else {
             write!(f, "LogicalSource")
         }
+    }
+}
+impl Distill for LogicalSource {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let fields = if let Some(catalog) = self.source_catalog() {
+            let src = Pretty::from(catalog.name.clone());
+            let time = Pretty::debug(&self.core.kafka_timestamp_range);
+            vec![
+                ("source", src),
+                ("columns", column_names_pretty(self.schema())),
+                ("time_range", time),
+            ]
+        } else {
+            vec![]
+        };
+        childless_record("LogicalSource", fields)
     }
 }
 

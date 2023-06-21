@@ -34,7 +34,6 @@ risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_storage = { path = "..", features = ["test"] }
-risingwave_tracing = { path = "../../tracing" }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
@@ -43,10 +42,13 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["async_futures"] }
+expect-test = "1"
 futures = { version = "0.3", default-features = false, features = [
     "alloc",
     "executor",
 ] }
+
+futures-async-stream = "0.2"
 risingwave_test_runner = { path = "../../test_runner" }
 serial_test = "0.9"
 sync-point = { path = "../../utils/sync-point" }
