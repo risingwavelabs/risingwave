@@ -16,13 +16,13 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::stream::StreamPlanRef;
-use super::utils::{formatter_debug_plan_node, watermark_fields_pretty, Distill};
+use super::utils::{childless_record, formatter_debug_plan_node, watermark_fields_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -40,7 +40,7 @@ pub struct StreamProject {
 }
 
 impl Distill for StreamProject {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let schema = self.schema();
         let mut vec = self.logical.fields_pretty(schema);
         let watermark_derivations = &self.watermark_derivations;
@@ -48,7 +48,7 @@ impl Distill for StreamProject {
             let wc = watermark_derivations.iter().map(|(_, i)| *i);
             vec.push(("output_watermarks", watermark_fields_pretty(wc, schema)));
         }
-        Pretty::childless_record("StreamProject", vec)
+        childless_record("StreamProject", vec)
     }
 }
 impl fmt::Display for StreamProject {

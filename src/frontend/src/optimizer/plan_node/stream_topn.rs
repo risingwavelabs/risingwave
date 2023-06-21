@@ -15,7 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
@@ -69,7 +69,7 @@ impl fmt::Display for StreamTopN {
     }
 }
 impl Distill for StreamTopN {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let name = plan_node_name!("StreamTopN",
             { "append_only", self.input().append_only() },
         );

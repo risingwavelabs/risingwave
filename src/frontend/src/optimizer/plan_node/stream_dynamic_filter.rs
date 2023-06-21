@@ -15,14 +15,16 @@
 use std::fmt;
 
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::FieldDisplay;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::generic::DynamicFilter;
-use super::utils::{column_names_pretty, formatter_debug_plan_node, watermark_pretty, Distill};
+use super::utils::{
+    childless_record, column_names_pretty, formatter_debug_plan_node, watermark_pretty, Distill,
+};
 use super::{generic, ExprRewritable};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
@@ -57,7 +59,7 @@ impl StreamDynamicFilter {
 }
 
 impl Distill for StreamDynamicFilter {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
         let pred = self.core.pretty_field();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
@@ -66,7 +68,7 @@ impl Distill for StreamDynamicFilter {
             vec.push(("output_watermarks", ow));
         }
         vec.push(("output", column_names_pretty(self.schema())));
-        Pretty::childless_record("StreamDynamicFilter", vec)
+        childless_record("StreamDynamicFilter", vec)
     }
 }
 

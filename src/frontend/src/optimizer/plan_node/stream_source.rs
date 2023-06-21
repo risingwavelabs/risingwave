@@ -17,11 +17,11 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
-use super::utils::{formatter_debug_plan_node, Distill};
+use super::utils::{childless_record, formatter_debug_plan_node, Distill};
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::utils::column_names_pretty;
@@ -74,7 +74,7 @@ impl fmt::Display for StreamSource {
     }
 }
 impl Distill for StreamSource {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = if let Some(catalog) = self.source_catalog() {
             let src = Pretty::from(catalog.name.clone());
             let col = column_names_pretty(self.schema());
@@ -82,7 +82,7 @@ impl Distill for StreamSource {
         } else {
             vec![]
         };
-        Pretty::childless_record("StreamSource", fields)
+        childless_record("StreamSource", fields)
     }
 }
 

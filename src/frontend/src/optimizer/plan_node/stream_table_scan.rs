@@ -17,6 +17,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
@@ -24,7 +25,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
-use super::utils::formatter_debug_plan_node;
+use super::utils::{childless_record, formatter_debug_plan_node, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
@@ -168,6 +169,33 @@ impl StreamTableScan {
 
 impl_plan_tree_node_for_leaf! { StreamTableScan }
 
+impl Distill for StreamTableScan {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut vec = Vec::with_capacity(4);
+        vec.push(("table", Pretty::from(self.logical.table_name.clone())));
+        vec.push(("columns", self.logical.columns_pretty(verbose)));
+
+        if verbose {
+            vec.push((
+                "pk",
+                Pretty::display(&IndicesDisplay {
+                    indices: self.logical_pk(),
+                    input_schema: &self.base.schema,
+                }),
+            ));
+            vec.push((
+                "dist",
+                Pretty::display(&DistributionDisplay {
+                    distribution: self.distribution(),
+                    input_schema: &self.base.schema,
+                }),
+            ));
+        }
+
+        childless_record("StreamTableScan", vec)
+    }
+}
 impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
