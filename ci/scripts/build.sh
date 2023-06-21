@@ -53,6 +53,10 @@ cargo build \
     -p risingwave_compaction_test \
     -p risingwave_backup_cmd \
     -p risingwave_e2e_extended_mode_test \
+    $RISINGWAVE_FEATURE_FLAGS \
+    --profile "$profile"
+
+ cargo build \
     --bin data-chunk-payload-generator\
     --bin data-chunk-payload-convert-generator\
     $RISINGWAVE_FEATURE_FLAGS \
