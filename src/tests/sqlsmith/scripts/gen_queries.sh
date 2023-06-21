@@ -326,7 +326,7 @@ check_failed_to_run_queries() {
 setup() {
   echo "--- Installing pg_format"
   wget https://github.com/darold/pgFormatter/archive/refs/tags/v5.5.tar.gz
-  tar -xvf pgFormatter-5.5.tar.gz
+  tar -xvf v5.5.tar.gz
   export PG_FORMAT="$PWD/pgFormatter-5.5/pg_format"
 
   echo "--- Configuring Test variables"
