@@ -55,14 +55,28 @@ where
         let property = req
             .property
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
-        let worker_node = self
+        let result = self
             .cluster_manager
             .add_worker_node(worker_type, host, property)
-            .await?;
-        Ok(Response::new(AddWorkerNodeResponse {
-            status: None,
-            node: Some(worker_node),
-        }))
+            .await;
+        match result {
+            Ok(worker_node) => Ok(Response::new(AddWorkerNodeResponse {
+                status: None,
+                node: Some(worker_node),
+            })),
+            Err(e) => {
+                if e.is_invalid_worker() {
+                    return Ok(Response::new(AddWorkerNodeResponse {
+                        status: Some(risingwave_pb::common::Status {
+                            code: risingwave_pb::common::status::Code::UnknownWorker as i32,
+                            message: format!("{}", e),
+                        }),
+                        node: None,
+                    }));
+                }
+                Err(e.into())
+            }
+        }
     }
 
     /// Update schedulability of a compute node. Will not affect actors which are already running on
