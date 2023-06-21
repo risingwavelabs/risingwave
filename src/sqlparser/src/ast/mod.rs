@@ -1941,7 +1941,7 @@ impl fmt::Display for FunctionArgExpr {
             FunctionArgExpr::Except(exprs) => {
                 write!(
                     f,
-                    "EXCEPT {}",
+                    "EXCEPT ({})",
                     exprs
                         .iter()
                         .map(|v| v.to_string())
