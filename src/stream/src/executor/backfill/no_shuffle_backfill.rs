@@ -39,6 +39,7 @@ use risingwave_storage::table::{collect_data_chunk, get_second};
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
+use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     build_temporary_state, check_all_vnode_finished, compute_bounds,
     construct_initial_finished_state, flush_data, iter_chunks, mapping_chunk, mapping_message,
@@ -438,7 +439,7 @@ where
         current_pos: Option<OwnedRow>,
         ordered: bool,
     ) {
-        // FIXME(kwannoel): `let-else` pattern does not work with `yield` for some reason.
+        // FIXME(kwannoel): `let-else` pattern does not work in generator.
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
         if range_bounds.is_none() {
             yield None;
@@ -467,11 +468,6 @@ where
         }
     }
 
-    /// Schema
-    /// | vnode | pk | `backfill_finished` |
-    ///
-    /// For `current_pos` and `old_pos` are just pk of upstream.
-    /// They should be strictly increasing.
     async fn persist_state(
         epoch: EpochPair,
         table: &mut Option<StateTable<S>>,
@@ -484,15 +480,15 @@ where
         let Some(table) = table else {
             return Ok(())
         };
-        if let Some(current_pos_inner) = current_pos {
-            // state w/o vnodes.
-            build_temporary_state(current_state, is_finished, current_pos_inner);
-            flush_data(table, epoch, old_state, current_state).await?;
-            *old_state = Some(current_state.into());
-        } else {
-            table.commit_no_data_expected(epoch);
-        }
-        Ok(())
+        utils::persist_state(
+            epoch,
+            table,
+            is_finished,
+            current_pos,
+            old_state,
+            current_state,
+        )
+        .await
     }
 }
 

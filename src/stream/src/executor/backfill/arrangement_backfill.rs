@@ -34,7 +34,7 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils::{
     build_temporary_state, check_all_vnode_finished, construct_initial_finished_state, flush_data,
-    mapping_chunk, mapping_message, mark_chunk_ref, update_pos,
+    mapping_chunk, mapping_message, mark_chunk_ref, persist_state, update_pos,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -266,7 +266,7 @@ where
                     );
 
                     // Persist state on barrier
-                    Self::persist_state(
+                    persist_state(
                         barrier.epoch,
                         &mut self.state_table,
                         false,
@@ -388,7 +388,7 @@ where
                     // Or snapshot was empty and we construct a placeholder state.
                     debug_assert_ne!(current_pos, None);
 
-                    Self::persist_state(
+                    persist_state(
                         barrier.epoch,
                         &mut self.state_table,
                         true,
@@ -458,30 +458,6 @@ where
         }
 
         yield None;
-    }
-
-    /// Schema
-    /// | vnode | pk | `backfill_finished` |
-    ///
-    /// For `current_pos` and `old_pos` are just pk of upstream.
-    /// They should be strictly increasing.
-    async fn persist_state(
-        epoch: EpochPair,
-        table: &mut StateTable<S>,
-        is_finished: bool,
-        current_pos: &Option<OwnedRow>,
-        old_state: &mut Option<Vec<Datum>>,
-        current_state: &mut [Datum],
-    ) -> StreamExecutorResult<()> {
-        if let Some(current_pos_inner) = current_pos {
-            // state w/o vnodes.
-            build_temporary_state(current_state, is_finished, current_pos_inner);
-            flush_data(table, epoch, old_state, current_state).await?;
-            *old_state = Some(current_state.into());
-        } else {
-            table.commit_no_data_expected(epoch);
-        }
-        Ok(())
     }
 }
 

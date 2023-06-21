@@ -258,3 +258,27 @@ pub(crate) async fn iter_chunks<'a, S, E>(
 
     yield None;
 }
+
+/// Schema
+/// | vnode | pk | `backfill_finished` |
+///
+/// For `current_pos` and `old_pos` are just pk of upstream.
+/// They should be strictly increasing.
+pub(crate) async fn persist_state<S: StateStore>(
+    epoch: EpochPair,
+    table: &mut StateTable<S>,
+    is_finished: bool,
+    current_pos: &Option<OwnedRow>,
+    old_state: &mut Option<Vec<Datum>>,
+    current_state: &mut [Datum],
+) -> StreamExecutorResult<()> {
+    if let Some(current_pos_inner) = current_pos {
+        // state w/o vnodes.
+        build_temporary_state(current_state, is_finished, current_pos_inner);
+        flush_data(table, epoch, old_state, current_state).await?;
+        *old_state = Some(current_state.into());
+    } else {
+        table.commit_no_data_expected(epoch);
+    }
+    Ok(())
+}
