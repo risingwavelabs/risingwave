@@ -21,7 +21,7 @@ use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
 use serde_with::serde_as;
 
-use crate::source::aws_auth::AwsAuthProps;
+use crate::aws_auth::AwsAuthProps;
 
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.

@@ -22,10 +22,10 @@ use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, Pro
 use risingwave_common::error::{Result, RwError};
 use url::Url;
 
+use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::parser::schema_registry::{Client, ConfluentSchema};
 use crate::parser::util::download_from_http;
-use crate::source::aws_auth::AwsAuthProps;
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 

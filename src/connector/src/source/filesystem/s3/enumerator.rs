@@ -17,8 +17,8 @@ use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
 use itertools::Itertools;
 
+use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
-use crate::source::aws_auth::AwsAuthProps;
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::SplitEnumerator;

@@ -21,7 +21,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use url::Url;
 
-use crate::source::aws_auth::AwsAuthProps;
+use crate::aws_auth::AwsAuthProps;
 
 pub const AWS_DEFAULT_CONFIG: [&str; 7] = [
     "region",

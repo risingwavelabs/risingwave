@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod aws_auth;
 pub mod base;
 pub mod cdc;
 pub mod data_gen_util;

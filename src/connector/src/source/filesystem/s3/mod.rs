@@ -18,7 +18,7 @@ mod source;
 use serde::Deserialize;
 pub use source::S3FileReader;
 
-use crate::source::aws_auth::AwsAuthProps;
+use crate::aws_auth::AwsAuthProps;
 
 pub const S3_CONNECTOR: &str = "s3";
 
