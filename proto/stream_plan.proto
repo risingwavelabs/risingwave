@@ -687,7 +687,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_CHAIN_NODE = 16;
   FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
   FRAGMENT_TYPE_FLAG_VALUES = 64;
-  FRAGMENT_TYPE_FLAG_DML= 128;
+  FRAGMENT_TYPE_FLAG_DML = 128;
 }
 
 // The environment associated with a stream plan
