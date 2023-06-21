@@ -58,18 +58,51 @@ second	2202-02-16 20:38:40+00:00
 week	2202-02-14 13:00:00+00:00
 year	2201-12-31 13:00:00+00:00
 
+query T rowsort
+SELECT field, date_trunc(field, TIMESTAMP WITH TIME ZONE '2202-02-16 20:38:40.123456Z') FROM t;
+----
+century	2201-01-01 00:00:00+00:00
+day	2202-02-16 00:00:00+00:00
+decade	2200-01-01 00:00:00+00:00
+hour	2202-02-16 20:00:00+00:00
+microseconds	2202-02-16 20:38:40.123456+00:00
+millennium	2001-01-01 00:00:00+00:00
+milliseconds	2202-02-16 20:38:40.123+00:00
+minute	2202-02-16 20:38:00+00:00
+month	2202-02-01 00:00:00+00:00
+quarter	2202-01-01 00:00:00+00:00
+second	2202-02-16 20:38:40+00:00
+week	2202-02-15 00:00:00+00:00
+year	2202-01-01 00:00:00+00:00
+
+query T rowsort
+SELECT field, date_trunc(field, DATE '2202-02-16') FROM t;
+----
+century	2201-01-01 00:00:00+00:00
+day	2202-02-16 00:00:00+00:00
+decade	2200-01-01 00:00:00+00:00
+hour	2202-02-16 00:00:00+00:00
+microseconds	2202-02-16 00:00:00+00:00
+millennium	2001-01-01 00:00:00+00:00
+milliseconds	2202-02-16 00:00:00+00:00
+minute	2202-02-16 00:00:00+00:00
+month	2202-02-01 00:00:00+00:00
+quarter	2202-01-01 00:00:00+00:00
+second	2202-02-16 00:00:00+00:00
+week	2202-02-15 00:00:00+00:00
+year	2202-01-01 00:00:00+00:00
+
 statement ok
 DELETE FROM t WHERE field = 'week';
 
-# TODO: support us precision in interval
 query T rowsort
-SELECT field, date_trunc(field, INTERVAL '2333 year 4 months 5 days 02:47:33.123') FROM t;
+SELECT field, date_trunc(field, INTERVAL '2333 year 4 months 5 days 02:47:33.123456') FROM t;
 ----
 century	2300 years
 day	2333 years 4 mons 5 days
 decade	2330 years
 hour	2333 years 4 mons 5 days 02:00:00
-microseconds	2333 years 4 mons 5 days 02:47:33.123
+microseconds	2333 years 4 mons 5 days 02:47:33.123456
 millennium	2000 years
 milliseconds	2333 years 4 mons 5 days 02:47:33.123
 minute	2333 years 4 mons 5 days 02:47:00
@@ -77,6 +110,22 @@ month	2333 years 4 mons
 quarter	2333 years 3 mons
 second	2333 years 4 mons 5 days 02:47:33
 year	2333 years
+
+query T rowsort
+SELECT field, date_trunc(field, TIME '02:47:33.123456') FROM t;
+----
+century	00:00:00
+day	00:00:00
+decade	00:00:00
+hour	02:00:00
+microseconds	02:47:33.123456
+millennium	00:00:00
+milliseconds	02:47:33.123
+minute	02:47:00
+month	00:00:00
+quarter	00:00:00
+second	02:47:33
+year	00:00:00
 
 # truncate 'week' is not supported for interval
 statement error

@@ -194,6 +194,17 @@ impl SessionTimezone {
                 }
                 None
             }
+            // `date_trunc(field_string, input_timestamptz)`
+            // => `date_trunc(field_string, input_timestamptz, zone_string)`
+            ExprType::DateTrunc => {
+                if !(inputs.len() == 2 && inputs[1].return_type() == DataType::Timestamptz) {
+                    return None;
+                }
+                assert_eq!(inputs[0].return_type(), DataType::Varchar);
+                let mut new_inputs = inputs.clone();
+                new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
+                Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
+            }
             _ => None,
         }
     }
