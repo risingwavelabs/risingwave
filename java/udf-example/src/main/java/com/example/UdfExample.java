@@ -16,6 +16,7 @@ package com.example;
 
 import com.google.gson.Gson;
 import com.risingwave.functions.DataTypeHint;
+import com.risingwave.functions.PeriodDuration;
 import com.risingwave.functions.ScalarFunction;
 import com.risingwave.functions.TableFunction;
 import com.risingwave.functions.UdfServer;
