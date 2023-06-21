@@ -97,3 +97,13 @@ query T
 select '\x31'::bytea > '1'::bytea;
 ----
 f
+
+query T
+select 'a'::varchar::bytea;
+----
+\x61
+
+query T
+select 'a'::bytea::varchar;
+----
+\x61
