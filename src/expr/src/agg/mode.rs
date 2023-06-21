@@ -21,7 +21,7 @@ use super::Aggregator;
 use crate::agg::AggCall;
 use crate::Result;
 
-#[build_aggregate("mode(*) -> *")]
+#[build_aggregate("mode(*) -> auto")]
 fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
     Ok(Box::new(Mode::new(agg.return_type)))
 }

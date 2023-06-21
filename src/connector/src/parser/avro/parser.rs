@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Reader, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -24,8 +25,8 @@ use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::schema_resolver::*;
+use super::util::avro_schema_to_column_descs;
 use crate::common::UpsertMessage;
-use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::upsert::UpsertChangeEvent;
@@ -111,35 +112,16 @@ impl AvroParserConfig {
         }
     }
 
-    pub fn extract_pks(&self) -> Result<Vec<ColumnDesc>> {
-        if let Some(Schema::Record { fields, .. }) = self.key_schema.as_deref() {
-            let mut index = 0;
-            let fields = fields
-                .iter()
-                .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
-                .collect::<Result<Vec<_>>>()?;
-            Ok(fields)
-        } else {
-            Err(RwError::from(InternalError(
-                "Kafka message key schema is invalid. Record type is required, or specify a primary key column to bypass the primary key detection.".into(),
-            )))
-        }
+    pub fn extract_pks(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+        avro_schema_to_column_descs(
+            self.key_schema
+                .as_deref()
+                .ok_or_else(|| anyhow::format_err!("key schema is required"))?,
+        )
     }
 
-    pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
-        // there must be a record at top level
-        if let Schema::Record { fields, .. } = self.schema.as_ref() {
-            let mut index = 0;
-            let fields = fields
-                .iter()
-                .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
-                .collect::<Result<Vec<_>>>()?;
-            Ok(fields)
-        } else {
-            Err(RwError::from(InternalError(
-                "schema invalid, record required".into(),
-            )))
-        }
+    pub fn map_to_columns(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+        avro_schema_to_column_descs(self.schema.as_ref())
     }
 }
 
@@ -171,6 +153,35 @@ impl AvroParser {
         self.key_schema.is_some()
     }
 
+    async fn parse_avro_value(
+        &self,
+        payload: &[u8],
+        reader_schema: Option<&Schema>,
+    ) -> anyhow::Result<Option<Value>> {
+        // parse payload to avro value
+        // if use confluent schema, get writer schema from confluent schema registry
+        if let Some(resolver) = &self.schema_resolver {
+            let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
+            let writer_schema = resolver.get(schema_id).await?;
+            Ok(Some(from_avro_datum(
+                writer_schema.as_ref(),
+                &mut raw_payload,
+                reader_schema,
+            )?))
+        } else if let Some(schema) = reader_schema {
+            let mut reader = Reader::with_schema(schema, payload)?;
+            match reader.next() {
+                Some(Ok(v)) => Ok(Some(v)),
+                Some(Err(e)) => Err(e)?,
+                None => {
+                    anyhow::bail!("avro parse unexpected eof")
+                }
+            }
+        } else {
+            unreachable!("both schema_resolver and reader_schema not exist");
+        }
+    }
+
     pub(crate) async fn parse_inner(
         &self,
         payload: Vec<u8>,
@@ -193,61 +204,14 @@ impl AvroParser {
         };
 
         let avro_value = if let Some(payload) = raw_value {
-            // parse payload to avro value
-            // if use confluent schema, get writer schema from confluent schema registry
-            if let Some(resolver) = &self.schema_resolver {
-                let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
-                let writer_schema = resolver.get(schema_id).await?;
-                let reader_schema = Some(&*self.schema);
-                Some(
-                    from_avro_datum(writer_schema.as_ref(), &mut raw_payload, reader_schema)
-                        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
-                )
-            } else {
-                let mut reader = Reader::with_schema(&self.schema, &payload as &[u8])
-                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-                match reader.next() {
-                    Some(Ok(v)) => Some(v),
-                    Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
-                    None => {
-                        return Err(RwError::from(ProtocolError(
-                            "avro parse unexpected eof".to_string(),
-                        )));
-                    }
-                }
-            }
+            self.parse_avro_value(payload.as_ref(), Some(&*self.schema))
+                .await?
         } else {
             None
         };
-
         let avro_key = if let Some(payload) = raw_key {
-            if let Some(resolver) = &self.schema_resolver {
-                let (schema_id, mut raw_payload) = extract_schema_id(payload.as_ref())?;
-                let writer_schema = resolver.get(schema_id).await?;
-                let reader_schema = self.key_schema.as_ref();
-                let value = from_avro_datum(
-                    writer_schema.as_ref(),
-                    &mut raw_payload,
-                    reader_schema.map(|x| &**x),
-                )
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-                Some(value)
-            } else if let Some(key_schema) = self.key_schema.as_ref() {
-                let mut reader = Reader::with_schema(key_schema, &payload as &[u8])
-                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-                match reader.next() {
-                    Some(Ok(v)) => Some(v),
-                    Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
-                    None => {
-                        return Err(RwError::from(ProtocolError(
-                            "avro parse unexpected eof".to_string(),
-                        )));
-                    }
-                }
-            } else {
-                None
-            }
+            self.parse_avro_value(payload.as_ref(), self.key_schema.as_deref())
+                .await?
         } else {
             None
         };
@@ -320,7 +284,7 @@ mod test {
         read_schema_from_http, read_schema_from_local, read_schema_from_s3, AvroParser,
         AvroParserConfig,
     };
-    use crate::parser::avro::util::unix_epoch_days;
+    use crate::parser::unified::avro::unix_epoch_days;
     use crate::parser::SourceStreamChunkBuilder;
     use crate::source::SourceColumnDesc;
 
