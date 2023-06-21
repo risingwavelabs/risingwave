@@ -469,10 +469,7 @@ impl LocalQueryExecution {
         &self,
         table_id: &TableId,
     ) -> SchedulerResult<ParallelUnitMapping> {
-        let guard = self
-            .front_env
-            .catalog_reader()
-            .read_guard();
+        let guard = self.front_env.catalog_reader().read_guard();
 
         let table = guard
             .get_table_by_id(table_id)

@@ -643,9 +643,7 @@ impl StageRunner {
         &self,
         table_id: &TableId,
     ) -> SchedulerResult<ParallelUnitMapping> {
-        let guard = self
-            .catalog_reader
-            .read_guard();
+        let guard = self.catalog_reader.read_guard();
 
         let table = guard
             .get_table_by_id(table_id)
