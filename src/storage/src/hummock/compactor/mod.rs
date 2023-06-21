@@ -788,6 +788,9 @@ impl Compactor {
                     .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
                     .verbose_instrument_await("add_full_key_delete")
                     .await?;
+                last_table_stats.total_key_count += 1;
+                last_table_stats.total_key_size += iter_key.encoded_len() as i64;
+                last_table_stats.total_value_size += 1;
                 iter_key.epoch = epoch;
                 is_new_user_key = false;
             }
