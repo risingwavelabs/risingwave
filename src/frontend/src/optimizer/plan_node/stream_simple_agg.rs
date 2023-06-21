@@ -20,7 +20,7 @@ use pretty_xmlish::Pretty;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
-use super::utils::Distill;
+use super::utils::{plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
 use crate::optimizer::property::Distribution;
@@ -66,23 +66,19 @@ impl StreamSimpleAgg {
 
 impl fmt::Display for StreamSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = if self.input().append_only() {
-            "StreamAppendOnlySimpleAgg"
-        } else {
-            "StreamSimpleAgg"
-        };
-        self.logical.fmt_with_name(f, name)
+        let name = plan_node_name!("StreamSimpleAgg",
+            { "append_only", self.input().append_only() },
+        );
+        self.logical.fmt_with_name(f, &name)
     }
 }
 
 impl Distill for StreamSimpleAgg {
     fn distill<'a>(&self) -> Pretty<'a> {
-        let name = if self.input().append_only() {
-            "StreamAppendOnlySimpleAgg"
-        } else {
-            "StreamSimpleAgg"
-        };
-        Pretty::childless_record(name, self.logical.fields_pretty())
+        let name = plan_node_name!("StreamSimpleAgg",
+            { "append_only", self.input().append_only() },
+        );
+        Pretty::childless_record(&name, self.logical.fields_pretty())
     }
 }
 
