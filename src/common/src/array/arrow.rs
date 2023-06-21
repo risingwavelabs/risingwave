@@ -95,7 +95,8 @@ converts_generic! {
     { arrow_array::Decimal128Array, Decimal128(_, _), ArrayImpl::Decimal },
     { arrow_array::Decimal256Array, Decimal256(_, _), ArrayImpl::Int256 },
     { arrow_array::Date32Array, Date32, ArrayImpl::Date },
-    { arrow_array::TimestampMicrosecondArray, Timestamp(Microsecond, _), ArrayImpl::Timestamp },
+    { arrow_array::TimestampMicrosecondArray, Timestamp(Microsecond, None), ArrayImpl::Timestamp },
+    { arrow_array::TimestampMicrosecondArray, Timestamp(Microsecond, Some(_)), ArrayImpl::Timestamptz },
     { arrow_array::Time64MicrosecondArray, Time64(Microsecond), ArrayImpl::Time },
     { arrow_array::IntervalMonthDayNanoArray, Interval(MonthDayNano), ArrayImpl::Interval },
     { arrow_array::StructArray, Struct(_), ArrayImpl::Struct },
@@ -122,6 +123,7 @@ impl From<&arrow_schema::DataType> for DataType {
             Date32 => Self::Date,
             Time64(Microsecond) => Self::Time,
             Timestamp(Microsecond, None) => Self::Timestamp,
+            Timestamp(Microsecond, Some(_)) => Self::Timestamptz,
             Interval(MonthDayNano) => Self::Interval,
             Binary => Self::Bytea,
             Utf8 => Self::Varchar,
@@ -162,6 +164,9 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Float64 => Self::Float64,
             DataType::Date => Self::Date32,
             DataType::Timestamp => Self::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
+            DataType::Timestamptz => {
+                Self::Timestamp(arrow_schema::TimeUnit::Microsecond, Some("".into()))
+            }
             DataType::Time => Self::Time64(arrow_schema::TimeUnit::Microsecond),
             DataType::Interval => Self::Interval(arrow_schema::IntervalUnit::MonthDayNano),
             DataType::Varchar => Self::Utf8,
@@ -252,6 +257,7 @@ converts!(Utf8Array, arrow_array::StringArray);
 converts!(DateArray, arrow_array::Date32Array, @map);
 converts!(TimeArray, arrow_array::Time64MicrosecondArray, @map);
 converts!(TimestampArray, arrow_array::TimestampMicrosecondArray, @map);
+converts!(TimestamptzArray, arrow_array::TimestampMicrosecondArray, @map);
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 
 /// Converts RisingWave value from and into Arrow value.
@@ -337,6 +343,18 @@ impl FromIntoArrow for Timestamp {
             .signed_duration_since(NaiveDateTime::default())
             .num_microseconds()
             .unwrap()
+    }
+}
+
+impl FromIntoArrow for Timestamptz {
+    type ArrowType = i64;
+
+    fn from_arrow(value: Self::ArrowType) -> Self {
+        Timestamptz(value)
+    }
+
+    fn into_arrow(self) -> Self::ArrowType {
+        self.0
     }
 }
 
@@ -558,6 +576,12 @@ impl From<&ListArray> for arrow_array::ListArray {
                 b.append_option(v.map(|d| d.into_arrow()))
             }),
             ArrayImpl::Timestamp(a) => build(
+                array,
+                a,
+                TimestampMicrosecondBuilder::with_capacity(a.len()),
+                |b, v| b.append_option(v.map(|d| d.into_arrow())),
+            ),
+            ArrayImpl::Timestamptz(a) => build(
                 array,
                 a,
                 TimestampMicrosecondBuilder::with_capacity(a.len()),

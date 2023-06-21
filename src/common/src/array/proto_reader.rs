@@ -50,6 +50,7 @@ impl ArrayImpl {
             PbArrayType::Date => read_date_array(array, cardinality)?,
             PbArrayType::Time => read_time_array(array, cardinality)?,
             PbArrayType::Timestamp => read_timestamp_array(array, cardinality)?,
+            PbArrayType::Timestamptz => read_timestamptz_array(array, cardinality)?,
             PbArrayType::Interval => read_interval_array(array, cardinality)?,
             PbArrayType::Jsonb => {
                 read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
@@ -122,7 +123,7 @@ fn read_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Date> {
 fn read_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Time> {
     match cursor.read_u64::<BigEndian>() {
         Ok(t) => Time::with_nano(t).map_err(|e| anyhow!(e).into()),
-        Err(e) => bail!("Failed to read i64 from NaiveTime buffer: {}", e),
+        Err(e) => bail!("Failed to read i64 from Time buffer: {}", e),
     }
 }
 
@@ -132,6 +133,13 @@ fn read_timestamp(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
         .map_err(|e| anyhow!("Failed to read i64 from Timestamp buffer: {}", e))
         .and_then(|t| Timestamp::with_micros(t).map_err(|e| anyhow!("{}", e)))
         .map_err(Into::into)
+}
+
+fn read_timestamptz(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Timestamptz> {
+    match cursor.read_i64::<BigEndian>() {
+        Ok(t) => Timestamptz::from_protobuf(t),
+        Err(e) => bail!("Failed to read i64 from Timestamptz buffer: {}", e),
+    }
 }
 
 fn read_interval(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Interval> {
@@ -185,7 +193,8 @@ read_one_value_array! {
     { Interval, IntervalArrayBuilder },
     { Date, DateArrayBuilder },
     { Time, TimeArrayBuilder },
-    { Timestamp, TimestampArrayBuilder }
+    { Timestamp, TimestampArrayBuilder },
+    { Timestamptz, TimestamptzArrayBuilder }
 }
 
 fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> ArrayResult<i64> {

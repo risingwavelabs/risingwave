@@ -116,7 +116,8 @@ impl_primitive_for_others! {
     { Interval, Interval, Interval },
     { Date, Date, Date },
     { Time, Time, Time },
-    { Timestamp, Timestamp, Timestamp }
+    { Timestamp, Timestamp, Timestamp },
+    { Timestamptz, Timestamptz, Timestamptz }
 }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.

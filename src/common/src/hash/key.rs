@@ -38,7 +38,7 @@ use crate::array::{ListValue, StructValue};
 use crate::estimate_size::EstimateSize;
 use crate::types::{
     DataType, Date, Decimal, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, Serial,
-    Time, Timestamp, F32, F64,
+    Time, Timestamp, Timestamptz, F32, F64,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
 use crate::util::sort_util::OrderType;
@@ -510,6 +510,18 @@ impl HashKeyDe for Time {
         let secs = buf.get_u32_ne();
         let nano = buf.get_u32_ne();
         Time::with_secs_nano(secs, nano).unwrap()
+    }
+}
+
+impl HashKeySer<'_> for Timestamptz {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        buf.put_i64_ne(self.0);
+    }
+}
+
+impl HashKeyDe for Timestamptz {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        Timestamptz(buf.get_i64_ne())
     }
 }
 

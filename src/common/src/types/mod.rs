@@ -55,10 +55,10 @@ mod scalar_impl;
 mod serial;
 mod struct_type;
 mod successor;
+mod timestamptz;
 mod to_binary;
 mod to_text;
 
-// export data types
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::{Decimal, PowError as DecimalPowError};
 pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
@@ -71,8 +71,8 @@ pub use self::ordered_float::{FloatExt, IntoOrdered};
 pub use self::scalar_impl::*;
 pub use self::serial::Serial;
 pub use self::struct_type::StructType;
-// export traits
 pub use self::successor::Successor;
+pub use self::timestamptz::*;
 pub use self::to_binary::ToBinary;
 pub use self::to_text::ToText;
 
@@ -102,7 +102,7 @@ macro_rules! for_all_type_pairs {
             { Date,        Date },
             { Time,        Time },
             { Timestamp,   Timestamp },
-            { Timestamptz, Int64 },
+            { Timestamptz, Timestamptz },
             { Interval,    Interval },
             { Decimal,     Decimal },
             { Jsonb,       Jsonb },
@@ -428,8 +428,7 @@ impl DataType {
             DataType::Date => ScalarImpl::Date(Date::MIN),
             DataType::Time => ScalarImpl::Time(Time::from_hms_uncheck(0, 0, 0)),
             DataType::Timestamp => ScalarImpl::Timestamp(Timestamp::MIN),
-            // FIXME(yuhao): Add a timestamptz scalar.
-            DataType::Timestamptz => ScalarImpl::Int64(i64::MIN),
+            DataType::Timestamptz => ScalarImpl::Timestamptz(Timestamptz::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
             DataType::Interval => ScalarImpl::Interval(Interval::MIN),
             DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::dummy()), // NOT `min` #7981
@@ -557,8 +556,9 @@ macro_rules! for_all_scalar_variants {
             { Decimal, decimal, Decimal, Decimal  },
             { Interval, interval, Interval, Interval },
             { Date, date, Date, Date },
-            { Timestamp, timestamp, Timestamp, Timestamp },
             { Time, time, Time, Time },
+            { Timestamp, timestamp, Timestamp, Timestamp },
+            { Timestamptz, timestamptz, Timestamptz, Timestamptz },
             { Jsonb, jsonb, JsonbVal, JsonbRef<'scalar> },
             { Struct, struct, StructValue, StructRef<'scalar> },
             { List, list, ListValue, ListRef<'scalar> },
@@ -1079,6 +1079,7 @@ impl ScalarRefImpl<'_> {
                 v.0.timestamp().serialize(&mut *ser)?;
                 v.0.timestamp_subsec_nanos().serialize(ser)?;
             }
+            Self::Timestamptz(v) => v.serialize(ser)?,
             Self::Time(v) => {
                 v.0.num_seconds_from_midnight().serialize(&mut *ser)?;
                 v.0.nanosecond().serialize(ser)?;
@@ -1132,7 +1133,7 @@ impl ScalarImpl {
                 Timestamp::with_secs_nsecs(secs, nsecs)
                     .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
-            Ty::Timestamptz => Self::Int64(i64::deserialize(de)?),
+            Ty::Timestamptz => Self::Timestamptz(Timestamptz::deserialize(de)?),
             Ty::Date => Self::Date({
                 let days = i32::deserialize(de)?;
                 Date::with_days(days).map_err(|e| memcomparable::Error::Message(format!("{e}")))?
