@@ -87,6 +87,18 @@ impl LogicalValues {
     pub fn rows(&self) -> &[Vec<ExprImpl>] {
         self.rows.as_ref()
     }
+
+    pub(super) fn rows_pretty<'a>(&self) -> Pretty<'a> {
+        let data = self
+            .rows()
+            .iter()
+            .map(|row| {
+                let collect = row.iter().map(Pretty::debug).collect();
+                Pretty::Array(collect)
+            })
+            .collect();
+        Pretty::Array(data)
+    }
 }
 
 impl_plan_tree_node_for_leaf! { LogicalValues }
@@ -101,17 +113,9 @@ impl fmt::Display for LogicalValues {
 }
 impl Distill for LogicalValues {
     fn distill<'a>(&self) -> Pretty<'a> {
-        let data = self
-            .rows()
-            .iter()
-            .map(|row| {
-                let collect = row.iter().map(Pretty::debug).collect();
-                Pretty::Array(collect)
-            })
-            .collect();
-        let data = Pretty::Array(data);
+        let data = self.rows_pretty();
         let fields = vec![("rows", data), ("schema", Pretty::debug(&self.schema()))];
-        Pretty::childless_record("BatchValues", fields)
+        Pretty::childless_record("LogicalValues", fields)
     }
 }
 

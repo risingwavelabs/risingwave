@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 // Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -77,7 +78,7 @@ impl<PlanRef: Eq + Hash> Delete<PlanRef> {
 }
 
 impl<PlanRef: Eq + Hash> DistillUnit for Delete<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
         let mut vec = Vec::with_capacity(if self.returning { 2 } else { 1 });
         vec.push(("table", Pretty::from(self.table_name.clone())));
         if self.returning {
