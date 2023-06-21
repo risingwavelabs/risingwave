@@ -7,12 +7,12 @@
     create index i_b1 on b(b1);
     /* should generate delta join plan, and stream index scan */
     select * from a join b on a.a1 = b.b1 ;
-  stream_plan: |
-    StreamMaterialize { columns: [a1, a2, b1, b2, i_a1.a._row_id(hidden), i_b1.b._row_id(hidden)], stream_key: [i_a1.a._row_id, i_b1.b._row_id, a1], pk_columns: [i_a1.a._row_id, i_b1.b._row_id, a1], pk_conflict: "NoCheck" }
-    └─StreamExchange { dist: HashShard(i_a1.a1, i_a1.a._row_id, i_b1.b._row_id) }
-      └─StreamDeltaJoin { type: Inner, predicate: i_a1.a1 = i_b1.b1, output: [i_a1.a1, i_a1.a2, i_b1.b1, i_b1.b2, i_a1.a._row_id, i_b1.b._row_id] }
-        ├─StreamTableScan { table: i_a1, columns: [i_a1.a1, i_a1.a2, i_a1.a._row_id], pk: [i_a1.a._row_id], dist: UpstreamHashShard(i_a1.a1) }
-        └─StreamTableScan { table: i_b1, columns: [i_b1.b1, i_b1.b2, i_b1.b._row_id], pk: [i_b1.b._row_id], dist: UpstreamHashShard(i_b1.b1) }
+  stream_plan: |-
+    StreamMaterialize { columns: [ a1, a2, b1, b2, i_a1.a._row_id(hidden), i_b1.b._row_id(hidden) ], stream_key: [ i_a1.a._row_id, i_b1.b._row_id, a1 ], pk_columns: [ i_a1.a._row_id, i_b1.b._row_id, a1 ], pk_conflict: NoCheck }
+    └── StreamExchange { dist: HashShard(i_a1.a1, i_a1.a._row_id, i_b1.b._row_id) }
+        └── StreamDeltaJoin { type: Inner, predicate: i_a1.a1 = i_b1.b1, output: [i_a1.a1, i_a1.a2, i_b1.b1, i_b1.b2, i_a1.a._row_id, i_b1.b._row_id] }
+            ├──  StreamTableScan { table: i_a1, columns: [ i_a1.a1, i_a1.a2, i_a1.a._row_id ], pk: [i_a1.a._row_id], dist: UpstreamHashShard(i_a1.a1) }
+            └──  StreamTableScan { table: i_b1, columns: [ i_b1.b1, i_b1.b2, i_b1.b._row_id ], pk: [i_b1.b._row_id], dist: UpstreamHashShard(i_b1.b1) }
 - sql: |
     set rw_streaming_enable_delta_join = true;
     create table a (a1 int primary key, a2 int);
@@ -20,21 +20,21 @@
     create index i_b1 on b(b1);
     /* should generate delta join plan, and stream index scan */
     select * from a join b on a.a1 = b.b1 ;
-  stream_plan: |
-    StreamMaterialize { columns: [a1, a2, b1, b2, i_b1.b._row_id(hidden)], stream_key: [a1, i_b1.b._row_id], pk_columns: [a1, i_b1.b._row_id], pk_conflict: "NoCheck" }
-    └─StreamExchange { dist: HashShard(a.a1, i_b1.b._row_id) }
-      └─StreamDeltaJoin { type: Inner, predicate: a.a1 = i_b1.b1, output: all }
-        ├─StreamTableScan { table: a, columns: [a.a1, a.a2], pk: [a.a1], dist: UpstreamHashShard(a.a1) }
-        └─StreamTableScan { table: i_b1, columns: [i_b1.b1, i_b1.b2, i_b1.b._row_id], pk: [i_b1.b._row_id], dist: UpstreamHashShard(i_b1.b1) }
+  stream_plan: |-
+    StreamMaterialize { columns: [ a1, a2, b1, b2, i_b1.b._row_id(hidden) ], stream_key: [ a1, i_b1.b._row_id ], pk_columns: [ a1, i_b1.b._row_id ], pk_conflict: NoCheck }
+    └── StreamExchange { dist: HashShard(a.a1, i_b1.b._row_id) }
+        └── StreamDeltaJoin { type: Inner, predicate: a.a1 = i_b1.b1, output: all }
+            ├──  StreamTableScan { table: a, columns: [ a.a1, a.a2 ], pk: [a.a1], dist: UpstreamHashShard(a.a1) }
+            └──  StreamTableScan { table: i_b1, columns: [ i_b1.b1, i_b1.b2, i_b1.b._row_id ], pk: [i_b1.b._row_id], dist: UpstreamHashShard(i_b1.b1) }
 - sql: |
     set rw_streaming_enable_delta_join = true;
     create table a (a1 int primary key, a2 int);
     create table b (b1 int primary key, b2 int);
     /* should generate delta join plan, and stream index scan */
     select * from a join b on a.a1 = b.b1 ;
-  stream_plan: |
-    StreamMaterialize { columns: [a1, a2, b1, b2], stream_key: [a1, b1], pk_columns: [a1, b1], pk_conflict: "NoCheck" }
-    └─StreamExchange { dist: HashShard(a.a1, b.b1) }
-      └─StreamDeltaJoin { type: Inner, predicate: a.a1 = b.b1, output: all }
-        ├─StreamTableScan { table: a, columns: [a.a1, a.a2], pk: [a.a1], dist: UpstreamHashShard(a.a1) }
-        └─StreamTableScan { table: b, columns: [b.b1, b.b2], pk: [b.b1], dist: UpstreamHashShard(b.b1) }
+  stream_plan: |-
+    StreamMaterialize { columns: [ a1, a2, b1, b2 ], stream_key: [ a1, b1 ], pk_columns: [ a1, b1 ], pk_conflict: NoCheck }
+    └── StreamExchange { dist: HashShard(a.a1, b.b1) }
+        └── StreamDeltaJoin { type: Inner, predicate: a.a1 = b.b1, output: all }
+            ├──  StreamTableScan { table: a, columns: [ a.a1, a.a2 ], pk: [a.a1], dist: UpstreamHashShard(a.a1) }
+            └──  StreamTableScan { table: b, columns: [ b.b1, b.b2 ], pk: [b.b1], dist: UpstreamHashShard(b.b1) }

@@ -11,17 +11,17 @@
   before:
   - create_tables
   sql: select A.v, B.v as Bv from A join B using(k1);
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v] }
-      └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
-        └─BatchScan { table: a, columns: [a.k1, a.v], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
-    └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
-      └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
-        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
+    └── BatchLookupJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v] }
+        └── BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
+            └──  BatchScan { table: a, columns: [ a.k1, a.v ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden) ], stream_key: [ ak1.a._row_id, bk1.b._row_id, ak1.k1 ], pk_columns: [ ak1.a._row_id, bk1.b._row_id, ak1.k1 ], pk_conflict: NoCheck }
+    └── StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
+        └── StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
+            ├──  StreamTableScan { table: ak1, columns: [ ak1.k1, ak1.v, ak1.a._row_id ], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+            └──  StreamTableScan { table: bk1, columns: [ bk1.k1, bk1.v, bk1.b._row_id ], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
@@ -63,17 +63,17 @@
   before:
   - create_tables
   sql: select A.v, B.v as Bv from Ak1 as A join B using(k1)
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v] }
-      └─BatchExchange { order: [], dist: UpstreamHashShard(ak1.k1) }
-        └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
-  stream_plan: |
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
-    └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
-      └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
-        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
+    └── BatchLookupJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v] }
+        └── BatchExchange { order: [], dist: UpstreamHashShard(ak1.k1) }
+            └──  BatchScan { table: ak1, columns: [ ak1.k1, ak1.v ], distribution: UpstreamHashShard(ak1.k1) }
+  stream_plan: |-
+    StreamMaterialize { columns: [ v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden) ], stream_key: [ ak1.a._row_id, bk1.b._row_id, ak1.k1 ], pk_columns: [ ak1.a._row_id, bk1.b._row_id, ak1.k1 ], pk_conflict: NoCheck }
+    └── StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
+        └── StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
+            ├──  StreamTableScan { table: ak1, columns: [ ak1.k1, ak1.v, ak1.a._row_id ], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+            └──  StreamTableScan { table: bk1, columns: [ bk1.k1, bk1.v, bk1.b._row_id ], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
@@ -115,17 +115,17 @@
   before:
   - create_tables
   sql: select A.v, B.v as Bv from A join Bk1 as B using(k1)
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v] }
-      └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
-        └─BatchScan { table: a, columns: [a.k1, a.v], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
-    └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
-      └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
-        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
+    └── BatchLookupJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v] }
+        └── BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
+            └──  BatchScan { table: a, columns: [ a.k1, a.v ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden) ], stream_key: [ ak1.a._row_id, bk1.b._row_id, ak1.k1 ], pk_columns: [ ak1.a._row_id, bk1.b._row_id, ak1.k1 ], pk_conflict: NoCheck }
+    └── StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
+        └── StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
+            ├──  StreamTableScan { table: ak1, columns: [ ak1.k1, ak1.v, ak1.a._row_id ], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+            └──  StreamTableScan { table: bk1, columns: [ bk1.k1, bk1.v, bk1.b._row_id ], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
@@ -167,17 +167,17 @@
   before:
   - create_tables
   sql: select A.v, B.v as Bv from Ak1 as A join Bk1 as B using(k1)
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v] }
-      └─BatchExchange { order: [], dist: UpstreamHashShard(ak1.k1) }
-        └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
-  stream_plan: |
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
-    └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
-      └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
-        ├─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-        └─StreamTableScan { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
+    └── BatchLookupJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v] }
+        └── BatchExchange { order: [], dist: UpstreamHashShard(ak1.k1) }
+            └──  BatchScan { table: ak1, columns: [ ak1.k1, ak1.v ], distribution: UpstreamHashShard(ak1.k1) }
+  stream_plan: |-
+    StreamMaterialize { columns: [ v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden) ], stream_key: [ ak1.a._row_id, bk1.b._row_id, ak1.k1 ], pk_columns: [ ak1.a._row_id, bk1.b._row_id, ak1.k1 ], pk_conflict: NoCheck }
+    └── StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id) }
+        └── StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id] }
+            ├──  StreamTableScan { table: ak1, columns: [ ak1.k1, ak1.v, ak1.a._row_id ], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+            └──  StreamTableScan { table: bk1, columns: [ bk1.k1, bk1.v, bk1.b._row_id ], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden)], stream_key: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1], pk_conflict: "NoCheck" }
@@ -222,18 +222,18 @@
     select max(v) as max_v
     from A
     group by k1;
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(a.v)] }
-      └─BatchHashAgg { group_key: [a.k1], aggs: [max(a.v)] }
-        └─BatchExchange { order: [], dist: HashShard(a.k1) }
-          └─BatchScan { table: a, columns: [a.k1, a.v], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [max_v, a.k1(hidden)], stream_key: [a.k1], pk_columns: [a.k1], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [max(a.v), a.k1] }
-      └─StreamHashAgg { group_key: [a.k1], aggs: [max(a.v), count] }
-        └─StreamExchange { dist: HashShard(a.k1) }
-          └─StreamTableScan { table: a, columns: [a.k1, a.v, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    └── BatchProject { exprs: [ max(a.v) ] }
+        └── BatchHashAgg { group_key: [ a.k1 ], aggs: [ max(a.v) ] }
+            └── BatchExchange { order: [], dist: HashShard(a.k1) }
+                └──  BatchScan { table: a, columns: [ a.k1, a.v ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ max_v, a.k1(hidden) ], stream_key: [ a.k1 ], pk_columns: [ a.k1 ], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [ max(a.v), a.k1 ] }
+        └── StreamHashAgg { group_key: [ a.k1 ], aggs: [ max(a.v), count ] }
+            └── StreamExchange { dist: HashShard(a.k1) }
+                └──  StreamTableScan { table: a, columns: [ a.k1, a.v, a._row_id ], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_v, a.k1(hidden)], stream_key: [a.k1], pk_columns: [a.k1], pk_conflict: "NoCheck" }
@@ -287,16 +287,16 @@
     select max(v) as max_v
     from Ak1 as A
     group by k1;
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(ak1.v)] }
-      └─BatchSortAgg { group_key: [ak1.k1], aggs: [max(ak1.v)] }
-        └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
-  stream_plan: |
-    StreamMaterialize { columns: [max_v, ak1.k1(hidden)], stream_key: [ak1.k1], pk_columns: [ak1.k1], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [max(ak1.v), ak1.k1] }
-      └─StreamHashAgg { group_key: [ak1.k1], aggs: [max(ak1.v), count] }
-        └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+    └── BatchProject { exprs: [ max(ak1.v) ] }
+        └── BatchSortAgg { group_key: [ ak1.k1 ], aggs: [ max(ak1.v) ] }
+            └──  BatchScan { table: ak1, columns: [ ak1.k1, ak1.v ], distribution: UpstreamHashShard(ak1.k1) }
+  stream_plan: |-
+    StreamMaterialize { columns: [ max_v, ak1.k1(hidden) ], stream_key: [ ak1.k1 ], pk_columns: [ ak1.k1 ], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [ max(ak1.v), ak1.k1 ] }
+        └── StreamHashAgg { group_key: [ ak1.k1 ], aggs: [ max(ak1.v), count ] }
+            └──  StreamTableScan { table: ak1, columns: [ ak1.k1, ak1.v, ak1.a._row_id ], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_v, ak1.k1(hidden)], stream_key: [ak1.k1], pk_columns: [ak1.k1], pk_conflict: "NoCheck" }
@@ -347,18 +347,18 @@
     select max(v) as max_v
     from Ak1k2 as A
     group by k1;
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(ak1k2.v)] }
-      └─BatchSortAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v)] }
-        └─BatchExchange { order: [ak1k2.k1 ASC], dist: HashShard(ak1k2.k1) }
-          └─BatchScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [max_v, ak1k2.k1(hidden)], stream_key: [ak1k2.k1], pk_columns: [ak1k2.k1], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [max(ak1k2.v), ak1k2.k1] }
-      └─StreamHashAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v), count] }
-        └─StreamExchange { dist: HashShard(ak1k2.k1) }
-          └─StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+    └── BatchProject { exprs: [ max(ak1k2.v) ] }
+        └── BatchSortAgg { group_key: [ ak1k2.k1 ], aggs: [ max(ak1k2.v) ] }
+            └── BatchExchange { order: [ak1k2.k1 ASC], dist: HashShard(ak1k2.k1) }
+                └──  BatchScan { table: ak1k2, columns: [ ak1k2.k1, ak1k2.v ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ max_v, ak1k2.k1(hidden) ], stream_key: [ ak1k2.k1 ], pk_columns: [ ak1k2.k1 ], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [ max(ak1k2.v), ak1k2.k1 ] }
+        └── StreamHashAgg { group_key: [ ak1k2.k1 ], aggs: [ max(ak1k2.v), count ] }
+            └── StreamExchange { dist: HashShard(ak1k2.k1) }
+                └──  StreamTableScan { table: ak1k2, columns: [ ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id ], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_v, ak1k2.k1(hidden)], stream_key: [ak1k2.k1], pk_columns: [ak1k2.k1], pk_conflict: "NoCheck" }
@@ -412,18 +412,18 @@
     select max(v) as max_v
     from Ak1k2 as A
     group by k2;
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(ak1k2.v)] }
-      └─BatchHashAgg { group_key: [ak1k2.k2], aggs: [max(ak1k2.v)] }
-        └─BatchExchange { order: [], dist: HashShard(ak1k2.k2) }
-          └─BatchScan { table: ak1k2, columns: [ak1k2.k2, ak1k2.v], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [max_v, ak1k2.k2(hidden)], stream_key: [ak1k2.k2], pk_columns: [ak1k2.k2], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [max(ak1k2.v), ak1k2.k2] }
-      └─StreamHashAgg { group_key: [ak1k2.k2], aggs: [max(ak1k2.v), count] }
-        └─StreamExchange { dist: HashShard(ak1k2.k2) }
-          └─StreamTableScan { table: ak1k2, columns: [ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+    └── BatchProject { exprs: [ max(ak1k2.v) ] }
+        └── BatchHashAgg { group_key: [ ak1k2.k2 ], aggs: [ max(ak1k2.v) ] }
+            └── BatchExchange { order: [], dist: HashShard(ak1k2.k2) }
+                └──  BatchScan { table: ak1k2, columns: [ ak1k2.k2, ak1k2.v ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ max_v, ak1k2.k2(hidden) ], stream_key: [ ak1k2.k2 ], pk_columns: [ ak1k2.k2 ], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [ max(ak1k2.v), ak1k2.k2 ] }
+        └── StreamHashAgg { group_key: [ ak1k2.k2 ], aggs: [ max(ak1k2.v), count ] }
+            └── StreamExchange { dist: HashShard(ak1k2.k2) }
+                └──  StreamTableScan { table: ak1k2, columns: [ ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id ], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_v, ak1k2.k2(hidden)], stream_key: [ak1k2.k2], pk_columns: [ak1k2.k2], pk_conflict: "NoCheck" }
@@ -477,16 +477,16 @@
     select sum(v) as sum_v
     from Ak1k2 as A
     group by k1, k2;
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [sum(ak1k2.v)] }
-      └─BatchSortAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v)] }
-        └─BatchScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v], distribution: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
-  stream_plan: |
-    StreamMaterialize { columns: [sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden)], stream_key: [ak1k2.k1, ak1k2.k2], pk_columns: [ak1k2.k1, ak1k2.k2], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [sum(ak1k2.v), ak1k2.k1, ak1k2.k2] }
-      └─StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v), count] }
-        └─StreamTableScan { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+    └── BatchProject { exprs: [ sum(ak1k2.v) ] }
+        └── BatchSortAgg { group_key: [ ak1k2.k1, ak1k2.k2 ], aggs: [ sum(ak1k2.v) ] }
+            └──  BatchScan { table: ak1k2, columns: [ ak1k2.k1, ak1k2.k2, ak1k2.v ], distribution: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
+  stream_plan: |-
+    StreamMaterialize { columns: [ sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden) ], stream_key: [ ak1k2.k1, ak1k2.k2 ], pk_columns: [ ak1k2.k1, ak1k2.k2 ], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [ sum(ak1k2.v), ak1k2.k1, ak1k2.k2 ] }
+        └── StreamHashAgg { group_key: [ ak1k2.k1, ak1k2.k2 ], aggs: [ sum(ak1k2.v), count ] }
+            └──  StreamTableScan { table: ak1k2, columns: [ ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id ], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden)], stream_key: [ak1k2.k1, ak1k2.k2], pk_columns: [ak1k2.k1, ak1k2.k2], pk_conflict: "NoCheck" }
@@ -527,16 +527,16 @@
     select sum(v) as sum_v
     from Ak1 as A
     group by k1, k2;
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [sum(ak1.v)] }
-      └─BatchHashAgg { group_key: [ak1.k1, ak1.k2], aggs: [sum(ak1.v)] }
-        └─BatchScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
-  stream_plan: |
-    StreamMaterialize { columns: [sum_v, ak1.k1(hidden), ak1.k2(hidden)], stream_key: [ak1.k1, ak1.k2], pk_columns: [ak1.k1, ak1.k2], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [sum(ak1.v), ak1.k1, ak1.k2] }
-      └─StreamHashAgg { group_key: [ak1.k1, ak1.k2], aggs: [sum(ak1.v), count] }
-        └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+    └── BatchProject { exprs: [ sum(ak1.v) ] }
+        └── BatchHashAgg { group_key: [ ak1.k1, ak1.k2 ], aggs: [ sum(ak1.v) ] }
+            └──  BatchScan { table: ak1, columns: [ ak1.k1, ak1.k2, ak1.v ], distribution: UpstreamHashShard(ak1.k1) }
+  stream_plan: |-
+    StreamMaterialize { columns: [ sum_v, ak1.k1(hidden), ak1.k2(hidden) ], stream_key: [ ak1.k1, ak1.k2 ], pk_columns: [ ak1.k1, ak1.k2 ], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [ sum(ak1.v), ak1.k1, ak1.k2 ] }
+        └── StreamHashAgg { group_key: [ ak1.k1, ak1.k2 ], aggs: [ sum(ak1.v), count ] }
+            └──  StreamTableScan { table: ak1, columns: [ ak1.k1, ak1.k2, ak1.v, ak1.a._row_id ], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [sum_v, ak1.k1(hidden), ak1.k2(hidden)], stream_key: [ak1.k1, ak1.k2], pk_columns: [ak1.k1, ak1.k2], pk_conflict: "NoCheck" }
@@ -583,20 +583,20 @@
       group by k1
     )
     group by k1;
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(count)] }
-      └─BatchHashAgg { group_key: [a.k1], aggs: [max(count)] }
-        └─BatchHashAgg { group_key: [a.k1], aggs: [count] }
-          └─BatchExchange { order: [], dist: HashShard(a.k1) }
-            └─BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [max_num, a.k1(hidden)], stream_key: [a.k1], pk_columns: [a.k1], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [max(count), a.k1] }
-      └─StreamHashAgg { group_key: [a.k1], aggs: [max(count), count] }
-        └─StreamHashAgg { group_key: [a.k1], aggs: [count] }
-          └─StreamExchange { dist: HashShard(a.k1) }
-            └─StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    └── BatchProject { exprs: [ max(count) ] }
+        └── BatchHashAgg { group_key: [ a.k1 ], aggs: [ max(count) ] }
+            └── BatchHashAgg { group_key: [ a.k1 ], aggs: [ count ] }
+                └── BatchExchange { order: [], dist: HashShard(a.k1) }
+                    └──  BatchScan { table: a, columns: [ a.k1 ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ max_num, a.k1(hidden) ], stream_key: [ a.k1 ], pk_columns: [ a.k1 ], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [ max(count), a.k1 ] }
+        └── StreamHashAgg { group_key: [ a.k1 ], aggs: [ max(count), count ] }
+            └── StreamHashAgg { group_key: [ a.k1 ], aggs: [ count ] }
+                └── StreamExchange { dist: HashShard(a.k1) }
+                    └──  StreamTableScan { table: a, columns: [ a.k1, a._row_id ], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_num, a.k1(hidden)], stream_key: [a.k1], pk_columns: [a.k1], pk_conflict: "NoCheck" }
@@ -667,35 +667,35 @@
       group by k1, k2
     )
     group by k1;
-  logical_plan: |
-    LogicalProject { exprs: [max(count)] }
-    └─LogicalAgg { group_key: [a.k1], aggs: [max(count)] }
-      └─LogicalProject { exprs: [a.k1, count] }
-        └─LogicalProject { exprs: [count, a.k1] }
-          └─LogicalAgg { group_key: [a.k1, a.k2], aggs: [count] }
-            └─LogicalProject { exprs: [a.k1, a.k2] }
-              └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id] }
-  optimized_logical_plan_for_batch: |
-    LogicalProject { exprs: [max(count)] }
-    └─LogicalAgg { group_key: [a.k1], aggs: [max(count)] }
-      └─LogicalAgg { group_key: [a.k1, a.k2], aggs: [count] }
-        └─LogicalScan { table: a, columns: [a.k1, a.k2] }
-  batch_plan: |
+  logical_plan: |-
+    LogicalProject { exprs: [ max(count) ] }
+    └── LogicalAgg { group_key: [ a.k1 ], aggs: [ max(count) ] }
+        └── LogicalProject { exprs: [ a.k1, count ] }
+            └── LogicalProject { exprs: [ count, a.k1 ] }
+                └── LogicalAgg { group_key: [ a.k1, a.k2 ], aggs: [ count ] }
+                    └── LogicalProject { exprs: [ a.k1, a.k2 ] }
+                        └──  LogicalScan { table: a, columns: [ a.k1, a.k2, a.k3, a.v, a._row_id ] }
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [ max(count) ] }
+    └── LogicalAgg { group_key: [ a.k1 ], aggs: [ max(count) ] }
+        └── LogicalAgg { group_key: [ a.k1, a.k2 ], aggs: [ count ] }
+            └──  LogicalScan { table: a, columns: [ a.k1, a.k2 ] }
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(count)] }
-      └─BatchHashAgg { group_key: [a.k1], aggs: [max(count)] }
-        └─BatchExchange { order: [], dist: HashShard(a.k1) }
-          └─BatchHashAgg { group_key: [a.k1, a.k2], aggs: [count] }
-            └─BatchExchange { order: [], dist: HashShard(a.k1, a.k2) }
-              └─BatchScan { table: a, columns: [a.k1, a.k2], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [max_num, a.k1(hidden)], stream_key: [a.k1], pk_columns: [a.k1], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [max(count), a.k1] }
-      └─StreamHashAgg { group_key: [a.k1], aggs: [max(count), count] }
-        └─StreamExchange { dist: HashShard(a.k1) }
-          └─StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] }
-            └─StreamExchange { dist: HashShard(a.k1, a.k2) }
-              └─StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    └── BatchProject { exprs: [ max(count) ] }
+        └── BatchHashAgg { group_key: [ a.k1 ], aggs: [ max(count) ] }
+            └── BatchExchange { order: [], dist: HashShard(a.k1) }
+                └── BatchHashAgg { group_key: [ a.k1, a.k2 ], aggs: [ count ] }
+                    └── BatchExchange { order: [], dist: HashShard(a.k1, a.k2) }
+                        └──  BatchScan { table: a, columns: [ a.k1, a.k2 ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ max_num, a.k1(hidden) ], stream_key: [ a.k1 ], pk_columns: [ a.k1 ], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [ max(count), a.k1 ] }
+        └── StreamHashAgg { group_key: [ a.k1 ], aggs: [ max(count), count ] }
+            └── StreamExchange { dist: HashShard(a.k1) }
+                └── StreamHashAgg { group_key: [ a.k1, a.k2 ], aggs: [ count ] }
+                    └── StreamExchange { dist: HashShard(a.k1, a.k2) }
+                        └──  StreamTableScan { table: a, columns: [ a.k1, a.k2, a._row_id ], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_num, a.k1(hidden)], stream_key: [a.k1], pk_columns: [a.k1], pk_conflict: "NoCheck" }
@@ -766,35 +766,35 @@
       group by k1, k2
     )
     group by k2;
-  logical_plan: |
-    LogicalProject { exprs: [max(count)] }
-    └─LogicalAgg { group_key: [a.k2], aggs: [max(count)] }
-      └─LogicalProject { exprs: [a.k2, count] }
-        └─LogicalProject { exprs: [count, a.k2] }
-          └─LogicalAgg { group_key: [a.k1, a.k2], aggs: [count] }
-            └─LogicalProject { exprs: [a.k1, a.k2] }
-              └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id] }
-  optimized_logical_plan_for_batch: |
-    LogicalProject { exprs: [max(count)] }
-    └─LogicalAgg { group_key: [a.k2], aggs: [max(count)] }
-      └─LogicalAgg { group_key: [a.k1, a.k2], aggs: [count] }
-        └─LogicalScan { table: a, columns: [a.k1, a.k2] }
-  batch_plan: |
+  logical_plan: |-
+    LogicalProject { exprs: [ max(count) ] }
+    └── LogicalAgg { group_key: [ a.k2 ], aggs: [ max(count) ] }
+        └── LogicalProject { exprs: [ a.k2, count ] }
+            └── LogicalProject { exprs: [ count, a.k2 ] }
+                └── LogicalAgg { group_key: [ a.k1, a.k2 ], aggs: [ count ] }
+                    └── LogicalProject { exprs: [ a.k1, a.k2 ] }
+                        └──  LogicalScan { table: a, columns: [ a.k1, a.k2, a.k3, a.v, a._row_id ] }
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [ max(count) ] }
+    └── LogicalAgg { group_key: [ a.k2 ], aggs: [ max(count) ] }
+        └── LogicalAgg { group_key: [ a.k1, a.k2 ], aggs: [ count ] }
+            └──  LogicalScan { table: a, columns: [ a.k1, a.k2 ] }
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(count)] }
-      └─BatchHashAgg { group_key: [a.k2], aggs: [max(count)] }
-        └─BatchExchange { order: [], dist: HashShard(a.k2) }
-          └─BatchHashAgg { group_key: [a.k1, a.k2], aggs: [count] }
-            └─BatchExchange { order: [], dist: HashShard(a.k1, a.k2) }
-              └─BatchScan { table: a, columns: [a.k1, a.k2], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [max_num, a.k2(hidden)], stream_key: [a.k2], pk_columns: [a.k2], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [max(count), a.k2] }
-      └─StreamHashAgg { group_key: [a.k2], aggs: [max(count), count] }
-        └─StreamExchange { dist: HashShard(a.k2) }
-          └─StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] }
-            └─StreamExchange { dist: HashShard(a.k1, a.k2) }
-              └─StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    └── BatchProject { exprs: [ max(count) ] }
+        └── BatchHashAgg { group_key: [ a.k2 ], aggs: [ max(count) ] }
+            └── BatchExchange { order: [], dist: HashShard(a.k2) }
+                └── BatchHashAgg { group_key: [ a.k1, a.k2 ], aggs: [ count ] }
+                    └── BatchExchange { order: [], dist: HashShard(a.k1, a.k2) }
+                        └──  BatchScan { table: a, columns: [ a.k1, a.k2 ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ max_num, a.k2(hidden) ], stream_key: [ a.k2 ], pk_columns: [ a.k2 ], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [ max(count), a.k2 ] }
+        └── StreamHashAgg { group_key: [ a.k2 ], aggs: [ max(count), count ] }
+            └── StreamExchange { dist: HashShard(a.k2) }
+                └── StreamHashAgg { group_key: [ a.k1, a.k2 ], aggs: [ count ] }
+                    └── StreamExchange { dist: HashShard(a.k1, a.k2) }
+                        └──  StreamTableScan { table: a, columns: [ a.k1, a.k2, a._row_id ], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_num, a.k2(hidden)], stream_key: [a.k2], pk_columns: [a.k2], pk_conflict: "NoCheck" }
@@ -865,20 +865,20 @@
       group by k1, k2
     )
     group by k1, k2;
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(count)] }
-      └─BatchHashAgg { group_key: [a.k1, a.k2], aggs: [max(count)] }
-        └─BatchHashAgg { group_key: [a.k1, a.k2], aggs: [count] }
-          └─BatchExchange { order: [], dist: HashShard(a.k1, a.k2) }
-            └─BatchScan { table: a, columns: [a.k1, a.k2], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [max_num, a.k1(hidden), a.k2(hidden)], stream_key: [a.k1, a.k2], pk_columns: [a.k1, a.k2], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [max(count), a.k1, a.k2] }
-      └─StreamHashAgg { group_key: [a.k1, a.k2], aggs: [max(count), count] }
-        └─StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] }
-          └─StreamExchange { dist: HashShard(a.k1, a.k2) }
-            └─StreamTableScan { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    └── BatchProject { exprs: [ max(count) ] }
+        └── BatchHashAgg { group_key: [ a.k1, a.k2 ], aggs: [ max(count) ] }
+            └── BatchHashAgg { group_key: [ a.k1, a.k2 ], aggs: [ count ] }
+                └── BatchExchange { order: [], dist: HashShard(a.k1, a.k2) }
+                    └──  BatchScan { table: a, columns: [ a.k1, a.k2 ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ max_num, a.k1(hidden), a.k2(hidden) ], stream_key: [ a.k1, a.k2 ], pk_columns: [ a.k1, a.k2 ], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [ max(count), a.k1, a.k2 ] }
+        └── StreamHashAgg { group_key: [ a.k1, a.k2 ], aggs: [ max(count), count ] }
+            └── StreamHashAgg { group_key: [ a.k1, a.k2 ], aggs: [ count ] }
+                └── StreamExchange { dist: HashShard(a.k1, a.k2) }
+                    └──  StreamTableScan { table: a, columns: [ a.k1, a.k2, a._row_id ], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [max_num, a.k1(hidden), a.k2(hidden)], stream_key: [a.k1, a.k2], pk_columns: [a.k1, a.k2], pk_conflict: "NoCheck" }
@@ -940,31 +940,31 @@
       group by k1
     )
     select A.v, B.num as Bv from Ak1 as A join B using(k1)
-  logical_plan: |
-    LogicalProject { exprs: [ak1.v, count] }
-    └─LogicalJoin { type: Inner, on: (ak1.k1 = a.k1), output: all }
-      ├─LogicalScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.k3, ak1.v, ak1.a._row_id] }
-      └─LogicalShare { id = 4 }
-        └─LogicalProject { exprs: [count, a.k1] }
-          └─LogicalAgg { group_key: [a.k1], aggs: [count] }
-            └─LogicalProject { exprs: [a.k1] }
-              └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id] }
-  batch_plan: |
+  logical_plan: |-
+    LogicalProject { exprs: [ ak1.v, count ] }
+    └── LogicalJoin { type: Inner, on: (ak1.k1 = a.k1), output: all }
+        ├──  LogicalScan { table: ak1, columns: [ ak1.k1, ak1.k2, ak1.k3, ak1.v, ak1.a._row_id ] }
+        └── LogicalShare { id: 4 }
+            └── LogicalProject { exprs: [ count, a.k1 ] }
+                └── LogicalAgg { group_key: [ a.k1 ], aggs: [ count ] }
+                    └── LogicalProject { exprs: [ a.k1 ] }
+                        └──  LogicalScan { table: a, columns: [ a.k1, a.k2, a.k3, a.v, a._row_id ] }
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count] }
-      ├─BatchExchange { order: [], dist: HashShard(ak1.k1) }
-      | └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
-      └─BatchHashAgg { group_key: [a.k1], aggs: [count] }
-        └─BatchExchange { order: [], dist: HashShard(a.k1) }
-          └─BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), a.k1(hidden)], stream_key: [ak1.a._row_id, a.k1, ak1.k1], pk_columns: [ak1.a._row_id, a.k1, ak1.k1], pk_conflict: "NoCheck" }
-    └─StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, ak1.k1, a.k1] }
-      ├─StreamExchange { dist: HashShard(ak1.k1) }
-      | └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-      └─StreamHashAgg { group_key: [a.k1], aggs: [count] }
-        └─StreamExchange { dist: HashShard(a.k1) }
-          └─StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    └── BatchHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count] }
+        ├── BatchExchange { order: [], dist: HashShard(ak1.k1) }
+        │   └──  BatchScan { table: ak1, columns: [ ak1.k1, ak1.v ], distribution: UpstreamHashShard(ak1.k1) }
+        └── BatchHashAgg { group_key: [ a.k1 ], aggs: [ count ] }
+            └── BatchExchange { order: [], dist: HashShard(a.k1) }
+                └──  BatchScan { table: a, columns: [ a.k1 ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), a.k1(hidden) ], stream_key: [ ak1.a._row_id, a.k1, ak1.k1 ], pk_columns: [ ak1.a._row_id, a.k1, ak1.k1 ], pk_conflict: NoCheck }
+    └── StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, ak1.k1, a.k1] }
+        ├── StreamExchange { dist: HashShard(ak1.k1) }
+        │   └──  StreamTableScan { table: ak1, columns: [ ak1.k1, ak1.v, ak1.a._row_id ], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+        └── StreamHashAgg { group_key: [ a.k1 ], aggs: [ count ] }
+            └── StreamExchange { dist: HashShard(a.k1) }
+                └──  StreamTableScan { table: a, columns: [ a.k1, a._row_id ], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), a.k1(hidden)], stream_key: [ak1.a._row_id, a.k1, ak1.k1], pk_columns: [ak1.a._row_id, a.k1, ak1.k1], pk_conflict: "NoCheck" }
@@ -1011,30 +1011,30 @@
       group by k1
     )
     select A.v, B.num as Bv from B join Ak1 as A using(k1)
-  logical_plan: |
-    LogicalProject { exprs: [ak1.v, count] }
-    └─LogicalJoin { type: Inner, on: (a.k1 = ak1.k1), output: all }
-      ├─LogicalShare { id = 4 }
-      | └─LogicalProject { exprs: [count, a.k1] }
-      |   └─LogicalAgg { group_key: [a.k1], aggs: [count] }
-      |     └─LogicalProject { exprs: [a.k1] }
-      |       └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id] }
-      └─LogicalScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.k3, ak1.v, ak1.a._row_id] }
-  batch_plan: |
+  logical_plan: |-
+    LogicalProject { exprs: [ ak1.v, count ] }
+    └── LogicalJoin { type: Inner, on: (a.k1 = ak1.k1), output: all }
+        ├── LogicalShare { id: 4 }
+        │   └── LogicalProject { exprs: [ count, a.k1 ] }
+        │       └── LogicalAgg { group_key: [ a.k1 ], aggs: [ count ] }
+        │           └── LogicalProject { exprs: [ a.k1 ] }
+        │               └──  LogicalScan { table: a, columns: [ a.k1, a.k2, a.k3, a.v, a._row_id ] }
+        └──  LogicalScan { table: ak1, columns: [ ak1.k1, ak1.k2, ak1.k3, ak1.v, ak1.a._row_id ] }
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count] }
-      └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
-        └─BatchHashAgg { group_key: [a.k1], aggs: [count] }
-          └─BatchExchange { order: [], dist: HashShard(a.k1) }
-            └─BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [v, bv, a.k1(hidden), ak1.a._row_id(hidden)], stream_key: [a.k1, ak1.a._row_id], pk_columns: [a.k1, ak1.a._row_id], pk_conflict: "NoCheck" }
-    └─StreamHashJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count, a.k1, ak1.a._row_id] }
-      ├─StreamHashAgg { group_key: [a.k1], aggs: [count] }
-      | └─StreamExchange { dist: HashShard(a.k1) }
-      |   └─StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
-      └─StreamExchange { dist: HashShard(ak1.k1) }
-        └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+    └── BatchLookupJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count] }
+        └── BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
+            └── BatchHashAgg { group_key: [ a.k1 ], aggs: [ count ] }
+                └── BatchExchange { order: [], dist: HashShard(a.k1) }
+                    └──  BatchScan { table: a, columns: [ a.k1 ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ v, bv, a.k1(hidden), ak1.a._row_id(hidden) ], stream_key: [ a.k1, ak1.a._row_id ], pk_columns: [ a.k1, ak1.a._row_id ], pk_conflict: NoCheck }
+    └── StreamHashJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count, a.k1, ak1.a._row_id] }
+        ├── StreamHashAgg { group_key: [ a.k1 ], aggs: [ count ] }
+        │   └── StreamExchange { dist: HashShard(a.k1) }
+        │       └──  StreamTableScan { table: a, columns: [ a.k1, a._row_id ], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+        └── StreamExchange { dist: HashShard(ak1.k1) }
+            └──  StreamTableScan { table: ak1, columns: [ ak1.k1, ak1.v, ak1.a._row_id ], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v, bv, a.k1(hidden), ak1.a._row_id(hidden)], stream_key: [a.k1, ak1.a._row_id], pk_columns: [a.k1, ak1.a._row_id], pk_conflict: "NoCheck" }
@@ -1107,37 +1107,37 @@
       group by k1
     )
     select A.num, B.num as Bv from A join B using(k1)
-  logical_plan: |
-    LogicalProject { exprs: [count, count] }
-    └─LogicalJoin { type: Inner, on: (a.k1 = b.k1), output: all }
-      ├─LogicalShare { id = 4 }
-      | └─LogicalProject { exprs: [count, a.k1] }
-      |   └─LogicalAgg { group_key: [a.k1], aggs: [count] }
-      |     └─LogicalProject { exprs: [a.k1] }
-      |       └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id] }
-      └─LogicalShare { id = 8 }
-        └─LogicalProject { exprs: [count, b.k1] }
-          └─LogicalAgg { group_key: [b.k1], aggs: [count] }
-            └─LogicalProject { exprs: [b.k1] }
-              └─LogicalScan { table: b, columns: [b.k1, b.k2, b.k3, b.v, b._row_id] }
-  batch_plan: |
+  logical_plan: |-
+    LogicalProject { exprs: [ count, count ] }
+    └── LogicalJoin { type: Inner, on: (a.k1 = b.k1), output: all }
+        ├── LogicalShare { id: 4 }
+        │   └── LogicalProject { exprs: [ count, a.k1 ] }
+        │       └── LogicalAgg { group_key: [ a.k1 ], aggs: [ count ] }
+        │           └── LogicalProject { exprs: [ a.k1 ] }
+        │               └──  LogicalScan { table: a, columns: [ a.k1, a.k2, a.k3, a.v, a._row_id ] }
+        └── LogicalShare { id: 8 }
+            └── LogicalProject { exprs: [ count, b.k1 ] }
+                └── LogicalAgg { group_key: [ b.k1 ], aggs: [ count ] }
+                    └── LogicalProject { exprs: [ b.k1 ] }
+                        └──  LogicalScan { table: b, columns: [ b.k1, b.k2, b.k3, b.v, b._row_id ] }
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [count, count] }
-      ├─BatchHashAgg { group_key: [a.k1], aggs: [count] }
-      | └─BatchExchange { order: [], dist: HashShard(a.k1) }
-      |   └─BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
-      └─BatchHashAgg { group_key: [b.k1], aggs: [count] }
-        └─BatchExchange { order: [], dist: HashShard(b.k1) }
-          └─BatchScan { table: b, columns: [b.k1], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [num, bv, a.k1(hidden), b.k1(hidden)], stream_key: [a.k1, b.k1], pk_columns: [a.k1, b.k1], pk_conflict: "NoCheck" }
-    └─StreamHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [count, count, a.k1, b.k1] }
-      ├─StreamHashAgg { group_key: [a.k1], aggs: [count] }
-      | └─StreamExchange { dist: HashShard(a.k1) }
-      |   └─StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
-      └─StreamHashAgg { group_key: [b.k1], aggs: [count] }
-        └─StreamExchange { dist: HashShard(b.k1) }
-          └─StreamTableScan { table: b, columns: [b.k1, b._row_id], pk: [b._row_id], dist: UpstreamHashShard(b._row_id) }
+    └── BatchHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [count, count] }
+        ├── BatchHashAgg { group_key: [ a.k1 ], aggs: [ count ] }
+        │   └── BatchExchange { order: [], dist: HashShard(a.k1) }
+        │       └──  BatchScan { table: a, columns: [ a.k1 ], distribution: SomeShard }
+        └── BatchHashAgg { group_key: [ b.k1 ], aggs: [ count ] }
+            └── BatchExchange { order: [], dist: HashShard(b.k1) }
+                └──  BatchScan { table: b, columns: [ b.k1 ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ num, bv, a.k1(hidden), b.k1(hidden) ], stream_key: [ a.k1, b.k1 ], pk_columns: [ a.k1, b.k1 ], pk_conflict: NoCheck }
+    └── StreamHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [count, count, a.k1, b.k1] }
+        ├── StreamHashAgg { group_key: [ a.k1 ], aggs: [ count ] }
+        │   └── StreamExchange { dist: HashShard(a.k1) }
+        │       └──  StreamTableScan { table: a, columns: [ a.k1, a._row_id ], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+        └── StreamHashAgg { group_key: [ b.k1 ], aggs: [ count ] }
+            └── StreamExchange { dist: HashShard(b.k1) }
+                └──  StreamTableScan { table: b, columns: [ b.k1, b._row_id ], pk: [b._row_id], dist: UpstreamHashShard(b._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [num, bv, a.k1(hidden), b.k1(hidden)], stream_key: [a.k1, b.k1], pk_columns: [a.k1, b.k1], pk_conflict: "NoCheck" }
@@ -1200,24 +1200,24 @@
 - sql: |
     create table t1 (row_id int, uid int, v int, created_at timestamp);
     select * from hop(t1, created_at, interval '15' minute, interval '30' minute);
-  logical_plan: |
-    LogicalProject { exprs: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end] }
-    └─LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
-      └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
-        └─LogicalScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id] }
-  optimized_logical_plan_for_batch: |
-    LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
-    └─LogicalScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at], predicate: IsNotNull(t1.created_at) }
-  batch_plan: |
-    BatchHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
-    └─BatchExchange { order: [], dist: Single }
-      └─BatchFilter { predicate: IsNotNull(t1.created_at) }
-        └─BatchScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at], distribution: SomeShard }
-  stream_plan: |
-    StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_start, window_end], pk_columns: [t1._row_id, window_start, window_end], pk_conflict: "NoCheck" }
-    └─StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end, t1._row_id] }
-      └─StreamFilter { predicate: IsNotNull(t1.created_at) }
-        └─StreamTableScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+  logical_plan: |-
+    LogicalProject { exprs: [ t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end ] }
+    └── LogicalHopWindow { time_col: t1.created_at, slide: Interval { months: 0, days: 0, usecs: 900000000 }, size: Interval { months: 0, days: 0, usecs: 1800000000 }, output: all }
+        └── LogicalFilter { predicate: IsNotNull(t1.created_at) }
+            └──  LogicalScan { table: t1, columns: [ t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id ] }
+  optimized_logical_plan_for_batch: |-
+    LogicalHopWindow { time_col: t1.created_at, slide: Interval { months: 0, days: 0, usecs: 900000000 }, size: Interval { months: 0, days: 0, usecs: 1800000000 }, output: all }
+    └──  LogicalScan { table: t1, columns: [ t1.row_id, t1.uid, t1.v, t1.created_at ], predicate: IsNotNull(t1.created_at) }
+  batch_plan: |-
+    BatchHopWindow { time_col: t1.created_at, slide: Interval { months: 0, days: 0, usecs: 900000000 }, size: Interval { months: 0, days: 0, usecs: 1800000000 }, output: all }
+    └── BatchExchange { order: [], dist: Single }
+        └── BatchFilter { predicate: IsNotNull(t1.created_at) }
+            └──  BatchScan { table: t1, columns: [ t1.row_id, t1.uid, t1.v, t1.created_at ], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [ row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden) ], stream_key: [ t1._row_id, window_start, window_end ], pk_columns: [ t1._row_id, window_start, window_end ], pk_conflict: NoCheck }
+    └── StreamHopWindow { time_col: t1.created_at, slide: Interval { months: 0, days: 0, usecs: 900000000 }, size: Interval { months: 0, days: 0, usecs: 1800000000 }, output: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end, t1._row_id] }
+        └── StreamFilter { predicate: IsNotNull(t1.created_at) }
+            └──  StreamTableScan { table: t1, columns: [ t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id ], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_start, window_end], pk_columns: [t1._row_id, window_start, window_end], pk_conflict: "NoCheck" }
