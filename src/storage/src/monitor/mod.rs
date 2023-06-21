@@ -13,7 +13,8 @@
 // limitations under the License.
 
 mod hummock_state_store_metrics;
-
+mod traced_store;
+use futures::Future;
 pub use hummock_state_store_metrics::*;
 mod monitored_store;
 pub use monitored_store::*;
@@ -29,3 +30,24 @@ pub use compactor_metrics::*;
 mod local_metrics;
 pub use local_metrics::*;
 pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+
+pub trait HummockTraceFutureExt: Sized + Future {
+    type TraceOutput;
+    fn may_trace_hummock(self) -> Self::TraceOutput;
+}
+
+impl<F: Future> HummockTraceFutureExt for F {
+    type TraceOutput = impl Future<Output = F::Output>;
+
+    fn may_trace_hummock(self) -> Self::TraceOutput {
+        #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
+        {
+            self
+        }
+        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+        {
+            use risingwave_hummock_trace::hummock_trace_scope;
+            hummock_trace_scope(self)
+        }
+    }
+}
