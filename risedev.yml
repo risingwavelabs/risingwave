@@ -33,8 +33,10 @@ profile:
       # - use: etcd
       #   unsafe-no-fsync: true
 
-      # If you want to enable tracing, uncomment the following line.
-      # - use: jaeger
+      # If you want to enable metrics or tracing, uncomment the following lines.
+      # - use: prometheus  # metrics
+      # - use: tempo       # tracing
+      # - use: grafana     # visualization
 
       - use: meta-node
       - use: compute-node
@@ -42,10 +44,6 @@ profile:
 
       # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
       # - use: compactor
-
-      # If you want to enable metrics, uncomment those two lines.
-      # - use: prometheus
-      # - use: grafana
 
       # If you want to create source from Kafka, uncomment the following lines
       # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
@@ -839,8 +837,8 @@ template:
     # Meta-nodes used by this compute node
     provide-meta-node: "meta-node*"
 
-    # Jaeger used by this compute node
-    provide-jaeger: "jaeger*"
+    # Tempo used by this compute node
+    provide-tempo: "tempo*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
@@ -899,8 +897,8 @@ template:
     # AWS s3 bucket used by the cluster
     provide-aws-s3: "aws-s3*"
 
-    # Jaeger used by this meta node
-    provide-jaeger: "jaeger*"
+    # Tempo used by this meta node
+    provide-tempo: "tempo*"
 
     # Whether to enable in-memory pure KV state backend
     enable-in-memory-kv-state-backend: false
@@ -973,8 +971,8 @@ template:
     # Meta-nodes used by this frontend instance
     provide-meta-node: "meta-node*"
 
-    # Jaeger used by this frontend instance
-    provide-jaeger: "jaeger*"
+    # Tempo used by this frontend instance
+    provide-tempo: "tempo*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
@@ -1001,8 +999,8 @@ template:
     # Meta-nodes used by this compactor
     provide-meta-node: "meta-node*"
 
-    # Jaeger used by this compator
-    provide-jaeger: "jaeger*"
+    # Tempo used by this compator
+    provide-tempo: "tempo*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
@@ -1039,15 +1037,16 @@ template:
     # Prometheus used by this Grafana instance
     provide-prometheus: "prometheus*"
 
-  jaeger:
+    # Tempo used by this Grafana instance
+    provide-tempo: "tempo*"
+
+  tempo:
     # Id of this instance
-    id: jaeger
+    id: tempo
 
-    # Dashboard listen address of Jaeger
-    dashboard-address: "127.0.0.1"
+    listen-address: "127.0.0.1"
 
-    # Dashboard listen port of Jaeger
-    dashboard-port: 16680
+    port: 3200
 
     # gRPC listen address of the OTLP collector
     otlp-address: "127.0.0.1"
@@ -1055,10 +1054,6 @@ template:
     # gRPC listen port of the OTLP collector
     otlp-port: 4317
 
-    # Jaeger has a lot of ports open, and we don't want to make this config more complex.
-    # So we keep the default value of jaeger instead of making it part of RiseDev config.
-
-  # opendal:
   opendal:
     id: opendal
 
