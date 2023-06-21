@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockContextId};
-use risingwave_pb::hummock::CompactTaskAssignment;
+use risingwave_pb::hummock::{CompactStatus as PbCompactStatus, CompactTaskAssignment};
 
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::manager::read_lock;
@@ -121,6 +121,21 @@ where
                     .flat_map(|lh| lh.pending_tasks_ids())
             })
             .collect_vec()
+    }
+
+    #[named]
+    pub async fn list_compaction_status(
+        &self,
+    ) -> (Vec<PbCompactStatus>, Vec<CompactTaskAssignment>) {
+        let compaction = read_lock!(self, compaction).await;
+        (
+            compaction.compaction_statuses.values().map_into().collect(),
+            compaction
+                .compact_task_assignment
+                .values()
+                .cloned()
+                .collect(),
+        )
     }
 }
 

@@ -201,6 +201,7 @@ where
                 break;
             }
         }
+        // TODO:refactor
         let worker = worker_opt.ok_or_else(|| anyhow!("Worker node does not exist!"))?;
         let worker_type = worker.worker_type();
 
