@@ -49,7 +49,7 @@ use crate::task::AtomicU64Ref;
 mod private {
     use std::collections::BTreeMap;
 
-    use risingwave_common::estimate_size::EstimateSize;
+    use risingwave_common::estimate_size::{EstimateSize, KvSize};
     use risingwave_common::row::OwnedRow;
 
     use crate::executor::over_window::state::StateKey;
@@ -58,15 +58,15 @@ mod private {
         /// Fully synced table cache for the partition. `StateKey (order key, input pk)` -> table
         /// row.
         cache: BTreeMap<StateKey, OwnedRow>,
-        heap_size: usize,
+        heap_size: KvSize,
     }
 
     impl Partition {
         pub fn new(cache: BTreeMap<StateKey, OwnedRow>) -> Self {
-            let heap_size = cache
-                .iter()
-                .map(|(key, row)| key.estimated_heap_size() + row.estimated_heap_size())
-                .sum();
+            let heap_size = cache.iter().fold(KvSize::new(), |mut x, (k, v)| {
+                x.add(k, v);
+                x
+            });
             Self { cache, heap_size }
         }
 
@@ -76,22 +76,24 @@ mod private {
 
         pub fn insert(&mut self, key: StateKey, row: OwnedRow) {
             let key_heap_size = key.estimated_heap_size();
-            self.heap_size += key_heap_size + row.estimated_heap_size();
+            self.heap_size.add_size(key_heap_size);
+            self.heap_size.add_val(&row);
             if let Some(old_row) = self.cache.insert(key, row) {
-                self.heap_size -= key_heap_size + old_row.estimated_heap_size();
+                self.heap_size.sub_size(key_heap_size);
+                self.heap_size.sub_val(&old_row);
             }
         }
 
         pub fn remove(&mut self, key: &StateKey) {
             if let Some(row) = self.cache.remove(key) {
-                self.heap_size -= key.estimated_heap_size() + row.estimated_heap_size();
+                self.heap_size.sub(key, &row);
             }
         }
     }
 
     impl EstimateSize for Partition {
         fn estimated_heap_size(&self) -> usize {
-            self.heap_size
+            self.heap_size.size()
         }
     }
 }
