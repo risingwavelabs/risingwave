@@ -233,6 +233,11 @@ impl MetaClient {
                     property: Some(property.clone()),
                 })
                 .await?;
+            if let Some(status) = &add_worker_resp.status
+                && status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+                tracing::error!("invalid worker: {}", status.message);
+                std::process::exit(1);
+            }
 
             let system_params_resp = grpc_meta_client
                 .get_system_params(GetSystemParamsRequest {})

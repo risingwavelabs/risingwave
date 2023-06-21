@@ -250,6 +250,16 @@ where
         self.notify_without_version(SubscribeType::Hummock.into(), operation, info)
     }
 
+    #[cfg(any(test, feature = "test"))]
+    pub fn notify_hummock_with_version(
+        &self,
+        operation: Operation,
+        info: Info,
+        version: Option<NotificationVersion>,
+    ) {
+        self.notify(SubscribeType::Hummock.into(), operation, info, version)
+    }
+
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
         let mut core_guard = self.core.lock().await;
         core_guard.local_senders.retain(|sender| {
