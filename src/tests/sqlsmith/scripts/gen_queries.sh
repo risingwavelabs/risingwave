@@ -215,9 +215,9 @@ generate_deterministic() {
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
   echo "" > $LOGDIR/generate_deterministic.stdout.log
-  gen_seed | env_parallel --colsep --jobs 14 "
-    mkdir -p $OUTDIR/{%}
-    echo '[INFO] Generating For Seed {2}, Query Set{1}'
+  gen_seed | env_parallel --colsep ' ' --jobs 14 "
+    mkdir -p $OUTDIR/{1}
+    echo '[INFO] Generating For Seed {2}, Query Set {1}'
     if MADSIM_TEST_SEED={2} timeout 3m $MADSIM_BIN \
       --sqlsmith 100 \
       --generate-sqlsmith-queries $OUTDIR/{1} \
@@ -227,7 +227,7 @@ generate_deterministic() {
     then
       echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
       echo '[INFO] Extracting Queries For Seed {2}, Query set {1}'
-      extract_queries $LOGDIR/generate-{%}.log $OUTDIR/{1}/queries.sql
+      extract_queries $LOGDIR/generate-{1}.log $OUTDIR/{1}/queries.sql
       echo '[INFO] Extracted Queries For Seed {2}, Query set {1}.'
     else
       echo '[ERROR] Query timed out For Seed {2}, Query set {1}'
