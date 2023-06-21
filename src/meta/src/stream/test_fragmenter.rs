@@ -448,10 +448,11 @@ fn make_cluster_info() -> StreamingClusterInfo {
 async fn test_graph_builder() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
-    let job = StreamingJob::Table(None, make_materialize_table(888));
+    let mut job = StreamingJob::Table(None, make_materialize_table(888));
 
     let graph = make_stream_graph();
-    let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
+    let fragment_graph =
+        StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &mut job).await?;
     let internal_tables = fragment_graph.internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(

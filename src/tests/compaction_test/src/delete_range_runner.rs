@@ -121,6 +121,7 @@ async fn compaction_test(
             0.to_string(),
         )]),
         fragment_id: 0,
+        dml_fragment_id: None,
         vnode_col_index: None,
         value_indices: vec![],
         definition: "".to_string(),

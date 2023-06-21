@@ -81,6 +81,15 @@ impl StreamingJob {
         }
     }
 
+    pub fn table_mut(&mut self) -> Option<&mut Table> {
+        match self {
+            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
+                Some(table)
+            }
+            Self::Sink(_) => None,
+        }
+    }
+
     pub fn schema_id(&self) -> u32 {
         match self {
             Self::MaterializedView(table) => table.schema_id,

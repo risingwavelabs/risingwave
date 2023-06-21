@@ -204,6 +204,7 @@ impl StreamMaterialize {
             properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
+            dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index,
             value_indices,

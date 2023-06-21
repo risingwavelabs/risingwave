@@ -340,7 +340,7 @@ where
     ) -> MetaResult<StreamFragmentGraph> {
         // 1. Build fragment graph.
         let fragment_graph =
-            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
+            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
                 .await?;
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
@@ -606,7 +606,7 @@ where
     ) -> MetaResult<StreamFragmentGraph> {
         // 1. Build fragment graph.
         let fragment_graph =
-            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
+            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
                 .await?;
         assert!(fragment_graph.internal_tables().is_empty());
         assert!(fragment_graph.dependent_table_ids().is_empty());

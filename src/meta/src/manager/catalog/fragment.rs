@@ -165,7 +165,10 @@ where
 
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
         for fragment in table_fragment.fragments.values() {
-            if !fragment.state_table_ids.is_empty() {
+            if !fragment.state_table_ids.is_empty()
+                // DML fragment mapping is used by frontend to decide where to execute.
+                || fragment.fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0
+            {
                 let mapping = fragment
                     .vnode_mapping
                     .clone()
@@ -846,7 +849,10 @@ where
 
                 *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
 
-                if !fragment.state_table_ids.is_empty() {
+                if !fragment.state_table_ids.is_empty()
+                    // DML fragment mapping is used by frontend to decide where to execute.
+                    || fragment.fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0
+                {
                     let fragment_mapping = FragmentParallelUnitMapping {
                         fragment_id: fragment_id as FragmentId,
                         mapping: Some(vnode_mapping),

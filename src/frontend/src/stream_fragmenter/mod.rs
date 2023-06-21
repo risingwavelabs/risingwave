@@ -261,6 +261,10 @@ fn build_fragment(
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
         }
 
+        NodeBody::Dml(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Dml as u32;
+        }
+
         NodeBody::Materialize(_) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Mview as u32;
         }
