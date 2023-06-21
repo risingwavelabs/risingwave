@@ -83,6 +83,7 @@ pub enum WildcardOrExpr {
     ExprQualifiedWildcard(Expr, Vec<Ident>),
     QualifiedWildcard(ObjectName),
     Wildcard,
+    Except(Vec<Expr>),
 }
 
 impl From<WildcardOrExpr> for FunctionArgExpr {
@@ -94,6 +95,7 @@ impl From<WildcardOrExpr> for FunctionArgExpr {
             }
             WildcardOrExpr::QualifiedWildcard(prefix) => Self::QualifiedWildcard(prefix),
             WildcardOrExpr::Wildcard => Self::Wildcard,
+            WildcardOrExpr::Except(exprs) => Self::Except(exprs),
         }
     }
 }
@@ -313,7 +315,14 @@ impl Parser {
                 return self.word_concat_wildcard_expr(w.to_ident()?, wildcard_expr);
             }
             Token::Mul => {
-                return Ok(WildcardOrExpr::Wildcard);
+                if self.parse_keyword(Keyword::EXCEPT) && self.consume_token(&Token::LParen) {
+                    let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+                    if self.consume_token(&Token::RParen) {
+                        return Ok(WildcardOrExpr::Except(exprs));
+                    }
+                } else {
+                    return Ok(WildcardOrExpr::Wildcard);
+                }
             }
             // parses wildcard field selection expression.
             // Code is similar to `parse_struct_selection`
@@ -349,6 +358,7 @@ impl Parser {
             WildcardOrExpr::Wildcard => {}
             WildcardOrExpr::ExprQualifiedWildcard(_, _) => unreachable!(),
             WildcardOrExpr::Expr(e) => return Ok(WildcardOrExpr::Expr(e)),
+            WildcardOrExpr::Except(_) => unreachable!(),
         }
         Ok(WildcardOrExpr::QualifiedWildcard(ObjectName(idents)))
     }
@@ -390,6 +400,7 @@ impl Parser {
             WildcardOrExpr::Wildcard => {}
             WildcardOrExpr::ExprQualifiedWildcard(_, _) => unreachable!(),
             WildcardOrExpr::Expr(_) => unreachable!(),
+            WildcardOrExpr::Except(_) => unreachable!(),
         }
         Ok(WildcardOrExpr::ExprQualifiedWildcard(expr, idents))
     }
@@ -3529,17 +3540,7 @@ impl Parser {
     pub fn parse_select(&mut self) -> Result<Select, ParserError> {
         let distinct = self.parse_all_or_distinct_on()?;
 
-        let mut projection = self.parse_comma_separated(Parser::parse_select_item)?;
-
-        // only deals with 'select * except' here
-        let index = self.index;
-        if self.parse_keyword(Keyword::EXCEPT) {
-            if projection.len() == 1 && let SelectItem::Wildcard = projection[0] {
-                projection = self.parse_comma_separated(Parser::parse_table_or_column)?;
-            } else {
-                self.index = index;
-            }
-        }
+        let projection = self.parse_comma_separated(Parser::parse_select_item)?;
 
         // Note that for keywords to be properly handled here, they need to be
         // added to `RESERVED_FOR_COLUMN_ALIAS` / `RESERVED_FOR_TABLE_ALIAS`,
@@ -4250,29 +4251,6 @@ impl Parser {
         }
     }
 
-    pub fn parse_table_or_column(&mut self) -> Result<SelectItem, ParserError> {
-        let index = self.index;
-
-        if let Token::Word(w) = self.next_token().token {
-            let mut id_parts = vec![w.to_ident()?];
-            while self.consume_token(&Token::Period) {
-                let token = self.next_token();
-                match token.token {
-                    Token::Word(w) => id_parts.push(w.to_ident()?),
-                    unexpected => {
-                        self.index = index;
-                        return self
-                            .expected("an identifier", unexpected.with_location(token.location));
-                    }
-                }
-            }
-            return Ok(SelectItem::Except(Expr::CompoundIdentifier(id_parts)));
-        }
-
-        self.index = index;
-        self.expected("an identifier", self.peek_token())
-    }
-
     /// Parse a comma-delimited list of projections after SELECT
     pub fn parse_select_item(&mut self) -> Result<SelectItem, ParserError> {
         match self.parse_wildcard_or_expr()? {
@@ -4287,6 +4265,7 @@ impl Parser {
                 Ok(SelectItem::ExprQualifiedWildcard(expr, prefix))
             }
             WildcardOrExpr::Wildcard => Ok(SelectItem::Wildcard),
+            WildcardOrExpr::Except(exprs) => Ok(SelectItem::Except(exprs)),
         }
     }
 

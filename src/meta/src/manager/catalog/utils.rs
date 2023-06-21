@@ -245,6 +245,11 @@ impl QueryRewriter<'_> {
                     self.visit_expr(expr)
                 }
                 FunctionArgExpr::QualifiedWildcard(_) | FunctionArgExpr::Wildcard => {}
+                FunctionArgExpr::Except(exprs) => {
+                    for expr in exprs {
+                        self.visit_expr(expr);
+                    }
+                }
             },
         }
     }
@@ -344,10 +349,14 @@ impl QueryRewriter<'_> {
     fn visit_select_item(&self, select_item: &mut SelectItem) {
         match select_item {
             SelectItem::UnnamedExpr(expr)
-            | SelectItem::Except(expr)
             | SelectItem::ExprQualifiedWildcard(expr, _)
             | SelectItem::ExprWithAlias { expr, .. } => self.visit_expr(expr),
             SelectItem::QualifiedWildcard(_) | SelectItem::Wildcard => {}
+            SelectItem::Except(exprs) => {
+                for expr in exprs {
+                    self.visit_expr(expr);
+                }
+            }
         }
     }
 }

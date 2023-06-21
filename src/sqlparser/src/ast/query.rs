@@ -311,8 +311,8 @@ pub enum SelectItem {
     QualifiedWildcard(ObjectName),
     /// An unqualified `*`
     Wildcard,
-    /// select * except [ ]
-    Except(Expr),
+    /// select * except ( test )
+    Except(Vec<Expr>)
 }
 
 impl fmt::Display for SelectItem {
@@ -330,7 +330,18 @@ impl fmt::Display for SelectItem {
             ),
             SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
             SelectItem::Wildcard => write!(f, "*"),
-            SelectItem::Except(expr) => write!(f, "EXCEPT {}", expr),
+            SelectItem::Except(exprs) => {
+                write!(
+                    f,
+                    "* EXCEPT {}",
+                    exprs
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                )
+            }
         }
     }
 }

@@ -226,7 +226,6 @@ impl Binder {
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let mut select_list = vec![];
         let mut aliases = vec![];
-        let mut is_except = false;
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
@@ -294,34 +293,25 @@ impl Binder {
                     // We may need to refactor `NaturalGroupContext` to become span aware in that
                     // case.
                 }
-                SelectItem::Except(expr) => {
-                    is_except = true;
-                    let alias = derive_alias(&expr);
-                    let bound = self.bind_expr(expr)?;
-                    select_list.push(bound);
-                    aliases.push(alias);
+                SelectItem::Except(exprs) => {
+                    let mut indices = HashSet::new();
+                    for expr in exprs {
+                        let bound = self.bind_expr(expr)?;
+                        if let ExprImpl::InputRef(inner) = bound {
+                            indices.insert(inner.index);
+                        } else {
+                            unreachable!();
+                        }                        
+                    }
+                    let (exprs, names) = Self::iter_bound_columns(
+                        self.context.columns[..]
+                            .iter()
+                            .filter(|c| !c.is_hidden && !indices.contains(&c.index)),
+                    );           
+                    select_list.extend(exprs);
+                    aliases.extend(names);
                 }
             }
-        }
-        if is_except {
-            let mut reverse_select_list = vec![];
-            let mut reverse_aliases = vec![];
-            let mut indices: HashSet<usize> = HashSet::new();
-            for expr in &select_list {
-                if let ExprImpl::InputRef(inner) = expr {
-                    indices.insert(inner.index);
-                } else {
-                    unreachable!();
-                }
-            }
-            let (exprs, names) = Self::iter_bound_columns(
-                self.context.columns[..]
-                    .iter()
-                    .filter(|c| !c.is_hidden && !indices.contains(&c.index)),
-            );
-            reverse_select_list.extend(exprs);
-            reverse_aliases.extend(names);
-            return Ok((reverse_select_list, reverse_aliases));
         }
         Ok((select_list, aliases))
     }

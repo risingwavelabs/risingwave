@@ -1011,6 +1011,7 @@ impl Binder {
             FunctionArgExpr::QualifiedWildcard(_) => todo!(),
             FunctionArgExpr::ExprQualifiedWildcard(_, _) => todo!(),
             FunctionArgExpr::Wildcard => Ok(vec![]),
+            FunctionArgExpr::Except(_) => unreachable!(),
         }
     }
 
