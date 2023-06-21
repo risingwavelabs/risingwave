@@ -170,9 +170,11 @@ generate_deterministic() {
   echo_err "[INFO] Generating"
   echo "" > $LOGDIR/generate_deterministic.stdout.log
 
+  local timeout=1
+
   for i in $(seq 0 3)
   do
-    local batch_size=25;
+    local batch_size=5
     local start="$((i * $batch_size + 1))"
     local end=$((start - 1 + $batch_size))
     echo_err "--- Generating for Queries $start - $end"
@@ -180,7 +182,8 @@ generate_deterministic() {
     do
         generate_one_deterministic "$SET_ID" &
     done
-    wait
+    timeout "$((batch_size * timeout))m" wait
+    kill $(jobs -p)
   done
   echo_err "[INFO] Finished generation"
 
