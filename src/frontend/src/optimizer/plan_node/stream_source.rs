@@ -77,10 +77,8 @@ impl Distill for StreamSource {
     fn distill<'a>(&self) -> Pretty<'a> {
         let fields = if let Some(catalog) = self.source_catalog() {
             let src = Pretty::from(catalog.name.clone());
-            vec![
-                ("source", src),
-                ("columns", column_names_pretty(self.schema())),
-            ]
+            let col = column_names_pretty(self.schema());
+            vec![("source", src), ("columns", col)]
         } else {
             vec![]
         };

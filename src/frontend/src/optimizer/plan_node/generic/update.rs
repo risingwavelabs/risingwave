@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::hash::Hash;
 
@@ -80,7 +81,7 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
 }
 
 impl<PlanRef: Eq + Hash> DistillUnit for Update<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
         let mut vec = Vec::with_capacity(if self.returning { 3 } else { 2 });
         vec.push(("table", Pretty::Text(self.table_name.clone().into())));
         vec.push(("exprs", Pretty::debug(&self.exprs)));

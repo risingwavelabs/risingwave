@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::fmt;
 
 use pretty_xmlish::Pretty;
@@ -60,7 +61,7 @@ impl<PlanRef> ProjectSet<PlanRef> {
 }
 
 impl<PlanRef> DistillUnit for ProjectSet<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
         let fields = vec![("select_list", Pretty::debug(&self.select_list))];
         Pretty::childless_record(name, fields)
     }

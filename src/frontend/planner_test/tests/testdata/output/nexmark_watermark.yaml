@@ -1796,7 +1796,7 @@
                     └─BatchSource { source: "nexmark", columns: ["event_type", "person", "auction", "bid", "_row_id"], filter: (None, None) }
   stream_plan: |
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: "NoCheck" }
-    └─StreamDynamicFilter { predicate: (count($expr4) >= $expr5), output: [$expr2, $expr3, count($expr4)] }
+    └─StreamDynamicFilter { predicate: (count($expr4) >= $expr5), output: ["$expr2", "$expr3", "count($expr4)"] }
       ├─StreamProject { exprs: [$expr2, $expr3, count($expr4)] }
       | └─StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count($expr4), count] }
       |   └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr4, output: [$expr2, $expr3, $expr4, _row_id, _row_id] }
@@ -1841,7 +1841,7 @@
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
-    └── StreamDynamicFilter { predicate: (count($expr4) >= $expr5), output: [$expr2, $expr3, count($expr4)] } { left table: 0, right table: 1 }
+    └── StreamDynamicFilter { predicate: (count($expr4) >= $expr5), output: ["$expr2", "$expr3", "count($expr4)"] } { left table: 0, right table: 1 }
         ├── StreamProject { exprs: [$expr2, $expr3, count($expr4)] }
         │   └── StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count($expr4), count] } { result table: 2, state tables: [], distinct tables: [] }
         │       └── StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr4, output: [$expr2, $expr3, $expr4, _row_id, _row_id] }
