@@ -317,7 +317,19 @@ where
                 .collect_vec();
             let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
-            commit_meta!(self, databases, schemas, sources, sinks, tables, indexes, views, users)?;
+            commit_meta!(
+                self,
+                databases,
+                schemas,
+                sources,
+                sinks,
+                tables,
+                indexes,
+                views,
+                users,
+                connections,
+                functions
+            )?;
 
             std::iter::once(database.owner)
                 .chain(schemas_to_drop.iter().map(|schema| schema.owner))
@@ -332,6 +344,11 @@ where
                 .chain(indexes_to_drop.iter().map(|index| index.owner))
                 .chain(views_to_drop.iter().map(|view| view.owner))
                 .chain(functions_to_drop.iter().map(|function| function.owner))
+                .chain(
+                    connections_to_drop
+                        .iter()
+                        .map(|connection| connection.owner),
+                )
                 .for_each(|owner_id| user_core.decrease_ref(owner_id));
 
             // Update relation ref count.
@@ -348,7 +365,6 @@ where
             for connection in &connections_to_drop {
                 database_core.relation_ref_count.remove(&connection.id);
             }
-            // FIXME: resolve function refer count.
             for user in users_need_update {
                 self.notify_frontend(Operation::Update, Info::User(user))
                     .await;
