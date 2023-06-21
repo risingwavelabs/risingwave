@@ -71,8 +71,9 @@ pub trait DistillUnit {
 
 macro_rules! impl_distill_unit_from_fields {
     ($name:ident, $bound:path) => {
-        use $crate::optimizer::plan_node::generic::DistillUnit;
         use std::borrow::Cow;
+
+        use $crate::optimizer::plan_node::generic::DistillUnit;
         impl<PlanRef: $bound> DistillUnit for $name<PlanRef> {
             fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
                 Pretty::childless_record(name, self.fields_pretty())
