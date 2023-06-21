@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -148,7 +149,7 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for TopN<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
         let mut vec = Vec::with_capacity(5);
         let input_schema = self.input.schema();
         let order_d = Pretty::display(&OrderDisplay {

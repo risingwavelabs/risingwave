@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::fmt;
 
 use pretty_xmlish::Pretty;
@@ -34,7 +35,7 @@ pub struct Filter<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for Filter<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
         let input_schema = self.input.schema();
         let predicate = ConditionDisplay {
             condition: &self.predicate,

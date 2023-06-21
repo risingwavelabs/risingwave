@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::borrow::Cow;
 use std::fmt;
 use std::hash::Hash;
 
@@ -64,7 +65,7 @@ impl<PlanRef> Limit<PlanRef> {
 }
 
 impl<PlanRef> DistillUnit for Limit<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
         Pretty::childless_record(
             name,
             vec![

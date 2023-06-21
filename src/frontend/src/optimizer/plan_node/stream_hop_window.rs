@@ -15,13 +15,14 @@
 use std::fmt;
 
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::stream::StreamPlanRef;
-use super::utils::formatter_debug_plan_node;
+use super::utils::{formatter_debug_plan_node, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -76,6 +77,15 @@ impl StreamHopWindow {
     }
 }
 
+impl Distill for StreamHopWindow {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let mut vec = self.logical.fields_pretty();
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+            vec.push(("output_watermarks", ow));
+        }
+        Pretty::childless_record("StreamHopWindow", vec)
+    }
+}
 impl fmt::Display for StreamHopWindow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = formatter_debug_plan_node!(f, "StreamHopWindow");

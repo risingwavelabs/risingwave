@@ -18,7 +18,9 @@ use std::{fmt, vec};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
+use risingwave_common::catalog::{
+    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema,
+};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
@@ -185,12 +187,33 @@ macro_rules! impl_distill_by_unit {
 }
 pub(crate) use impl_distill_by_unit;
 
-pub fn column_names_pretty<'a>(schema: &Schema) -> Pretty<'a> {
+pub(crate) fn column_names_pretty<'a>(schema: &Schema) -> Pretty<'a> {
     let columns = (schema.fields.iter())
         .map(|f| f.name.clone())
         .map(Pretty::from)
         .collect();
     Pretty::Array(columns)
+}
+
+pub(crate) fn watermark_pretty<'a>(
+    watermark_columns: &FixedBitSet,
+    schema: &Schema,
+) -> Option<Pretty<'a>> {
+    if watermark_columns.count_ones(..) > 0 {
+        Some(watermark_fields_pretty(watermark_columns.ones(), schema))
+    } else {
+        None
+    }
+}
+pub(crate) fn watermark_fields_pretty<'a>(
+    watermark_columns: impl Iterator<Item = usize>,
+    schema: &Schema,
+) -> Pretty<'a> {
+    let arr = watermark_columns
+        .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+        .map(|d| Pretty::display(&d))
+        .collect();
+    Pretty::Array(arr)
 }
 
 #[derive(Clone, Copy)]
@@ -249,8 +272,8 @@ impl fmt::Debug for IndicesDisplay<'_> {
 /// Call `debug_struct` on the given formatter to create a debug struct builder.
 /// If a property list is provided, properties in it will be added to the struct name according to
 /// the condition of that property.
-macro_rules! formatter_debug_plan_node {
-    ($formatter:ident, $name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
+macro_rules! plan_node_name {
+    ($name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
         {
             #[allow(unused_mut)]
             let mut properties: Vec<&str> = vec![];
@@ -261,10 +284,19 @@ macro_rules! formatter_debug_plan_node {
                 name += &properties.join(", ");
                 name += "]";
             }
+            name
+        }
+    };
+}
+macro_rules! formatter_debug_plan_node {
+    ($formatter:ident, $name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
+        {
+            use $crate::optimizer::plan_node::utils::plan_node_name;
+            let name = plan_node_name!($name $(, { $prop, $cond } )* );
             $formatter.debug_struct(&name)
         }
     };
 }
-pub(crate) use formatter_debug_plan_node;
+pub(crate) use {formatter_debug_plan_node, plan_node_name};
 
 use super::generic::{self, GenericPlanRef};

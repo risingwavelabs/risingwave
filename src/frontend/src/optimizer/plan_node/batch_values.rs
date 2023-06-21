@@ -70,16 +70,7 @@ impl fmt::Display for BatchValues {
 }
 impl Distill for BatchValues {
     fn distill<'a>(&self) -> Pretty<'a> {
-        let data = Pretty::Array(
-            self.logical
-                .rows()
-                .iter()
-                .map(|row| {
-                    let collect = row.iter().map(Pretty::debug).collect();
-                    Pretty::Array(collect)
-                })
-                .collect(),
-        );
+        let data = self.logical.rows_pretty();
         Pretty::childless_record("BatchValues", vec![("rows", data)])
     }
 }
