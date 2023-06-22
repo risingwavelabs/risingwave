@@ -324,8 +324,9 @@ run_queries() {
 check_failed_to_run_queries() {
   FAILED_LOGS=$(ls "$LOGDIR" | grep fuzzing || true)
   if [[ -n "$FAILED_LOGS" ]]; then
-    echo_err -e "FAILING_LOGS: $FAILED_LOGS" && exit 1
+    echo_err -e "FAILING_LOGS: $FAILED_LOGS"
     buildkite-agent artifact upload "$LOGDIR/fuzzing-*.log"
+    exit 1
   fi
 }
 
