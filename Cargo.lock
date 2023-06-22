@@ -5715,6 +5715,7 @@ dependencies = [
  "clap 4.2.7",
  "console",
  "madsim-tokio",
+ "risingwave_cmd",
  "risingwave_common",
  "risingwave_compactor",
  "risingwave_compute",
