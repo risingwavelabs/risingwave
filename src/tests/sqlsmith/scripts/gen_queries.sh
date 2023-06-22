@@ -173,10 +173,10 @@ generate_deterministic() {
   # FIXME: try increase jobs again?
   # FIXME: If this times out, the last query needs to be removed too.
   # This is because last query could be partially processed and actually cause error / timeout.
-  gen_seed | timeout 20m parallel --colsep ' ' "
+  gen_seed | timeout 15m parallel --colsep ' ' "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
-    if MADSIM_TEST_SEED={2} timeout 4m $MADSIM_BIN \
+    if MADSIM_TEST_SEED={2} timeout 5m $MADSIM_BIN \
       --sqlsmith $TEST_NUM_PER_SET \
       --generate-sqlsmith-queries $OUTDIR/{1} \
       $TESTDATA \
@@ -186,7 +186,7 @@ generate_deterministic() {
     else
       echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
       echo '[WARN] Cluster crashed or timed out while generating queries. see $LOGDIR/generate-{1}.log for more information.'
-      if ! cat $LOGDIR/generate-{1} | grep $CRASH_MESSAGE
+      if ! cat $LOGDIR/generate-{1}.log | grep $CRASH_MESSAGE
       then
         echo $TIMEOUT_MESSAGE >> $LOGDIR/generate-{1}.log
       fi
