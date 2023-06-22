@@ -37,11 +37,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
         match self.rng.gen_range(1..=10) {
-            1..=2 => self.gen_no_join(),
-            3..=6 => self
+            1..=3 => self.gen_no_join(),
+            4..=7 => self
                 .gen_simple_join_clause()
                 .unwrap_or_else(|| self.gen_no_join()),
-            7..=10 => self.gen_more_joins(),
+            8..=10 => self.gen_more_joins(),
             // TODO(kwannoel): cycles, bushy joins.
             _ => unreachable!(),
         }
