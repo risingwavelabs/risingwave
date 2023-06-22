@@ -61,7 +61,7 @@ pub async fn generate(
     _outdir: &str,
     seed: Option<u64>,
 ) {
-    let timeout_duration = 6;
+    let timeout_duration = 5;
 
     set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
     set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;

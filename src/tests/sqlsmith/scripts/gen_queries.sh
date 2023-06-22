@@ -23,7 +23,7 @@ export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
 export TIME_BOUND="6m"
-export TEST_NUM_PER_SET=20
+export TEST_NUM_PER_SET=30
 export E2E_TEST_NUM=32
 export TIMEOUT_MESSAGE="Query Set timed out"
 
@@ -63,12 +63,12 @@ extract_queries() {
   local QUERIES=$(grep "\[EXECUTING .*\]: " < "$1" | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/')
   local FAILED=$(check_if_failed < "$1")
   if [[ -n "$FAILED" ]]; then
-    local FAIL_REASON=$(get_failure_reason "$1")
-
+    echo "Cluster crashed, see $1. Removing failed query."
     # Comment out the last line of queries.
     local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
   if [[ -n $(check_if_timeout < "$1") ]]; then
+    echo "Cluster timed out, see $1. Removing last query in case."
     # Comment out the last line of queries.
     local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
@@ -173,10 +173,10 @@ generate_deterministic() {
   # FIXME: try increase jobs again?
   # FIXME: If this times out, the last query needs to be removed too.
   # This is because last query could be partially processed and actually cause error / timeout.
-  gen_seed | timeout 15m parallel --colsep ' ' "
+  gen_seed | timeout 20m parallel --colsep ' ' "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
-    if MADSIM_TEST_SEED={2} timeout 3m $MADSIM_BIN \
+    if MADSIM_TEST_SEED={2} timeout 4m $MADSIM_BIN \
       --sqlsmith $TEST_NUM_PER_SET \
       --generate-sqlsmith-queries $OUTDIR/{1} \
       $TESTDATA \
@@ -272,7 +272,7 @@ run_queries() {
   set +e
   echo "" > $LOGDIR/run_deterministic.stdout.log
   seq $TEST_NUM | parallel "MADSIM_TEST_SEED={} \
-    timeout 20m $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
+    timeout 15m $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
       && rm $LOGDIR/fuzzing-{}.log"
