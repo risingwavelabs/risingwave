@@ -39,7 +39,7 @@ impl CdcSplitBase {
     }
 }
 
-// Example debezium offset JSON:
+// Example debezium offset for Postgres:
 // {
 //     "sourcePartition":
 //     {
@@ -68,10 +68,6 @@ struct DebeziumSourceOffset {
     last_snapshot_record: Option<bool>,
     // mysql snapshot progress
     snapshot: Option<bool>,
-    lsn: u64,
-    #[serde(alias = "txId")]
-    tx_id: u64,
-    ts_usec: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
