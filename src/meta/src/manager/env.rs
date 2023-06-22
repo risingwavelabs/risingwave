@@ -15,6 +15,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use risingwave_common::config::DefaultParallelism;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
@@ -77,6 +78,8 @@ pub struct MetaOpts {
     pub max_idle_ms: u64,
     /// Whether run in compaction detection test mode
     pub compaction_deterministic_test: bool,
+    /// Default parallelism of units for all streaming jobs.
+    pub default_parallelism: DefaultParallelism,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
@@ -128,12 +131,14 @@ pub struct MetaOpts {
     /// The size limit to split a large compaction group.
     pub split_group_size_limit: u64,
     /// The size limit to move a state-table to other group.
-    pub move_table_size_limit: u64,
+    pub min_table_split_size: u64,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
     pub do_not_config_object_storage_lifecycle: bool,
 
     pub partition_vnode_count: u32,
+    pub table_write_throughput_threshold: u64,
+    pub min_table_split_write_throughput: u64,
 }
 
 impl MetaOpts {
@@ -144,6 +149,7 @@ impl MetaOpts {
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
+            default_parallelism: DefaultParallelism::Full,
             vacuum_interval_sec: 30,
             hummock_version_checkpoint_interval_sec: 30,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
@@ -162,7 +168,9 @@ impl MetaOpts {
             periodic_split_compact_group_interval_sec: 60,
             max_compactor_task_multiplier: 2,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
-            move_table_size_limit: 2 * 1024 * 1024 * 1024,
+            min_table_split_size: 2 * 1024 * 1024 * 1024,
+            table_write_throughput_threshold: 128 * 1024 * 1024,
+            min_table_split_write_throughput: 64 * 1024 * 1024,
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
         }

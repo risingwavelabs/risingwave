@@ -38,7 +38,7 @@ use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 type HashMappingId = usize;
 
@@ -199,8 +199,8 @@ impl Scheduler {
     /// `None`, all parallel units will be used.
     pub fn new(
         parallel_units: impl IntoIterator<Item = ParallelUnit>,
-        default_parallelism: Option<NonZeroUsize>,
-    ) -> MetaResult<Self> {
+        default_parallelism: NonZeroUsize,
+    ) -> Self {
         // Group parallel units with worker node.
         let mut parallel_units_map = BTreeMap::new();
         for p in parallel_units {
@@ -209,18 +209,6 @@ impl Scheduler {
                 .or_insert_with(Vec::new)
                 .push(p);
         }
-
-        if parallel_units_map.is_empty() {
-            return Err(MetaError::unavailable(
-                "No available parallel units to schedule".to_string(),
-            ));
-        }
-
-        // Use all parallel units if no default parallelism is specified.
-        let default_parallelism = default_parallelism.map_or_else(
-            || parallel_units_map.values().map(|p| p.len()).sum::<usize>(),
-            NonZeroUsize::get,
-        );
 
         let mut parallel_units: LinkedList<_> = parallel_units_map
             .into_values()
@@ -239,14 +227,8 @@ impl Scheduler {
                 }
             });
         }
-        round_robin.truncate(default_parallelism);
-
-        if round_robin.len() < default_parallelism {
-            return Err(MetaError::unavailable(format!(
-                "Not enough parallel units to schedule {} parallelism",
-                default_parallelism
-            )));
-        }
+        round_robin.truncate(default_parallelism.get());
+        assert_eq!(round_robin.len(), default_parallelism.get());
 
         // Sort all parallel units by ID to achieve better vnode locality.
         round_robin.sort_unstable_by_key(|p| p.id);
@@ -256,10 +238,10 @@ impl Scheduler {
         // Randomly choose a parallel unit as the default singleton parallel unit.
         let default_singleton_parallel_unit = round_robin.choose(&mut thread_rng()).unwrap().id;
 
-        Ok(Self {
+        Self {
             default_hash_mapping,
             default_singleton_parallel_unit,
-        })
+        }
     }
 
     /// Schedule the given complete graph and returns the distribution of each **building
