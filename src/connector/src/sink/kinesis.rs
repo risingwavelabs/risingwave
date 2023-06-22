@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
@@ -32,7 +33,12 @@ use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
-use crate::sink::{Result, Sink, SinkError, SINK_TYPE_DEBEZIUM, SINK_TYPE_UPSERT};
+use crate::sink::{
+    Result, Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT,
+};
+
+pub const KINESIS_SINK: &str = "kinesis";
 
 #[derive(Clone, Debug)]
 pub struct KinesisSink<const APPEND_ONLY: bool> {
@@ -49,6 +55,27 @@ pub struct KinesisSinkConfig {
     pub common: KinesisCommon,
 
     pub r#type: String, // accept "append-only", "debezium", or "upsert"
+}
+
+impl KinesisSinkConfig {
+    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+        let config =
+            serde_json::from_value::<KinesisSinkConfig>(serde_json::to_value(properties).unwrap())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        if config.r#type != SINK_TYPE_APPEND_ONLY
+            && config.r#type != SINK_TYPE_DEBEZIUM
+            && config.r#type != SINK_TYPE_UPSERT
+        {
+            return Err(SinkError::Config(anyhow!(
+                "`{}` must be {}, {}, or {}",
+                SINK_TYPE_OPTION,
+                SINK_TYPE_APPEND_ONLY,
+                SINK_TYPE_DEBEZIUM,
+                SINK_TYPE_UPSERT
+            )));
+        }
+        Ok(config)
+    }
 }
 
 impl<const APPEND_ONLY: bool> KinesisSink<APPEND_ONLY> {
