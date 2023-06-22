@@ -157,7 +157,6 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
     is_mview: bool,
 
     recursion_weight: f64,
-    //
     // /// Count number of subquery.
     // /// We don't want too many per query otherwise it is hard to debug.
     // with_statements: u64,
