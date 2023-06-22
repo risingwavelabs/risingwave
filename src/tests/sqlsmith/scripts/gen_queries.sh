@@ -167,7 +167,7 @@ generate_deterministic() {
   gen_seed | timeout 15m parallel --colsep ' ' "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
-    if MADSIM_TEST_SEED={2} $MADSIM_BIN \
+    if timeout 2m MADSIM_TEST_SEED={2} $MADSIM_BIN \
       --sqlsmith $TEST_NUM_PER_SET \
       --generate-sqlsmith-queries $OUTDIR/{1} \
       $TESTDATA \
