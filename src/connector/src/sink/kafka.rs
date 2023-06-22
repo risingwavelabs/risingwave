@@ -18,30 +18,26 @@ use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
-use futures::stream::BoxStream;
-use futures::{FutureExt, StreamExt};
 use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{BaseRecord, Producer, ThreadedProducer};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::row::Row;
+use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::Schema;
 use serde_derive::Deserialize;
-use serde_json::{json, Map, Value};
-use tracing::warn;
+use serde_json::Value;
 
 use super::{
-    Sink, SinkError, TimestampHandlingMode, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM,
-    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
 use crate::sink::utils::{
-    gen_debezium_message_stream, pk_to_json, schema_to_json, DebeziumAdapterOpts,
+    gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
+    AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
-use crate::sink::{datum_to_json_object, record_to_json, Result};
+use crate::sink::Result;
 use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
@@ -240,6 +236,25 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         )
     }
 
+    async fn write_json_objects(
+        &self,
+        event_key_object: Option<Value>,
+        event_object: Option<Value>,
+    ) -> Result<()> {
+        // here we assume the key part always exists and value part is optional.
+        // if value is None, we will skip the payload part.
+        let key_str = event_key_object.unwrap().to_string();
+        let mut record =
+            BaseRecord::<[u8], [u8]>::to(self.config.common.topic.as_str()).key(key_str.as_bytes());
+        let payload;
+        if let Some(value) = event_object {
+            payload = value.to_string();
+            record = record.payload(payload.as_bytes());
+        }
+        self.send(record).await?;
+        Ok(())
+    }
+
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
         let dbz_stream = gen_debezium_message_stream(
             &self.schema,
@@ -252,85 +267,42 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         #[for_await]
         for msg in dbz_stream {
             let (event_key_object, event_object) = msg?;
-            let key_str = event_key_object.unwrap().to_string();
-            let mut record = BaseRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
-                .key(key_str.as_bytes());
-            let payload;
-            if let Some(value) = event_object {
-                payload = value.to_string();
-                record = record.payload(payload.as_bytes());
-            }
-            self.send(record).await?;
+            self.write_json_objects(event_key_object, event_object)
+                .await?;
         }
         Ok(())
     }
 
     async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
-        let mut update_cache: Option<Map<String, Value>> = None;
-        let schema = &self.schema;
-        for (op, row) in chunk.rows() {
-            let event_object = match op {
-                Op::Insert => Some(Value::Object(record_to_json(
-                    row,
-                    &schema.fields,
-                    TimestampHandlingMode::Milli,
-                )?)),
-                Op::Delete => Some(Value::Null),
-                Op::UpdateDelete => {
-                    update_cache = Some(record_to_json(
-                        row,
-                        &schema.fields,
-                        TimestampHandlingMode::Milli,
-                    )?);
-                    continue;
-                }
-                Op::UpdateInsert => {
-                    if update_cache.take().is_some() {
-                        Some(Value::Object(record_to_json(
-                            row,
-                            &schema.fields,
-                            TimestampHandlingMode::Milli,
-                        )?))
-                    } else {
-                        warn!(
-                            "not found UpdateDelete in prev row, skipping, row index {:?}",
-                            row.index()
-                        );
-                        continue;
-                    }
-                }
-            };
-            if let Some(obj) = event_object {
-                let event_key =
-                    Value::Object(pk_to_json(row, &schema.fields, &self.pk_indices)?).to_string();
-                let event_value = obj.to_string();
-                let mut msg: BaseRecord<'_, [u8], [u8]> =
-                    BaseRecord::to(self.config.common.topic.as_str()).key(event_key.as_bytes());
-                if op != Op::Delete {
-                    msg = msg.payload(event_value.as_bytes());
-                }
-                self.send(msg).await?;
-            }
+        let upsert_stream = gen_upsert_message_stream(
+            &self.schema,
+            &self.pk_indices,
+            chunk,
+            UpsertAdapterOpts::default(),
+        );
+
+        #[for_await]
+        for msg in upsert_stream {
+            let (event_key_object, event_object) = msg?;
+            self.write_json_objects(event_key_object, event_object)
+                .await?;
         }
         Ok(())
     }
 
     async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
-        for (op, row) in chunk.rows() {
-            if op == Op::Insert {
-                let record = Value::Object(record_to_json(
-                    row,
-                    &self.schema.fields,
-                    TimestampHandlingMode::Milli,
-                )?)
-                .to_string();
-                self.send(
-                    BaseRecord::to(self.config.common.topic.as_str())
-                        .key(self.gen_message_key().as_bytes())
-                        .payload(record.as_bytes()),
-                )
+        let append_only_stream = gen_append_only_message_stream(
+            &self.schema,
+            &self.pk_indices,
+            chunk,
+            AppendOnlyAdapterOpts::default(),
+        );
+
+        #[for_await]
+        for msg in append_only_stream {
+            let (event_key_object, event_object) = msg?;
+            self.write_json_objects(event_key_object, event_object)
                 .await?;
-            }
         }
         Ok(())
     }
@@ -481,6 +453,7 @@ impl KafkaTransactionConductor {
 #[cfg(test)]
 mod test {
     use maplit::hashmap;
+    use risingwave_common::catalog::Field;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
 

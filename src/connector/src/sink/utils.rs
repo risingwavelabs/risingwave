@@ -37,7 +37,7 @@ impl Default for DebeziumAdapterOpts {
 #[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
 pub async fn gen_debezium_message_stream<'a>(
     schema: &'a Schema,
-    pk_indices: &'a Vec<usize>,
+    pk_indices: &'a [usize],
     chunk: StreamChunk,
     ts_ms: u64,
     opts: DebeziumAdapterOpts,
@@ -260,4 +260,64 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
     }
 
     Ok(records)
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UpsertAdapterOpts {}
+
+#[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
+pub async fn gen_upsert_message_stream<'a>(
+    schema: &'a Schema,
+    pk_indices: &'a [usize],
+    chunk: StreamChunk,
+    _opts: UpsertAdapterOpts,
+) {
+    for (op, row) in chunk.rows() {
+        let event_key_object = Some(Value::Object(pk_to_json(row, &schema.fields, pk_indices)?));
+
+        let event_object = match op {
+            Op::Insert => Some(Value::Object(record_to_json(
+                row,
+                &schema.fields,
+                TimestampHandlingMode::Milli,
+            )?)),
+            Op::Delete => Some(Value::Null),
+            Op::UpdateDelete => {
+                // upsert semantic does not require update delete event
+                continue;
+            }
+            Op::UpdateInsert => Some(Value::Object(record_to_json(
+                row,
+                &schema.fields,
+                TimestampHandlingMode::Milli,
+            )?)),
+        };
+
+        yield (event_key_object, event_object);
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AppendOnlyAdapterOpts {}
+
+#[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
+pub async fn gen_append_only_message_stream<'a>(
+    schema: &'a Schema,
+    pk_indices: &'a [usize],
+    chunk: StreamChunk,
+    _opts: AppendOnlyAdapterOpts,
+) {
+    for (op, row) in chunk.rows() {
+        if op != Op::Insert {
+            continue;
+        }
+        let event_key_object = Some(Value::Object(pk_to_json(row, &schema.fields, pk_indices)?));
+        let event_object = Some(Value::Object(record_to_json(
+            row,
+            &schema.fields,
+            TimestampHandlingMode::Milli,
+        )?));
+
+        yield (event_key_object, event_object);
+    }
 }

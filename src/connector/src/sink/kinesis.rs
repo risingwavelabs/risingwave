@@ -12,25 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
-use aws_sdk_kinesis::error::{DisplayErrorContext, SdkError};
-use aws_sdk_kinesis::operation::put_record::{PutRecordError, PutRecordOutput};
+use aws_sdk_kinesis::error::DisplayErrorContext;
+use aws_sdk_kinesis::operation::put_record::PutRecordOutput;
 use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::for_await;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_derive::{Deserialize, Serialize};
-use serde_with::json::JsonString;
+use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
 use crate::common::KinesisCommon;
-use crate::sink::kafka::KafkaConfig;
-use crate::sink::utils::{gen_debezium_message_stream, DebeziumAdapterOpts};
+use crate::sink::utils::{
+    gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
+    AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
+};
 use crate::sink::{Result, Sink, SinkError, SINK_TYPE_DEBEZIUM, SINK_TYPE_UPSERT};
 
 #[derive(Clone, Debug)]
@@ -86,6 +87,7 @@ impl<const APPEND_ONLY: bool> KinesisSink<APPEND_ONLY> {
             .send()
             .await
             .map_err(|e| {
+                tracing::warn!("failed to list shards: {}", DisplayErrorContext(&e));
                 SinkError::Kinesis(anyhow!("failed to list shards: {}", DisplayErrorContext(e)))
             })?;
         Ok(())
@@ -107,12 +109,41 @@ impl<const APPEND_ONLY: bool> KinesisSink<APPEND_ONLY> {
         )
         .await
         .map_err(|e| {
+            tracing::warn!(
+                "failed to put record: {} to {}",
+                DisplayErrorContext(&e),
+                self.config.common.stream_name
+            );
             SinkError::Kinesis(anyhow!(
                 "failed to put record: {} to {}",
                 DisplayErrorContext(e),
                 self.config.common.stream_name
             ))
         })
+    }
+
+    async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
+        let upsert_stream = gen_upsert_message_stream(
+            &self.schema,
+            &self.pk_indices,
+            chunk,
+            UpsertAdapterOpts::default(),
+        );
+
+        crate::impl_load_stream_write_record!(upsert_stream, self.put_record);
+        Ok(())
+    }
+
+    async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
+        let append_only_stream = gen_append_only_message_stream(
+            &self.schema,
+            &self.pk_indices,
+            chunk,
+            AppendOnlyAdapterOpts::default(),
+        );
+
+        crate::impl_load_stream_write_record!(append_only_stream, self.put_record);
+        Ok(())
     }
 
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
@@ -124,20 +155,7 @@ impl<const APPEND_ONLY: bool> KinesisSink<APPEND_ONLY> {
             DebeziumAdapterOpts::default(),
         );
 
-        #[for_await]
-        for msg in dbz_stream {
-            let (event_key_object, event_object) = msg?;
-            let key_str = event_key_object.unwrap().to_string();
-            self.put_record(
-                &key_str,
-                Blob::new(if let Some(value) = event_object {
-                    value.to_string().into_bytes()
-                } else {
-                    vec![]
-                }),
-            )
-            .await?;
-        }
+        crate::impl_load_stream_write_record!(dbz_stream, self.put_record);
 
         Ok(())
     }
@@ -147,28 +165,53 @@ impl<const APPEND_ONLY: bool> KinesisSink<APPEND_ONLY> {
 impl<const APPEND_ONLY: bool> Sink for KinesisSink<APPEND_ONLY> {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if APPEND_ONLY {
-            todo!()
+            self.append_only(chunk).await
+        } else if self.config.r#type == SINK_TYPE_DEBEZIUM {
+            self.debezium_update(
+                chunk,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+            )
+            .await
+        } else if self.config.r#type == SINK_TYPE_UPSERT {
+            self.upsert(chunk).await
         } else {
-            if self.config.r#type == SINK_TYPE_DEBEZIUM {
-                todo!()
-            } else if self.config.r#type == SINK_TYPE_UPSERT {
-                // upsert
-                todo!()
-            } else {
-                unreachable!()
-            }
+            unreachable!()
         }
     }
 
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        todo!()
+    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
+        // Kinesis offers no transactional guarantees, so we do nothing here.
+        Ok(())
     }
 
     async fn commit(&mut self) -> Result<()> {
-        todo!()
+        Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {
-        todo!()
+        Ok(())
     }
+}
+
+#[macro_export]
+macro_rules! impl_load_stream_write_record {
+    ($stream:ident, $op_fn:stmt) => {
+        #[for_await]
+        for msg in $stream {
+            let (event_key_object, event_object) = msg?;
+            let key_str = event_key_object.unwrap().to_string();
+            $op_fn(
+                &key_str,
+                Blob::new(if let Some(value) = event_object {
+                    value.to_string().into_bytes()
+                } else {
+                    vec![]
+                }),
+            )
+            .await?;
+        }
+    };
 }
