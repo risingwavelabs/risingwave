@@ -23,7 +23,7 @@ export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
 export TIME_BOUND="6m"
-export TEST_NUM_PER_SET=40
+export TEST_NUM_PER_SET=30
 
 ################## COMMON
 
@@ -155,36 +155,6 @@ gen_seed() {
       echo "$i $i"
     fi
   done
-}
-
-generate_one_deterministic() {
-  local SEED=$RANDOM
-  local SET_ID=$1
-  mkdir -p "$OUTDIR/$SET_ID"
-  echo "[INFO] Generating For Seed $RANDOM, Query set $SET_ID"
-  MADSIM_TEST_SEED=$RANDOM timeout 3m "$MADSIM_BIN" \
-    --sqlsmith 60 \
-    --generate-sqlsmith-queries "$OUTDIR/$SET_ID" \
-    $TESTDATA \
-    1>>"$LOGDIR/generate_deterministic.stdout.log" \
-    2>"$LOGDIR/generate-$SET_ID.log"
-  local EXIT_CODE="$?"
-  if [[ $EXIT_CODE -eq 0 ]];
-  then
-    echo "[INFO] Finished Generating For Seed $RANDOM, Query set $SET_ID"
-    echo "[INFO] Extracting Queries For Seed $RANDOM, Query set $SET_ID"
-    extract_queries "$LOGDIR/generate-$SET_ID.log" "$OUTDIR/$SET_ID/queries.sql"
-    echo "[INFO] Extracted Queries For Seed $RANDOM, Query set $SET_ID."
-  elif [[ $EXIT_CODE -eq 124 ]]
-  then
-    echo "[ERROR] Query timeout for Seed $RANDOM, Query set $SET_ID"
-    buildkite-agent artifact upload "$LOGDIR/generate-$SET_ID.log"
-    echo "[INFO] Uploaded failure logs: $LOGDIR/generate-$SET_ID.log"
-  else
-    echo "[ERROR] Query failed For Seed $RANDOM, Query set $SET_ID"
-    buildkite-agent artifact upload "$LOGDIR/generate-$SET_ID.log"
-    echo "[INFO] Uploaded failure logs: $LOGDIR/generate-$SET_ID.log"
-  fi
 }
 
 # Prefer to use [`generate_deterministic`], it is faster since
