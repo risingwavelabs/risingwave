@@ -23,6 +23,7 @@ export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
 export TIME_BOUND="6m"
+export TEST_NUM_PER_SET=40
 
 ################## COMMON
 
@@ -238,7 +239,7 @@ generate_deterministic() {
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
     MADSIM_TEST_SEED={2} $MADSIM_BIN \
-      --sqlsmith 30 \
+      --sqlsmith $TEST_NUM_PER_SET \
       --generate-sqlsmith-queries $OUTDIR/{1} \
       $TESTDATA \
       1>>$LOGDIR/generate_deterministic.stdout.log \

@@ -94,7 +94,6 @@ pub async fn generate(
 
     tracing::info!("Ran updates");
 
-    let mut queries = String::with_capacity(10000);
     let mut generated_queries = 0;
     for _ in 0..count {
         test_session_variable(client, &mut rng).await;
@@ -104,14 +103,12 @@ pub async fn generate(
         match result {
             Err(_e) => {
                 generated_queries += 1;
-                queries.push_str(&format!("-- {};\n", &sql));
                 tracing::info!("Generated {} batch queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
             Ok(skipped) if skipped == 0 => {
                 generated_queries += 1;
-                queries.push_str(&format!("{};\n", &sql));
             }
             _ => {}
         }
@@ -127,16 +124,12 @@ pub async fn generate(
         match result {
             Err(_e) => {
                 generated_queries += 1;
-                queries.push_str(&format!("-- {};\n", &sql));
-                queries.push_str(&format!("-- {};\n", format_drop_mview(&table)));
                 tracing::info!("Generated {} stream queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
             Ok(skipped) if skipped == 0 => {
                 generated_queries += 1;
-                queries.push_str(&format!("{};\n", &sql));
-                queries.push_str(&format!("{};\n", format_drop_mview(&table)));
             }
             _ => {}
         }
@@ -331,7 +324,7 @@ async fn test_batch_queries<R: Rng>(
         test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("[TEST BATCH]: {}", sql);
-        skipped += run_query(100, client, &sql).await?;
+        skipped += run_query(6, client, &sql).await?;
     }
     Ok(skipped as f64 / sample_size as f64)
 }
@@ -349,7 +342,7 @@ async fn test_stream_queries<R: Rng>(
         test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("[TEST STREAM]: {}", sql);
-        skipped += run_query(100, client, &sql).await?;
+        skipped += run_query(6, client, &sql).await?;
         tracing::info!("[TEST DROP MVIEW]: {}", &format_drop_mview(&table));
         drop_mview_table(&table, client).await;
     }
