@@ -37,7 +37,7 @@ type Result<A> = anyhow::Result<A>;
 
 /// e2e test runner for pre-generated queries from sqlsmith
 pub async fn run_pre_generated(client: &Client, outdir: &str) {
-    let timeout_duration = 3;
+    let timeout_duration = 12; // allow for some variance.
     let queries_path = format!("{}/queries.sql", outdir);
     let queries = read_file_contents(queries_path).unwrap();
     for statement in parse_sql(&queries) {
@@ -61,7 +61,7 @@ pub async fn generate(
     _outdir: &str,
     seed: Option<u64>,
 ) {
-    let timeout_duration = 3;
+    let timeout_duration = 6;
 
     set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
     set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
@@ -390,7 +390,7 @@ async fn create_mviews(
         let (create_sql, table) =
             mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
         tracing::info!("[EXECUTING CREATE MVIEW]: {}", &create_sql);
-        let skip_count = run_query(3, client, &create_sql).await?;
+        let skip_count = run_query(6, client, &create_sql).await?;
         if skip_count == 0 {
             mvs_and_base_tables.push(table.clone());
             mviews.push(table);
