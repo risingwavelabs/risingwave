@@ -25,6 +25,7 @@ export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment var
 export TIME_BOUND="6m"
 export TEST_NUM_PER_SET=20
 export E2E_TEST_NUM=32
+export TIMEOUT_MESSAGE="Query Set timed out"
 
 ################## COMMON
 
@@ -53,6 +54,10 @@ check_if_failed() {
   grep -B 2 "$CRASH_MESSAGE" || true
 }
 
+check_if_timeout() {
+  grep "$TIMEOUT_MESSAGE" || true
+}
+
 # Extract queries from file $1, write to file $2
 extract_queries() {
   local QUERIES=$(grep "\[EXECUTING .*\]: " < "$1" | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/')
@@ -60,6 +65,10 @@ extract_queries() {
   if [[ -n "$FAILED" ]]; then
     local FAIL_REASON=$(get_failure_reason "$1")
 
+    # Comment out the last line of queries.
+    local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
+  fi
+  if [[ -n $(check_if_timeout < "$1") ]]; then
     # Comment out the last line of queries.
     local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
@@ -177,6 +186,10 @@ generate_deterministic() {
     else
       echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
       echo '[WARN] Cluster crashed or timed out while generating queries. see $LOGDIR/generate-{1}.log for more information.'
+      if ! cat $LOGDIR/generate-{1} | grep $CRASH_MESSAGE
+      then
+        echo $TIMEOUT_MESSAGE >> $LOGDIR/generate-{1}.log
+      fi
       buildkite-agent artifact upload "$LOGDIR/generate-{1}.log"
     fi
     "
