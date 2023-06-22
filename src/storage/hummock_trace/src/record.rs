@@ -21,7 +21,9 @@ use bytes::Bytes;
 use prost::Message;
 use risingwave_pb::meta::SubscribeResponse;
 
-use crate::{StorageType, TracedHummockReadEpoch, TracedNewLocalOptions, TracedReadOptions};
+use crate::{
+    LocalStorageId, StorageType, TracedHummockReadEpoch, TracedNewLocalOptions, TracedReadOptions,
+};
 
 pub type RecordId = u64;
 
@@ -155,7 +157,7 @@ pub enum Operation {
     Result(OperationResult),
 
     /// NewLocalStorage operation of Hummock.
-    NewLocalStorage(TracedNewLocalOptions),
+    NewLocalStorage(TracedNewLocalOptions, LocalStorageId),
 
     /// DropLocalStorage operation of Hummock.
     DropLocalStorage,
@@ -179,7 +181,7 @@ pub enum Operation {
 
     LocalStorageIsDirty,
 
-    Flush(Vec<(TracedBytes, TracedBytes)>),
+    Flush(Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>),
     /// Finish operation of Hummock.
     Finish,
 }

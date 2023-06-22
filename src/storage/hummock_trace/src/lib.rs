@@ -23,6 +23,7 @@ mod error;
 mod opts;
 mod read;
 mod record;
+mod replay;
 mod write;
 use std::future::Future;
 
@@ -31,6 +32,7 @@ pub use error::*;
 pub use opts::*;
 pub use read::*;
 pub use record::*;
+pub use replay::*;
 pub(crate) use write::*;
 
 pub fn hummock_trace_scope<F: Future>(f: F) -> impl Future<Output = F::Output> {

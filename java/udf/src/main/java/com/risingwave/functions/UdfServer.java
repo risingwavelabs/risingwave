@@ -18,7 +18,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-
 import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
@@ -30,9 +29,7 @@ import org.apache.arrow.vector.types.pojo.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * A server that exposes user-defined functions over Apache Arrow Flight.
- */
+/** A server that exposes user-defined functions over Apache Arrow Flight. */
 public class UdfServer implements AutoCloseable {
 
     private FlightServer server;
@@ -43,50 +40,38 @@ public class UdfServer implements AutoCloseable {
         var location = Location.forGrpcInsecure(host, port);
         var allocator = new RootAllocator();
         this.producer = new UdfProducer(allocator);
-        this.server = FlightServer.builder(
-                allocator,
-                location,
-                this.producer).build();
+        this.server = FlightServer.builder(allocator, location, this.producer).build();
     }
 
     /**
      * Add a user-defined function to the server.
-     * 
+     *
      * @param name the name of the function
-     * @param udf  the function to add
-     * @throws IllegalArgumentException if a function with the same name already
-     *                                  exists
+     * @param udf the function to add
+     * @throws IllegalArgumentException if a function with the same name already exists
      */
     public void addFunction(String name, UserDefinedFunction udf) throws IllegalArgumentException {
         logger.info("added function: " + name);
         this.producer.addFunction(name, udf);
     }
 
-    /**
-     * Start the server.
-     */
+    /** Start the server. */
     public void start() throws IOException {
         this.server.start();
         logger.info("listening on " + this.server.getLocation().toSocketAddress());
     }
 
-    /**
-     * Get the port the server is listening on.
-     */
+    /** Get the port the server is listening on. */
     public int getPort() {
         return this.server.getPort();
     }
 
-    /**
-     * Wait for the server to terminate.
-     */
+    /** Wait for the server to terminate. */
     public void awaitTermination() throws InterruptedException {
         this.server.awaitTermination();
     }
 
-    /**
-     * Close the server.
-     */
+    /** Close the server. */
     public void close() throws InterruptedException {
         this.server.close();
     }
@@ -109,7 +94,8 @@ class UdfProducer extends NoOpFlightProducer {
         } else if (function instanceof TableFunction) {
             udf = new TableFunctionBatch((TableFunction) function, this.allocator);
         } else {
-            throw new IllegalArgumentException("Unknown function type: " + function.getClass().getName());
+            throw new IllegalArgumentException(
+                    "Unknown function type: " + function.getClass().getName());
         }
         if (functions.containsKey(name)) {
             throw new IllegalArgumentException("Function already exists: " + name);
@@ -129,9 +115,9 @@ class UdfProducer extends NoOpFlightProducer {
             fields.addAll(udf.getInputSchema().getFields());
             fields.addAll(udf.getOutputSchema().getFields());
             var fullSchema = new Schema(fields);
-            var input_len = udf.getInputSchema().getFields().size();
+            var inputLen = udf.getInputSchema().getFields().size();
 
-            return new FlightInfo(fullSchema, descriptor, Collections.emptyList(), 0, input_len);
+            return new FlightInfo(fullSchema, descriptor, Collections.emptyList(), 0, inputLen);
         } catch (Exception e) {
             logger.error("Error occurred during getFlightInfo", e);
             throw e;

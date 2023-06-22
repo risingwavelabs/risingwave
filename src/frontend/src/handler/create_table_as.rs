@@ -20,8 +20,10 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
+use crate::catalog::CatalogError;
 use crate::handler::create_table::{gen_create_table_plan_without_bind, ColumnIdGenerator};
 use crate::handler::query::handle_query;
+use crate::session::CheckRelationError;
 use crate::{build_graph, Binder, OptimizerContext};
 
 pub async fn handle_create_as(
@@ -40,16 +42,16 @@ pub async fn handle_create_as(
     }
     let session = handler_args.session.clone();
 
-    if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
-        if if_not_exists {
+    match session.check_relation_name_duplicated(table_name.clone()) {
+        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
             return Ok(PgResponse::empty_result_with_notice(
                 StatementType::CREATE_TABLE,
-                format!("relation \"{}\" already exists, skipping", table_name),
+                format!("relation \"{}\" already exists, skipping", name),
             ));
-        } else {
-            return Err(e);
         }
-    }
+        Err(e) => return Err(e.into()),
+        Ok(_) => {}
+    };
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 

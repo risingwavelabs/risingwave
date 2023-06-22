@@ -603,6 +603,14 @@ message RiseCtlGetCheckpointVersionResponse {
   HummockVersion checkpoint_version = 1;
 }
 
+message RiseCtlListCompactionStatusRequest {}
+
+message RiseCtlListCompactionStatusResponse {
+  repeated CompactStatus compaction_statuses = 1;
+  repeated CompactTaskAssignment task_assignment = 2;
+  repeated CompactTaskProgress task_progress = 3;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -635,6 +643,7 @@ service HummockManagerService {
   rpc GetScaleCompactor(GetScaleCompactorRequest) returns (GetScaleCompactorResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
+  rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
 }
 
 message CompactionConfig {

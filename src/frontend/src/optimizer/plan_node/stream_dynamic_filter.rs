@@ -15,13 +15,16 @@
 use std::fmt;
 
 use itertools::Itertools;
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::FieldDisplay;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::generic::DynamicFilter;
-use super::utils::{formatter_debug_plan_node, IndicesDisplay};
+use super::utils::{
+    childless_record, column_names_pretty, formatter_debug_plan_node, watermark_pretty, Distill,
+};
 use super::{generic, ExprRewritable};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
@@ -55,6 +58,20 @@ impl StreamDynamicFilter {
     }
 }
 
+impl Distill for StreamDynamicFilter {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let pred = self.core.pretty_field();
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("predicate", pred));
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+            vec.push(("output_watermarks", ow));
+        }
+        vec.push(("output", column_names_pretty(self.schema())));
+        childless_record("StreamDynamicFilter", vec)
+    }
+}
+
 impl fmt::Display for StreamDynamicFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
@@ -62,7 +79,7 @@ impl fmt::Display for StreamDynamicFilter {
 
         self.core.fmt_fields_with_builder(&mut builder);
         let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
+        if watermark_columns.count_ones(..) > 0 {
             let schema = self.schema();
             builder.field(
                 "output_watermarks",
@@ -75,13 +92,7 @@ impl fmt::Display for StreamDynamicFilter {
 
         if verbose {
             // For now, output all columns from the left side. Make it explicit here.
-            builder.field(
-                "output",
-                &IndicesDisplay {
-                    indices: &(0..self.schema().fields.len()).collect_vec(),
-                    input_schema: self.schema(),
-                },
-            );
+            builder.field("output", &self.schema().names_str());
         }
 
         builder.finish()

@@ -15,11 +15,12 @@ use std::fmt;
 use std::hash::Hash;
 
 use educe::Educe;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{Schema, TableVersionId};
 
 use super::{DistillUnit, GenericPlanRef};
 use crate::catalog::TableId;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, Educe)]
@@ -77,12 +78,12 @@ impl<PlanRef: Eq + Hash> Delete<PlanRef> {
 }
 
 impl<PlanRef: Eq + Hash> DistillUnit for Delete<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let mut vec = Vec::with_capacity(if self.returning { 2 } else { 1 });
         vec.push(("table", Pretty::from(self.table_name.clone())));
         if self.returning {
             vec.push(("returning", Pretty::display(&true)));
         }
-        Pretty::childless_record(name, vec)
+        childless_record(name, vec)
     }
 }
