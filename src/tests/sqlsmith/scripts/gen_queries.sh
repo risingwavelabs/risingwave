@@ -298,7 +298,7 @@ check_failed_to_generate_queries() {
 run_queries_timed() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
   timeout "$TIME_BOUND" seq 64 | parallel --jobs 14 "MADSIM_TEST_SEED={} \
-    $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
+    timeout 2.2m $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
       && rm $LOGDIR/fuzzing-{}.log"
@@ -308,7 +308,7 @@ run_queries_timed() {
 run_queries() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
   seq $TEST_NUM | parallel --jobs 14 "MADSIM_TEST_SEED={} \
-    $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
+    timeout 2.2m $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
       && rm $LOGDIR/fuzzing-{}.log"
