@@ -309,12 +309,14 @@ run_queries_timed() {
 
 # Run it to make sure it should have no errors
 run_queries() {
+  set +e
   echo "" > $LOGDIR/run_deterministic.stdout.log
   seq $TEST_NUM | parallel --jobs 14 "MADSIM_TEST_SEED={} \
     timeout 2.2m $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
       && rm $LOGDIR/fuzzing-{}.log"
+  set -e
 }
 
 # Generated query sets should not fail.
@@ -322,6 +324,7 @@ check_failed_to_run_queries() {
   FAILED_LOGS=$(ls "$LOGDIR" | grep fuzzing || true)
   if [[ -n "$FAILED_LOGS" ]]; then
     echo_err -e "FAILING_LOGS: $FAILED_LOGS" && exit 1
+    buildkite-agent artifact upload "$LOGDIR/fuzzing-*.log"
   fi
 }
 
