@@ -23,7 +23,7 @@ export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
 export TIME_BOUND="6m"
-export TEST_NUM_PER_SET=30
+export TEST_NUM_PER_SET=20
 export E2E_TEST_NUM=32
 
 ################## COMMON
@@ -165,18 +165,16 @@ generate_deterministic() {
   . $(which env_parallel.bash)
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
-  echo "" > $LOGDIR/generate_deterministic.stdout.log
   # FIXME: try increase jobs again?
   # FIXME: If this times out, the last query needs to be removed too.
   # This is because last query could be partially processed and actually cause error / timeout.
-  gen_seed | env_parallel --jobs 14 --colsep ' ' "
+  timeout 15m gen_seed | env_parallel --colsep ' ' "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
     MADSIM_TEST_SEED={2} $MADSIM_BIN \
       --sqlsmith $TEST_NUM_PER_SET \
       --generate-sqlsmith-queries $OUTDIR/{1} \
       $TESTDATA \
-      1>>$LOGDIR/generate_deterministic.stdout.log \
       2>$LOGDIR/generate-{1}.log;
     echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
     echo '[INFO] Extracting Queries For Seed {2}, Query set {1}.'
@@ -236,7 +234,7 @@ check_failed_to_generate_queries() {
 # Otherwise don't update this batch of queries yet.
 run_queries_timed() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
-  timeout "$TIME_BOUND" seq $E2E_TEST_NUM | parallel --jobs 14 "MADSIM_TEST_SEED={} \
+  timeout "$TIME_BOUND" seq $E2E_TEST_NUM | parallel "MADSIM_TEST_SEED={} \
     timeout 6m $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
@@ -247,7 +245,7 @@ run_queries_timed() {
 run_queries() {
   set +e
   echo "" > $LOGDIR/run_deterministic.stdout.log
-  seq $TEST_NUM | parallel --jobs 14 "MADSIM_TEST_SEED={} \
+  seq $TEST_NUM | parallel "MADSIM_TEST_SEED={} \
     timeout 20m $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
