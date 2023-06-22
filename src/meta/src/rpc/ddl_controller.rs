@@ -190,7 +190,7 @@ where
         if !streaming_ids.is_empty() {
             self.stream_manager.drop_streaming_jobs(streaming_ids).await;
         }
-        // 4. delete cloud resouces if any
+        // 4. delete cloud resources if any
         for conn in connections_dropped {
             self.delete_vpc_endpoint(&conn).await?;
         }

@@ -81,7 +81,7 @@ where
             env,
             catalog_manager,
             ddl_controller,
-            aws_client: aws_cli_ref.clone(),
+            aws_client: aws_cli_ref,
         }
     }
 }
