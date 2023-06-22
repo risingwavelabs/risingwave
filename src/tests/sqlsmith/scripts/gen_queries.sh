@@ -230,6 +230,9 @@ generate_deterministic() {
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
   echo "" > $LOGDIR/generate_deterministic.stdout.log
+  # FIXME: try increase jobs again?
+  # FIXME: If this times out, the last query needs to be removed too.
+  # This is because last query could be partially processed and actually cause error / timeout.
   gen_seed | env_parallel --colsep ' ' --jobs 14 "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
