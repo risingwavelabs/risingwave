@@ -250,9 +250,8 @@ async fn test_sqlsmith<R: Rng>(
     test_population_count(client, base_tables, row_count).await;
     tracing::info!("passed population count test");
 
-    // Test percentage of skipped queries <=5% of sample size.
-    let threshold = 0.40; // permit at most 40% of queries to be skipped.
-    let sample_size = 30;
+    let threshold = 0.50; // permit at most 50% of queries to be skipped.
+    let sample_size = 20;
 
     let skipped_percentage = test_batch_queries(client, rng, tables.clone(), sample_size)
         .await

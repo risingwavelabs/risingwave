@@ -23,7 +23,7 @@ export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
 export TIME_BOUND="6m"
-export TEST_NUM_PER_SET=20
+export TEST_NUM_PER_SET=30
 export E2E_TEST_NUM=32
 
 ################## COMMON
@@ -59,8 +59,7 @@ extract_queries() {
   local FAILED=$(check_if_failed < "$1")
   if [[ -n "$FAILED" ]]; then
     local FAIL_REASON=$(get_failure_reason "$1")
-    echo_err "[WARN] Cluster crashed while generating queries. see $1 for more information."
-    buildkite-agent artifact upload "$1"
+
     # Comment out the last line of queries.
     local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
@@ -168,14 +167,25 @@ generate_deterministic() {
   gen_seed | timeout 15m parallel --colsep ' ' "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
-    MADSIM_TEST_SEED={2} $MADSIM_BIN \
+    if MADSIM_TEST_SEED={2} $MADSIM_BIN \
       --sqlsmith $TEST_NUM_PER_SET \
       --generate-sqlsmith-queries $OUTDIR/{1} \
       $TESTDATA \
       2>$LOGDIR/generate-{1}.log;
-    echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
+    then
+      echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
+      echo_err '[WARN] Cluster crashed or timed out while generating queries. see $LOGDIR/generate-{1}.log for more information.'
+      buildkite-agent artifact upload "$LOGDIR/generate-{1}.log"
+    else
+      echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
+    fi
     "
+  TIMED_OUT=$?
   set -e
+  if [[ $TIMED_OUT -eq 124 ]]; then
+    echo "TIMED_OUT"
+    exit 124
+  fi
   echo "--- Extracting queries"
   for i in $(seq 1 100);
   do
