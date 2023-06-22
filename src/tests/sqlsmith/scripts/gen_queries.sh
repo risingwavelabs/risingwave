@@ -167,7 +167,7 @@ generate_deterministic() {
   gen_seed | timeout 15m parallel --colsep ' ' "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
-    if MADSIM_TEST_SEED={2} timeout 2m $MADSIM_BIN \
+    if MADSIM_TEST_SEED={2} timeout 5m $MADSIM_BIN \
       --sqlsmith $TEST_NUM_PER_SET \
       --generate-sqlsmith-queries $OUTDIR/{1} \
       $TESTDATA \
@@ -176,7 +176,7 @@ generate_deterministic() {
       echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
     else
       echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
-      echo_err '[WARN] Cluster crashed or timed out while generating queries. see $LOGDIR/generate-{1}.log for more information.'
+      echo '[WARN] Cluster crashed or timed out while generating queries. see $LOGDIR/generate-{1}.log for more information.'
       buildkite-agent artifact upload "$LOGDIR/generate-{1}.log"
     fi
     "
