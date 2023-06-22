@@ -181,10 +181,10 @@ generate_deterministic() {
     extract_queries $LOGDIR/generate-{1}.log $OUTDIR/{1}/queries.sql
     echo '[INFO] Extracted Queries For Seed {2}, Query set {1}.'
     "
+  set -e
   if [[ $? -eq 124 ]]; then
     exit 124
   fi
-  set -e
 }
 
 generate_sqlsmith() {
