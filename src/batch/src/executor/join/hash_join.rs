@@ -1844,6 +1844,7 @@ impl<K> HashJoinExecutor<K> {
 mod tests {
     use futures::StreamExt;
     use futures_async_stream::for_await;
+    use prometheus::IntGauge;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
@@ -2050,6 +2051,7 @@ mod tests {
             left_child: BoxedExecutor,
             right_child: BoxedExecutor,
             shutdown_rx: Option<Receiver<ShutdownMsg>>,
+            parent_mem_ctx: Option<MemoryContext>,
         ) -> BoxedExecutor {
             let join_type = self.join_type;
 
@@ -2066,6 +2068,8 @@ mod tests {
                 None
             };
 
+            let mem_ctx =
+                MemoryContext::new(parent_mem_ctx, IntGauge::new("memory_usage", " ").unwrap());
             Box::new(HashJoinExecutor::<Key32>::new(
                 join_type,
                 output_indices,
@@ -2078,7 +2082,7 @@ mod tests {
                 "HashJoinExecutor".to_string(),
                 chunk_size,
                 shutdown_rx,
-                MemoryContext::none(),
+                mem_ctx,
             ))
         }
 
@@ -2105,45 +2109,53 @@ mod tests {
             left_executor: BoxedExecutor,
             right_executor: BoxedExecutor,
         ) {
-            let join_executor = self.create_join_executor_with_chunk_size_and_executors(
-                has_non_equi_cond,
-                null_safe,
-                chunk_size,
-                left_executor,
-                right_executor,
-                None,
-            );
+            let parent_mem_context =
+                MemoryContext::root(IntGauge::new("total_memory_usage", " ").unwrap());
 
-            let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
+            {
+                let join_executor = self.create_join_executor_with_chunk_size_and_executors(
+                    has_non_equi_cond,
+                    null_safe,
+                    chunk_size,
+                    left_executor,
+                    right_executor,
+                    None,
+                    Some(parent_mem_context.clone()),
+                );
 
-            let fields = &join_executor.schema().fields;
+                let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
 
-            if self.join_type.keep_all() {
-                assert_eq!(fields[1].data_type, DataType::Float32);
-                assert_eq!(fields[3].data_type, DataType::Float64);
-            } else if self.join_type.keep_left() {
-                assert_eq!(fields[1].data_type, DataType::Float32);
-            } else if self.join_type.keep_right() {
-                assert_eq!(fields[1].data_type, DataType::Float64)
-            } else {
-                unreachable!()
+                let fields = &join_executor.schema().fields;
+
+                if self.join_type.keep_all() {
+                    assert_eq!(fields[1].data_type, DataType::Float32);
+                    assert_eq!(fields[3].data_type, DataType::Float64);
+                } else if self.join_type.keep_left() {
+                    assert_eq!(fields[1].data_type, DataType::Float32);
+                } else if self.join_type.keep_right() {
+                    assert_eq!(fields[1].data_type, DataType::Float64)
+                } else {
+                    unreachable!()
+                }
+
+                let mut stream = join_executor.execute();
+
+                while let Some(data_chunk) = stream.next().await {
+                    let data_chunk = data_chunk.unwrap();
+                    let data_chunk = data_chunk.compact();
+                    data_chunk_merger.append(&data_chunk).unwrap();
+                }
+
+                let result_chunk = data_chunk_merger.finish().unwrap();
+                println!("expected: {:?}", expected);
+                println!("result: {:?}", result_chunk);
+
+                // TODO: Replace this with unsorted comparison
+                // assert_eq!(expected, result_chunk);
+                assert!(is_data_chunk_eq(&expected, &result_chunk));
             }
 
-            let mut stream = join_executor.execute();
-
-            while let Some(data_chunk) = stream.next().await {
-                let data_chunk = data_chunk.unwrap();
-                let data_chunk = data_chunk.compact();
-                data_chunk_merger.append(&data_chunk).unwrap();
-            }
-
-            let result_chunk = data_chunk_merger.finish().unwrap();
-            println!("expected: {:?}", expected);
-            println!("result: {:?}", result_chunk);
-
-            // TODO: Replace this with unsorted comparison
-            // assert_eq!(expected, result_chunk);
-            assert!(is_data_chunk_eq(&expected, &result_chunk));
+            assert_eq!(0, parent_mem_context.get_bytes_used());
         }
 
         async fn do_test_shutdown(&self, has_non_equi_cond: bool) {
@@ -2158,6 +2170,7 @@ mod tests {
                 left_executor,
                 right_executor,
                 Some(shutdown_rx),
+                None,
             );
             shutdown_tx.send(ShutdownMsg::Cancel).unwrap();
             #[for_await]
@@ -2177,6 +2190,7 @@ mod tests {
                 left_executor,
                 right_executor,
                 Some(shutdown_rx),
+                None,
             );
             shutdown_tx
                 .send(ShutdownMsg::Abort("Test".to_string()))
