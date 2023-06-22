@@ -88,6 +88,7 @@ extract_failing_query() {
   grep "\[EXECUTING .*\]: " | tail -n 1 | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/' | $PG_FORMAT || true
 }
 
+# FIXME(kwannoel): Extract from query-log instead.
 # Extract fail info from [`generate-*.log`] in log dir
 # $1 := log file name prefix. E.g. if file is generate-XXX.log, prefix will be "generate"
 extract_fail_info_from_logs() {
@@ -370,13 +371,13 @@ validate() {
   echo_err "[INFO] Recorded new bugs from  generated queries"
   echo "--- Running all queries check"
   run_queries
+  echo "--- Check fail to run queries"
+  check_failed_to_run_queries
+  echo_err "[CHECK PASSED] Queries all ran without failure"
   echo_err "[INFO] Queries were ran and passed"
   echo "--- Running timeout check"
   run_queries_timed
   echo_err "[INFO] pre-generated queries running in e2e deterministic test are ran and passed in $TIME_BOUND"
-  echo "--- Check fail to run queries"
-  check_failed_to_run_queries
-  echo_err "[CHECK PASSED] Queries all ran without failure"
   echo_err "[INFO] Passed checks"
 }
 
