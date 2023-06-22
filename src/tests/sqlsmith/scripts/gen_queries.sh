@@ -161,14 +161,11 @@ gen_seed() {
 # Prefer to use [`generate_deterministic`], it is faster since
 # runs with all-in-one binary.
 generate_deterministic() {
-  # Allows us to use other functions defined in this file within `parallel`.
-  . $(which env_parallel.bash)
-  # Even if fails early, it should still generate some queries, do not exit script.
   set +e
   # FIXME: try increase jobs again?
   # FIXME: If this times out, the last query needs to be removed too.
   # This is because last query could be partially processed and actually cause error / timeout.
-  gen_seed | env_parallel --colsep ' ' "
+  gen_seed | parallel --colsep ' ' "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
     MADSIM_TEST_SEED={2} $MADSIM_BIN \
@@ -177,11 +174,17 @@ generate_deterministic() {
       $TESTDATA \
       2>$LOGDIR/generate-{1}.log;
     echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
-    echo '[INFO] Extracting Queries For Seed {2}, Query set {1}.'
-    extract_queries $LOGDIR/generate-{1}.log $OUTDIR/{1}/queries.sql
-    echo '[INFO] Extracted Queries For Seed {2}, Query set {1}.'
     "
   set -e
+  echo "--- Extracting queries"
+  for i in $(seq 1 100);
+  do
+    echo "[INFO] Extracting Queries For Query set ${i}"
+    extract_queries "${LOGDIR}/generate-${i}.log" "${OUTDIR}/${i}/queries.sql"
+    echo "[INFO] Extracted Queries For Query set ${i}."
+  done
+  echo "Extracted all queries"
+  wait
 }
 
 generate_sqlsmith() {
