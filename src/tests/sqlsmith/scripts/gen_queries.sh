@@ -140,18 +140,6 @@ extract_fail_info_from_logs() {
 
 ################# Generate
 
-#
-## Generate $TEST_NUM number of seeds.
-## if `ENABLE_RANDOM_SEED=1`, we will generate random seeds.
-#gen_seed() {
-#  if [[ $ENABLE_RANDOM_SEED -eq 1 ]]; then
-#    seq 1 32768 | shuf | tail -n "$TEST_NUM"
-#  else
-#    seq 1 32678 | tail -n "$TEST_NUM"
-#  fi
-#}
-#
-
 # Generate $TEST_NUM number of seeds.
 # if `ENABLE_RANDOM_SEED=1`, we will generate random seeds.
 # sample output:
@@ -198,31 +186,6 @@ generate_one_deterministic() {
     echo "[INFO] Uploaded failure logs: $LOGDIR/generate-$SET_ID.log"
   fi
 }
-#
-## Prefer to use generate_deterministic, it is faster since
-## runs with all-in-one binary.
-#generate_deterministic() {
-#  # Even if fails early, it should still generate some queries, do not exit script.
-#  set +e
-#  echo_err "[INFO] Generating"
-#  echo "" > $LOGDIR/generate_deterministic.stdout.log
-#
-#  for i in $(seq 0 9)
-#  do
-#    local batch_size=10
-#    local start="$((i * $batch_size + 1))"
-#    local end=$((start - 1 + $batch_size))
-#    echo_err "--- Generating for Queries $start - $end"
-#    for SET_ID in $(seq $start $end)
-#    do
-#        generate_one_deterministic "$SET_ID" &
-#    done
-#    wait
-#  done
-#  echo_err "[INFO] Finished generation"
-#
-#  set -e
-#}
 
 # Prefer to use [`generate_deterministic`], it is faster since
 # runs with all-in-one binary.
