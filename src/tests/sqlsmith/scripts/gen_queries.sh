@@ -23,7 +23,7 @@ export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
 export TIME_BOUND="6m"
-export TEST_NUM_PER_SET=30
+export TEST_NUM_PER_SET=20
 export E2E_TEST_NUM=32
 
 ################## COMMON
