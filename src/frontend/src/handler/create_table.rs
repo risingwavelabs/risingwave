@@ -670,6 +670,12 @@ pub async fn handle_create_table(
         Ok(_) => {}
     };
 
+    if source_schema == Some(SourceSchema::Json) && columns.is_empty() {
+        return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+            "Json schema definition not specified".to_owned(),
+        )));
+    }
+
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;

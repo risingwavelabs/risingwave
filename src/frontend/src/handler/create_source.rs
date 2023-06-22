@@ -724,6 +724,12 @@ pub async fn handle_create_source(
         )));
     }
 
+    if stmt.source_schema == SourceSchema::Json && stmt.columns.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(
+            "Json schema definition not specified".to_owned(),
+        )));
+    }
+
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
     validate_compatibility(&stmt.source_schema, &mut with_properties)?;
 

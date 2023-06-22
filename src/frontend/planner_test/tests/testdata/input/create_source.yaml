@@ -8,3 +8,8 @@
     create source s() with(a=1) row format json;
   expected_outputs:
   - planner_error
+- id: create_source_without_schema_in_json
+  sql: |
+    create source s with(connector='kafka') row format json;
+  expected_outputs:
+  - planner_error
