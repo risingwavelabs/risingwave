@@ -59,6 +59,7 @@ extract_queries() {
     local FAIL_REASON=$(get_failure_reason "$1")
     echo_err "[WARN] Cluster crashed while generating queries. see $1 for more information."
     buildkite-agent artifact upload "$1"
+    # Comment out the last line of queries.
     local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
   echo -e "$QUERIES" > "$2"
