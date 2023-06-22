@@ -168,7 +168,7 @@ generate_deterministic() {
   # FIXME: try increase jobs again?
   # FIXME: If this times out, the last query needs to be removed too.
   # This is because last query could be partially processed and actually cause error / timeout.
-  timeout 15m gen_seed | env_parallel --colsep ' ' "
+  gen_seed | timeout 15m env_parallel --colsep ' ' "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
     MADSIM_TEST_SEED={2} $MADSIM_BIN \
