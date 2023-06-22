@@ -484,10 +484,16 @@ async fn run_query(client: &Client, query: &str) -> Result<i64> {
             let tries = 5;
             let interval = 1;
             for _ in 0..tries { // retry 5 times
-                sleep(Duration::from_millis(interval * 1000)).await;
-                let response = client.simple_query(query).await;
-                if response.is_ok() {
-                    return Ok(0);
+                sleep(Duration::from_secs(interval)).await;
+                let query_task = client.simple_query(query);
+                let response = timeout(Duration::from_secs(timeout_duration), query_task).await;
+                match response {
+                    Ok(r) if r.is_ok() => { return Ok(0); }
+                    Err(_) => bail!(
+                        "[UNEXPECTED ERROR] Query timeout after {timeout_duration}s:\n{:?}",
+                        query
+                    ),
+                    _ => {}
                 }
             }
             bail!("[UNEXPECTED ERROR] Failed to recover after {tries} tries with interval {interval}s")
