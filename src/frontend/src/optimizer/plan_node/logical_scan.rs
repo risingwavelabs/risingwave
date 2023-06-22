@@ -104,6 +104,7 @@ impl LogicalScan {
         self.core.table_cardinality
     }
 
+    // FIXME(kwannoel): Fetch from `table_catalog` + lazily instantiate?
     /// Get a reference to the logical scan's table desc.
     pub fn table_desc(&self) -> &TableDesc {
         self.core.table_desc.as_ref()
