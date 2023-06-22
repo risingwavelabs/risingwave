@@ -15,13 +15,14 @@
 use std::fmt;
 use std::ops::BitAnd;
 
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::generic::{self};
-use super::utils::formatter_debug_plan_node;
+use super::utils::{childless_record, formatter_debug_plan_node, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -112,6 +113,30 @@ impl fmt::Display for StreamDeltaJoin {
         }
 
         builder.finish()
+    }
+}
+impl Distill for StreamDeltaJoin {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.logical.join_type)));
+
+        let concat_schema = self.logical.concat_schema();
+        vec.push((
+            "predicate",
+            Pretty::debug(&EqJoinPredicateDisplay {
+                eq_join_predicate: self.eq_join_predicate(),
+                input_schema: &concat_schema,
+            }),
+        ));
+
+        if verbose {
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema)
+                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            vec.push(("output", data));
+        }
+
+        childless_record("StreamDeltaJoin", vec)
     }
 }
 

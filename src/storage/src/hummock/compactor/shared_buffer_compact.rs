@@ -120,7 +120,7 @@ async fn compact_shared_buffer(
         .acquire(existing_table_ids.clone())
         .await?;
     if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
-        existing_table_ids = multi.get_exsting_table_ids();
+        existing_table_ids = multi.get_existing_table_ids();
     }
     let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 

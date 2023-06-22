@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -47,7 +48,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
 
     catalog_manager: CatalogManagerRef<S>,
     ddl_controller: DdlController<S>,
-    aws_client: Option<AwsEc2Client>,
+    aws_client: Arc<Option<AwsEc2Client>>,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -65,6 +66,7 @@ where
         fragment_manager: FragmentManagerRef<S>,
         barrier_manager: BarrierManagerRef<S>,
     ) -> Self {
+        let aws_cli_ref = Arc::new(aws_client);
         let ddl_controller = DdlController::new(
             env.clone(),
             catalog_manager.clone(),
@@ -73,12 +75,13 @@ where
             cluster_manager,
             fragment_manager,
             barrier_manager,
+            aws_cli_ref.clone(),
         );
         Self {
             env,
             catalog_manager,
             ddl_controller,
-            aws_client,
+            aws_client: aws_cli_ref,
         }
     }
 }
@@ -600,13 +603,13 @@ where
                         dns_entries: HashMap::new(),
                     },
                     PbPrivateLinkProvider::Aws => {
-                        if self.aws_client.is_none() {
+                        if let Some(aws_cli) = self.aws_client.as_ref() {
+                            aws_cli.create_aws_private_link(&link.service_name).await?
+                        } else {
                             return Err(Status::from(MetaError::unavailable(
                                 "AWS client is not configured".into(),
                             )));
                         }
-                        let cli = self.aws_client.as_ref().unwrap();
-                        cli.create_aws_private_link(&link.service_name).await?
                     }
                     PbPrivateLinkProvider::Unspecified => {
                         return Err(Status::invalid_argument("Privatelink provider unspecified"));
@@ -701,12 +704,13 @@ where
             }
 
             // check whether private link is ready
-            let cli = self.aws_client.as_ref().unwrap();
-            if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
-                return Err(MetaError::from(anyhow!(
-                    "Private link endpoint {} is not ready",
-                    svc.endpoint_id
-                )));
+            if let Some(aws_cli) = self.aws_client.as_ref() {
+                if !aws_cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
+                    return Err(MetaError::from(anyhow!(
+                        "Private link endpoint {} is not ready",
+                        svc.endpoint_id
+                    )));
+                }
             }
         }
         Ok(())

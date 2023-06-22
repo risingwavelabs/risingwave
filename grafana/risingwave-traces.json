@@ -1,0 +1,140 @@
+{
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": {
+            "type": "grafana",
+            "uid": "-- Grafana --"
+          },
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "id": 11,
+    "links": [],
+    "liveNow": false,
+    "panels": [
+      {
+        "datasource": {
+          "type": "tempo",
+          "uid": "risedev-tempo"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto",
+              "cellOptions": {
+                "type": "auto"
+              },
+              "inspect": false
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "percentage",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "#EAB839",
+                  "value": 95
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 14,
+          "w": 24,
+          "x": 0,
+          "y": 0
+        },
+        "id": 1,
+        "options": {
+          "cellHeight": "sm",
+          "footer": {
+            "countRows": false,
+            "enablePagination": false,
+            "fields": [
+              "traceDuration"
+            ],
+            "reducer": [
+              "mean"
+            ],
+            "show": false
+          },
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": true,
+              "displayName": "Start time"
+            }
+          ]
+        },
+        "pluginVersion": "10.0.0",
+        "targets": [
+          {
+            "datasource": {
+              "type": "tempo",
+              "uid": "risedev-tempo"
+            },
+            "limit": 100000,
+            "query": "{ .service.name =~ \"meta\" }",
+            "queryType": "traceql",
+            "refId": "A"
+          }
+        ],
+        "title": "Recent Traces from Meta Service",
+        "transformations": [
+          {
+            "id": "sortBy",
+            "options": {
+              "fields": {},
+              "sort": [
+                {
+                  "desc": true,
+                  "field": "Start time"
+                }
+              ]
+            }
+          },
+          {
+            "id": "limit",
+            "options": {
+              "limitField": 1000
+            }
+          }
+        ],
+        "type": "table"
+      }
+    ],
+    "refresh": "10s",
+    "schemaVersion": 38,
+    "style": "dark",
+    "tags": [
+      "risingwave"
+    ],
+    "templating": {
+      "list": []
+    },
+    "time": {
+      "from": "now-30m",
+      "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "",
+    "title": "risingwave_traces",
+    "uid": "b7aa94b4-220a-4226-8204-ca758318862c",
+    "version": 9,
+    "weekStart": ""
+  }

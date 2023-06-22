@@ -18,20 +18,23 @@ normal = ["workspace-hack"]
 async-stream = "0.3"
 async-trait = "0.1"
 bytes = { version = "1" }
+clap = { version = "4", features = ["derive"] }
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2"
 itertools = "0.10"
 parking_lot = "0.12"
 rand = "0.8"
 risingwave_common = { path = "../../common" }
 risingwave_common_service = { path = "../../common/common_service" }
 risingwave_hummock_sdk = { path = "../hummock_sdk" }
+risingwave_hummock_trace = { path = "../hummock_trace" }
 risingwave_meta = { path = "../../meta", features = ["test"] }
 risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_storage = { path = "..", features = ["test"] }
-risingwave_tracing = { path = "../../tracing" }
+serde = { version = "1", features = ["derive"] }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -39,10 +42,13 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["async_futures"] }
+expect-test = "1"
 futures = { version = "0.3", default-features = false, features = [
     "alloc",
     "executor",
 ] }
+
+futures-async-stream = "0.2"
 risingwave_test_runner = { path = "../../test_runner" }
 serial_test = "0.9"
 sync-point = { path = "../../utils/sync-point" }
@@ -56,3 +62,7 @@ test = []
 name = "bench_hummock_iter"
 harness = false
 required-features = ["test"]
+
+[[bin]]
+name = "replay"
+path = "src/bin/replay/main.rs"

@@ -39,9 +39,54 @@ use uuid::Uuid;
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::MetaStore;
+use crate::storage::{MetaStore, MetaStoreError, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::GlobalStreamManager;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
+
+#[derive(Copy, Clone, Debug)]
+pub struct TableRevision(u64);
+
+const TABLE_REVISION_KEY: &[u8] = b"table_revision";
+
+impl From<TableRevision> for u64 {
+    fn from(value: TableRevision) -> Self {
+        value.0
+    }
+}
+
+impl TableRevision {
+    pub async fn get<S>(store: &S) -> MetaResult<Self>
+    where
+        S: MetaStore,
+    {
+        let version = match store
+            .get_cf(DEFAULT_COLUMN_FAMILY, TABLE_REVISION_KEY)
+            .await
+        {
+            Ok(byte_vec) => memcomparable::from_slice(&byte_vec).unwrap(),
+            Err(MetaStoreError::ItemNotFound(_)) => 0,
+            Err(e) => return Err(MetaError::from(e)),
+        };
+
+        Ok(Self(version))
+    }
+
+    pub fn next(&self) -> Self {
+        TableRevision(self.0 + 1)
+    }
+
+    pub fn store(&self, txn: &mut Transaction) {
+        txn.put(
+            DEFAULT_COLUMN_FAMILY.to_string(),
+            TABLE_REVISION_KEY.to_vec(),
+            memcomparable::to_vec(&self.0).unwrap(),
+        );
+    }
+
+    pub fn inner(&self) -> u64 {
+        self.0
+    }
+}
 
 #[derive(Debug)]
 pub struct ParallelUnitReschedule {
@@ -315,9 +360,23 @@ where
             .into_iter()
             .map(|worker_node| (worker_node.id, worker_node))
             .collect();
-
         if worker_nodes.is_empty() {
             bail!("no available compute node in the cluster");
+        }
+
+        // Check if we are trying to move a fragment to a node marked as unschedulable
+        let unschedulable_pu_ids: HashSet<ParallelUnitId> = worker_nodes
+            .values()
+            .filter(|w| w.property.as_ref().unwrap().is_unschedulable)
+            .flat_map(|w| w.parallel_units.iter().map(|pu| pu.id))
+            .collect();
+
+        if reschedule
+            .values()
+            .flat_map(|p| &p.added_parallel_units)
+            .any(|pu| unschedulable_pu_ids.contains(pu))
+        {
+            bail!("unable to move fragment to unschedulable node");
         }
 
         // Associating ParallelUnit with Worker
@@ -341,7 +400,7 @@ where
         // Index for actor status, including actor's parallel unit
         let mut actor_status = BTreeMap::new();
         let mut fragment_state = HashMap::new();
-        for table_fragments in self.fragment_manager.list_table_fragments().await? {
+        for table_fragments in self.fragment_manager.list_table_fragments().await {
             fragment_state.extend(
                 table_fragments
                     .fragment_ids()
@@ -509,7 +568,16 @@ where
             }
 
             match fragment.distribution_type() {
-                FragmentDistributionType::Hash => {}
+                FragmentDistributionType::Hash => {
+                    if current_parallel_units.len() + added_parallel_units.len()
+                        <= removed_parallel_units.len()
+                    {
+                        bail!(
+                            "can't remove all parallel units from fragment {}",
+                            fragment_id
+                        );
+                    }
+                }
                 FragmentDistributionType::Single => {
                     if added_parallel_units.len() != removed_parallel_units.len() {
                         bail!("single distribution fragment only support migration");
@@ -557,6 +625,7 @@ where
             }
             return Err(e);
         }
+
         Ok(())
     }
 
@@ -638,12 +707,11 @@ where
                 }
             }
 
-            if new_actor_ids.is_empty() {
-                bail!(
-                    "should be at least one actor in fragment {} after rescheduling",
-                    fragment_id
-                );
-            }
+            assert!(
+                !new_actor_ids.is_empty(),
+                "should be at least one actor in fragment {} after rescheduling",
+                fragment_id
+            );
 
             fragment_actors_after_reschedule.insert(*fragment_id, new_actor_ids);
         }
@@ -1127,7 +1195,9 @@ where
         tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
-            .run_command_with_paused(Command::RescheduleFragment(reschedule_fragment))
+            .run_command_with_paused(Command::RescheduleFragment {
+                reschedules: reschedule_fragment,
+            })
             .await?;
 
         Ok(())

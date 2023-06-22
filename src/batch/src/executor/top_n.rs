@@ -25,7 +25,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::memcmp_encoding::encode_chunk;
+use risingwave_common::util::memcmp_encoding::{encode_chunk, MemcmpEncoded};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -145,6 +145,17 @@ impl TopNHeap {
         }
     }
 
+    // Only used for swapping out the heap in hashmap, due to a bug in hashmap which forbids us from
+    // using `into_iter`. We should remove this after Hashmap upgraded and fixed the bug.
+    pub fn empty() -> Self {
+        Self {
+            heap: MemMonitoredHeap::with_capacity(0, MemoryContext::none()),
+            limit: 0,
+            offset: 0,
+            with_ties: false,
+        }
+    }
+
     pub fn push(&mut self, elem: HeapElem) {
         if self.heap.len() < self.limit + self.offset {
             self.heap.push(elem);
@@ -200,7 +211,7 @@ impl TopNHeap {
 
 #[derive(Clone, EstimateSize)]
 pub struct HeapElem {
-    encoded_row: Vec<u8>,
+    encoded_row: MemcmpEncoded,
     row: OwnedRow,
 }
 
@@ -225,7 +236,7 @@ impl Ord for HeapElem {
 }
 
 impl HeapElem {
-    pub fn new(encoded_row: Vec<u8>, row: impl Row) -> Self {
+    pub fn new(encoded_row: MemcmpEncoded, row: impl Row) -> Self {
         Self {
             encoded_row,
             row: row.into_owned_row(),

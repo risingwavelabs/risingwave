@@ -245,7 +245,7 @@
   stream_plan: |
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: "NoCheck" }
     └─StreamExchange { dist: HashShard(t._row_id) }
-      └─StreamGroupTopN { order: "[t.x ASC]", limit: 3, offset: 0, group_key: [1], with_ties: true }
+      └─StreamGroupTopN { order: "[t.x ASC]", limit: 3, offset: 0, with_ties: true, group_key: [1] }
         └─StreamExchange { dist: HashShard(t.y) }
           └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |

@@ -101,6 +101,7 @@ pub(super) mod handlers {
                     .ok_or_else(|| anyhow!("invalid worker type"))
                     .map_err(err)?,
                 None,
+                true,
             )
             .await;
         result.sort_unstable_by_key(|n| n.id);
@@ -191,7 +192,6 @@ pub(super) mod handlers {
             .fragment_manager
             .list_table_fragments()
             .await
-            .map_err(err)?
             .iter()
             .map(|f| (f.table_id().table_id() as i32, f.actors()))
             .collect::<Vec<_>>();

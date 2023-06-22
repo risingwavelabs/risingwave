@@ -19,12 +19,14 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::num::NonZeroUsize;
 
+use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_default::DefaultFromSerde;
 use serde_json::Value;
 
@@ -199,6 +201,12 @@ pub struct MetaConfig {
     #[serde(default)]
     pub dangerous_max_idle_secs: Option<u64>,
 
+    /// The default global parallelism for all streaming jobs, if user doesn't specify the
+    /// parallelism, this value will be used. `FULL` means use all available parallelism units,
+    /// otherwise it's a number.
+    #[serde(default = "default::meta::default_parallelism")]
+    pub default_parallelism: DefaultParallelism,
+
     /// Whether to enable deterministic compaction scheduling, which
     /// will disable all auto scheduling of compaction tasks.
     /// Should only be used in e2e tests.
@@ -247,6 +255,73 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::partition_vnode_count")]
     pub partition_vnode_count: u32,
+
+    #[serde(default = "default::meta::table_write_throughput_threshold")]
+    pub table_write_throughput_threshold: u64,
+
+    #[serde(default = "default::meta::min_table_split_write_throughput")]
+    /// If the size of one table is smaller than `min_table_split_write_throughput`, we would not
+    /// split it to an single group.
+    pub min_table_split_write_throughput: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+pub enum DefaultParallelism {
+    #[default]
+    Full,
+    Default(NonZeroUsize),
+}
+
+impl Serialize for DefaultParallelism {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        #[derive(Debug, Serialize, Deserialize)]
+        #[serde(untagged)]
+        enum Parallelism {
+            Str(String),
+            Int(usize),
+        }
+        match self {
+            DefaultParallelism::Full => Parallelism::Str("Full".to_string()).serialize(serializer),
+            DefaultParallelism::Default(val) => {
+                Parallelism::Int(val.get() as _).serialize(serializer)
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for DefaultParallelism {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Debug, Deserialize)]
+        #[serde(untagged)]
+        enum Parallelism {
+            Str(String),
+            Int(usize),
+        }
+        let p = Parallelism::deserialize(deserializer)?;
+        match p {
+            Parallelism::Str(s) => {
+                if s.trim().eq_ignore_ascii_case("full") {
+                    Ok(DefaultParallelism::Full)
+                } else {
+                    Err(serde::de::Error::custom(format!(
+                        "invalid default parallelism: {}",
+                        s
+                    )))
+                }
+            }
+            Parallelism::Int(i) => Ok(DefaultParallelism::Default(
+                NonZeroUsize::new(i)
+                    .context("default parallelism should be greater than 0")
+                    .map_err(|e| serde::de::Error::custom(e.to_string()))?,
+            )),
+        }
+    }
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -304,10 +379,6 @@ pub struct StreamingConfig {
     /// decided by `tokio`.
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
-
-    /// Enable reporting tracing information to jaeger.
-    #[serde(default = "default::streaming::enable_jaegar_tracing")]
-    pub enable_jaeger_tracing: bool,
 
     /// Enable async stack tracing through `await-tree` for risectl.
     #[serde(default = "default::streaming::async_stack_trace")]
@@ -459,12 +530,6 @@ serde_with::with_prefix!(batch_prefix "batch_");
 /// It is put at [`StreamingConfig::developer`].
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct StreamingDeveloperConfig {
-    /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
-    /// and might affect the prometheus performance. If you only need actor input and output
-    /// rows data, see `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
-    #[serde(default = "default::developer::stream_enable_executor_row_count")]
-    pub enable_executor_row_count: bool,
-
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
     #[serde(default = "default::developer::connector_message_buffer_size")]
@@ -574,7 +639,7 @@ impl SystemConfig {
 
 mod default {
     pub mod meta {
-        use crate::config::MetaBackend;
+        use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
             604800
@@ -608,6 +673,10 @@ mod default {
             30
         }
 
+        pub fn default_parallelism() -> DefaultParallelism {
+            DefaultParallelism::Full
+        }
+
         pub fn node_num_monitor_interval_sec() -> u64 {
             10
         }
@@ -633,15 +702,23 @@ mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            2 * 1024 * 1024 * 1024 // 2GB
+            4 * 1024 * 1024 * 1024 // 4GB
         }
 
         pub fn split_group_size_limit() -> u64 {
-            20 * 1024 * 1024 * 1024 // 20GB
+            64 * 1024 * 1024 * 1024 // 64GB
         }
 
         pub fn partition_vnode_count() -> u32 {
             64
+        }
+
+        pub fn table_write_throughput_threshold() -> u64 {
+            128 * 1024 * 1024 // 128MB
+        }
+
+        pub fn min_table_split_write_throughput() -> u64 {
+            32 * 1024 * 1024 // 32MB
         }
     }
 
@@ -745,10 +822,6 @@ mod default {
             10000
         }
 
-        pub fn enable_jaegar_tracing() -> bool {
-            false
-        }
-
         pub fn async_stack_trace() -> AsyncStackTraceOption {
             AsyncStackTraceOption::default()
         }
@@ -793,10 +866,6 @@ mod default {
 
         pub fn batch_chunk_size() -> usize {
             1024
-        }
-
-        pub fn stream_enable_executor_row_count() -> bool {
-            false
         }
 
         pub fn connector_message_buffer_size() -> usize {

@@ -29,8 +29,8 @@ use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
-    compact_task, CompactionConfig, CompactionGroupInfo, GroupConstruct, GroupDelta, GroupDestroy,
-    GroupMetaChange, GroupTableChange,
+    compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
+    GroupDelta, GroupDestroy, GroupMetaChange, GroupTableChange,
 };
 use tokio::sync::{OnceCell, RwLock};
 
@@ -535,6 +535,7 @@ impl<S: MetaStore> HummockManager<S> {
                         origin_group_id: parent_group_id,
                         target_group_id: compaction_group_id,
                         new_sst_start_id,
+                        version: CompatibilityVersion::NoTrivialSplit as i32,
                     })),
                 });
                 compaction_group_id
@@ -569,6 +570,7 @@ impl<S: MetaStore> HummockManager<S> {
                                 parent_group_id,
                                 new_sst_start_id,
                                 table_ids: table_ids.to_vec(),
+                                version: CompatibilityVersion::NoTrivialSplit as i32,
                             })),
                         }],
                     },
@@ -615,18 +617,12 @@ impl<S: MetaStore> HummockManager<S> {
         for (object_id, sst_id, _parent_old_sst_id, parent_new_sst_id) in sst_split_info {
             match branched_ssts.get_mut(object_id) {
                 Some(mut entry) => {
-                    if let Some(parent_new_sst_id) = parent_new_sst_id {
-                        entry.insert(parent_group_id, parent_new_sst_id);
-                    } else {
-                        entry.remove(&parent_group_id);
-                    }
+                    entry.insert(parent_group_id, parent_new_sst_id);
                     entry.insert(target_compaction_group_id, sst_id);
                 }
                 None => {
                     let mut groups = HashMap::from_iter([(target_compaction_group_id, sst_id)]);
-                    if let Some(parent_new_sst_id) = parent_new_sst_id {
-                        groups.insert(parent_group_id, parent_new_sst_id);
-                    }
+                    groups.insert(parent_group_id, parent_new_sst_id);
                     branched_ssts.insert(object_id, groups);
                 }
             }
@@ -643,16 +639,39 @@ impl<S: MetaStore> HummockManager<S> {
                 compact_task::TaskType::SpaceReclaim,
             );
         }
+
+        self.metrics
+            .move_state_table_count
+            .with_label_values(&[&parent_group_id.to_string()])
+            .inc();
+
         Ok(target_compaction_group_id)
     }
 
     #[named]
     pub async fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
-        let mut infos = {
+        let mut infos = vec![];
+        {
             let versioning_guard = read_lock!(self, versioning).await;
-            versioning_guard
-                .current_version
-                .calculate_compaction_group_statistic()
+            let version = &versioning_guard.current_version;
+            for (group_id, group) in &version.levels {
+                let mut group_info = TableGroupInfo {
+                    group_id: *group_id,
+                    ..Default::default()
+                };
+                for table_id in &group.member_table_ids {
+                    let stats_size = versioning_guard
+                        .version_stats
+                        .table_stats
+                        .get(table_id)
+                        .map(|stats| stats.total_key_size + stats.total_value_size)
+                        .unwrap_or(0);
+                    let table_size = std::cmp::max(stats_size, 0) as u64;
+                    group_info.group_size += table_size;
+                    group_info.table_statistic.insert(*table_id, table_size);
+                }
+                infos.push(group_info);
+            }
         };
         let manager = self.compaction_group_manager.read().await;
         for info in &mut infos {

@@ -171,6 +171,8 @@ pub struct GlobalStreamManager<S: MetaStore> {
     creating_job_info: CreatingStreamingJobInfoRef,
 
     hummock_manager: HummockManagerRef<S>,
+
+    pub(crate) streaming_job_lock: Mutex<()>,
 }
 
 impl<S> GlobalStreamManager<S>
@@ -193,6 +195,7 @@ where
             source_manager,
             hummock_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
+            streaming_job_lock: Mutex::new(()),
         })
     }
 
@@ -722,6 +725,7 @@ mod tests {
                         worker_node_parallelism: fake_parallelism,
                         is_streaming: true,
                         is_serving: true,
+                        is_unschedulable: false,
                     },
                 )
                 .await?;

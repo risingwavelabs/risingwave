@@ -18,8 +18,9 @@ use comfy_table::{Attribute, Cell, Row, Table};
 use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
+use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::table_fragments::State;
-use risingwave_pb::meta::GetClusterInfoResponse;
+use risingwave_pb::meta::{GetClusterInfoResponse, UpdateWorkerNodeSchedulabilityResponse};
 use risingwave_pb::source::ConnectorSplits;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 
@@ -31,12 +32,25 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
     Ok(response)
 }
 
+pub async fn update_schedulability(
+    context: &CtlContext,
+    addr: HostAddress,
+    is_unschedulable: bool,
+) -> anyhow::Result<UpdateWorkerNodeSchedulabilityResponse> {
+    let meta_client = context.meta_client().await?;
+    let response = meta_client
+        .update_schedulability(addr, is_unschedulable)
+        .await?;
+    Ok(response)
+}
+
 pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
     let GetClusterInfoResponse {
         worker_nodes: _,
         source_infos: _,
         table_fragments,
         mut actor_splits,
+        revision: _,
     } = get_cluster_info(context).await?;
 
     for table_fragment in &table_fragments {
@@ -79,6 +93,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
         table_fragments,
         actor_splits: _,
         source_infos: _,
+        revision,
     } = get_cluster_info(context).await?;
 
     // Fragment ID -> [Parallel Unit ID -> (Parallel Unit, Actor)]
@@ -167,6 +182,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
     }
 
     println!("{table}");
+    println!("Revision: {}", revision);
 
     Ok(())
 }

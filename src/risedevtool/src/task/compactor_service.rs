@@ -20,7 +20,7 @@ use std::process::Command;
 use anyhow::Result;
 
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, CompactorConfig, ExecuteContext, Task};
+use crate::{add_meta_node, add_tempo_endpoint, CompactorConfig, ExecuteContext, Task};
 
 pub struct CompactorService {
     config: CompactorConfig,
@@ -68,6 +68,9 @@ impl CompactorService {
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
 
+        let provide_tempo = config.provide_tempo.as_ref().unwrap();
+        add_tempo_endpoint(provide_tempo, cmd)?;
+
         Ok(())
     }
 }
@@ -95,7 +98,7 @@ impl Task for CompactorService {
         if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
             cmd.env(
-                "_RJEM_MALLOC_CONF",
+                "MALLOC_CONF",
                 "prof:true,lg_prof_interval:38,lg_prof_sample:19,prof_prefix:compactor",
             );
         }

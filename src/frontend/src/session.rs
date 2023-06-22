@@ -31,7 +31,7 @@ use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::{load_config, BatchConfig};
+use risingwave_common::config::{load_config, BatchConfig, MetaConfig};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::{ConfigMap, VisibilityMode};
@@ -52,16 +52,17 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
+use thiserror::Error;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::info;
 
-use crate::binder::{Binder, BoundStatement};
+use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
+use crate::catalog::{check_schema_writable, CatalogError, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
@@ -111,6 +112,7 @@ pub struct FrontendEnv {
     source_metrics: Arc<SourceMetrics>,
 
     batch_config: BatchConfig,
+    meta_config: MetaConfig,
 
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
@@ -157,6 +159,7 @@ impl FrontendEnv {
             sessions_map: Arc::new(Mutex::new(HashMap::new())),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
+            meta_config: MetaConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
         }
@@ -173,6 +176,7 @@ impl FrontendEnv {
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
         let batch_config = config.batch;
+        let meta_config = config.meta;
 
         let frontend_address: HostAddr = opts
             .advertise_addr
@@ -191,7 +195,7 @@ impl FrontendEnv {
             WorkerType::Frontend,
             &frontend_address,
             Default::default(),
-            &config.meta,
+            &meta_config,
         )
         .await?;
 
@@ -321,6 +325,7 @@ impl FrontendEnv {
                 frontend_metrics,
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
                 batch_config,
+                meta_config,
                 source_metrics,
                 creating_streaming_job_tracker,
             },
@@ -385,6 +390,10 @@ impl FrontendEnv {
         &self.batch_config
     }
 
+    pub fn meta_config(&self) -> &MetaConfig {
+        &self.meta_config
+    }
+
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.source_metrics.clone()
     }
@@ -427,6 +436,23 @@ pub struct SessionImpl {
     /// This flag is set only when current query is executed in local mode, and used to cancel
     /// local query.
     current_query_cancel_flag: Mutex<Option<Trigger>>,
+}
+
+#[derive(Error, Debug)]
+pub enum CheckRelationError {
+    #[error("{0}")]
+    Resolve(#[from] ResolveQualifiedNameError),
+    #[error("{0}")]
+    Catalog(#[from] CatalogError),
+}
+
+impl From<CheckRelationError> for RwError {
+    fn from(e: CheckRelationError) -> Self {
+        match e {
+            CheckRelationError::Resolve(e) => e.into(),
+            CheckRelationError::Catalog(e) => e.into(),
+        }
+    }
 }
 
 impl SessionImpl {
@@ -497,7 +523,10 @@ impl SessionImpl {
         self.id
     }
 
-    pub fn check_relation_name_duplicated(&self, name: ObjectName) -> Result<()> {
+    pub fn check_relation_name_duplicated(
+        &self,
+        name: ObjectName,
+    ) -> std::result::Result<(), CheckRelationError> {
         let db_name = self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
@@ -513,9 +542,9 @@ impl SessionImpl {
             };
             (schema_name, relation_name)
         };
-        catalog_reader
-            .check_relation_name_duplicated(db_name, &schema_name, &relation_name)
-            .map_err(RwError::from)
+        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name)?;
+
+        Ok(())
     }
 
     pub fn check_connection_name_duplicated(&self, name: ObjectName) -> Result<()> {
@@ -695,7 +724,7 @@ pub struct SessionManagerImpl {
     number: AtomicI32,
 }
 
-impl SessionManager<PgResponseStream, PrepareStatement, Portal> for SessionManagerImpl {
+impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
     fn connect(
@@ -833,10 +862,13 @@ impl SessionManagerImpl {
     }
 }
 
-#[async_trait::async_trait]
-impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
-    /// A copy of run_statement but exclude the parser part so each run must be at most one
-    /// statement. The str sql use the to_string of AST. Consider Reuse later.
+impl Session for SessionImpl {
+    type Portal = Portal;
+    type PreparedStatement = PrepareStatement;
+    type ValuesStream = PgResponseStream;
+
+    /// A copy of `run_statement` but exclude the parser part so each run must be at most one
+    /// statement. The str sql use the `to_string` of AST. Consider Reuse later.
     async fn run_one_query(
         self: Arc<Self>,
         stmt: Statement,

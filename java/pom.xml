@@ -8,12 +8,15 @@
     <version>1.0-SNAPSHOT</version>
     <modules>
         <module>proto</module>
+        <module>udf</module>
+        <module>udf-example</module>
         <module>java-binding</module>
         <module>common-utils</module>
         <module>java-binding-integration-test</module>
         <module>connector-node/connector-api</module>
         <module>connector-node/risingwave-sink-iceberg</module>
         <module>connector-node/risingwave-sink-deltalake</module>
+        <module>connector-node/risingwave-sink-es</module>
         <module>connector-node/risingwave-sink-jdbc</module>
         <module>connector-node/risingwave-source-cdc</module>
         <module>connector-node/risingwave-connector-test</module>
@@ -40,6 +43,7 @@
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.3.3</hadoop.version>
+        <elasticsearch.version>7.17.10</elasticsearch.version>
     </properties>
 
     <dependencyManagement>
@@ -116,6 +120,16 @@
                 <groupId>mysql</groupId>
                 <artifactId>mysql-connector-java</artifactId>
                 <version>8.0.28</version>
+            </dependency>
+            <dependency>
+                <groupId>org.elasticsearch</groupId>
+                <artifactId>elasticsearch</artifactId>
+                <version>${elasticsearch.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.elasticsearch.client</groupId>
+                <artifactId>elasticsearch-rest-high-level-client</artifactId>
+                <version>${elasticsearch.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.grpc</groupId>
@@ -207,6 +221,11 @@
             </dependency>
             <dependency>
                 <groupId>com.risingwave.java</groupId>
+                <artifactId>risingwave-sink-es</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave.java</groupId>
                 <artifactId>risingwave-sink-jdbc</artifactId>
                 <version>${module.version}</version>
             </dependency>
@@ -292,25 +311,24 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.0.0-M7</version>
                 <configuration>
-                    <environmentVariables>
-                        <_JAVA_OPTIONS>
-                            --add-opens=java.base/java.lang=ALL-UNNAMED
-                            --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
-                            --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
-                            --add-opens=java.base/java.io=ALL-UNNAMED
-                            --add-opens=java.base/java.net=ALL-UNNAMED
-                            --add-opens=java.base/java.nio=ALL-UNNAMED
-                            --add-opens=java.base/java.util=ALL-UNNAMED
-                            --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
-                            --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
-                            --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
-                            --add-opens=java.base/sun.nio.cs=ALL-UNNAMED
-                            --add-opens=java.base/sun.security.action=ALL-UNNAMED
-                            --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
-                            --add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED
-                            --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
-                        </_JAVA_OPTIONS>
-                    </environmentVariables>
+                    <enableAssertions>true</enableAssertions>
+                    <argLine>
+                        --add-opens=java.base/java.lang=ALL-UNNAMED
+                        --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+                        --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+                        --add-opens=java.base/java.io=ALL-UNNAMED
+                        --add-opens=java.base/java.net=ALL-UNNAMED
+                        --add-opens=java.base/java.nio=ALL-UNNAMED
+                        --add-opens=java.base/java.util=ALL-UNNAMED
+                        --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
+                        --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
+                        --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+                        --add-opens=java.base/sun.nio.cs=ALL-UNNAMED
+                        --add-opens=java.base/sun.security.action=ALL-UNNAMED
+                        --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
+                        --add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED
+                        --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+                    </argLine>
                 </configuration>
             </plugin>
 

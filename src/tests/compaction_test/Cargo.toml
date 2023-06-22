@@ -21,6 +21,7 @@ bytes = "1"
 clap = { version = "4", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
+prometheus = { version = "0.13" }
 rand = "0.8"
 risingwave_common = { path = "../../common" }
 risingwave_compactor = { path = "../../storage/compactor" }
@@ -32,7 +33,6 @@ risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_rt = { path = "../../utils/runtime" }
 risingwave_storage = { path = "../../storage", features = ["test"] }
-risingwave_tracing = { path = "../../tracing" }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",

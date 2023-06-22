@@ -1,0 +1,276 @@
+# Before running this test:
+#   python3 e2e_test/udf/test.py
+# or:
+#   cd java/udf-example && mvn package && java -jar target/risingwave-udf-example.jar
+
+# Create a function.
+statement ok
+create function int_42() returns int language python as int_42 using link 'http://localhost:8815';
+
+# Argument or return type mismatch.
+statement error argument mismatch
+create function foo(int) returns int language python as int_42 using link 'http://localhost:8815';
+
+statement error return type mismatch
+create function foo() returns real language python as int_42 using link 'http://localhost:8815';
+
+# Create another function.
+statement ok
+create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
+
+# Create a function with the same name but different arguments.
+statement ok
+create function gcd(int, int, int) returns int language python as gcd3 using link 'http://localhost:8815';
+
+# Create a function with the same name and arguments.
+statement error exists
+create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
+
+# Create a function that returns multiple columns.
+statement ok
+create function extract_tcp_info(bytea) returns struct<src_ip varchar, dst_ip varchar, src_port smallint, dst_port smallint>
+language python as extract_tcp_info using link 'http://localhost:8815';
+
+# Create a table function.
+statement ok
+create function series(int) returns table (x int) language python as series using link 'http://localhost:8815';
+
+# Create a table function that returns multiple columns.
+statement ok
+create function split(varchar) returns table (word varchar, length int) language python as split using link 'http://localhost:8815';
+
+statement ok
+create function hex_to_dec(varchar) returns decimal language python as hex_to_dec using link 'http://localhost:8815';
+
+statement ok
+create function array_access(varchar[], int) returns varchar language python as array_access using link 'http://localhost:8815';
+
+statement ok
+create function jsonb_access(jsonb, int) returns jsonb language python as jsonb_access using link 'http://localhost:8815';
+
+statement ok
+create function jsonb_concat(jsonb[]) returns jsonb language python as jsonb_concat using link 'http://localhost:8815';
+
+statement ok
+create function jsonb_array_identity(jsonb[]) returns jsonb[] language python as jsonb_array_identity using link 'http://localhost:8815';
+
+statement ok
+create function jsonb_array_struct_identity(struct<v jsonb[], len int>) returns struct<v jsonb[], len int>
+language python as jsonb_array_struct_identity using link 'http://localhost:8815';
+
+statement ok
+create function return_all(BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB)
+returns struct<bool BOOLEAN, i16 SMALLINT, i32 INT, i64 BIGINT, f32 FLOAT4, f64 FLOAT8, decimal DECIMAL, date DATE, time TIME, timestamp TIMESTAMP, interval INTERVAL, varchar VARCHAR, bytea BYTEA, jsonb JSONB>
+language python as return_all using link 'http://localhost:8815';
+
+query TTTTT rowsort
+show functions
+----
+array_access varchar[], integer varchar python http://localhost:8815
+extract_tcp_info bytea struct<src_ip varchar,dst_ip varchar,src_port smallint,dst_port smallint> python http://localhost:8815
+gcd integer, integer integer python http://localhost:8815
+gcd integer, integer, integer integer python http://localhost:8815
+hex_to_dec varchar numeric python http://localhost:8815
+int_42 (empty) integer python http://localhost:8815
+jsonb_access jsonb, integer jsonb python http://localhost:8815
+jsonb_array_identity jsonb[] jsonb[] python http://localhost:8815
+jsonb_array_struct_identity struct<v jsonb[],len integer> struct<v jsonb[],len integer> python http://localhost:8815
+jsonb_concat jsonb[] jsonb python http://localhost:8815
+return_all boolean, smallint, integer, bigint, real, double precision, numeric, date, time without time zone, timestamp without time zone, interval, varchar, bytea, jsonb struct<bool boolean,i16 smallint,i32 integer,i64 bigint,f32 real,f64 double precision,decimal numeric,date date,time time without time zone,timestamp timestamp without time zone,interval interval,varchar varchar,bytea bytea,jsonb jsonb> python http://localhost:8815
+series integer integer python http://localhost:8815
+split varchar struct<word varchar,length integer> python http://localhost:8815
+
+query I
+select int_42();
+----
+42
+
+query I
+select gcd(25, 15);
+----
+5
+
+query I
+select gcd(25, 15, 3);
+----
+1
+
+query I
+select hex_to_dec('000000000000000000000000000000000000000000c0f6346334241a61f90a36');
+----
+233276425899864771438119478
+
+query T
+select array_access(ARRAY['a', 'b', 'c'], 2);
+----
+b
+
+query T
+select jsonb_access(a::jsonb, 1) from
+(values ('["a", "b", "c"]'), (null), ('[0, false]')) t(a);
+----
+"b"
+NULL
+false
+
+query T
+select jsonb_concat(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
+----
+[null, 1, "str", {}]
+
+query T
+select jsonb_array_identity(ARRAY[null, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
+----
+{NULL,1,"\"str\"","{}"}
+
+query T
+select jsonb_array_struct_identity(ROW(ARRAY[null, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb], 4)::struct<v jsonb[], len int>);
+----
+({NULL,1,"\"str\"","{}"},4)
+
+query T
+select return_all(
+    true,
+    1 ::smallint,
+    1 ::int,
+    1 ::bigint,
+    1 ::float4,
+    1 ::float8,
+    1234567890123456789012345678 ::decimal,
+    date '2023-06-01',
+    time '01:02:03.456789',
+    timestamp '2023-06-01 01:02:03.456789',
+    interval '1 month 2 days 3 seconds',
+    'string',
+    'bytes'::bytea,
+    '{"key":1}'::jsonb);
+----
+(t,1,1,1,1,1,1234567890123456789012345678,2023-06-01,01:02:03.456789,2023-06-01 01:02:03.456789,1 mon 2 days 00:00:03,string,\x6279746573,{"key": 1})
+
+query I
+select series(5);
+----
+0
+1
+2
+3
+4
+
+query IT
+select * from split('rising wave');
+----
+rising 6
+wave   4
+
+query T
+select split('rising wave');
+----
+(rising,6)
+(wave,4)
+
+query II
+select x, series(x) from series(4) t(x);
+----
+1 0
+2 0
+2 1
+3 0
+3 1
+3 2
+
+# test large output for table function
+query I
+select count(*) from series(1000000);
+----
+1000000
+
+# TODO: support argument implicit cast for UDF
+# e.g. extract_tcp_info(E'\\x45');
+
+query T
+select extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: bytea);
+----
+(192.168.0.14,192.168.0.1,861,8374)
+
+query TTII
+select (extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: BYTEA)).*;
+----
+192.168.0.14 192.168.0.1 861 8374
+
+# error handling
+
+statement error
+select hex_to_dec('1z');
+
+statement ok
+create table t (dummy date, v varchar);
+
+statement ok
+create materialized view mv as select dummy, hex_to_dec(v) from t;
+
+statement ok
+insert into t values ('2023-01-01', '1z');
+
+statement ok
+flush;
+
+query TI
+select * from mv;
+----
+2023-01-01 NULL
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
+
+# Drop a function
+statement ok
+drop function int_42();
+
+# Drop a function without arguments, but the function name is not unique.
+statement error is not unique
+drop function gcd;
+
+# Drop a function with arguments.
+statement ok
+drop function gcd(int, int);
+
+# foo() is different from foo.
+statement error function not found
+drop function gcd();
+
+# Drop a function without arguments. Now the function name is unique.
+statement ok
+drop function gcd;
+
+statement ok
+drop function extract_tcp_info;
+
+statement ok
+drop function series;
+
+statement ok
+drop function split;
+
+statement ok
+drop function hex_to_dec;
+
+statement ok
+drop function array_access;
+
+statement ok
+drop function jsonb_access;
+
+statement ok
+drop function jsonb_concat;
+
+statement ok
+drop function jsonb_array_identity;
+
+statement ok
+drop function jsonb_array_struct_identity;
+
+statement ok
+drop function return_all;
