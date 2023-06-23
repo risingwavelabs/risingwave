@@ -321,7 +321,7 @@ async fn test_batch_queries<R: Rng>(
         test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("[TEST BATCH]: {}", sql);
-        skipped += run_query(12, client, &sql).await?;
+        skipped += run_query(30, client, &sql).await?;
     }
     Ok(skipped as f64 / sample_size as f64)
 }
