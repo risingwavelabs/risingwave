@@ -1566,6 +1566,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "const-str"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce5cd0d05ad8032f6252503d4a61401b640ce9365082accf046c68c7a419339d"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4235,9 +4241,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.52"
+version = "0.10.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01b8574602df80f7b85fdfc5392fa884a4e3b3f4f35402c070ab34c3d3f78d56"
+checksum = "345df152bc43501c5eb9e4654ff05f794effb78d4efe3d53abc158baddc0703d"
 dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
@@ -4276,9 +4282,9 @@ dependencies = [
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.87"
+version = "0.9.90"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e17f59264b2809d77ae94f0e1ebabc434773f370d6ca667bd223ea10e06cc7e"
+checksum = "374533b0e45f3a7ced10fcaeccca020e66656bc03dac384f852e4e5a7a8104a6"
 dependencies = [
  "cc",
  "libc",
@@ -5600,6 +5606,7 @@ version = "0.19.1"
 dependencies = [
  "clap 4.2.7",
  "madsim-tokio",
+ "prometheus",
  "risingwave_backup",
  "risingwave_meta",
  "risingwave_rt",
@@ -5694,6 +5701,7 @@ dependencies = [
  "anyhow",
  "clap 4.2.7",
  "madsim-tokio",
+ "prometheus",
  "risingwave_common",
  "risingwave_compactor",
  "risingwave_compute",
@@ -5714,7 +5722,10 @@ dependencies = [
  "anyhow",
  "clap 4.2.7",
  "console",
+ "const-str",
  "madsim-tokio",
+ "prometheus",
+ "risingwave_cmd",
  "risingwave_common",
  "risingwave_compactor",
  "risingwave_compute",
@@ -5805,6 +5816,7 @@ dependencies = [
  "tinyvec",
  "toml 0.7.3",
  "tracing",
+ "tracing-subscriber",
  "twox-hash",
  "url",
  "uuid",
@@ -5852,6 +5864,7 @@ dependencies = [
  "futures",
  "itertools",
  "madsim-tokio",
+ "prometheus",
  "rand",
  "risingwave_common",
  "risingwave_compactor",
@@ -6406,6 +6419,8 @@ dependencies = [
  "madsim-tokio",
  "parking_lot 0.12.1",
  "pprof",
+ "prometheus",
+ "risingwave_common",
  "tracing",
  "tracing-subscriber",
  "workspace-hack",
@@ -6431,6 +6446,7 @@ dependencies = [
  "paste",
  "pin-project",
  "pretty_assertions",
+ "prometheus",
  "rand",
  "risingwave_common",
  "risingwave_compactor",
@@ -6535,6 +6551,7 @@ dependencies = [
  "futures",
  "itertools",
  "madsim-tokio",
+ "prometheus",
  "regex",
  "risingwave_rt",
  "serde",
@@ -8826,7 +8843,6 @@ version = "0.19.1"
 dependencies = [
  "ahash 0.8.3",
  "anyhow",
- "arrayvec",
  "auto_enums",
  "aws-sdk-s3",
  "aws-smithy-client",

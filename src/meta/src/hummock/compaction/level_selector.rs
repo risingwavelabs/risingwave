@@ -491,6 +491,7 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
             .state
             .entry(group.group_id)
             .or_insert_with(SpaceReclaimPickerState::default);
+
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
         compaction_input.add_pending_task(task_id, level_handlers);
 
