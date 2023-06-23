@@ -321,7 +321,7 @@ async fn test_batch_queries<R: Rng>(
         test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("[TEST BATCH]: {}", sql);
-        skipped += run_query(6, client, &sql).await?;
+        skipped += run_query(12, client, &sql).await?;
     }
     Ok(skipped as f64 / sample_size as f64)
 }
@@ -339,7 +339,7 @@ async fn test_stream_queries<R: Rng>(
         test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("[TEST STREAM]: {}", sql);
-        skipped += run_query(6, client, &sql).await?;
+        skipped += run_query(12, client, &sql).await?;
         tracing::info!("[TEST DROP MVIEW]: {}", &format_drop_mview(&table));
         drop_mview_table(&table, client).await;
     }
