@@ -141,25 +141,8 @@ impl ProtobufParserConfig {
         index: &mut i32,
         parse_trace: &mut Vec<String>,
     ) -> Result<ColumnDesc> {
-        let identifier = format!(
-            "{}({})",
-            field_descriptor.name(),
-            field_descriptor.full_name()
-        );
-
-        _ = parse_trace
-            .iter()
-            .filter_ok(|s| s == &identifier)
-            .next()
-            .ok_or_else(|| {
-                ProtocolError(format!(
-                    "cyclic dependency detected in protobuf schema: {:?}, conflict field: {}",
-                    parse_trace, identifier
-                ))
-            })?;
-        parse_trace.push(identifier);
-
-        let field_type = protobuf_type_mapping(field_descriptor)?;
+        detect_loop_and_push(parse_trace, field_descriptor)?;
+        let field_type = protobuf_type_mapping(field_descriptor, parse_trace)?;
         if let Kind::Message(m) = field_descriptor.kind() {
             let field_descs = if let DataType::List { .. } = field_type {
                 vec![]
@@ -245,6 +228,20 @@ impl ProtobufParser {
     }
 }
 
+fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> Result<()> {
+    let identifier = format!("{}({})", fd.name(), fd.full_name());
+    if trace.iter().find(|s| *s == identifier.as_str()).is_some() {
+        return Err(RwError::from(ProtocolError(format!(
+            "circular reference detected: {}, conflict with {}, kind {:?}",
+            trace.iter().join("->"),
+            identifier,
+            fd.kind(),
+        ))));
+    }
+    trace.push(identifier);
+    Ok(())
+}
+
 impl ByteStreamSourceParser for ProtobufParser {
     fn columns(&self) -> &[SourceColumnDesc] {
         &self.rw_columns
@@ -328,7 +325,10 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
 }
 
 /// Maps protobuf type to RW type.
-fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType> {
+fn protobuf_type_mapping(
+    field_descriptor: &FieldDescriptor,
+    parse_trace: &mut Vec<String>,
+) -> Result<DataType> {
     let field_type = field_descriptor.kind();
     let mut t = match field_type {
         Kind::Bool => DataType::Boolean,
@@ -343,7 +343,13 @@ fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType>
         Kind::Message(m) => {
             let fields = m
                 .fields()
-                .map(|f| protobuf_type_mapping(&f))
+                .map(|f| {
+                    detect_loop_and_push(parse_trace, &f)?;
+                    let resp = protobuf_type_mapping(&f, parse_trace)?;
+                    parse_trace.pop();
+
+                    Ok(resp)
+                })
                 .collect::<Result<Vec<_>>>()?;
             let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
             DataType::new_struct(fields, field_names)
@@ -481,5 +487,22 @@ mod test {
             PbTypeName::List
         );
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_refuse_recursive_proto_message() {
+        let location = schema_dir() + "/proto_recursive/recursive.pb";
+        let message_name = "recursive.ComplexRecursiveMessage";
+        let conf = ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false)
+            .await
+            .unwrap();
+        let columns = conf.map_to_columns();
+        // expect error message:
+        // "Err(Protocol error: circular reference detected:
+        // parent(recursive.ComplexRecursiveMessage.parent)->siblings(recursive.
+        // ComplexRecursiveMessage.Parent.siblings), conflict with
+        // parent(recursive.ComplexRecursiveMessage.parent), kind
+        // recursive.ComplexRecursiveMessage.Parent"
+        assert_eq!(columns.is_err(), true);
     }
 }
