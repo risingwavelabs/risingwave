@@ -28,6 +28,15 @@ create source invalid_startup_timestamp (
   properties.bootstrap.server = 'message_queue:29092'
 ) row format json;
 
+statement error schema definition not specified for ROW FORMAT JSON
+create source invalid_schema_definition 
+with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  upsert = 'true',
+  properties.bootstrap.server = 'message_queue:29092'
+) row format json;
+
 statement ok
 create source upsert_source (
   column1 varchar
