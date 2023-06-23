@@ -41,7 +41,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             2..=3 => self
                 .gen_simple_join_clause()
                 .unwrap_or_else(|| self.gen_no_join()),
-            3..=4 => self.gen_more_joins(),
+            4..=4 => self.gen_more_joins(),
             // TODO(kwannoel): cycles, bushy joins.
             _ => unreachable!(),
         }
