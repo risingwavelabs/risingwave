@@ -1507,9 +1507,9 @@ async fn test_split_compaction_group_on_demand_basic() {
     assert_eq!(current_version.levels.len(), 3);
     let new_group_id = current_version.levels.keys().max().cloned().unwrap();
     assert!(new_group_id > StaticCompactionGroupId::End as u64);
-    assert!(
-        get_compaction_group_object_ids(&current_version, 2).is_empty(),
-        "SST 10, 11 has been moved to new_group completely."
+    assert_eq!(
+        get_compaction_group_object_ids(&current_version, 2),
+        vec![10, 11]
     );
     assert_eq!(
         get_compaction_group_object_ids(&current_version, new_group_id),
@@ -1530,7 +1530,7 @@ async fn test_split_compaction_group_on_demand_basic() {
     let branched_ssts = get_branched_ssts(&hummock_manager).await;
     assert_eq!(branched_ssts.len(), 2);
     for object_id in [10, 11] {
-        assert_eq!(branched_ssts.get(&object_id).unwrap().len(), 1);
+        assert_eq!(branched_ssts.get(&object_id).unwrap().len(), 2);
         assert_ne!(
             branched_ssts
                 .get(&object_id)
@@ -1738,7 +1738,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         current_version.get_compaction_group_levels(2).levels[base_level - 1]
             .table_infos
             .len(),
-        1
+        2
     );
 
     let branched_ssts = hummock_manager.get_branched_ssts_info().await;
@@ -1934,7 +1934,7 @@ async fn test_move_tables_between_compaction_group() {
         current_version.get_compaction_group_levels(2).levels[base_level - 1]
             .table_infos
             .len(),
-        2
+        3
     );
 
     let level = &current_version
@@ -1995,7 +1995,7 @@ async fn test_move_tables_between_compaction_group() {
         current_version.get_compaction_group_levels(2).levels[base_level - 1]
             .table_infos
             .len(),
-        1
+        2
     );
     let branched_ssts = hummock_manager.get_branched_ssts_info().await;
     assert_eq!(branched_ssts.len(), 5);

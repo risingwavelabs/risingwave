@@ -865,15 +865,30 @@ where
             .unwrap()
             .member_table_ids
             .clone();
+        let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
 
-        if CompactStatus::is_trivial_move_task(&compact_task) && can_trivial_move {
+        if is_trivial_reclaim {
+            compact_task.set_task_status(TaskStatus::Success);
+            self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
+                .await?;
+            tracing::debug!(
+                "TrivialReclaim for compaction group {}: remove {} sstables, cost time: {:?}",
+                compaction_group_id,
+                compact_task
+                    .input_ssts
+                    .iter()
+                    .map(|level| level.table_infos.len())
+                    .sum::<usize>(),
+                start_time.elapsed()
+            );
+        } else if CompactStatus::is_trivial_move_task(&compact_task) && can_trivial_move {
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
             self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
                 .await?;
             tracing::debug!(
-                "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
+                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
                 compaction_group_id,
                 compact_task.input_ssts[0].table_infos.len(),
                 compact_task.input_ssts[0].level_idx,
@@ -943,6 +958,8 @@ where
                         .is_empty()
                     {
                         "trivial-move"
+                    } else if is_trivial_reclaim {
+                        "trivial-space-reclaim"
                     } else {
                         ""
                     };
@@ -988,6 +1005,8 @@ where
                     compact_task.input_ssts[1].level_idx,
                     if CompactStatus::is_trivial_move_task(&compact_task) {
                         "trivial-move"
+                    } else if is_trivial_reclaim {
+                        "trivial-space-reclaim"
                     } else {
                         ""
                     }
@@ -1077,7 +1096,10 @@ where
             if let TaskStatus::Pending = task.task_status() {
                 return Ok(Some(task));
             }
-            assert!(CompactStatus::is_trivial_move_task(&task));
+            assert!(
+                CompactStatus::is_trivial_move_task(&task)
+                    || CompactStatus::is_trivial_reclaim(&task)
+            );
         }
 
         Ok(None)
@@ -1374,8 +1396,9 @@ where
             // There are two cases where assignee_context_id is not available
             // 1. compactor does not exist
             // 2. trivial_move
-
-            let label = if CompactStatus::is_trivial_move_task(compact_task) {
+            let label = if CompactStatus::is_trivial_reclaim(compact_task) {
+                "trivial-space-reclaim"
+            } else if CompactStatus::is_trivial_move_task(compact_task) {
                 // TODO: only support can_trivial_move in DynamicLevelCompcation, will check
                 // task_type next PR
                 "trivial-move"
