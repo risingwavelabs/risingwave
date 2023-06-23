@@ -123,8 +123,13 @@ impl ProtobufParserConfig {
     pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
         let mut columns = Vec::with_capacity(self.message_descriptor.fields().len());
         let mut index = 0;
+        let mut parse_trace: Vec<String> = vec![];
         for field in self.message_descriptor.fields() {
-            columns.push(Self::pb_field_to_col_desc(&field, &mut index)?);
+            columns.push(Self::pb_field_to_col_desc(
+                &field,
+                &mut index,
+                &mut parse_trace,
+            )?);
         }
 
         Ok(columns)
@@ -134,17 +139,37 @@ impl ProtobufParserConfig {
     fn pb_field_to_col_desc(
         field_descriptor: &FieldDescriptor,
         index: &mut i32,
+        parse_trace: &mut Vec<String>,
     ) -> Result<ColumnDesc> {
+        let identifier = format!(
+            "{}({})",
+            field_descriptor.name(),
+            field_descriptor.full_name()
+        );
+
+        _ = parse_trace
+            .iter()
+            .filter_ok(|s| s == &identifier)
+            .next()
+            .ok_or_else(|| {
+                ProtocolError(format!(
+                    "cyclic dependency detected in protobuf schema: {:?}, conflict field: {}",
+                    parse_trace, identifier
+                ))
+            })?;
+        parse_trace.push(identifier);
+
         let field_type = protobuf_type_mapping(field_descriptor)?;
         if let Kind::Message(m) = field_descriptor.kind() {
             let field_descs = if let DataType::List { .. } = field_type {
                 vec![]
             } else {
                 m.fields()
-                    .map(|f| Self::pb_field_to_col_desc(&f, index))
+                    .map(|f| Self::pb_field_to_col_desc(&f, index, parse_trace))
                     .collect::<Result<Vec<_>>>()?
             };
             *index += 1;
+            _ = parse_trace.pop();
             Ok(ColumnDesc {
                 column_id: *index,
                 name: field_descriptor.name().to_string(),
@@ -155,6 +180,7 @@ impl ProtobufParserConfig {
             })
         } else {
             *index += 1;
+            _ = parse_trace.pop();
             Ok(ColumnDesc {
                 column_id: *index,
                 name: field_descriptor.name().to_string(),
