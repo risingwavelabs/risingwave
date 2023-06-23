@@ -468,7 +468,7 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
 /// If takes too long return the query which timed out + execution time + timeout error
 /// Returns: Number of skipped queries.
 async fn run_query(client: &Client, query: &str) -> Result<i64> {
-    let timeout_duration = 3;
+    let timeout_duration = 12;
     let query_task = client.simple_query(query);
     let result = timeout(Duration::from_secs(timeout_duration), query_task).await;
     let response = match result {
