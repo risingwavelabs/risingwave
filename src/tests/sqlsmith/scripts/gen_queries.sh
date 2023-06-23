@@ -183,7 +183,7 @@ generate_deterministic() {
     else
       echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
       echo '[WARN] Cluster crashed or timed out while generating queries. see $LOGDIR/generate-{1}.log for more information.'
-      if ! cat $LOGDIR/generate-{1}.log | grep $CRASH_MESSAGE
+      if ! cat $LOGDIR/generate-{1}.log | grep '$CRASH_MESSAGE'
       then
         echo $TIMEOUT_MESSAGE >> $LOGDIR/generate-{1}.log
       fi
