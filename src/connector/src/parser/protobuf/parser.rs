@@ -230,7 +230,7 @@ impl ProtobufParser {
 
 fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> Result<()> {
     let identifier = format!("{}({})", fd.name(), fd.full_name());
-    if trace.iter().find(|s| *s == identifier.as_str()).is_some() {
+    if trace.iter().any(|s| s == identifier.as_str()) {
         return Err(RwError::from(ProtocolError(format!(
             "circular reference detected: {}, conflict with {}, kind {:?}",
             trace.iter().join("->"),
@@ -503,6 +503,6 @@ mod test {
         // ComplexRecursiveMessage.Parent.siblings), conflict with
         // parent(recursive.ComplexRecursiveMessage.parent), kind
         // recursive.ComplexRecursiveMessage.Parent"
-        assert_eq!(columns.is_err(), true);
+        assert!(columns.is_err());
     }
 }
