@@ -61,10 +61,30 @@ impl From<generic::Scan> for PlanRef {
 }
 
 impl LogicalScan {
+    pub fn create_for_table_catalog(
+        table_name: String, // explain-only
+        table_desc: Rc<TableDesc>,
+        indexes: Vec<Rc<IndexCatalog>>,
+        ctx: OptimizerContextRef,
+        for_system_time_as_of_proctime: bool,
+    ) -> Self {
+        generic::Scan::new(
+            table_name,
+            true,
+            (0..table_desc.columns.len()).collect(),
+            table_desc,
+            None,
+            indexes,
+            ctx,
+            Condition::true_cond(),
+            for_system_time_as_of_proctime,
+        )
+        .into()
+    }
+
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
-        is_sys_table: bool,
         table_desc: Rc<TableDesc>,
         table_catalog: Rc<TableCatalog>,
         indexes: Vec<Rc<IndexCatalog>>,
@@ -74,10 +94,10 @@ impl LogicalScan {
     ) -> Self {
         generic::Scan::new(
             table_name,
-            is_sys_table,
+            false,
             (0..table_desc.columns.len()).collect(),
             table_desc,
-            table_catalog,
+            Some(table_catalog),
             indexes,
             ctx,
             Condition::true_cond(),

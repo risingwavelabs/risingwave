@@ -43,7 +43,7 @@ pub struct Scan {
     /// Stored as a field so we don't have to re-compute it each time.
     pub table_desc: Rc<TableDesc>,
     /// Table Catalog of the upstream table that the descriptor is derived from.
-    pub table_catalog: Rc<TableCatalog>,
+    pub table_catalog: Option<Rc<TableCatalog>>,
     // Descriptors of all indexes on this table
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
@@ -240,7 +240,7 @@ impl Scan {
         is_sys_table: bool,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
-        table_catalog: Rc<TableCatalog>,
+        table_catalog: Option<Rc<TableCatalog>>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table

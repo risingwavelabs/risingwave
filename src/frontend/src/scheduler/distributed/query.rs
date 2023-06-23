@@ -510,9 +510,9 @@ pub(crate) mod tests {
         //
         let ctx = OptimizerContext::mock().await;
         let table_id = 0.into();
+        let table_catalog: TableCatalog = todo!();
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
-            false,
             Rc::new(TableDesc {
                 table_id,
                 stream_key: vec![],
@@ -530,6 +530,7 @@ pub(crate) mod tests {
                 watermark_columns: FixedBitSet::with_capacity(3),
                 versioned: false,
             }),
+            table_catalog,
             vec![],
             ctx,
             false,

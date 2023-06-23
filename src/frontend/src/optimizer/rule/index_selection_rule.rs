@@ -221,7 +221,6 @@ impl IndexSelectionRule {
 
         let index_scan = LogicalScan::create(
             index.index_table.name.clone(),
-            false,
             index.index_table.table_desc().into(),
             index.index_table.into(),
             vec![],
@@ -232,7 +231,6 @@ impl IndexSelectionRule {
 
         let primary_table_scan = LogicalScan::create(
             index.primary_table.name.clone(),
-            false,
             index.primary_table.table_desc().into(),
             index.primary_table.into(),
             vec![],
@@ -333,7 +331,6 @@ impl IndexSelectionRule {
 
         let primary_table_scan = LogicalScan::create(
             logical_scan.table_name().to_string(),
-            false,
             primary_table_desc.clone().into(),
             logical_scan.table_catalog().clone().into(),
             vec![],
@@ -570,7 +567,7 @@ impl IndexSelectionRule {
                 .collect_vec(),
             // TODO: Should these be cloning the underlying rc instead?
             primary_table_desc.clone().into(),
-            logical_scan.table_catalog().clone().into(),
+            Some(logical_scan.table_catalog().clone().into()),
             vec![],
             logical_scan.ctx(),
             Condition {
@@ -614,7 +611,7 @@ impl IndexSelectionRule {
                     .map(|x| x.column_index)
                     .collect_vec(),
                 index.index_table.table_desc().into(),
-                index.index_table.into(),
+                Some(index.index_table.clone().into()),
                 vec![],
                 ctx,
                 new_predicate,
