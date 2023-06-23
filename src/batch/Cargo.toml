@@ -61,7 +61,7 @@ task_stats_alloc = { path = "../utils/task_stats_alloc" }
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-criterion = { version = "0.4", features = ["async_tokio", "async"] }
+criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
 

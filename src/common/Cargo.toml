@@ -109,7 +109,7 @@ libc = "0.2.72"
 mach2 = "0.4"
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = { workspace = true }
 more-asserts = "0.3"
 pretty_assertions = "1"
 rand = "0.8"

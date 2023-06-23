@@ -396,17 +396,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "atty"
-version = "0.2.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9b39be18770d11421cdb1b9947a45dd3f37e93092cbf377614828a319d5fee8"
-dependencies = [
- "hermit-abi 0.1.19",
- "libc",
- "winapi",
-]
-
-[[package]]
 name = "auto_enums"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1311,18 +1300,6 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ea181bf566f71cb9a5d17a59e1871af638180a18fb0035c92ae62b705207123"
-dependencies = [
- "bitflags 1.3.2",
- "clap_lex 0.2.4",
- "indexmap",
- "textwrap",
-]
-
-[[package]]
-name = "clap"
 version = "4.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80672091db20273a15cf9fdd4e47ed43b5091ec9841bf4c6145c9dfbbcae09ed"
@@ -1341,7 +1318,7 @@ dependencies = [
  "anstream",
  "anstyle",
  "bitflags 1.3.2",
- "clap_lex 0.5.0",
+ "clap_lex",
  "once_cell",
  "strsim",
 ]
@@ -1356,15 +1333,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.15",
-]
-
-[[package]]
-name = "clap_lex"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2850f2f5a82cbf437dd5af4d49848fbdfc27c157c3d010345776f952765261c5"
-dependencies = [
- "os_str_bytes",
 ]
 
 [[package]]
@@ -1606,20 +1574,20 @@ dependencies = [
 
 [[package]]
 name = "criterion"
-version = "0.4.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7c76e09c1aae2bc52b3d2f29e13c6572553b30c4aa1b8a49fd70de6412654cb"
+checksum = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f"
 dependencies = [
  "anes",
- "atty",
  "cast",
  "ciborium",
- "clap 3.2.25",
+ "clap",
  "criterion-plot",
  "futures",
+ "is-terminal",
  "itertools",
- "lazy_static",
  "num-traits",
+ "once_cell",
  "oorandom",
  "plotters",
  "rayon",
@@ -2807,15 +2775,6 @@ checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
 name = "hermit-abi"
-version = "0.1.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "hermit-abi"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee512640fe35acbfb4bb779db6f0d80704c2cacfa2e39b601ef3e3f47d1ae4c7"
@@ -3336,7 +3295,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7b603516767d1ab23d0de09d023e62966c3322f7148297c35cf3d97aa8b37fa"
 dependencies = [
- "clap 4.3.4",
+ "clap",
  "termcolor",
  "threadpool",
 ]
@@ -4416,12 +4375,6 @@ dependencies = [
  "libc",
  "windows-sys 0.48.0",
 ]
-
-[[package]]
-name = "os_str_bytes"
-version = "6.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ceedf44fb00f2d1984b0bc98102627ce622e083e49a5bacdb3e514fa4238e267"
 
 [[package]]
 name = "output_vt100"
@@ -5571,7 +5524,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 4.3.4",
+ "clap",
  "console",
  "fs-err",
  "glob",
@@ -5599,7 +5552,7 @@ name = "risedev-config"
 version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
- "clap 4.3.4",
+ "clap",
  "console",
  "dialoguer",
  "enum-iterator",
@@ -5631,7 +5584,7 @@ dependencies = [
 name = "risingwave_backup_cmd"
 version = "1.0.0-alpha"
 dependencies = [
- "clap 4.3.4",
+ "clap",
  "madsim-tokio",
  "prometheus",
  "risingwave_backup",
@@ -5693,7 +5646,7 @@ dependencies = [
  "bcc",
  "bytes",
  "bytesize",
- "clap 4.3.4",
+ "clap",
  "futures",
  "hdrhistogram",
  "isahc",
@@ -5721,7 +5674,7 @@ dependencies = [
 name = "risingwave_cmd"
 version = "1.0.0-alpha"
 dependencies = [
- "clap 4.3.4",
+ "clap",
  "madsim-tokio",
  "prometheus",
  "risingwave_common",
@@ -5742,7 +5695,7 @@ name = "risingwave_cmd_all"
 version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
- "clap 4.3.4",
+ "clap",
  "console",
  "const-str",
  "madsim-tokio",
@@ -5782,7 +5735,7 @@ dependencies = [
  "bytes",
  "chrono",
  "chrono-tz",
- "clap 4.3.4",
+ "clap",
  "comfy-table",
  "crc32fast",
  "criterion",
@@ -5886,7 +5839,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
- "clap 4.3.4",
+ "clap",
  "futures",
  "madsim-tokio",
  "prometheus",
@@ -5912,7 +5865,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "await-tree",
- "clap 4.3.4",
+ "clap",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
@@ -5936,7 +5889,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "await-tree",
- "clap 4.3.4",
+ "clap",
  "either",
  "futures",
  "futures-async-stream",
@@ -6038,7 +5991,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "chrono",
- "clap 4.3.4",
+ "clap",
  "comfy-table",
  "futures",
  "itertools",
@@ -6068,7 +6021,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 4.3.4",
+ "clap",
  "madsim-tokio",
  "pg_interval",
  "rust_decimal",
@@ -6143,7 +6096,7 @@ dependencies = [
  "async-trait",
  "bk-tree",
  "bytes",
- "clap 4.3.4",
+ "clap",
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
@@ -6214,7 +6167,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
- "clap 4.3.4",
+ "clap",
  "criterion",
  "expect-test",
  "fail",
@@ -6295,7 +6248,7 @@ dependencies = [
  "aws-sdk-ec2",
  "axum",
  "bytes",
- "clap 4.3.4",
+ "clap",
  "crepe",
  "easy-ext",
  "either",
@@ -6414,7 +6367,7 @@ name = "risingwave_regress_test"
 version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
- "clap 4.3.4",
+ "clap",
  "madsim-tokio",
  "path-absolutize",
  "similar",
@@ -6478,7 +6431,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.3.4",
+ "clap",
  "console",
  "futures",
  "glob",
@@ -6569,7 +6522,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 4.3.4",
+ "clap",
  "expect-test",
  "itertools",
  "libtest-mimic",
@@ -6592,7 +6545,7 @@ name = "risingwave_state_cleaning_test"
 version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
- "clap 4.3.4",
+ "clap",
  "futures",
  "madsim-tokio",
  "prometheus",
@@ -7719,12 +7672,6 @@ name = "termtree"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
-
-[[package]]
-name = "textwrap"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "222a222a5bfe1bba4a77b45ec488a741b3cb8872e5e499451fd7d0129c9c7c3d"
 
 [[package]]
 name = "thiserror"
@@ -8904,7 +8851,7 @@ dependencies = [
  "bytes",
  "cc",
  "chrono",
- "clap 4.3.4",
+ "clap",
  "clap_builder",
  "combine",
  "crossbeam-epoch",
