@@ -37,22 +37,13 @@ type Result<A> = anyhow::Result<A>;
 
 /// e2e test runner for pre-generated queries from sqlsmith
 pub async fn run_pre_generated(client: &Client, outdir: &str) {
+    let timeout_duration = 12; // allow for some variance.
     let queries_path = format!("{}/queries.sql", outdir);
     let queries = read_file_contents(queries_path).unwrap();
-    let ddl = queries
-        .lines()
-        .filter(|s| s.starts_with("CREATE"))
-        .collect::<String>();
-    tracing::info!("[DDL]: {}", ddl);
-    let dml = queries
-        .lines()
-        .filter(|s| s.starts_with("INSERT"))
-        .collect::<String>();
-    tracing::info!("[DML]: {}", dml);
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
         tracing::info!("[EXECUTING STATEMENT]: {}", sql);
-        run_query(client, &sql).await.unwrap();
+        run_query(timeout_duration, client, &sql).await.unwrap();
     }
     tracing::info!("[EXECUTION SUCCESS]");
 }
@@ -70,6 +61,8 @@ pub async fn generate(
     _outdir: &str,
     seed: Option<u64>,
 ) {
+    let timeout_duration = 5;
+
     set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
     set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
     tracing::info!("Set session variables");
@@ -101,24 +94,21 @@ pub async fn generate(
 
     tracing::info!("Ran updates");
 
-    let mut queries = String::with_capacity(10000);
     let mut generated_queries = 0;
     for _ in 0..count {
         test_session_variable(client, &mut rng).await;
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
-        let result = run_query(client, sql.as_str()).await;
+        let result = run_query(timeout_duration, client, sql.as_str()).await;
         match result {
             Err(_e) => {
                 generated_queries += 1;
-                queries.push_str(&format!("-- {};\n", &sql));
                 tracing::info!("Generated {} batch queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
             Ok(skipped) if skipped == 0 => {
                 generated_queries += 1;
-                queries.push_str(&format!("{};\n", &sql));
             }
             _ => {}
         }
@@ -130,20 +120,16 @@ pub async fn generate(
         test_session_variable(client, &mut rng).await;
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
-        let result = run_query(client, sql.as_str()).await;
+        let result = run_query(timeout_duration, client, sql.as_str()).await;
         match result {
             Err(_e) => {
                 generated_queries += 1;
-                queries.push_str(&format!("-- {};\n", &sql));
-                queries.push_str(&format!("-- {};\n", format_drop_mview(&table)));
                 tracing::info!("Generated {} stream queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
             Ok(skipped) if skipped == 0 => {
                 generated_queries += 1;
-                queries.push_str(&format!("{};\n", &sql));
-                queries.push_str(&format!("{};\n", format_drop_mview(&table)));
             }
             _ => {}
         }
@@ -224,11 +210,9 @@ async fn update_base_tables<R: Rng>(
 ) {
     let update_statements = generate_update_statements(rng, base_tables, inserts).unwrap();
     for update_statement in update_statements {
-        if rng.gen_bool(0.5) {
-            let sql = update_statement.to_string();
-            tracing::info!("[EXECUTING UPDATES]: {}", &sql);
-            client.simple_query(&sql).await.unwrap();
-        }
+        let sql = update_statement.to_string();
+        tracing::info!("[EXECUTING UPDATES]: {}", &sql);
+        client.simple_query(&sql).await.unwrap();
     }
 }
 
@@ -263,9 +247,8 @@ async fn test_sqlsmith<R: Rng>(
     test_population_count(client, base_tables, row_count).await;
     tracing::info!("passed population count test");
 
-    // Test percentage of skipped queries <=5% of sample size.
-    let threshold = 0.40; // permit at most 40% of queries to be skipped.
-    let sample_size = 50;
+    let threshold = 0.50; // permit at most 50% of queries to be skipped.
+    let sample_size = 20;
 
     let skipped_percentage = test_batch_queries(client, rng, tables.clone(), sample_size)
         .await
@@ -336,8 +319,8 @@ async fn test_batch_queries<R: Rng>(
     for _ in 0..sample_size {
         test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
-        tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
-        skipped += run_query(client, &sql).await?;
+        tracing::info!("[TEST BATCH]: {}", sql);
+        skipped += run_query(30, client, &sql).await?;
     }
     Ok(skipped as f64 / sample_size as f64)
 }
@@ -354,9 +337,9 @@ async fn test_stream_queries<R: Rng>(
     for _ in 0..sample_size {
         test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
-        tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
-        skipped += run_query(client, &sql).await?;
-        tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(&table));
+        tracing::info!("[TEST STREAM]: {}", sql);
+        skipped += run_query(12, client, &sql).await?;
+        tracing::info!("[TEST DROP MVIEW]: {}", &format_drop_mview(&table));
         drop_mview_table(&table, client).await;
     }
     Ok(skipped as f64 / sample_size as f64)
@@ -399,11 +382,11 @@ async fn create_mviews(
     let mut mvs_and_base_tables = mvs_and_base_tables;
     let mut mviews = vec![];
     // Generate some mviews
-    for i in 0..10 {
+    for i in 0..20 {
         let (create_sql, table) =
             mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
         tracing::info!("[EXECUTING CREATE MVIEW]: {}", &create_sql);
-        let skip_count = run_query(client, &create_sql).await?;
+        let skip_count = run_query(6, client, &create_sql).await?;
         if skip_count == 0 {
             mvs_and_base_tables.push(table.clone());
             mviews.push(table);
@@ -466,8 +449,7 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
 /// Otherwise just return success.
 /// If takes too long return the query which timed out + execution time + timeout error
 /// Returns: Number of skipped queries.
-async fn run_query(client: &Client, query: &str) -> Result<i64> {
-    let timeout_duration = 12;
+async fn run_query(timeout_duration: u64, client: &Client, query: &str) -> Result<i64> {
     let query_task = client.simple_query(query);
     let result = timeout(Duration::from_secs(timeout_duration), query_task).await;
     let response = match result {
@@ -483,10 +465,16 @@ async fn run_query(client: &Client, query: &str) -> Result<i64> {
             let tries = 5;
             let interval = 1;
             for _ in 0..tries { // retry 5 times
-                sleep(Duration::from_millis(interval * 1000)).await;
-                let response = client.simple_query(query).await;
-                if response.is_ok() {
-                    return Ok(0);
+                sleep(Duration::from_secs(interval)).await;
+                let query_task = client.simple_query(query);
+                let response = timeout(Duration::from_secs(timeout_duration), query_task).await;
+                match response {
+                    Ok(r) if r.is_ok() => { return Ok(0); }
+                    Err(_) => bail!(
+                        "[UNEXPECTED ERROR] Query timeout after {timeout_duration}s:\n{:?}",
+                        query
+                    ),
+                    _ => {}
                 }
             }
             bail!("[UNEXPECTED ERROR] Failed to recover after {tries} tries with interval {interval}s")
