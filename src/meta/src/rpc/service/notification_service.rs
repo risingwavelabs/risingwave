@@ -117,7 +117,7 @@ where
 
     async fn get_worker_node_snapshot(&self) -> (Vec<WorkerNode>, NotificationVersion) {
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
-        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running), true);
         let notification_version = self.env.notification_manager().current_version().await;
         (nodes, notification_version)
     }

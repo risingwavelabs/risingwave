@@ -20,3 +20,5 @@ mod zookeeper_gen;
 pub use zookeeper_gen::*;
 mod kafka_gen;
 pub use kafka_gen::*;
+mod tempo_gen;
+pub use tempo_gen::*;
