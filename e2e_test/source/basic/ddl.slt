@@ -28,7 +28,7 @@ create source invalid_startup_timestamp (
   properties.bootstrap.server = 'message_queue:29092'
 ) row format json;
 
-statement error schema definition not specified for ROW FORMAT JSON
+statement error db error: ERROR: QueryError: Invalid input syntax: Json schema definition not specified
 create source invalid_schema_definition 
 with (
   connector = 'kafka',
