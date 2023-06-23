@@ -445,7 +445,7 @@ impl Explain for PlanRef {
         let mut node = self.distill();
         let inputs = self.inputs();
         let mut inputs_iter = inputs.iter().peekable();
-        while let Some(input) = inputs_iter.next() {
+        for input in inputs_iter {
             node.children.push(input.explain());
         }
         Pretty::Record(node)
@@ -456,9 +456,11 @@ impl Explain for PlanRef {
         let plan = reorganize_elements_id(self.clone());
 
         let mut output = String::with_capacity(2048);
-        let mut config = PrettyConfig::default();
-        config.need_boundaries = false;
-        config.width = 360;
+        let config = PrettyConfig {
+            need_boundaries: false,
+            width: 360,
+            ..Default::default()
+        };
         config.unicode(&mut output, &plan.explain());
         output
     }
