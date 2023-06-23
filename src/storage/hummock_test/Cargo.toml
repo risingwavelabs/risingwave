@@ -15,7 +15,6 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-async-stream = "0.3"
 async-trait = "0.1"
 bytes = { version = "1" }
 clap = { version = "4", features = ["derive"] }

@@ -2893,16 +2893,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bfe8eed0a9285ef776bb792479ea3834e8b94e13d615c2f66d03dd50a435a29"
 
 [[package]]
-name = "http-serde"
-version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e272971f774ba29341db2f686255ff8a979365a26fb9e4277f6b6d9ec0cdd5e"
-dependencies = [
- "http",
- "serde",
-]
-
-[[package]]
 name = "httparse"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4654,17 +4644,12 @@ name = "pgwire"
 version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
- "async-trait",
  "byteorder",
  "bytes",
- "chrono",
  "futures",
  "itertools",
  "madsim-tokio",
  "openssl",
- "pg_interval",
- "postgres-types",
- "regex",
  "risingwave_common",
  "risingwave_sqlparser",
  "thiserror",
@@ -5362,15 +5347,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "random-string"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf4e63111ec5292d8af9c220f06fe3bb87991cc78b6f1f7e291d1ae6b8a60817"
-dependencies = [
- "fastrand",
-]
-
-[[package]]
 name = "raw-cpuid"
 version = "10.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5597,8 +5573,6 @@ dependencies = [
  "chrono",
  "clap 4.3.4",
  "console",
- "dialoguer",
- "enum-iterator",
  "fs-err",
  "glob",
  "google-cloud-pubsub",
@@ -5631,7 +5605,6 @@ dependencies = [
  "enum-iterator",
  "fs-err",
  "itertools",
- "tempfile",
 ]
 
 [[package]]
@@ -5677,7 +5650,6 @@ dependencies = [
  "async-trait",
  "criterion",
  "either",
- "fixedbitset",
  "futures",
  "futures-async-stream",
  "hashbrown 0.13.2",
@@ -5685,13 +5657,11 @@ dependencies = [
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
- "num-traits",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "rand",
  "risingwave_common",
- "risingwave_common_proc_macro",
  "risingwave_connector",
  "risingwave_expr",
  "risingwave_hummock_sdk",
@@ -5718,7 +5688,6 @@ version = "1.0.0-alpha"
 dependencies = [
  "async-trait",
  "aws-config",
- "aws-credential-types",
  "aws-sdk-s3",
  "aws-smithy-http",
  "bcc",
@@ -5752,7 +5721,6 @@ dependencies = [
 name = "risingwave_cmd"
 version = "1.0.0-alpha"
 dependencies = [
- "anyhow",
  "clap 4.3.4",
  "madsim-tokio",
  "prometheus",
@@ -5826,7 +5794,6 @@ dependencies = [
  "ethnum",
  "fixedbitset",
  "futures",
- "futures-async-stream",
  "hex",
  "humantime",
  "hytra",
@@ -5921,7 +5888,6 @@ dependencies = [
  "bytes",
  "clap 4.3.4",
  "futures",
- "itertools",
  "madsim-tokio",
  "prometheus",
  "rand",
@@ -5953,7 +5919,6 @@ dependencies = [
  "prometheus",
  "risingwave_common",
  "risingwave_common_service",
- "risingwave_hummock_sdk",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -6000,7 +5965,6 @@ dependencies = [
  "tokio-stream",
  "tower",
  "tracing",
- "uuid",
  "workspace-hack",
 ]
 
@@ -6014,7 +5978,6 @@ dependencies = [
  "auto_enums",
  "aws-config",
  "aws-credential-types",
- "aws-sdk-ec2",
  "aws-sdk-kinesis",
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -6032,11 +5995,6 @@ dependencies = [
  "futures-async-stream",
  "glob",
  "google-cloud-pubsub",
- "hex",
- "http",
- "http-serde",
- "hyper",
- "hyper-tls",
  "itertools",
  "madsim-rdkafka",
  "madsim-tokio",
@@ -6045,7 +6003,6 @@ dependencies = [
  "moka",
  "nexmark",
  "num-bigint",
- "num-traits",
  "parking_lot 0.12.1",
  "prometheus",
  "prost",
@@ -6097,7 +6054,6 @@ dependencies = [
  "risingwave_storage",
  "risingwave_stream",
  "serde",
- "serde_derive",
  "serde_json",
  "serde_yaml",
  "size",
@@ -6170,7 +6126,6 @@ name = "risingwave_expr_macro"
 version = "0.1.0"
 dependencies = [
  "itertools",
- "proc-macro-error",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -6246,8 +6201,6 @@ dependencies = [
  "bytes",
  "hex",
  "itertools",
- "madsim-tokio",
- "parking_lot 0.12.1",
  "parse-display",
  "risingwave_common",
  "risingwave_pb",
@@ -6259,7 +6212,6 @@ dependencies = [
 name = "risingwave_hummock_test"
 version = "1.0.0-alpha"
 dependencies = [
- "async-stream",
  "async-trait",
  "bytes",
  "clap 4.3.4",
@@ -6415,10 +6367,8 @@ dependencies = [
  "madsim-tokio",
  "opendal",
  "prometheus",
- "random-string",
  "risingwave_common",
  "spin 0.9.8",
- "tempfile",
  "thiserror",
  "tokio-retry",
  "tracing",
@@ -6444,10 +6394,7 @@ name = "risingwave_planner_test"
 version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
- "backtrace",
- "console",
  "expect-test",
- "futures",
  "itertools",
  "libtest-mimic",
  "madsim-tokio",
@@ -6645,10 +6592,8 @@ name = "risingwave_state_cleaning_test"
 version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
- "chrono",
  "clap 4.3.4",
  "futures",
- "itertools",
  "madsim-tokio",
  "prometheus",
  "regex",
@@ -6739,7 +6684,6 @@ dependencies = [
  "either",
  "enum-as-inner",
  "expect-test",
- "fixedbitset",
  "futures",
  "futures-async-stream",
  "hytra",
