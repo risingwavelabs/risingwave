@@ -170,9 +170,6 @@ gen_seed() {
 # runs with all-in-one binary.
 generate_deterministic() {
   set +e
-  # FIXME: try increase jobs again?
-  # FIXME: If this times out, the last query needs to be removed too.
-  # This is because last query could be partially processed and actually cause error / timeout.
   gen_seed | timeout 15m parallel --colsep ' ' "
     mkdir -p $OUTDIR/{1}
     echo '[INFO] Generating For Seed {2}, Query Set {1}'
