@@ -361,38 +361,51 @@ where
             .into_iter()
             .map(|worker_node| (worker_node.id, worker_node))
             .collect();
+
         if worker_nodes.is_empty() {
             bail!("no available compute node in the cluster");
         }
 
         // Check if we are trying to move a fragment to a node marked as unschedulable
-        let unschedulable_pu_ids: HashSet<ParallelUnitId> = worker_nodes
+        let unschedulable_parallel_unit_ids: HashMap<_, _> = worker_nodes
             .values()
-            .filter(|w| w.property.as_ref().unwrap().is_unschedulable)
-            .flat_map(|w| w.parallel_units.iter().map(|pu| pu.id))
+            .filter(|w| {
+                w.property
+                    .as_ref()
+                    .map(|property| property.is_unschedulable)
+                    .unwrap_or(false)
+            })
+            .flat_map(|w| {
+                w.parallel_units
+                    .iter()
+                    .map(|parallel_unit| (parallel_unit.id as ParallelUnitId, w.id as WorkerId))
+            })
             .collect();
 
-        if reschedule
-            .values()
-            .flat_map(|p| &p.added_parallel_units)
-            .any(|pu| unschedulable_pu_ids.contains(pu))
-        {
-            bail!("unable to move fragment to unschedulable node");
+        for (fragment_id, reschedule) in reschedule.iter() {
+            for parallel_unit_id in &reschedule.added_parallel_units {
+                if let Some(worker_id) = unschedulable_parallel_unit_ids.get(parallel_unit_id) {
+                    bail!(
+                        "unable to move fragment {} to unschedulable parallel unit {} from worker {}",
+                        fragment_id,
+                        parallel_unit_id,
+                        worker_id
+                    );
+                }
+            }
         }
 
         // Associating ParallelUnit with Worker
-        let parallel_unit_id_to_worker_id: BTreeMap<_, _> = self
-            .cluster_manager
-            .list_active_streaming_parallel_units()
-            .await
-            .into_iter()
-            .map(|parallel_unit| {
-                (
-                    parallel_unit.id as ParallelUnitId,
-                    parallel_unit.worker_node_id as WorkerId,
-                )
+        let parallel_unit_id_to_worker_id: BTreeMap<_, _> = worker_nodes
+            .iter()
+            .flat_map(|(worker_id, worker_node)| {
+                worker_node
+                    .parallel_units
+                    .iter()
+                    .map(move |parallel_unit| (parallel_unit.id as ParallelUnitId, *worker_id))
             })
             .collect();
+
 
         // Index for StreamActor
         let mut actor_map = HashMap::new();
@@ -1524,6 +1537,26 @@ where
             .cluster_manager
             .list_active_streaming_compute_nodes()
             .await;
+
+        let unschedulable_worker_ids: HashSet<_> = workers
+            .iter()
+            .filter(|worker| {
+                worker
+                    .property
+                    .as_ref()
+                    .map(|p| p.is_unschedulable)
+                    .unwrap_or(false)
+            })
+            .map(|worker| worker.id as WorkerId)
+            .collect();
+
+        for changes in fragment_worker_changes.values() {
+            for worker_id in &changes.include_worker_ids {
+                if unschedulable_worker_ids.contains(worker_id) {
+                    bail!("Cannot scale out to cordoned worker {}", worker_id)
+                }
+            }
+        }
 
         let worker_parallel_units = workers
             .iter()
