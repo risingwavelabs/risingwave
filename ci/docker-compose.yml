@@ -122,7 +122,5 @@ services:
     environment:
       - xpack.security.enabled=false
       - "discovery.type=single-node"
-    networks:
-      - es-net
     ports:
       - 9200:9200
