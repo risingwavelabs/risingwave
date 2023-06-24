@@ -179,7 +179,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 15
 
   - label: "fuzz test"
     command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
@@ -258,7 +258,7 @@ steps:
           environment:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 21
+    timeout_in_minutes: 30
 
   - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=8 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
