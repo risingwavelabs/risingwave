@@ -1165,10 +1165,7 @@
       └─LogicalProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   batch_plan: |-
-    BatchProject
-    ├─exprs:
-    │ ┌─Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr2
-    │ └─Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / sum0(count(t.v1))::Decimal)) as $expr3
+    BatchProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr2, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / sum0(count(t.v1))::Decimal)) as $expr3] }
     └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
@@ -1182,10 +1179,7 @@
           └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [stddev_samp, stddev_pop], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject
-      ├─exprs:
-      │ ┌─Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr2
-      │ └─Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / sum0(count(t.v1))::Decimal)) as $expr3
+    └─StreamProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr2, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / sum0(count(t.v1))::Decimal)) as $expr3] }
       └─StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }

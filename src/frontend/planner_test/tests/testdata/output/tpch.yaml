@@ -119,74 +119,19 @@
       l_returnflag,
       l_linestatus;
   logical_plan: |-
-    LogicalProject
-    ├─exprs:
-    │ ┌─lineitem.l_returnflag
-    │ ├─lineitem.l_linestatus
-    │ ├─sum(lineitem.l_quantity)
-    │ ├─sum(lineitem.l_extendedprice)
-    │ ├─sum($expr1)
-    │ ├─sum($expr2)
-    │ ├─RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal), 4:Int32) as $expr3
-    │ ├─RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal), 4:Int32) as $expr4
-    │ ├─RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal), 4:Int32) as $expr5
-    │ └─count
+    LogicalProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal), 4:Int32) as $expr3, RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal), 4:Int32) as $expr4, RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal), 4:Int32) as $expr5, count] }
     └─LogicalAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
       └─LogicalProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) as $expr1, ((lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) * (1:Int32::Decimal + lineitem.l_tax)) as $expr2, lineitem.l_discount] }
         └─LogicalFilter { predicate: (lineitem.l_shipdate <= ('1998-12-01':Date - '71 days':Interval)) }
-          └─LogicalScan
-            ├─table: lineitem
-            └─columns:
-              ┌─lineitem.l_orderkey
-              ├─lineitem.l_partkey
-              ├─lineitem.l_suppkey
-              ├─lineitem.l_linenumber
-              ├─lineitem.l_quantity
-              ├─lineitem.l_extendedprice
-              ├─lineitem.l_discount
-              ├─lineitem.l_tax
-              ├─lineitem.l_returnflag
-              ├─lineitem.l_linestatus
-              ├─lineitem.l_shipdate
-              ├─lineitem.l_commitdate
-              ├─lineitem.l_receiptdate
-              ├─lineitem.l_shipinstruct
-              ├─lineitem.l_shipmode
-              └─lineitem.l_comment
+          └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan_for_batch: |-
-    LogicalProject
-    ├─exprs:
-    │ ┌─lineitem.l_returnflag
-    │ ├─lineitem.l_linestatus
-    │ ├─sum(lineitem.l_quantity)
-    │ ├─sum(lineitem.l_extendedprice)
-    │ ├─sum($expr1)
-    │ ├─sum($expr2)
-    │ ├─RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal), 4:Int32) as $expr3
-    │ ├─RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal), 4:Int32) as $expr4
-    │ ├─RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal), 4:Int32) as $expr5
-    │ └─count
+    LogicalProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal), 4:Int32) as $expr3, RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal), 4:Int32) as $expr4, RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal), 4:Int32) as $expr5, count] }
     └─LogicalAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
       └─LogicalProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) as $expr1, ((lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) * (1:Int32::Decimal + lineitem.l_tax)) as $expr2, lineitem.l_discount] }
-        └─LogicalScan
-          ├─table: lineitem
-          ├─output_columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus]
-          ├─required_columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate]
-          └─predicate: (lineitem.l_shipdate <= ('1998-12-01':Date - '71 days':Interval))
+        └─LogicalScan { table: lineitem, output_columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus], required_columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate], predicate: (lineitem.l_shipdate <= ('1998-12-01':Date - '71 days':Interval)) }
   batch_plan: |-
     BatchExchange { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], dist: Single }
-    └─BatchProject
-      ├─exprs:
-      │ ┌─lineitem.l_returnflag
-      │ ├─lineitem.l_linestatus
-      │ ├─sum(lineitem.l_quantity)
-      │ ├─sum(lineitem.l_extendedprice)
-      │ ├─sum($expr1)
-      │ ├─sum($expr2)
-      │ ├─RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal), 4:Int32) as $expr3
-      │ ├─RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal), 4:Int32) as $expr4
-      │ ├─RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal), 4:Int32) as $expr5
-      │ └─count
+    └─BatchProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal), 4:Int32) as $expr3, RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal), 4:Int32) as $expr4, RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal), 4:Int32) as $expr5, count] }
       └─BatchSort { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC] }
         └─BatchHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
           └─BatchExchange { order: [], dist: HashShard(lineitem.l_returnflag, lineitem.l_linestatus) }
@@ -195,37 +140,12 @@
                 └─BatchScan { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], stream_key: [l_returnflag, l_linestatus], pk_columns: [l_returnflag, l_linestatus], pk_conflict: NoCheck }
-    └─StreamProject
-      ├─exprs:
-      │ ┌─lineitem.l_returnflag
-      │ ├─lineitem.l_linestatus
-      │ ├─sum(lineitem.l_quantity)
-      │ ├─sum(lineitem.l_extendedprice)
-      │ ├─sum($expr1)
-      │ ├─sum($expr2)
-      │ ├─RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal), 4:Int32) as $expr3
-      │ ├─RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal), 4:Int32) as $expr4
-      │ ├─RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal), 4:Int32) as $expr5
-      │ └─count
+    └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal), 4:Int32) as $expr3, RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)::Decimal), 4:Int32) as $expr4, RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)::Decimal), 4:Int32) as $expr5, count] }
       └─StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
         └─StreamExchange { dist: HashShard(lineitem.l_returnflag, lineitem.l_linestatus) }
-          └─StreamProject
-            ├─exprs:
-            │ ┌─lineitem.l_returnflag
-            │ ├─lineitem.l_linestatus
-            │ ├─lineitem.l_quantity
-            │ ├─lineitem.l_extendedprice
-            │ ├─(lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1
-            │ ├─((lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) * (1:Decimal + lineitem.l_tax)) as $expr2
-            │ ├─lineitem.l_discount
-            │ ├─lineitem.l_orderkey
-            │ └─lineitem.l_linenumber
+          └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, ((lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) * (1:Decimal + lineitem.l_tax)) as $expr2, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
             └─StreamFilter { predicate: (lineitem.l_shipdate <= '1998-09-21 00:00:00':Timestamp) }
-              └─StreamTableScan
-                ├─table: lineitem
-                ├─columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate]
-                ├─pk: [lineitem.l_orderkey, lineitem.l_linenumber]
-                └─dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber)
+              └─StreamTableScan { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], stream_key: [l_returnflag, l_linestatus], pk_columns: [l_returnflag, l_linestatus], pk_conflict: "NoCheck" } { materialized table: 4294967294 }
@@ -297,8 +217,7 @@
   logical_plan: |-
     LogicalTopN { order: [supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC], limit: 100, offset: 0 }
     └─LogicalProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment] }
-      └─LogicalFilter
-        ├─predicate: (part.p_partkey = partsupp.ps_partkey) AND (supplier.s_suppkey = partsupp.ps_suppkey) AND (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_regionkey = region.r_regionkey) AND (region.r_name = 'AFRICA':Varchar) AND (partsupp.ps_supplycost = min(partsupp.ps_supplycost))
+      └─LogicalFilter { predicate: (part.p_partkey = partsupp.ps_partkey) AND (supplier.s_suppkey = partsupp.ps_suppkey) AND (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_regionkey = region.r_regionkey) AND (region.r_name = 'AFRICA':Varchar) AND (partsupp.ps_supplycost = min(partsupp.ps_supplycost)) }
         └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
           ├─LogicalJoin { type: Inner, on: true, output: all }
           │ ├─LogicalJoin { type: Inner, on: true, output: all }
@@ -379,21 +298,13 @@
                                 └─BatchFilter { predicate: IsNotNull(partsupp.ps_partkey) }
                                   └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
   stream_plan: |-
-    StreamMaterialize
-    ├─columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, region.r_regionkey(hidden), nation.n_nationkey(hidden), supplier.s_suppkey(hidden), part.p_partkey(hidden), partsupp.ps_partkey(hidden), partsupp.ps_suppkey(hidden), min(partsupp.ps_supplycost)(hidden)]
-    ├─stream_key: [region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)]
-    ├─pk_columns: [s_acctbal, n_name, s_name, p_partkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)]
-    ├─pk_conflict: NoCheck
+    StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, region.r_regionkey(hidden), nation.n_nationkey(hidden), supplier.s_suppkey(hidden), part.p_partkey(hidden), partsupp.ps_partkey(hidden), partsupp.ps_suppkey(hidden), min(partsupp.ps_supplycost)(hidden)], stream_key: [region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)], pk_columns: [s_acctbal, n_name, s_name, p_partkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)], pk_conflict: NoCheck }
     └─StreamProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)] }
       └─StreamTopN { order: [supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC], limit: 100, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC], limit: 100, offset: 0, group_key: [15] }
-            └─StreamProject
-              ├─exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost), Vnode(supplier.s_suppkey) as $expr1]
-              └─StreamHashJoin
-                ├─type: Inner
-                ├─predicate: supplier.s_suppkey = partsupp.ps_suppkey
-                ├─output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)]
+            └─StreamProject { exprs: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost), Vnode(supplier.s_suppkey) as $expr1] }
+              └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = partsupp.ps_suppkey, output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost)] }
                 ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
                 │ └─StreamHashJoin { type: Inner, predicate: nation.n_nationkey = supplier.s_nationkey, output: [nation.n_name, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, region.r_regionkey, nation.n_nationkey] }
                 │   ├─StreamExchange { dist: HashShard(nation.n_nationkey) }
@@ -694,25 +605,7 @@
               ├─LogicalJoin { type: Inner, on: true, output: all }
               │ ├─LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
               │ └─LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-              └─LogicalScan
-                ├─table: lineitem
-                └─columns:
-                  ┌─lineitem.l_orderkey
-                  ├─lineitem.l_partkey
-                  ├─lineitem.l_suppkey
-                  ├─lineitem.l_linenumber
-                  ├─lineitem.l_quantity
-                  ├─lineitem.l_extendedprice
-                  ├─lineitem.l_discount
-                  ├─lineitem.l_tax
-                  ├─lineitem.l_returnflag
-                  ├─lineitem.l_linestatus
-                  ├─lineitem.l_shipdate
-                  ├─lineitem.l_commitdate
-                  ├─lineitem.l_receiptdate
-                  ├─lineitem.l_shipinstruct
-                  ├─lineitem.l_shipmode
-                  └─lineitem.l_comment
+              └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalTopN { order: [sum($expr1) DESC, orders.o_orderdate ASC], limit: 10, offset: 0 }
     └─LogicalProject { exprs: [lineitem.l_orderkey, sum($expr1), orders.o_orderdate, orders.o_shippriority] }
@@ -887,44 +780,9 @@
         └─LogicalFilter { predicate: (orders.o_orderdate >= '1997-07-01':Date) AND (orders.o_orderdate < ('1997-07-01':Date + '3 mons':Interval)) }
           └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
             ├─LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-            └─LogicalProject
-              ├─exprs:
-              │ ┌─lineitem.l_orderkey
-              │ ├─lineitem.l_partkey
-              │ ├─lineitem.l_suppkey
-              │ ├─lineitem.l_linenumber
-              │ ├─lineitem.l_quantity
-              │ ├─lineitem.l_extendedprice
-              │ ├─lineitem.l_discount
-              │ ├─lineitem.l_tax
-              │ ├─lineitem.l_returnflag
-              │ ├─lineitem.l_linestatus
-              │ ├─lineitem.l_shipdate
-              │ ├─lineitem.l_commitdate
-              │ ├─lineitem.l_receiptdate
-              │ ├─lineitem.l_shipinstruct
-              │ ├─lineitem.l_shipmode
-              │ └─lineitem.l_comment
+            └─LogicalProject { exprs: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
               └─LogicalFilter { predicate: (lineitem.l_orderkey = CorrelatedInputRef { index: 0, correlated_id: 1 }) AND (lineitem.l_commitdate < lineitem.l_receiptdate) }
-                └─LogicalScan
-                  ├─table: lineitem
-                  └─columns:
-                    ┌─lineitem.l_orderkey
-                    ├─lineitem.l_partkey
-                    ├─lineitem.l_suppkey
-                    ├─lineitem.l_linenumber
-                    ├─lineitem.l_quantity
-                    ├─lineitem.l_extendedprice
-                    ├─lineitem.l_discount
-                    ├─lineitem.l_tax
-                    ├─lineitem.l_returnflag
-                    ├─lineitem.l_linestatus
-                    ├─lineitem.l_shipdate
-                    ├─lineitem.l_commitdate
-                    ├─lineitem.l_receiptdate
-                    ├─lineitem.l_shipinstruct
-                    ├─lineitem.l_shipmode
-                    └─lineitem.l_comment
+                └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [orders.o_orderpriority], aggs: [count] }
     └─LogicalJoin { type: LeftSemi, on: (lineitem.l_orderkey = orders.o_orderkey), output: [orders.o_orderpriority] }
@@ -1037,8 +895,7 @@
     LogicalProject { exprs: [nation.n_name, sum($expr1)] }
     └─LogicalAgg { group_key: [nation.n_name], aggs: [sum($expr1)] }
       └─LogicalProject { exprs: [nation.n_name, (lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) as $expr1] }
-        └─LogicalFilter
-          ├─predicate: (customer.c_custkey = orders.o_custkey) AND (lineitem.l_orderkey = orders.o_orderkey) AND (lineitem.l_suppkey = supplier.s_suppkey) AND (customer.c_nationkey = supplier.s_nationkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_regionkey = region.r_regionkey) AND (region.r_name = 'MIDDLE EAST':Varchar) AND (orders.o_orderdate >= '1994-01-01':Date) AND (orders.o_orderdate < ('1994-01-01':Date + '1 year':Interval))
+        └─LogicalFilter { predicate: (customer.c_custkey = orders.o_custkey) AND (lineitem.l_orderkey = orders.o_orderkey) AND (lineitem.l_suppkey = supplier.s_suppkey) AND (customer.c_nationkey = supplier.s_nationkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_regionkey = region.r_regionkey) AND (region.r_name = 'MIDDLE EAST':Varchar) AND (orders.o_orderdate >= '1994-01-01':Date) AND (orders.o_orderdate < ('1994-01-01':Date + '1 year':Interval)) }
           └─LogicalJoin { type: Inner, on: true, output: all }
             ├─LogicalJoin { type: Inner, on: true, output: all }
             │ ├─LogicalJoin { type: Inner, on: true, output: all }
@@ -1095,10 +952,7 @@
       └─StreamHashAgg { group_key: [nation.n_name], aggs: [sum($expr1), count] }
         └─StreamExchange { dist: HashShard(nation.n_name) }
           └─StreamProject { exprs: [nation.n_name, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, region.r_regionkey, nation.n_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber, supplier.s_suppkey, lineitem.l_suppkey, customer.c_nationkey] }
-            └─StreamHashJoin
-              ├─type: Inner
-              ├─predicate: nation.n_nationkey = supplier.s_nationkey AND nation.n_nationkey = customer.c_nationkey
-              ├─output: [nation.n_name, lineitem.l_extendedprice, lineitem.l_discount, region.r_regionkey, nation.n_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber, supplier.s_suppkey, lineitem.l_suppkey, customer.c_nationkey]
+            └─StreamHashJoin { type: Inner, predicate: nation.n_nationkey = supplier.s_nationkey AND nation.n_nationkey = customer.c_nationkey, output: [nation.n_name, lineitem.l_extendedprice, lineitem.l_discount, region.r_regionkey, nation.n_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber, supplier.s_suppkey, lineitem.l_suppkey, customer.c_nationkey] }
               ├─StreamExchange { dist: HashShard(nation.n_nationkey, nation.n_nationkey) }
               │ └─StreamHashJoin { type: Inner, predicate: region.r_regionkey = nation.n_regionkey, output: [nation.n_nationkey, nation.n_name, region.r_regionkey] }
               │   ├─StreamExchange { dist: HashShard(region.r_regionkey) }
@@ -1109,10 +963,7 @@
               │     └─StreamFilter { predicate: (nation.n_nationkey = nation.n_nationkey) }
               │       └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
               └─StreamExchange { dist: HashShard(customer.c_nationkey, supplier.s_nationkey) }
-                └─StreamHashJoin
-                  ├─type: Inner
-                  ├─predicate: orders.o_orderkey = lineitem.l_orderkey AND customer.c_nationkey = supplier.s_nationkey
-                  ├─output: [customer.c_nationkey, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber, supplier.s_suppkey, lineitem.l_suppkey]
+                └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey AND customer.c_nationkey = supplier.s_nationkey, output: [customer.c_nationkey, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey, lineitem.l_orderkey, lineitem.l_linenumber, supplier.s_suppkey, lineitem.l_suppkey] }
                   ├─StreamExchange { dist: HashShard(orders.o_orderkey, customer.c_nationkey) }
                   │ └─StreamHashJoin { type: Inner, predicate: orders.o_custkey = customer.c_custkey, output: [orders.o_orderkey, customer.c_nationkey, orders.o_custkey, customer.c_custkey] }
                   │   ├─StreamExchange { dist: HashShard(orders.o_custkey) }
@@ -1286,33 +1137,11 @@
     └─LogicalAgg { aggs: [sum($expr1)] }
       └─LogicalProject { exprs: [(lineitem.l_extendedprice * lineitem.l_discount) as $expr1] }
         └─LogicalFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < ('1994-01-01':Date + '1 year':Interval)) AND (lineitem.l_discount >= (0.08:Decimal - 0.01:Decimal)) AND (lineitem.l_discount <= (0.08:Decimal + 0.01:Decimal)) AND (lineitem.l_quantity < 24:Int32::Decimal) }
-          └─LogicalScan
-            ├─table: lineitem
-            └─columns:
-              ┌─lineitem.l_orderkey
-              ├─lineitem.l_partkey
-              ├─lineitem.l_suppkey
-              ├─lineitem.l_linenumber
-              ├─lineitem.l_quantity
-              ├─lineitem.l_extendedprice
-              ├─lineitem.l_discount
-              ├─lineitem.l_tax
-              ├─lineitem.l_returnflag
-              ├─lineitem.l_linestatus
-              ├─lineitem.l_shipdate
-              ├─lineitem.l_commitdate
-              ├─lineitem.l_receiptdate
-              ├─lineitem.l_shipinstruct
-              ├─lineitem.l_shipmode
-              └─lineitem.l_comment
+          └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum($expr1)] }
     └─LogicalProject { exprs: [(lineitem.l_extendedprice * lineitem.l_discount) as $expr1] }
-      └─LogicalScan
-        ├─table: lineitem
-        ├─output_columns: [lineitem.l_extendedprice, lineitem.l_discount]
-        ├─required_columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_shipdate]
-        └─predicate: (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < ('1994-01-01':Date + '1 year':Interval)) AND (lineitem.l_discount >= (0.08:Decimal - 0.01:Decimal)) AND (lineitem.l_discount <= (0.08:Decimal + 0.01:Decimal)) AND (lineitem.l_quantity < 24:Int32::Decimal)
+      └─LogicalScan { table: lineitem, output_columns: [lineitem.l_extendedprice, lineitem.l_discount], required_columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_quantity, lineitem.l_shipdate], predicate: (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < ('1994-01-01':Date + '1 year':Interval)) AND (lineitem.l_discount >= (0.08:Decimal - 0.01:Decimal)) AND (lineitem.l_discount <= (0.08:Decimal + 0.01:Decimal)) AND (lineitem.l_quantity < 24:Int32::Decimal) }
   batch_plan: |-
     BatchSimpleAgg { aggs: [sum(sum($expr1))] }
     └─BatchExchange { order: [], dist: Single }
@@ -1403,8 +1232,7 @@
     └─LogicalAgg { group_key: [nation.n_name, nation.n_name, $expr1], aggs: [sum($expr2)] }
       └─LogicalProject { exprs: [nation.n_name, nation.n_name, $expr1, $expr2] }
         └─LogicalProject { exprs: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate) as $expr1, (lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) as $expr2] }
-          └─LogicalFilter
-            ├─predicate: (supplier.s_suppkey = lineitem.l_suppkey) AND (orders.o_orderkey = lineitem.l_orderkey) AND (customer.c_custkey = orders.o_custkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (customer.c_nationkey = nation.n_nationkey) AND (((nation.n_name = 'ROMANIA':Varchar) AND (nation.n_name = 'IRAN':Varchar)) OR ((nation.n_name = 'IRAN':Varchar) AND (nation.n_name = 'ROMANIA':Varchar))) AND (lineitem.l_shipdate >= '1983-01-01':Date) AND (lineitem.l_shipdate <= '2000-12-31':Date)
+          └─LogicalFilter { predicate: (supplier.s_suppkey = lineitem.l_suppkey) AND (orders.o_orderkey = lineitem.l_orderkey) AND (customer.c_custkey = orders.o_custkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (customer.c_nationkey = nation.n_nationkey) AND (((nation.n_name = 'ROMANIA':Varchar) AND (nation.n_name = 'IRAN':Varchar)) OR ((nation.n_name = 'IRAN':Varchar) AND (nation.n_name = 'ROMANIA':Varchar))) AND (lineitem.l_shipdate >= '1983-01-01':Date) AND (lineitem.l_shipdate <= '2000-12-31':Date) }
             └─LogicalJoin { type: Inner, on: true, output: all }
               ├─LogicalJoin { type: Inner, on: true, output: all }
               │ ├─LogicalJoin { type: Inner, on: true, output: all }
@@ -1436,10 +1264,7 @@
       └─BatchHashAgg { group_key: [nation.n_name, nation.n_name, $expr1], aggs: [sum($expr2)] }
         └─BatchExchange { order: [], dist: HashShard(nation.n_name, nation.n_name, $expr1) }
           └─BatchProject { exprs: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate) as $expr1, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr2] }
-            └─BatchLookupJoin
-              ├─type: Inner
-              ├─predicate: customer.c_nationkey = nation.n_nationkey AND (((nation.n_name = 'ROMANIA':Varchar) AND (nation.n_name = 'IRAN':Varchar)) OR ((nation.n_name = 'IRAN':Varchar) AND (nation.n_name = 'ROMANIA':Varchar)))
-              ├─output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, nation.n_name]
+            └─BatchLookupJoin { type: Inner, predicate: customer.c_nationkey = nation.n_nationkey AND (((nation.n_name = 'ROMANIA':Varchar) AND (nation.n_name = 'IRAN':Varchar)) OR ((nation.n_name = 'IRAN':Varchar) AND (nation.n_name = 'ROMANIA':Varchar))), output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, nation.n_name] }
               └─BatchExchange { order: [], dist: UpstreamHashShard(customer.c_nationkey) }
                 └─BatchLookupJoin { type: Inner, predicate: orders.o_custkey = customer.c_custkey, output: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, nation.n_name, customer.c_nationkey] }
                   └─BatchExchange { order: [], dist: UpstreamHashShard(orders.o_custkey) }
@@ -1659,8 +1484,7 @@
     └─LogicalAgg { group_key: [$expr1], aggs: [sum($expr3), sum($expr2)] }
       └─LogicalProject { exprs: [$expr1, Case((nation.n_name = 'IRAN':Varchar), $expr2, 0:Int32::Decimal) as $expr3, $expr2] }
         └─LogicalProject { exprs: [Extract('YEAR':Varchar, orders.o_orderdate) as $expr1, (lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) as $expr2, nation.n_name] }
-          └─LogicalFilter
-            ├─predicate: (part.p_partkey = lineitem.l_partkey) AND (supplier.s_suppkey = lineitem.l_suppkey) AND (lineitem.l_orderkey = orders.o_orderkey) AND (orders.o_custkey = customer.c_custkey) AND (customer.c_nationkey = nation.n_nationkey) AND (nation.n_regionkey = region.r_regionkey) AND (region.r_name = 'ASIA':Varchar) AND (supplier.s_nationkey = nation.n_nationkey) AND (orders.o_orderdate >= '1995-01-01':Date) AND (orders.o_orderdate <= '1996-12-31':Date) AND (part.p_type = 'PROMO ANODIZED STEEL':Varchar)
+          └─LogicalFilter { predicate: (part.p_partkey = lineitem.l_partkey) AND (supplier.s_suppkey = lineitem.l_suppkey) AND (lineitem.l_orderkey = orders.o_orderkey) AND (orders.o_custkey = customer.c_custkey) AND (customer.c_nationkey = nation.n_nationkey) AND (nation.n_regionkey = region.r_regionkey) AND (region.r_name = 'ASIA':Varchar) AND (supplier.s_nationkey = nation.n_nationkey) AND (orders.o_orderdate >= '1995-01-01':Date) AND (orders.o_orderdate <= '1996-12-31':Date) AND (part.p_type = 'PROMO ANODIZED STEEL':Varchar) }
             └─LogicalJoin { type: Inner, on: true, output: all }
               ├─LogicalJoin { type: Inner, on: true, output: all }
               │ ├─LogicalJoin { type: Inner, on: true, output: all }
@@ -1726,24 +1550,8 @@
     └─StreamProject { exprs: [$expr1, RoundDigit((sum($expr2) / sum($expr3)), 6:Int32) as $expr4] }
       └─StreamHashAgg { group_key: [$expr1], aggs: [sum($expr2), sum($expr3), count] }
         └─StreamExchange { dist: HashShard($expr1) }
-          └─StreamProject
-            ├─exprs:
-            │ ┌─Extract('YEAR':Varchar, orders.o_orderdate) as $expr1
-            │ ├─Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)), 0:Decimal) as $expr2
-            │ ├─(lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr3
-            │ ├─region.r_regionkey
-            │ ├─nation.n_nationkey
-            │ ├─customer.c_custkey
-            │ ├─nation.n_nationkey
-            │ ├─supplier.s_suppkey
-            │ ├─part.p_partkey
-            │ ├─lineitem.l_orderkey
-            │ ├─lineitem.l_linenumber
-            │ └─orders.o_orderkey
-            └─StreamHashJoin
-              ├─type: Inner
-              ├─predicate: customer.c_custkey = orders.o_custkey
-              ├─output: [nation.n_name, lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, region.r_regionkey, nation.n_nationkey, customer.c_custkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, orders.o_orderkey]
+          └─StreamProject { exprs: [Extract('YEAR':Varchar, orders.o_orderdate) as $expr1, Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)), 0:Decimal) as $expr2, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr3, region.r_regionkey, nation.n_nationkey, customer.c_custkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, orders.o_orderkey] }
+            └─StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [nation.n_name, lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderdate, region.r_regionkey, nation.n_nationkey, customer.c_custkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, orders.o_orderkey] }
               ├─StreamExchange { dist: HashShard(customer.c_custkey) }
               │ └─StreamHashJoin { type: Inner, predicate: nation.n_nationkey = customer.c_nationkey, output: [customer.c_custkey, region.r_regionkey, nation.n_nationkey] }
               │   ├─StreamExchange { dist: HashShard(nation.n_nationkey) }
@@ -1994,25 +1802,7 @@
               │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
               │ │ │ │ ├─LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
               │ │ │ │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-              │ │ │ └─LogicalScan
-              │ │ │   ├─table: lineitem
-              │ │ │   └─columns:
-              │ │ │     ┌─lineitem.l_orderkey
-              │ │ │     ├─lineitem.l_partkey
-              │ │ │     ├─lineitem.l_suppkey
-              │ │ │     ├─lineitem.l_linenumber
-              │ │ │     ├─lineitem.l_quantity
-              │ │ │     ├─lineitem.l_extendedprice
-              │ │ │     ├─lineitem.l_discount
-              │ │ │     ├─lineitem.l_tax
-              │ │ │     ├─lineitem.l_returnflag
-              │ │ │     ├─lineitem.l_linestatus
-              │ │ │     ├─lineitem.l_shipdate
-              │ │ │     ├─lineitem.l_commitdate
-              │ │ │     ├─lineitem.l_receiptdate
-              │ │ │     ├─lineitem.l_shipinstruct
-              │ │ │     ├─lineitem.l_shipmode
-              │ │ │     └─lineitem.l_comment
+              │ │ │ └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
               │ │ └─LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment] }
               │ └─LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
               └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
@@ -2058,23 +1848,8 @@
     └─StreamProject { exprs: [nation.n_name, $expr1, RoundDigit(sum($expr2), 2:Int32) as $expr3] }
       └─StreamHashAgg { group_key: [nation.n_name, $expr1], aggs: [sum($expr2), count] }
         └─StreamExchange { dist: HashShard(nation.n_name, $expr1) }
-          └─StreamProject
-            ├─exprs:
-            │ ┌─nation.n_name
-            │ ├─Extract('YEAR':Varchar, orders.o_orderdate) as $expr1
-            │ ├─((lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)) as $expr2
-            │ ├─part.p_partkey
-            │ ├─partsupp.ps_partkey
-            │ ├─partsupp.ps_suppkey
-            │ ├─nation.n_nationkey
-            │ ├─supplier.s_suppkey
-            │ ├─orders.o_orderkey
-            │ ├─lineitem.l_orderkey
-            │ └─lineitem.l_linenumber
-            └─StreamHashJoin
-              ├─type: Inner
-              ├─predicate: part.p_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = lineitem.l_suppkey AND partsupp.ps_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = supplier.s_suppkey
-              ├─output: [partsupp.ps_supplycost, nation.n_name, orders.o_orderdate, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, nation.n_nationkey, supplier.s_suppkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber]
+          └─StreamProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate) as $expr1, ((lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)) as $expr2, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, nation.n_nationkey, supplier.s_suppkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+            └─StreamHashJoin { type: Inner, predicate: part.p_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = lineitem.l_suppkey AND partsupp.ps_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_supplycost, nation.n_name, orders.o_orderdate, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, nation.n_nationkey, supplier.s_suppkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
               ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
               │ └─StreamHashJoin { type: Inner, predicate: part.p_partkey = partsupp.ps_partkey, output: all }
               │   ├─StreamExchange { dist: HashShard(part.p_partkey) }
@@ -2273,25 +2048,7 @@
               │ ├─LogicalJoin { type: Inner, on: true, output: all }
               │ │ ├─LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
               │ │ └─LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-              │ └─LogicalScan
-              │   ├─table: lineitem
-              │   └─columns:
-              │     ┌─lineitem.l_orderkey
-              │     ├─lineitem.l_partkey
-              │     ├─lineitem.l_suppkey
-              │     ├─lineitem.l_linenumber
-              │     ├─lineitem.l_quantity
-              │     ├─lineitem.l_extendedprice
-              │     ├─lineitem.l_discount
-              │     ├─lineitem.l_tax
-              │     ├─lineitem.l_returnflag
-              │     ├─lineitem.l_linestatus
-              │     ├─lineitem.l_shipdate
-              │     ├─lineitem.l_commitdate
-              │     ├─lineitem.l_receiptdate
-              │     ├─lineitem.l_shipinstruct
-              │     ├─lineitem.l_shipmode
-              │     └─lineitem.l_comment
+              │ └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
               └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalTopN { order: [sum($expr1) DESC], limit: 20, offset: 0 }
@@ -2337,10 +2094,7 @@
             └─StreamProject { exprs: [customer.c_custkey, customer.c_name, sum($expr1), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment, Vnode(customer.c_custkey) as $expr2] }
               └─StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment], aggs: [sum($expr1), count] }
                 └─StreamProject { exprs: [customer.c_custkey, customer.c_name, customer.c_acctbal, customer.c_phone, nation.n_name, customer.c_address, customer.c_comment, (lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount)) as $expr1, nation.n_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, orders.o_orderkey] }
-                  └─StreamHashJoin
-                    ├─type: Inner
-                    ├─predicate: customer.c_custkey = orders.o_custkey
-                    ├─output: [nation.n_name, customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, lineitem.l_extendedprice, lineitem.l_discount, nation.n_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, orders.o_orderkey]
+                  └─StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [nation.n_name, customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, lineitem.l_extendedprice, lineitem.l_discount, nation.n_nationkey, lineitem.l_orderkey, lineitem.l_linenumber, orders.o_orderkey] }
                     ├─StreamExchange { dist: HashShard(customer.c_custkey) }
                     │ └─StreamHashJoin { type: Inner, predicate: nation.n_nationkey = customer.c_nationkey, output: [nation.n_name, customer.c_custkey, customer.c_name, customer.c_address, customer.c_phone, customer.c_acctbal, customer.c_comment, nation.n_nationkey] }
                     │   ├─StreamExchange { dist: HashShard(nation.n_nationkey) }
@@ -2725,39 +2479,16 @@
     LogicalProject { exprs: [lineitem.l_shipmode, sum($expr1), sum($expr2)] }
     └─LogicalAgg { group_key: [lineitem.l_shipmode], aggs: [sum($expr1), sum($expr2)] }
       └─LogicalProject { exprs: [lineitem.l_shipmode, Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32) as $expr1, Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32) as $expr2] }
-        └─LogicalFilter
-          ├─predicate: (orders.o_orderkey = lineitem.l_orderkey) AND In(lineitem.l_shipmode, 'FOB':Varchar, 'SHIP':Varchar) AND (lineitem.l_commitdate < lineitem.l_receiptdate) AND (lineitem.l_shipdate < lineitem.l_commitdate) AND (lineitem.l_receiptdate >= '1994-01-01':Date) AND (lineitem.l_receiptdate < ('1994-01-01':Date + '1 year':Interval))
+        └─LogicalFilter { predicate: (orders.o_orderkey = lineitem.l_orderkey) AND In(lineitem.l_shipmode, 'FOB':Varchar, 'SHIP':Varchar) AND (lineitem.l_commitdate < lineitem.l_receiptdate) AND (lineitem.l_shipdate < lineitem.l_commitdate) AND (lineitem.l_receiptdate >= '1994-01-01':Date) AND (lineitem.l_receiptdate < ('1994-01-01':Date + '1 year':Interval)) }
           └─LogicalJoin { type: Inner, on: true, output: all }
             ├─LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-            └─LogicalScan
-              ├─table: lineitem
-              └─columns:
-                ┌─lineitem.l_orderkey
-                ├─lineitem.l_partkey
-                ├─lineitem.l_suppkey
-                ├─lineitem.l_linenumber
-                ├─lineitem.l_quantity
-                ├─lineitem.l_extendedprice
-                ├─lineitem.l_discount
-                ├─lineitem.l_tax
-                ├─lineitem.l_returnflag
-                ├─lineitem.l_linestatus
-                ├─lineitem.l_shipdate
-                ├─lineitem.l_commitdate
-                ├─lineitem.l_receiptdate
-                ├─lineitem.l_shipinstruct
-                ├─lineitem.l_shipmode
-                └─lineitem.l_comment
+            └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [lineitem.l_shipmode], aggs: [sum($expr1), sum($expr2)] }
     └─LogicalProject { exprs: [lineitem.l_shipmode, Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32) as $expr1, Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32) as $expr2] }
       └─LogicalJoin { type: Inner, on: (orders.o_orderkey = lineitem.l_orderkey), output: [orders.o_orderpriority, lineitem.l_shipmode] }
         ├─LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority] }
-        └─LogicalScan
-          ├─table: lineitem
-          ├─output_columns: [lineitem.l_orderkey, lineitem.l_shipmode]
-          ├─required_columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate]
-          └─predicate: In(lineitem.l_shipmode, 'FOB':Varchar, 'SHIP':Varchar) AND (lineitem.l_commitdate < lineitem.l_receiptdate) AND (lineitem.l_shipdate < lineitem.l_commitdate) AND (lineitem.l_receiptdate >= '1994-01-01':Date) AND (lineitem.l_receiptdate < ('1994-01-01':Date + '1 year':Interval))
+        └─LogicalScan { table: lineitem, output_columns: [lineitem.l_orderkey, lineitem.l_shipmode], required_columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate], predicate: In(lineitem.l_shipmode, 'FOB':Varchar, 'SHIP':Varchar) AND (lineitem.l_commitdate < lineitem.l_receiptdate) AND (lineitem.l_shipdate < lineitem.l_commitdate) AND (lineitem.l_receiptdate >= '1994-01-01':Date) AND (lineitem.l_receiptdate < ('1994-01-01':Date + '1 year':Interval)) }
   batch_plan: |-
     BatchExchange { order: [lineitem.l_shipmode ASC], dist: Single }
     └─BatchSort { order: [lineitem.l_shipmode ASC] }
@@ -2776,14 +2507,7 @@
     └─StreamProject { exprs: [lineitem.l_shipmode, sum($expr1), sum($expr2)] }
       └─StreamHashAgg { group_key: [lineitem.l_shipmode], aggs: [sum($expr1), sum($expr2), count] }
         └─StreamExchange { dist: HashShard(lineitem.l_shipmode) }
-          └─StreamProject
-            ├─exprs:
-            │ ┌─lineitem.l_shipmode
-            │ ├─Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32) as $expr1
-            │ ├─Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32) as $expr2
-            │ ├─orders.o_orderkey
-            │ ├─lineitem.l_orderkey
-            │ └─lineitem.l_linenumber
+          └─StreamProject { exprs: [lineitem.l_shipmode, Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32) as $expr1, Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32) as $expr2, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
             └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderpriority, lineitem.l_shipmode, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
               ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
               │ └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
@@ -3008,25 +2732,7 @@
       └─LogicalProject { exprs: [Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)), 0:Int32::Decimal) as $expr1, (lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) as $expr2] }
         └─LogicalFilter { predicate: (lineitem.l_partkey = part.p_partkey) AND (lineitem.l_shipdate >= '1995-09-01':Date) AND (lineitem.l_shipdate < ('1995-09-01':Date + '1 mon':Interval)) }
           └─LogicalJoin { type: Inner, on: true, output: all }
-            ├─LogicalScan
-            │ ├─table: lineitem
-            │ └─columns:
-            │   ┌─lineitem.l_orderkey
-            │   ├─lineitem.l_partkey
-            │   ├─lineitem.l_suppkey
-            │   ├─lineitem.l_linenumber
-            │   ├─lineitem.l_quantity
-            │   ├─lineitem.l_extendedprice
-            │   ├─lineitem.l_discount
-            │   ├─lineitem.l_tax
-            │   ├─lineitem.l_returnflag
-            │   ├─lineitem.l_linestatus
-            │   ├─lineitem.l_shipdate
-            │   ├─lineitem.l_commitdate
-            │   ├─lineitem.l_receiptdate
-            │   ├─lineitem.l_shipinstruct
-            │   ├─lineitem.l_shipmode
-            │   └─lineitem.l_comment
+            ├─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
             └─LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [((100.00:Decimal * sum($expr1)) / sum($expr2)) as $expr3] }
@@ -3157,25 +2863,7 @@
         │     └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1)] }
         │       └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) as $expr1] }
         │         └─LogicalFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
-        │           └─LogicalScan
-        │             ├─table: lineitem
-        │             └─columns:
-        │               ┌─lineitem.l_orderkey
-        │               ├─lineitem.l_partkey
-        │               ├─lineitem.l_suppkey
-        │               ├─lineitem.l_linenumber
-        │               ├─lineitem.l_quantity
-        │               ├─lineitem.l_extendedprice
-        │               ├─lineitem.l_discount
-        │               ├─lineitem.l_tax
-        │               ├─lineitem.l_returnflag
-        │               ├─lineitem.l_linestatus
-        │               ├─lineitem.l_shipdate
-        │               ├─lineitem.l_commitdate
-        │               ├─lineitem.l_receiptdate
-        │               ├─lineitem.l_shipinstruct
-        │               ├─lineitem.l_shipmode
-        │               └─lineitem.l_comment
+        │           └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
         └─LogicalProject { exprs: [max(sum($expr1))] }
           └─LogicalAgg { aggs: [max(sum($expr1))] }
             └─LogicalProject { exprs: [sum($expr1)] }
@@ -3184,25 +2872,7 @@
                   └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1)] }
                     └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) as $expr1] }
                       └─LogicalFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
-                        └─LogicalScan
-                          ├─table: lineitem
-                          └─columns:
-                            ┌─lineitem.l_orderkey
-                            ├─lineitem.l_partkey
-                            ├─lineitem.l_suppkey
-                            ├─lineitem.l_linenumber
-                            ├─lineitem.l_quantity
-                            ├─lineitem.l_extendedprice
-                            ├─lineitem.l_discount
-                            ├─lineitem.l_tax
-                            ├─lineitem.l_returnflag
-                            ├─lineitem.l_linestatus
-                            ├─lineitem.l_shipdate
-                            ├─lineitem.l_commitdate
-                            ├─lineitem.l_receiptdate
-                            ├─lineitem.l_shipinstruct
-                            ├─lineitem.l_shipmode
-                            └─lineitem.l_comment
+                        └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: (sum($expr1) = max(sum($expr2))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1)] }
     ├─LogicalJoin { type: Inner, on: (supplier.s_suppkey = lineitem.l_suppkey), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1)] }
@@ -3384,10 +3054,7 @@
           └─BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [] }
             └─BatchLookupJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey AND Like(supplier.s_comment, '%Customer%Complaints%':Varchar), output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
               └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_suppkey) }
-                └─BatchLookupJoin
-                  ├─type: Inner
-                  ├─predicate: partsupp.ps_partkey = part.p_partkey AND (part.p_brand <> 'Brand#45':Varchar) AND (Not((part.p_type >= 'SMALL PLATED':Varchar)) OR Not((part.p_type < 'SMALL PLATEE':Varchar))) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32)
-                  ├─output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size]
+                └─BatchLookupJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey AND (part.p_brand <> 'Brand#45':Varchar) AND (Not((part.p_type >= 'SMALL PLATED':Varchar)) OR Not((part.p_type < 'SMALL PLATEE':Varchar))) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32), output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size] }
                   └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_partkey) }
                     └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
   stream_plan: |-
@@ -3522,49 +3189,13 @@
         └─LogicalFilter { predicate: (part.p_partkey = lineitem.l_partkey) AND (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) AND (lineitem.l_quantity < $expr1) }
           └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
             ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ ├─LogicalScan
-            │ │ ├─table: lineitem
-            │ │ └─columns:
-            │ │   ┌─lineitem.l_orderkey
-            │ │   ├─lineitem.l_partkey
-            │ │   ├─lineitem.l_suppkey
-            │ │   ├─lineitem.l_linenumber
-            │ │   ├─lineitem.l_quantity
-            │ │   ├─lineitem.l_extendedprice
-            │ │   ├─lineitem.l_discount
-            │ │   ├─lineitem.l_tax
-            │ │   ├─lineitem.l_returnflag
-            │ │   ├─lineitem.l_linestatus
-            │ │   ├─lineitem.l_shipdate
-            │ │   ├─lineitem.l_commitdate
-            │ │   ├─lineitem.l_receiptdate
-            │ │   ├─lineitem.l_shipinstruct
-            │ │   ├─lineitem.l_shipmode
-            │ │   └─lineitem.l_comment
+            │ ├─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
             │ └─LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
             └─LogicalProject { exprs: [(0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)::Decimal)) as $expr1] }
               └─LogicalAgg { aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
                 └─LogicalProject { exprs: [lineitem.l_quantity] }
                   └─LogicalFilter { predicate: (lineitem.l_partkey = CorrelatedInputRef { index: 16, correlated_id: 1 }) }
-                    └─LogicalScan
-                      ├─table: lineitem
-                      └─columns:
-                        ┌─lineitem.l_orderkey
-                        ├─lineitem.l_partkey
-                        ├─lineitem.l_suppkey
-                        ├─lineitem.l_linenumber
-                        ├─lineitem.l_quantity
-                        ├─lineitem.l_extendedprice
-                        ├─lineitem.l_discount
-                        ├─lineitem.l_tax
-                        ├─lineitem.l_returnflag
-                        ├─lineitem.l_linestatus
-                        ├─lineitem.l_shipdate
-                        ├─lineitem.l_commitdate
-                        ├─lineitem.l_receiptdate
-                        ├─lineitem.l_shipinstruct
-                        ├─lineitem.l_shipmode
-                        └─lineitem.l_comment
+                    └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [RoundDigit((sum(lineitem.l_extendedprice) / 7.0:Decimal), 16:Int32) as $expr2] }
     └─LogicalAgg { aggs: [sum(lineitem.l_extendedprice)] }
@@ -3786,48 +3417,12 @@
               │ ├─LogicalJoin { type: Inner, on: true, output: all }
               │ │ ├─LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
               │ │ └─LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-              │ └─LogicalScan
-              │   ├─table: lineitem
-              │   └─columns:
-              │     ┌─lineitem.l_orderkey
-              │     ├─lineitem.l_partkey
-              │     ├─lineitem.l_suppkey
-              │     ├─lineitem.l_linenumber
-              │     ├─lineitem.l_quantity
-              │     ├─lineitem.l_extendedprice
-              │     ├─lineitem.l_discount
-              │     ├─lineitem.l_tax
-              │     ├─lineitem.l_returnflag
-              │     ├─lineitem.l_linestatus
-              │     ├─lineitem.l_shipdate
-              │     ├─lineitem.l_commitdate
-              │     ├─lineitem.l_receiptdate
-              │     ├─lineitem.l_shipinstruct
-              │     ├─lineitem.l_shipmode
-              │     └─lineitem.l_comment
+              │ └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
               └─LogicalProject { exprs: [lineitem.l_orderkey] }
                 └─LogicalFilter { predicate: (sum(lineitem.l_quantity) > 1:Int32::Decimal) }
                   └─LogicalAgg { group_key: [lineitem.l_orderkey], aggs: [sum(lineitem.l_quantity)] }
                     └─LogicalProject { exprs: [lineitem.l_orderkey, lineitem.l_quantity] }
-                      └─LogicalScan
-                        ├─table: lineitem
-                        └─columns:
-                          ┌─lineitem.l_orderkey
-                          ├─lineitem.l_partkey
-                          ├─lineitem.l_suppkey
-                          ├─lineitem.l_linenumber
-                          ├─lineitem.l_quantity
-                          ├─lineitem.l_extendedprice
-                          ├─lineitem.l_discount
-                          ├─lineitem.l_tax
-                          ├─lineitem.l_returnflag
-                          ├─lineitem.l_linestatus
-                          ├─lineitem.l_shipdate
-                          ├─lineitem.l_commitdate
-                          ├─lineitem.l_receiptdate
-                          ├─lineitem.l_shipinstruct
-                          ├─lineitem.l_shipmode
-                          └─lineitem.l_comment
+                      └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalTopN { order: [orders.o_totalprice DESC, orders.o_orderdate ASC], limit: 100, offset: 0 }
     └─LogicalAgg { group_key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice], aggs: [sum(lineitem.l_quantity)] }
@@ -4046,18 +3641,14 @@
     LogicalProject { exprs: [sum($expr1)] }
     └─LogicalAgg { aggs: [sum($expr1)] }
       └─LogicalProject { exprs: [(lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) as $expr1] }
-        └─LogicalFilter
-          ├─predicate: (part.p_partkey = lineitem.l_partkey) AND (part.p_size >= 1:Int32) AND In(lineitem.l_shipmode, 'AIR':Varchar, 'AIR REG':Varchar) AND (lineitem.l_shipinstruct = 'DELIVER IN PERSON':Varchar) AND (((((((part.p_brand = 'Brand#52':Varchar) AND In(part.p_container, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND (lineitem.l_quantity >= 1:Int32::Decimal)) AND (lineitem.l_quantity <= 11:Int32::Decimal)) AND (part.p_size <= 5:Int32)) OR (((((part.p_brand = 'Brand#24':Varchar) AND In(part.p_container, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND (lineitem.l_quantity >= 30:Int32::Decimal)) AND (lineitem.l_quantity <= 40:Int32::Decimal)) AND (part.p_size <= 10:Int32))) OR (((((part.p_brand = 'Brand#32':Varchar) AND In(part.p_container, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND (lineitem.l_quantity >= 10:Int32::Decimal)) AND (lineitem.l_quantity <= 20:Int32::Decimal)) AND (part.p_size <= 15:Int32)))
+        └─LogicalFilter { predicate: (part.p_partkey = lineitem.l_partkey) AND (part.p_size >= 1:Int32) AND In(lineitem.l_shipmode, 'AIR':Varchar, 'AIR REG':Varchar) AND (lineitem.l_shipinstruct = 'DELIVER IN PERSON':Varchar) AND (((((((part.p_brand = 'Brand#52':Varchar) AND In(part.p_container, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND (lineitem.l_quantity >= 1:Int32::Decimal)) AND (lineitem.l_quantity <= 11:Int32::Decimal)) AND (part.p_size <= 5:Int32)) OR (((((part.p_brand = 'Brand#24':Varchar) AND In(part.p_container, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND (lineitem.l_quantity >= 30:Int32::Decimal)) AND (lineitem.l_quantity <= 40:Int32::Decimal)) AND (part.p_size <= 10:Int32))) OR (((((part.p_brand = 'Brand#32':Varchar) AND In(part.p_container, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND (lineitem.l_quantity >= 10:Int32::Decimal)) AND (lineitem.l_quantity <= 20:Int32::Decimal)) AND (part.p_size <= 15:Int32))) }
           └─LogicalJoin { type: Inner, on: true, output: all }
             ├─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
             └─LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum($expr1)] }
     └─LogicalProject { exprs: [(lineitem.l_extendedprice * (1:Int32::Decimal - lineitem.l_discount)) as $expr1] }
-      └─LogicalJoin
-        ├─type: Inner
-        ├─on: (part.p_partkey = lineitem.l_partkey) AND (((((((part.p_brand = 'Brand#52':Varchar) AND In(part.p_container, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND (lineitem.l_quantity >= 1:Int32::Decimal)) AND (lineitem.l_quantity <= 11:Int32::Decimal)) AND (part.p_size <= 5:Int32)) OR (((((part.p_brand = 'Brand#24':Varchar) AND In(part.p_container, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND (lineitem.l_quantity >= 30:Int32::Decimal)) AND (lineitem.l_quantity <= 40:Int32::Decimal)) AND (part.p_size <= 10:Int32))) OR (((((part.p_brand = 'Brand#32':Varchar) AND In(part.p_container, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND (lineitem.l_quantity >= 10:Int32::Decimal)) AND (lineitem.l_quantity <= 20:Int32::Decimal)) AND (part.p_size <= 15:Int32)))
-        ├─output: [lineitem.l_extendedprice, lineitem.l_discount]
+      └─LogicalJoin { type: Inner, on: (part.p_partkey = lineitem.l_partkey) AND (((((((part.p_brand = 'Brand#52':Varchar) AND In(part.p_container, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND (lineitem.l_quantity >= 1:Int32::Decimal)) AND (lineitem.l_quantity <= 11:Int32::Decimal)) AND (part.p_size <= 5:Int32)) OR (((((part.p_brand = 'Brand#24':Varchar) AND In(part.p_container, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND (lineitem.l_quantity >= 30:Int32::Decimal)) AND (lineitem.l_quantity <= 40:Int32::Decimal)) AND (part.p_size <= 10:Int32))) OR (((((part.p_brand = 'Brand#32':Varchar) AND In(part.p_container, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND (lineitem.l_quantity >= 10:Int32::Decimal)) AND (lineitem.l_quantity <= 20:Int32::Decimal)) AND (part.p_size <= 15:Int32))), output: [lineitem.l_extendedprice, lineitem.l_discount] }
         ├─LogicalScan { table: lineitem, output_columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount], required_columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipinstruct, lineitem.l_shipmode], predicate: In(lineitem.l_shipmode, 'AIR':Varchar, 'AIR REG':Varchar) AND (lineitem.l_shipinstruct = 'DELIVER IN PERSON':Varchar) }
         └─LogicalScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_size, part.p_container], predicate: (part.p_size >= 1:Int32) }
   batch_plan: |-
@@ -4065,10 +3656,7 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [sum($expr1)] }
         └─BatchProject { exprs: [(lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1] }
-          └─BatchLookupJoin
-            ├─type: Inner
-            ├─predicate: lineitem.l_partkey = part.p_partkey AND (((((((part.p_brand = 'Brand#52':Varchar) AND In(part.p_container, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND (lineitem.l_quantity >= 1:Decimal)) AND (lineitem.l_quantity <= 11:Decimal)) AND (part.p_size <= 5:Int32)) OR (((((part.p_brand = 'Brand#24':Varchar) AND In(part.p_container, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND (lineitem.l_quantity >= 30:Decimal)) AND (lineitem.l_quantity <= 40:Decimal)) AND (part.p_size <= 10:Int32))) OR (((((part.p_brand = 'Brand#32':Varchar) AND In(part.p_container, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND (lineitem.l_quantity >= 10:Decimal)) AND (lineitem.l_quantity <= 20:Decimal)) AND (part.p_size <= 15:Int32))) AND (part.p_size >= 1:Int32)
-            ├─output: [lineitem.l_extendedprice, lineitem.l_discount]
+          └─BatchLookupJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey AND (((((((part.p_brand = 'Brand#52':Varchar) AND In(part.p_container, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND (lineitem.l_quantity >= 1:Decimal)) AND (lineitem.l_quantity <= 11:Decimal)) AND (part.p_size <= 5:Int32)) OR (((((part.p_brand = 'Brand#24':Varchar) AND In(part.p_container, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND (lineitem.l_quantity >= 30:Decimal)) AND (lineitem.l_quantity <= 40:Decimal)) AND (part.p_size <= 10:Int32))) OR (((((part.p_brand = 'Brand#32':Varchar) AND In(part.p_container, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND (lineitem.l_quantity >= 10:Decimal)) AND (lineitem.l_quantity <= 20:Decimal)) AND (part.p_size <= 15:Int32))) AND (part.p_size >= 1:Int32), output: [lineitem.l_extendedprice, lineitem.l_discount] }
             └─BatchExchange { order: [], dist: UpstreamHashShard(lineitem.l_partkey) }
               └─BatchProject { exprs: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount] }
                 └─BatchFilter { predicate: In(lineitem.l_shipmode, 'AIR':Varchar, 'AIR REG':Varchar) AND (lineitem.l_shipinstruct = 'DELIVER IN PERSON':Varchar) }
@@ -4080,8 +3668,7 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum($expr1)] }
             └─StreamProject { exprs: [(lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey] }
-              └─StreamFilter
-                ├─predicate: (((((((part.p_brand = 'Brand#52':Varchar) AND In(part.p_container, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND (lineitem.l_quantity >= 1:Decimal)) AND (lineitem.l_quantity <= 11:Decimal)) AND (part.p_size <= 5:Int32)) OR (((((part.p_brand = 'Brand#24':Varchar) AND In(part.p_container, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND (lineitem.l_quantity >= 30:Decimal)) AND (lineitem.l_quantity <= 40:Decimal)) AND (part.p_size <= 10:Int32))) OR (((((part.p_brand = 'Brand#32':Varchar) AND In(part.p_container, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND (lineitem.l_quantity >= 10:Decimal)) AND (lineitem.l_quantity <= 20:Decimal)) AND (part.p_size <= 15:Int32)))
+              └─StreamFilter { predicate: (((((((part.p_brand = 'Brand#52':Varchar) AND In(part.p_container, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND (lineitem.l_quantity >= 1:Decimal)) AND (lineitem.l_quantity <= 11:Decimal)) AND (part.p_size <= 5:Int32)) OR (((((part.p_brand = 'Brand#24':Varchar) AND In(part.p_container, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND (lineitem.l_quantity >= 30:Decimal)) AND (lineitem.l_quantity <= 40:Decimal)) AND (part.p_size <= 10:Int32))) OR (((((part.p_brand = 'Brand#32':Varchar) AND In(part.p_container, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND (lineitem.l_quantity >= 10:Decimal)) AND (lineitem.l_quantity <= 20:Decimal)) AND (part.p_size <= 15:Int32))) }
                 └─StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: all }
                   ├─StreamExchange { dist: HashShard(lineitem.l_partkey) }
                   │ └─StreamProject { exprs: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
@@ -4198,25 +3785,7 @@
                 └─LogicalAgg { aggs: [sum(lineitem.l_quantity)] }
                   └─LogicalProject { exprs: [lineitem.l_quantity] }
                     └─LogicalFilter { predicate: (lineitem.l_partkey = CorrelatedInputRef { index: 0, correlated_id: 3 }) AND (lineitem.l_suppkey = CorrelatedInputRef { index: 1, correlated_id: 3 }) AND (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < ('1994-01-01':Date + '1 year':Interval)) }
-                      └─LogicalScan
-                        ├─table: lineitem
-                        └─columns:
-                          ┌─lineitem.l_orderkey
-                          ├─lineitem.l_partkey
-                          ├─lineitem.l_suppkey
-                          ├─lineitem.l_linenumber
-                          ├─lineitem.l_quantity
-                          ├─lineitem.l_extendedprice
-                          ├─lineitem.l_discount
-                          ├─lineitem.l_tax
-                          ├─lineitem.l_returnflag
-                          ├─lineitem.l_linestatus
-                          ├─lineitem.l_shipdate
-                          ├─lineitem.l_commitdate
-                          ├─lineitem.l_receiptdate
-                          ├─lineitem.l_shipinstruct
-                          ├─lineitem.l_shipmode
-                          └─lineitem.l_comment
+                      └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftSemi, on: (supplier.s_suppkey = partsupp.ps_suppkey), output: [supplier.s_name, supplier.s_address] }
     ├─LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address] }
@@ -4232,11 +3801,7 @@
           └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(partsupp.ps_partkey, lineitem.l_partkey) AND IsNotDistinctFrom(partsupp.ps_suppkey, lineitem.l_suppkey), output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity] }
             ├─LogicalAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
             │ └─LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey] }
-            └─LogicalScan
-              ├─table: lineitem
-              ├─output_columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity]
-              ├─required_columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_shipdate]
-              └─predicate: IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) AND (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < ('1994-01-01':Date + '1 year':Interval))
+            └─LogicalScan { table: lineitem, output_columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity], required_columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_shipdate], predicate: IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) AND (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < ('1994-01-01':Date + '1 year':Interval)) }
   batch_plan: |-
     BatchExchange { order: [supplier.s_name ASC], dist: Single }
     └─BatchSort { order: [supplier.s_name ASC] }
@@ -4483,103 +4048,15 @@
               │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
               │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
               │ │ │ │ ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-              │ │ │ │ └─LogicalScan
-              │ │ │ │   ├─table: lineitem
-              │ │ │ │   └─columns:
-              │ │ │ │     ┌─lineitem.l_orderkey
-              │ │ │ │     ├─lineitem.l_partkey
-              │ │ │ │     ├─lineitem.l_suppkey
-              │ │ │ │     ├─lineitem.l_linenumber
-              │ │ │ │     ├─lineitem.l_quantity
-              │ │ │ │     ├─lineitem.l_extendedprice
-              │ │ │ │     ├─lineitem.l_discount
-              │ │ │ │     ├─lineitem.l_tax
-              │ │ │ │     ├─lineitem.l_returnflag
-              │ │ │ │     ├─lineitem.l_linestatus
-              │ │ │ │     ├─lineitem.l_shipdate
-              │ │ │ │     ├─lineitem.l_commitdate
-              │ │ │ │     ├─lineitem.l_receiptdate
-              │ │ │ │     ├─lineitem.l_shipinstruct
-              │ │ │ │     ├─lineitem.l_shipmode
-              │ │ │ │     └─lineitem.l_comment
+              │ │ │ │ └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
               │ │ │ └─LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
               │ │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
-              │ └─LogicalProject
-              │   ├─exprs:
-              │   │ ┌─lineitem.l_orderkey
-              │   │ ├─lineitem.l_partkey
-              │   │ ├─lineitem.l_suppkey
-              │   │ ├─lineitem.l_linenumber
-              │   │ ├─lineitem.l_quantity
-              │   │ ├─lineitem.l_extendedprice
-              │   │ ├─lineitem.l_discount
-              │   │ ├─lineitem.l_tax
-              │   │ ├─lineitem.l_returnflag
-              │   │ ├─lineitem.l_linestatus
-              │   │ ├─lineitem.l_shipdate
-              │   │ ├─lineitem.l_commitdate
-              │   │ ├─lineitem.l_receiptdate
-              │   │ ├─lineitem.l_shipinstruct
-              │   │ ├─lineitem.l_shipmode
-              │   │ └─lineitem.l_comment
+              │ └─LogicalProject { exprs: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
               │   └─LogicalFilter { predicate: (lineitem.l_orderkey = CorrelatedInputRef { index: 7, correlated_id: 1 }) AND (lineitem.l_suppkey <> CorrelatedInputRef { index: 9, correlated_id: 1 }) }
-              │     └─LogicalScan
-              │       ├─table: lineitem
-              │       └─columns:
-              │         ┌─lineitem.l_orderkey
-              │         ├─lineitem.l_partkey
-              │         ├─lineitem.l_suppkey
-              │         ├─lineitem.l_linenumber
-              │         ├─lineitem.l_quantity
-              │         ├─lineitem.l_extendedprice
-              │         ├─lineitem.l_discount
-              │         ├─lineitem.l_tax
-              │         ├─lineitem.l_returnflag
-              │         ├─lineitem.l_linestatus
-              │         ├─lineitem.l_shipdate
-              │         ├─lineitem.l_commitdate
-              │         ├─lineitem.l_receiptdate
-              │         ├─lineitem.l_shipinstruct
-              │         ├─lineitem.l_shipmode
-              │         └─lineitem.l_comment
-              └─LogicalProject
-                ├─exprs:
-                │ ┌─lineitem.l_orderkey
-                │ ├─lineitem.l_partkey
-                │ ├─lineitem.l_suppkey
-                │ ├─lineitem.l_linenumber
-                │ ├─lineitem.l_quantity
-                │ ├─lineitem.l_extendedprice
-                │ ├─lineitem.l_discount
-                │ ├─lineitem.l_tax
-                │ ├─lineitem.l_returnflag
-                │ ├─lineitem.l_linestatus
-                │ ├─lineitem.l_shipdate
-                │ ├─lineitem.l_commitdate
-                │ ├─lineitem.l_receiptdate
-                │ ├─lineitem.l_shipinstruct
-                │ ├─lineitem.l_shipmode
-                │ └─lineitem.l_comment
+              │     └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+              └─LogicalProject { exprs: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
                 └─LogicalFilter { predicate: (lineitem.l_orderkey = CorrelatedInputRef { index: 7, correlated_id: 2 }) AND (lineitem.l_suppkey <> CorrelatedInputRef { index: 9, correlated_id: 2 }) AND (lineitem.l_receiptdate > lineitem.l_commitdate) }
-                  └─LogicalScan
-                    ├─table: lineitem
-                    └─columns:
-                      ┌─lineitem.l_orderkey
-                      ├─lineitem.l_partkey
-                      ├─lineitem.l_suppkey
-                      ├─lineitem.l_linenumber
-                      ├─lineitem.l_quantity
-                      ├─lineitem.l_extendedprice
-                      ├─lineitem.l_discount
-                      ├─lineitem.l_tax
-                      ├─lineitem.l_returnflag
-                      ├─lineitem.l_linestatus
-                      ├─lineitem.l_shipdate
-                      ├─lineitem.l_commitdate
-                      ├─lineitem.l_receiptdate
-                      ├─lineitem.l_shipinstruct
-                      ├─lineitem.l_shipmode
-                      └─lineitem.l_comment
+                  └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan_for_batch: |-
     LogicalTopN { order: [count DESC, supplier.s_name ASC], limit: 100, offset: 0 }
     └─LogicalAgg { group_key: [supplier.s_name], aggs: [count] }

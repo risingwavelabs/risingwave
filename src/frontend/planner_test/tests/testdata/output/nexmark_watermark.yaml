@@ -820,8 +820,7 @@
             └─LogicalFilter { predicate: ($expr1 = $expr10) AND (date_time >= date_time) AND (date_time <= $expr6) }
               └─LogicalJoin { type: Inner, on: true, output: all }
                 ├─LogicalShare { id: 3 }
-                │ └─LogicalProject
-                │   ├─exprs: [Field(auction, 0:Int32) as $expr1, Field(auction, 1:Int32) as $expr2, Field(auction, 2:Int32) as $expr3, Field(auction, 3:Int32) as $expr4, Field(auction, 4:Int32) as $expr5, date_time, Field(auction, 6:Int32) as $expr6, Field(auction, 7:Int32) as $expr7, Field(auction, 8:Int32) as $expr8, Field(auction, 9:Int32) as $expr9]
+                │ └─LogicalProject { exprs: [Field(auction, 0:Int32) as $expr1, Field(auction, 1:Int32) as $expr2, Field(auction, 2:Int32) as $expr3, Field(auction, 3:Int32) as $expr4, Field(auction, 4:Int32) as $expr5, date_time, Field(auction, 6:Int32) as $expr6, Field(auction, 7:Int32) as $expr7, Field(auction, 8:Int32) as $expr8, Field(auction, 9:Int32) as $expr9] }
                 │   └─LogicalFilter { predicate: (event_type = 1:Int32) }
                 │     └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: (Unbounded, Unbounded) }
                 └─LogicalShare { id: 6 }
@@ -856,9 +855,7 @@
     └─StreamGroupTopN [append_only] { order: [$expr12 DESC, $expr1 ASC], limit: 1, offset: 0, group_key: [0], output_watermarks: [$expr1] }
       └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr10 AND ($expr1 >= $expr1) AND ($expr1 <= $expr7), conditions_to_clean_right_state_table: ($expr1 >= $expr1), output_watermarks: [$expr1], output: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7, $expr8, $expr9, $expr10, $expr11, $expr12, $expr1, _row_id, _row_id] }
         ├─StreamExchange { dist: HashShard($expr2) }
-        │ └─StreamProject
-        │   ├─exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, $expr1, Field(auction, 6:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, Field(auction, 8:Int32) as $expr9, _row_id]
-        │   ├─output_watermarks: [$expr1]
+        │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, $expr1, Field(auction, 6:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, Field(auction, 8:Int32) as $expr9, _row_id], output_watermarks: [$expr1] }
         │   └─StreamFilter { predicate: (event_type = 1:Int32) }
         │     └─StreamShare { id: 6 }
         │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
@@ -927,9 +924,7 @@
       └─StreamGroupTopN [append_only] { order: [$expr12 DESC, $expr1 ASC], limit: 1, offset: 0, group_key: [0], output_watermarks: [$expr1] }
         └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr10 AND ($expr1 >= $expr1) AND ($expr1 <= $expr7), conditions_to_clean_right_state_table: ($expr1 >= $expr1), output_watermarks: [$expr1], output: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7, $expr8, $expr9, $expr10, $expr11, $expr12, $expr1, _row_id, _row_id] }
           ├─StreamExchange { dist: HashShard($expr2) }
-          │ └─StreamProject
-          │   ├─exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, $expr1, Field(auction, 6:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, Field(auction, 8:Int32) as $expr9, _row_id]
-          │   ├─output_watermarks: [$expr1]
+          │ └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, $expr1, Field(auction, 6:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, Field(auction, 8:Int32) as $expr9, _row_id], output_watermarks: [$expr1] }
           │   └─StreamFilter { predicate: (event_type = 1:Int32) }
           │     └─StreamShare { id: 6 }
           │       └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
@@ -1066,29 +1061,13 @@
     WHERE 0.908 * price > 1000000 AND 0.908 * price < 50000000;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject
-      ├─exprs:
-      │ ┌─Field(bid, 0:Int32) as $expr2
-      │ ├─Field(bid, 1:Int32) as $expr3
-      │ ├─(0.908:Decimal * Field(bid, 2:Int32)::Decimal) as $expr4
-      │ ├─Case(((Extract('HOUR':Varchar, $expr1) >= 8:Decimal) AND (Extract('HOUR':Varchar, $expr1) <= 18:Decimal)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, $expr1) <= 6:Decimal) OR (Extract('HOUR':Varchar, $expr1) >= 20:Decimal)), 'nightTime':Varchar, 'otherTime':Varchar) as $expr5
-      │ ├─$expr1
-      │ └─Field(bid, 6:Int32) as $expr6
+    └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, (0.908:Decimal * Field(bid, 2:Int32)::Decimal) as $expr4, Case(((Extract('HOUR':Varchar, $expr1) >= 8:Decimal) AND (Extract('HOUR':Varchar, $expr1) <= 18:Decimal)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, $expr1) <= 6:Decimal) OR (Extract('HOUR':Varchar, $expr1) >= 20:Decimal)), 'nightTime':Varchar, 'otherTime':Varchar) as $expr5, $expr1, Field(bid, 6:Int32) as $expr6] }
       └─BatchFilter { predicate: ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) > 1000000:Decimal) AND ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) < 50000000:Decimal) AND (event_type = 2:Int32) }
         └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
           └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, bidtimetype, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
-    └─StreamProject
-      ├─exprs:
-      │ ┌─Field(bid, 0:Int32) as $expr2
-      │ ├─Field(bid, 1:Int32) as $expr3
-      │ ├─(0.908:Decimal * Field(bid, 2:Int32)::Decimal) as $expr4
-      │ ├─Case(((Extract('HOUR':Varchar, $expr1) >= 8:Decimal) AND (Extract('HOUR':Varchar, $expr1) <= 18:Decimal)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, $expr1) <= 6:Decimal) OR (Extract('HOUR':Varchar, $expr1) >= 20:Decimal)), 'nightTime':Varchar, 'otherTime':Varchar) as $expr5
-      │ ├─$expr1
-      │ ├─Field(bid, 6:Int32) as $expr6
-      │ └─_row_id
-      ├─output_watermarks: [$expr1]
+    └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, (0.908:Decimal * Field(bid, 2:Int32)::Decimal) as $expr4, Case(((Extract('HOUR':Varchar, $expr1) >= 8:Decimal) AND (Extract('HOUR':Varchar, $expr1) <= 18:Decimal)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, $expr1) <= 6:Decimal) OR (Extract('HOUR':Varchar, $expr1) >= 20:Decimal)), 'nightTime':Varchar, 'otherTime':Varchar) as $expr5, $expr1, Field(bid, 6:Int32) as $expr6, _row_id], output_watermarks: [$expr1] }
       └─StreamFilter { predicate: ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) > 1000000:Decimal) AND ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) < 50000000:Decimal) AND (event_type = 2:Int32) }
         └─StreamRowIdGen { row_id_index: 5 }
           └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 4, expr: ($expr1 - '00:00:04':Interval) }] }
@@ -1111,16 +1090,7 @@
   eowc_stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, bidtimetype, date_time, extra, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
     └─StreamSort { sort_column_index: 4 }
-      └─StreamProject
-        ├─exprs:
-        │ ┌─Field(bid, 0:Int32) as $expr2
-        │ ├─Field(bid, 1:Int32) as $expr3
-        │ ├─(0.908:Decimal * Field(bid, 2:Int32)::Decimal) as $expr4
-        │ ├─Case(((Extract('HOUR':Varchar, $expr1) >= 8:Decimal) AND (Extract('HOUR':Varchar, $expr1) <= 18:Decimal)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, $expr1) <= 6:Decimal) OR (Extract('HOUR':Varchar, $expr1) >= 20:Decimal)), 'nightTime':Varchar, 'otherTime':Varchar) as $expr5
-        │ ├─$expr1
-        │ ├─Field(bid, 6:Int32) as $expr6
-        │ └─_row_id
-        ├─output_watermarks: [$expr1]
+      └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, (0.908:Decimal * Field(bid, 2:Int32)::Decimal) as $expr4, Case(((Extract('HOUR':Varchar, $expr1) >= 8:Decimal) AND (Extract('HOUR':Varchar, $expr1) <= 18:Decimal)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, $expr1) <= 6:Decimal) OR (Extract('HOUR':Varchar, $expr1) >= 20:Decimal)), 'nightTime':Varchar, 'otherTime':Varchar) as $expr5, $expr1, Field(bid, 6:Int32) as $expr6, _row_id], output_watermarks: [$expr1] }
         └─StreamFilter { predicate: ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) > 1000000:Decimal) AND ((0.908:Decimal * Field(bid, 2:Int32)::Decimal) < 50000000:Decimal) AND (event_type = 2:Int32) }
           └─StreamRowIdGen { row_id_index: 5 }
             └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 4, expr: ($expr1 - '00:00:04':Interval) }] }
@@ -1148,35 +1118,9 @@
     GROUP BY to_char(date_time, 'yyyy-MM-dd');
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashAgg
-      ├─group_key: [$expr2]
-      ├─aggs:
-      │ ┌─sum0(count) filter((flag = 0:Int64))
-      │ ├─sum0(count filter(($expr3 < 10000:Int32))) filter((flag = 0:Int64))
-      │ ├─sum0(count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32))) filter((flag = 0:Int64))
-      │ ├─sum0(count filter(($expr3 >= 1000000:Int32))) filter((flag = 0:Int64))
-      │ ├─count($expr4) filter((flag = 1:Int64))
-      │ ├─count($expr4) filter((count filter(($expr3 < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64))
-      │ ├─count($expr4) filter((count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64))
-      │ ├─count($expr4) filter((count filter(($expr3 >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64))
-      │ ├─count($expr5) filter((flag = 2:Int64))
-      │ ├─count($expr5) filter((count filter(($expr3 < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64))
-      │ ├─count($expr5) filter((count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))
-      │ └─count($expr5) filter((count filter(($expr3 >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))
+    └─BatchHashAgg { group_key: [$expr2], aggs: [sum0(count) filter((flag = 0:Int64)), sum0(count filter(($expr3 < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter(($expr3 >= 1000000:Int32))) filter((flag = 0:Int64)), count($expr4) filter((flag = 1:Int64)), count($expr4) filter((count filter(($expr3 < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count($expr4) filter((count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count($expr4) filter((count filter(($expr3 >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count($expr5) filter((flag = 2:Int64)), count($expr5) filter((count filter(($expr3 < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count($expr5) filter((count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count($expr5) filter((count filter(($expr3 >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))] }
       └─BatchExchange { order: [], dist: HashShard($expr2) }
-        └─BatchHashAgg
-          ├─group_key: [$expr2, $expr4, $expr5, flag]
-          ├─aggs:
-          │ ┌─count
-          │ ├─count filter(($expr3 < 10000:Int32))
-          │ ├─count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32))
-          │ ├─count filter(($expr3 >= 1000000:Int32))
-          │ ├─count filter(($expr3 < 10000:Int32))
-          │ ├─count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32))
-          │ ├─count filter(($expr3 >= 1000000:Int32))
-          │ ├─count filter(($expr3 < 10000:Int32))
-          │ ├─count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32))
-          │ └─count filter(($expr3 >= 1000000:Int32))
+        └─BatchHashAgg { group_key: [$expr2, $expr4, $expr5, flag], aggs: [count, count filter(($expr3 < 10000:Int32)), count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32)), count filter(($expr3 >= 1000000:Int32)), count filter(($expr3 < 10000:Int32)), count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32)), count filter(($expr3 >= 1000000:Int32)), count filter(($expr3 < 10000:Int32)), count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32)), count filter(($expr3 >= 1000000:Int32))] }
           └─BatchExchange { order: [], dist: HashShard($expr2, $expr4, $expr5, flag) }
             └─BatchExpand { column_subsets: [[$expr2], [$expr2, $expr4], [$expr2, $expr5]] }
               └─BatchProject { exprs: [ToChar($expr1, 'yyyy-MM-dd':Varchar) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 1:Int32) as $expr4, Field(bid, 0:Int32) as $expr5] }
@@ -1185,21 +1129,7 @@
                     └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], stream_key: [day], pk_columns: [day], pk_conflict: NoCheck }
-    └─StreamHashAgg [append_only]
-      ├─group_key: [$expr2]
-      ├─aggs:
-      │ ┌─count
-      │ ├─count filter(($expr3 < 10000:Int32))
-      │ ├─count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32))
-      │ ├─count filter(($expr3 >= 1000000:Int32))
-      │ ├─count(distinct $expr4)
-      │ ├─count(distinct $expr4) filter(($expr3 < 10000:Int32))
-      │ ├─count(distinct $expr4) filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32))
-      │ ├─count(distinct $expr4) filter(($expr3 >= 1000000:Int32))
-      │ ├─count(distinct $expr5)
-      │ ├─count(distinct $expr5) filter(($expr3 < 10000:Int32))
-      │ ├─count(distinct $expr5) filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32))
-      │ └─count(distinct $expr5) filter(($expr3 >= 1000000:Int32))
+    └─StreamHashAgg [append_only] { group_key: [$expr2], aggs: [count, count filter(($expr3 < 10000:Int32)), count filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32)), count filter(($expr3 >= 1000000:Int32)), count(distinct $expr4), count(distinct $expr4) filter(($expr3 < 10000:Int32)), count(distinct $expr4) filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32)), count(distinct $expr4) filter(($expr3 >= 1000000:Int32)), count(distinct $expr5), count(distinct $expr5) filter(($expr3 < 10000:Int32)), count(distinct $expr5) filter(($expr3 >= 10000:Int32) AND ($expr3 < 1000000:Int32)), count(distinct $expr5) filter(($expr3 >= 1000000:Int32))] }
       └─StreamExchange { dist: HashShard($expr2) }
         └─StreamProject { exprs: [ToChar($expr1, 'yyyy-MM-dd':Varchar) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 1:Int32) as $expr4, Field(bid, 0:Int32) as $expr5, _row_id] }
           └─StreamFilter { predicate: (event_type = 2:Int32) }
@@ -1266,37 +1196,9 @@
     GROUP BY channel, to_char(date_time, 'yyyy-MM-dd');
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashAgg
-      ├─group_key: [$expr2, $expr3]
-      ├─aggs:
-      │ ┌─max(max($expr4)) filter((flag = 0:Int64))
-      │ ├─sum0(count) filter((flag = 0:Int64))
-      │ ├─sum0(count filter(($expr5 < 10000:Int32))) filter((flag = 0:Int64))
-      │ ├─sum0(count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32))) filter((flag = 0:Int64))
-      │ ├─sum0(count filter(($expr5 >= 1000000:Int32))) filter((flag = 0:Int64))
-      │ ├─count($expr6) filter((flag = 1:Int64))
-      │ ├─count($expr6) filter((count filter(($expr5 < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64))
-      │ ├─count($expr6) filter((count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64))
-      │ ├─count($expr6) filter((count filter(($expr5 >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64))
-      │ ├─count($expr7) filter((flag = 2:Int64))
-      │ ├─count($expr7) filter((count filter(($expr5 < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64))
-      │ ├─count($expr7) filter((count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))
-      │ └─count($expr7) filter((count filter(($expr5 >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))
+    └─BatchHashAgg { group_key: [$expr2, $expr3], aggs: [max(max($expr4)) filter((flag = 0:Int64)), sum0(count) filter((flag = 0:Int64)), sum0(count filter(($expr5 < 10000:Int32))) filter((flag = 0:Int64)), sum0(count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32))) filter((flag = 0:Int64)), sum0(count filter(($expr5 >= 1000000:Int32))) filter((flag = 0:Int64)), count($expr6) filter((flag = 1:Int64)), count($expr6) filter((count filter(($expr5 < 10000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count($expr6) filter((count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count($expr6) filter((count filter(($expr5 >= 1000000:Int32)) > 0:Int64) AND (flag = 1:Int64)), count($expr7) filter((flag = 2:Int64)), count($expr7) filter((count filter(($expr5 < 10000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count($expr7) filter((count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64)), count($expr7) filter((count filter(($expr5 >= 1000000:Int32)) > 0:Int64) AND (flag = 2:Int64))] }
       └─BatchExchange { order: [], dist: HashShard($expr2, $expr3) }
-        └─BatchHashAgg
-          ├─group_key: [$expr2, $expr3, $expr6, $expr7, flag]
-          ├─aggs:
-          │ ┌─max($expr4)
-          │ ├─count
-          │ ├─count filter(($expr5 < 10000:Int32))
-          │ ├─count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32))
-          │ ├─count filter(($expr5 >= 1000000:Int32))
-          │ ├─count filter(($expr5 < 10000:Int32))
-          │ ├─count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32))
-          │ ├─count filter(($expr5 >= 1000000:Int32))
-          │ ├─count filter(($expr5 < 10000:Int32))
-          │ ├─count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32))
-          │ └─count filter(($expr5 >= 1000000:Int32))
+        └─BatchHashAgg { group_key: [$expr2, $expr3, $expr6, $expr7, flag], aggs: [max($expr4), count, count filter(($expr5 < 10000:Int32)), count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32)), count filter(($expr5 >= 1000000:Int32)), count filter(($expr5 < 10000:Int32)), count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32)), count filter(($expr5 >= 1000000:Int32)), count filter(($expr5 < 10000:Int32)), count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32)), count filter(($expr5 >= 1000000:Int32))] }
           └─BatchExchange { order: [], dist: HashShard($expr2, $expr3, $expr6, $expr7, flag) }
             └─BatchExpand { column_subsets: [[$expr2, $expr3, $expr4], [$expr2, $expr3, $expr6], [$expr2, $expr3, $expr7]] }
               └─BatchProject { exprs: [Field(bid, 3:Int32) as $expr2, ToChar($expr1, 'yyyy-MM-dd':Varchar) as $expr3, ToChar($expr1, 'HH:mm':Varchar) as $expr4, Field(bid, 2:Int32) as $expr5, Field(bid, 1:Int32) as $expr6, Field(bid, 0:Int32) as $expr7] }
@@ -1305,22 +1207,7 @@
                     └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], stream_key: [channel, day], pk_columns: [channel, day], pk_conflict: NoCheck }
-    └─StreamHashAgg [append_only]
-      ├─group_key: [$expr2, $expr3]
-      ├─aggs:
-      │ ┌─max($expr4)
-      │ ├─count
-      │ ├─count filter(($expr5 < 10000:Int32))
-      │ ├─count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32))
-      │ ├─count filter(($expr5 >= 1000000:Int32))
-      │ ├─count(distinct $expr6)
-      │ ├─count(distinct $expr6) filter(($expr5 < 10000:Int32))
-      │ ├─count(distinct $expr6) filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32))
-      │ ├─count(distinct $expr6) filter(($expr5 >= 1000000:Int32))
-      │ ├─count(distinct $expr7)
-      │ ├─count(distinct $expr7) filter(($expr5 < 10000:Int32))
-      │ ├─count(distinct $expr7) filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32))
-      │ └─count(distinct $expr7) filter(($expr5 >= 1000000:Int32))
+    └─StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [max($expr4), count, count filter(($expr5 < 10000:Int32)), count filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32)), count filter(($expr5 >= 1000000:Int32)), count(distinct $expr6), count(distinct $expr6) filter(($expr5 < 10000:Int32)), count(distinct $expr6) filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32)), count(distinct $expr6) filter(($expr5 >= 1000000:Int32)), count(distinct $expr7), count(distinct $expr7) filter(($expr5 < 10000:Int32)), count(distinct $expr7) filter(($expr5 >= 10000:Int32) AND ($expr5 < 1000000:Int32)), count(distinct $expr7) filter(($expr5 >= 1000000:Int32))] }
       └─StreamExchange { dist: HashShard($expr2, $expr3) }
         └─StreamProject { exprs: [Field(bid, 3:Int32) as $expr2, ToChar($expr1, 'yyyy-MM-dd':Varchar) as $expr3, ToChar($expr1, 'HH:mm':Varchar) as $expr4, Field(bid, 2:Int32) as $expr5, Field(bid, 1:Int32) as $expr6, Field(bid, 0:Int32) as $expr7, _row_id] }
           └─StreamFilter { predicate: (event_type = 2:Int32) }
@@ -1627,9 +1514,7 @@
       │               └─StreamProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id], output_watermarks: [_row_id] }
       │                 └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       └─StreamExchange { dist: HashShard($expr7) }
-        └─StreamProject
-          ├─exprs: [Field(auction, 0:Int32) as $expr7, Field(auction, 1:Int32) as $expr8, Field(auction, 2:Int32) as $expr9, Field(auction, 3:Int32) as $expr10, Field(auction, 4:Int32) as $expr11, $expr1, Field(auction, 6:Int32) as $expr12, Field(auction, 7:Int32) as $expr13, Field(auction, 8:Int32) as $expr14, _row_id]
-          ├─output_watermarks: [$expr1]
+        └─StreamProject { exprs: [Field(auction, 0:Int32) as $expr7, Field(auction, 1:Int32) as $expr8, Field(auction, 2:Int32) as $expr9, Field(auction, 3:Int32) as $expr10, Field(auction, 4:Int32) as $expr11, $expr1, Field(auction, 6:Int32) as $expr12, Field(auction, 7:Int32) as $expr13, Field(auction, 8:Int32) as $expr14, _row_id], output_watermarks: [$expr1] }
           └─StreamFilter { predicate: (Field(auction, 8:Int32) = 10:Int32) AND (event_type = 1:Int32) }
             └─StreamShare { id: 6 }
               └─StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
@@ -1697,26 +1582,13 @@
               lower(channel) in ('apple', 'google', 'facebook', 'baidu');
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject
-      ├─exprs:
-      │ ┌─Field(bid, 0:Int32) as $expr2
-      │ ├─Field(bid, 1:Int32) as $expr3
-      │ ├─Field(bid, 2:Int32) as $expr4
-      │ ├─Field(bid, 3:Int32) as $expr5
-      │ └─Case((Lower(Field(bid, 3:Int32)) = 'apple':Varchar), '0':Varchar, (Lower(Field(bid, 3:Int32)) = 'google':Varchar), '1':Varchar, (Lower(Field(bid, 3:Int32)) = 'facebook':Varchar), '2':Varchar, (Lower(Field(bid, 3:Int32)) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch(Field(bid, 4:Int32), '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr6
+    └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Case((Lower(Field(bid, 3:Int32)) = 'apple':Varchar), '0':Varchar, (Lower(Field(bid, 3:Int32)) = 'google':Varchar), '1':Varchar, (Lower(Field(bid, 3:Int32)) = 'facebook':Varchar), '2':Varchar, (Lower(Field(bid, 3:Int32)) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch(Field(bid, 4:Int32), '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr6] }
       └─BatchFilter { predicate: (IsNotNull(ArrayAccess(RegexpMatch(Field(bid, 4:Int32), '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) OR In(Lower(Field(bid, 3:Int32)), 'apple':Varchar, 'google':Varchar, 'facebook':Varchar, 'baidu':Varchar)) AND (event_type = 2:Int32) }
         └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
           └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, channel_id, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamProject
-      ├─exprs:
-      │ ┌─Field(bid, 0:Int32) as $expr2
-      │ ├─Field(bid, 1:Int32) as $expr3
-      │ ├─Field(bid, 2:Int32) as $expr4
-      │ ├─Field(bid, 3:Int32) as $expr5
-      │ ├─Case((Lower(Field(bid, 3:Int32)) = 'apple':Varchar), '0':Varchar, (Lower(Field(bid, 3:Int32)) = 'google':Varchar), '1':Varchar, (Lower(Field(bid, 3:Int32)) = 'facebook':Varchar), '2':Varchar, (Lower(Field(bid, 3:Int32)) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch(Field(bid, 4:Int32), '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr6
-      │ └─_row_id
+    └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Case((Lower(Field(bid, 3:Int32)) = 'apple':Varchar), '0':Varchar, (Lower(Field(bid, 3:Int32)) = 'google':Varchar), '1':Varchar, (Lower(Field(bid, 3:Int32)) = 'facebook':Varchar), '2':Varchar, (Lower(Field(bid, 3:Int32)) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch(Field(bid, 4:Int32), '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr6, _row_id] }
       └─StreamFilter { predicate: (IsNotNull(ArrayAccess(RegexpMatch(Field(bid, 4:Int32), '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) OR In(Lower(Field(bid, 3:Int32)), 'apple':Varchar, 'google':Varchar, 'facebook':Varchar, 'baidu':Varchar)) AND (event_type = 2:Int32) }
         └─StreamRowIdGen { row_id_index: 5 }
           └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 4, expr: ($expr1 - '00:00:04':Interval) }] }

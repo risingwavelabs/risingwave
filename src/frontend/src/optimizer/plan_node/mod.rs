@@ -458,7 +458,7 @@ impl Explain for PlanRef {
         let mut config = PrettyConfig {
             indent: 3,
             need_boundaries: false,
-            width: 360,
+            width: 2048,
             reduced_spaces: true,
         };
         config.unicode(&mut output, &plan.explain());

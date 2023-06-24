@@ -536,50 +536,10 @@
     select * from lineitem where l_orderkey = 1
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchScan
-      ├─table: covered_index
-      ├─columns:
-      │ ┌─covered_index.l_orderkey
-      │ ├─covered_index.l_partkey
-      │ ├─covered_index.l_suppkey
-      │ ├─covered_index.l_linenumber
-      │ ├─covered_index.l_quantity
-      │ ├─covered_index.l_extendedprice
-      │ ├─covered_index.l_discount
-      │ ├─covered_index.l_tax
-      │ ├─covered_index.l_returnflag
-      │ ├─covered_index.l_linestatus
-      │ ├─covered_index.l_shipdate
-      │ ├─covered_index.l_commitdate
-      │ ├─covered_index.l_receiptdate
-      │ ├─covered_index.l_shipinstruct
-      │ ├─covered_index.l_shipmode
-      │ └─covered_index.l_comment
-      ├─scan_ranges: [covered_index.l_orderkey = Int64(1)]
-      └─distribution: UpstreamHashShard(covered_index.l_orderkey)
+    └─BatchScan { table: covered_index, columns: [covered_index.l_orderkey, covered_index.l_partkey, covered_index.l_suppkey, covered_index.l_linenumber, covered_index.l_quantity, covered_index.l_extendedprice, covered_index.l_discount, covered_index.l_tax, covered_index.l_returnflag, covered_index.l_linestatus, covered_index.l_shipdate, covered_index.l_commitdate, covered_index.l_receiptdate, covered_index.l_shipinstruct, covered_index.l_shipmode, covered_index.l_comment], scan_ranges: [covered_index.l_orderkey = Int64(1)], distribution: UpstreamHashShard(covered_index.l_orderkey) }
   batch_local_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchScan
-      ├─table: covered_index
-      ├─columns:
-      │ ┌─covered_index.l_orderkey
-      │ ├─covered_index.l_partkey
-      │ ├─covered_index.l_suppkey
-      │ ├─covered_index.l_linenumber
-      │ ├─covered_index.l_quantity
-      │ ├─covered_index.l_extendedprice
-      │ ├─covered_index.l_discount
-      │ ├─covered_index.l_tax
-      │ ├─covered_index.l_returnflag
-      │ ├─covered_index.l_linestatus
-      │ ├─covered_index.l_shipdate
-      │ ├─covered_index.l_commitdate
-      │ ├─covered_index.l_receiptdate
-      │ ├─covered_index.l_shipinstruct
-      │ ├─covered_index.l_shipmode
-      │ └─covered_index.l_comment
-      ├─scan_ranges: [covered_index.l_orderkey = Int64(1)]
-      └─distribution: UpstreamHashShard(covered_index.l_orderkey)
+    └─BatchScan { table: covered_index, columns: [covered_index.l_orderkey, covered_index.l_partkey, covered_index.l_suppkey, covered_index.l_linenumber, covered_index.l_quantity, covered_index.l_extendedprice, covered_index.l_discount, covered_index.l_tax, covered_index.l_returnflag, covered_index.l_linestatus, covered_index.l_shipdate, covered_index.l_commitdate, covered_index.l_receiptdate, covered_index.l_shipinstruct, covered_index.l_shipmode, covered_index.l_comment], scan_ranges: [covered_index.l_orderkey = Int64(1)], distribution: UpstreamHashShard(covered_index.l_orderkey) }
 - sql: |
     create table t1 (a int, b numeric, c bigint, p int);
     create index idx1 on t1(a) include(a);
@@ -589,61 +549,11 @@
     BatchExchange { order: [], dist: Single }
     └─BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id, output: [t1.a, t1.b, t1.c, t1.p] }
       └─BatchExchange { order: [], dist: UpstreamHashShard(idx1.t1._row_id) }
-        └─BatchScan
-          ├─table: idx1
-          ├─columns: [idx1.t1._row_id]
-          ├─scan_ranges:
-          │ ┌─idx1.a = Int32(1)
-          │ ├─idx1.a = Int32(2)
-          │ ├─idx1.a = Int32(3)
-          │ ├─idx1.a = Int32(4)
-          │ ├─idx1.a = Int32(5)
-          │ ├─idx1.a = Int32(6)
-          │ ├─idx1.a = Int32(7)
-          │ ├─idx1.a = Int32(8)
-          │ ├─idx1.a = Int32(9)
-          │ ├─idx1.a = Int32(10)
-          │ ├─idx1.a = Int32(11)
-          │ ├─idx1.a = Int32(12)
-          │ ├─idx1.a = Int32(13)
-          │ ├─idx1.a = Int32(14)
-          │ ├─idx1.a = Int32(15)
-          │ ├─idx1.a = Int32(16)
-          │ ├─idx1.a = Int32(17)
-          │ ├─idx1.a = Int32(18)
-          │ ├─idx1.a = Int32(19)
-          │ ├─idx1.a = Int32(20)
-          │ └─...
-          └─distribution: SomeShard
+        └─BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a = Int32(1), idx1.a = Int32(2), idx1.a = Int32(3), idx1.a = Int32(4), idx1.a = Int32(5), idx1.a = Int32(6), idx1.a = Int32(7), idx1.a = Int32(8), idx1.a = Int32(9), idx1.a = Int32(10), idx1.a = Int32(11), idx1.a = Int32(12), idx1.a = Int32(13), idx1.a = Int32(14), idx1.a = Int32(15), idx1.a = Int32(16), idx1.a = Int32(17), idx1.a = Int32(18), idx1.a = Int32(19), idx1.a = Int32(20), ...], distribution: SomeShard }
   batch_local_plan: |-
     BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id IS NOT DISTINCT FROM t1._row_id, output: [t1.a, t1.b, t1.c, t1.p] }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchScan
-        ├─table: idx1
-        ├─columns: [idx1.t1._row_id]
-        ├─scan_ranges:
-        │ ┌─idx1.a = Int32(1)
-        │ ├─idx1.a = Int32(2)
-        │ ├─idx1.a = Int32(3)
-        │ ├─idx1.a = Int32(4)
-        │ ├─idx1.a = Int32(5)
-        │ ├─idx1.a = Int32(6)
-        │ ├─idx1.a = Int32(7)
-        │ ├─idx1.a = Int32(8)
-        │ ├─idx1.a = Int32(9)
-        │ ├─idx1.a = Int32(10)
-        │ ├─idx1.a = Int32(11)
-        │ ├─idx1.a = Int32(12)
-        │ ├─idx1.a = Int32(13)
-        │ ├─idx1.a = Int32(14)
-        │ ├─idx1.a = Int32(15)
-        │ ├─idx1.a = Int32(16)
-        │ ├─idx1.a = Int32(17)
-        │ ├─idx1.a = Int32(18)
-        │ ├─idx1.a = Int32(19)
-        │ ├─idx1.a = Int32(20)
-        │ └─...
-        └─distribution: SomeShard
+      └─BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a = Int32(1), idx1.a = Int32(2), idx1.a = Int32(3), idx1.a = Int32(4), idx1.a = Int32(5), idx1.a = Int32(6), idx1.a = Int32(7), idx1.a = Int32(8), idx1.a = Int32(9), idx1.a = Int32(10), idx1.a = Int32(11), idx1.a = Int32(12), idx1.a = Int32(13), idx1.a = Int32(14), idx1.a = Int32(15), idx1.a = Int32(16), idx1.a = Int32(17), idx1.a = Int32(18), idx1.a = Int32(19), idx1.a = Int32(20), ...], distribution: SomeShard }
 - sql: |
     create table t1 (a int, b int, c int, d int);
     create index d on t1(a) include(a);

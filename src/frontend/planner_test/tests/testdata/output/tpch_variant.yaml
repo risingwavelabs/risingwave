@@ -242,11 +242,7 @@
         └─BatchExchange { order: [], dist: HashShard(r_regionkey) }
           └─BatchSource { source: region, columns: [r_regionkey, r_name, r_comment, _row_id], filter: (None, None) }
   stream_plan: |-
-    StreamMaterialize
-    ├─columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id(hidden), _row_id#1(hidden), r_regionkey(hidden), _row_id#2(hidden), _row_id#3(hidden), _row_id#4(hidden), ps_suppkey(hidden), n_nationkey(hidden), ps_supplycost(hidden), p_partkey#1(hidden)]
-    ├─stream_key: [_row_id, _row_id#1, r_regionkey, _row_id#2, _row_id#3, p_partkey, _row_id#4, ps_suppkey, n_nationkey, p_partkey#1, ps_supplycost]
-    ├─pk_columns: [s_acctbal, n_name, s_name, p_partkey, _row_id, _row_id#1, r_regionkey, _row_id#2, _row_id#3, _row_id#4, ps_suppkey, n_nationkey, p_partkey#1, ps_supplycost]
-    ├─pk_conflict: NoCheck
+    StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id(hidden), _row_id#1(hidden), r_regionkey(hidden), _row_id#2(hidden), _row_id#3(hidden), _row_id#4(hidden), ps_suppkey(hidden), n_nationkey(hidden), ps_supplycost(hidden), p_partkey#1(hidden)], stream_key: [_row_id, _row_id#1, r_regionkey, _row_id#2, _row_id#3, p_partkey, _row_id#4, ps_suppkey, n_nationkey, p_partkey#1, ps_supplycost], pk_columns: [s_acctbal, n_name, s_name, p_partkey, _row_id, _row_id#1, r_regionkey, _row_id#2, _row_id#3, _row_id#4, ps_suppkey, n_nationkey, p_partkey#1, ps_supplycost], pk_conflict: NoCheck }
     └─StreamHashJoin { type: Inner, predicate: p_partkey IS NOT DISTINCT FROM p_partkey AND ps_supplycost = min(ps_supplycost), output: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id, _row_id, r_regionkey, _row_id, _row_id, _row_id, ps_suppkey, n_nationkey, ps_supplycost, p_partkey] }
       ├─StreamExchange { dist: HashShard(p_partkey) }
       │ └─StreamShare { id: 26 }
@@ -1192,26 +1188,7 @@
     └─StreamProject { exprs: [$expr1, RoundDigit((sum($expr2) / sum($expr3)), 6:Int32) as $expr4] }
       └─StreamHashAgg [append_only] { group_key: [$expr1], aggs: [sum($expr2), sum($expr3), count] }
         └─StreamExchange { dist: HashShard($expr1) }
-          └─StreamProject
-            ├─exprs:
-            │ ┌─Extract('YEAR':Varchar, o_orderdate) as $expr1
-            │ ├─Case((n_name <> 'IRAN':Varchar), (l_extendedprice * (1:Decimal - l_discount)), 0:Decimal) as $expr2
-            │ ├─(l_extendedprice * (1:Decimal - l_discount)) as $expr3
-            │ ├─_row_id
-            │ ├─_row_id
-            │ ├─r_regionkey
-            │ ├─_row_id
-            │ ├─n_nationkey
-            │ ├─_row_id
-            │ ├─_row_id
-            │ ├─n_nationkey
-            │ ├─_row_id
-            │ ├─_row_id
-            │ ├─p_partkey
-            │ ├─s_suppkey
-            │ ├─_row_id
-            │ ├─l_orderkey
-            │ └─c_custkey
+          └─StreamProject { exprs: [Extract('YEAR':Varchar, o_orderdate) as $expr1, Case((n_name <> 'IRAN':Varchar), (l_extendedprice * (1:Decimal - l_discount)), 0:Decimal) as $expr2, (l_extendedprice * (1:Decimal - l_discount)) as $expr3, _row_id, _row_id, r_regionkey, _row_id, n_nationkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, _row_id, l_orderkey, c_custkey] }
             └─StreamHashJoin [append_only] { type: Inner, predicate: c_custkey = o_custkey, output: [n_name, l_extendedprice, l_discount, o_orderdate, _row_id, _row_id, r_regionkey, _row_id, n_nationkey, c_custkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, _row_id, l_orderkey] }
               ├─StreamExchange { dist: HashShard(c_custkey) }
               │ └─StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = c_nationkey, output: [c_custkey, _row_id, _row_id, r_regionkey, n_nationkey, _row_id] }
@@ -1522,10 +1499,7 @@
       └─StreamHashAgg [append_only] { group_key: [n_name, $expr1], aggs: [sum($expr2), count] }
         └─StreamExchange { dist: HashShard(n_name, $expr1) }
           └─StreamProject { exprs: [n_name, Extract('YEAR':Varchar, o_orderdate) as $expr1, ((l_extendedprice * (1:Decimal - l_discount)) - (ps_supplycost * l_quantity)) as $expr2, _row_id, _row_id, p_partkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey, ps_suppkey, ps_partkey] }
-            └─StreamHashJoin [append_only]
-              ├─type: Inner
-              ├─predicate: p_partkey = l_partkey AND ps_suppkey = l_suppkey AND ps_partkey = l_partkey AND ps_suppkey = s_suppkey
-              ├─output: [ps_supplycost, n_name, o_orderdate, l_quantity, l_extendedprice, l_discount, _row_id, _row_id, p_partkey, ps_suppkey, ps_partkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey]
+            └─StreamHashJoin [append_only] { type: Inner, predicate: p_partkey = l_partkey AND ps_suppkey = l_suppkey AND ps_partkey = l_partkey AND ps_suppkey = s_suppkey, output: [ps_supplycost, n_name, o_orderdate, l_quantity, l_extendedprice, l_discount, _row_id, _row_id, p_partkey, ps_suppkey, ps_partkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey] }
               ├─StreamExchange { dist: HashShard(ps_suppkey) }
               │ └─StreamHashJoin [append_only] { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, ps_partkey, ps_suppkey, ps_supplycost, _row_id, _row_id] }
               │   ├─StreamExchange { dist: HashShard(p_partkey) }
