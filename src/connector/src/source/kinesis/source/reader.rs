@@ -255,6 +255,7 @@ impl KinesisSplitReader {
     ) -> core::result::Result<GetRecordsOutput, SdkError<GetRecordsError>> {
         self.client
             .get_records()
+            .limit(self.source_ctx.source_ctrl_opts.chunk_size as i32)
             .set_shard_iterator(self.shard_iter.take())
             .send()
             .await
