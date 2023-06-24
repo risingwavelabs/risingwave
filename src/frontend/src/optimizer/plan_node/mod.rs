@@ -456,9 +456,10 @@ impl Explain for PlanRef {
         let plan = reorganize_elements_id(self.clone());
 
         let mut output = String::with_capacity(2048);
-        let config = PrettyConfig {
+        let mut config = PrettyConfig {
             need_boundaries: false,
             width: 360,
+            reduced_spaces: true,
             ..Default::default()
         };
         config.unicode(&mut output, &plan.explain());

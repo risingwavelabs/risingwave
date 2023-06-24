@@ -2,39 +2,39 @@
 - sql: |
     select * from pg_catalog.pg_type
   logical_plan: |-
-    LogicalProject { exprs: [ pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive ] }
-    └──  LogicalScan { table: pg_type, columns: [ pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive ] }
-  batch_plan: 'BatchScan { table: pg_type, columns: [ pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive ], distribution: Single }'
+    LogicalProject { exprs: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive] }
+    └──LogicalScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive] }
+  batch_plan: 'BatchScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive], distribution: Single }'
 - sql: |
     select * from pg_catalog.pg_namespace
   logical_plan: |-
-    LogicalProject { exprs: [ pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl ] }
-    └──  LogicalScan { table: pg_namespace, columns: [ pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl ] }
-  batch_plan: 'BatchScan { table: pg_namespace, columns: [ pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl ], distribution: Single }'
+    LogicalProject { exprs: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
+    └──LogicalScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
+  batch_plan: 'BatchScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl], distribution: Single }'
 - sql: |
     select * from pg_catalog.pg_cast
   logical_plan: |-
-    LogicalProject { exprs: [ pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext ] }
-    └──  LogicalScan { table: pg_cast, columns: [ pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext ] }
-  batch_plan: 'BatchScan { table: pg_cast, columns: [ pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext ], distribution: Single }'
+    LogicalProject { exprs: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext] }
+    └──LogicalScan { table: pg_cast, columns: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext] }
+  batch_plan: 'BatchScan { table: pg_cast, columns: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext], distribution: Single }'
 - sql: |
     select pg_catalog.pg_get_userbyid(1)
   logical_plan: |-
-    LogicalProject { exprs: [ pg_user.name ] }
-    └── LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        ├──  LogicalValues { rows: [ [] ], schema: Schema { fields: [] } }
-        └── LogicalProject { exprs: [ pg_user.name ] }
-            └── LogicalFilter { predicate: (1:Int32 = pg_user.usesysid) }
-                └──  LogicalScan { table: pg_user, columns: [ pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd ] }
+    LogicalProject { exprs: [pg_user.name] }
+    └──LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+       ├──LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+       └──LogicalProject { exprs: [pg_user.name] }
+          └──LogicalFilter { predicate: (1:Int32 = pg_user.usesysid) }
+             └──LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
   batch_plan: |-
     BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-    ├──  BatchValues { rows: [ [] ] }
-    └── BatchProject { exprs: [ pg_user.name ] }
-        └── BatchFilter { predicate: (1:Int32 = pg_user.usesysid) }
-            └──  BatchScan { table: pg_user, columns: [ pg_user.name, pg_user.usesysid ], distribution: Single }
+    ├──BatchValues { rows: [[]] }
+    └──BatchProject { exprs: [pg_user.name] }
+       └──BatchFilter { predicate: (1:Int32 = pg_user.usesysid) }
+          └──BatchScan { table: pg_user, columns: [pg_user.name, pg_user.usesysid], distribution: Single }
 - sql: |
     select 'pg_namespace'::regclass
   logical_plan: |-
-    LogicalProject { exprs: [ 2:Int32 ] }
-    └──  LogicalValues { rows: [ [] ], schema: Schema { fields: [] } }
-  batch_plan: 'BatchValues { rows: [ [ 2:Int32 ] ] }'
+    LogicalProject { exprs: [2:Int32] }
+    └──LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: 'BatchValues { rows: [[2:Int32]] }'

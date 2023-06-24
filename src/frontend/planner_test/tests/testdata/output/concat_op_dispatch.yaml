@@ -2,27 +2,27 @@
 - name: int[] || int[] -> int[]
   sql: |
     select array[1] || array[2];
-  batch_plan: 'BatchValues { rows: [ [ ARRAY[1, 2]:List(Int32) ] ] }'
+  batch_plan: 'BatchValues { rows: [[ARRAY[1, 2]:List(Int32)]] }'
 - name: int[] || int -> int[]
   sql: |
     select array[1] || 2;
-  batch_plan: 'BatchValues { rows: [ [ ARRAY[1, 2]:List(Int32) ] ] }'
+  batch_plan: 'BatchValues { rows: [[ARRAY[1, 2]:List(Int32)]] }'
 - name: int[] || unknown (as int[]) -> int[]
   sql: |
     select array[1] || null;
-  batch_plan: 'BatchValues { rows: [ [ ARRAY[1]:List(Int32) ] ] }'
+  batch_plan: 'BatchValues { rows: [[ARRAY[1]:List(Int32)]] }'
 - name: int[] || unknown (as int[]) -> int[]
   sql: |
     select array[1] || '{2}';
-  batch_plan: 'BatchValues { rows: [ [ ARRAY[1, 2]:List(Int32) ] ] }'
+  batch_plan: 'BatchValues { rows: [[ARRAY[1, 2]:List(Int32)]] }'
 - name: text[] || unknown (as text[]) -> text[]
   sql: |
     select array['a'] || '{b}';
-  batch_plan: 'BatchValues { rows: [ [ ARRAY[a, b]:List(Varchar) ] ] }'
+  batch_plan: 'BatchValues { rows: [[ARRAY[a, b]:List(Varchar)]] }'
 - name: text[] || text -> text[]
   sql: |
     with t(s) as (select 'b') select array['a'] || s from t;
-  batch_plan: 'BatchValues { rows: [ [ ARRAY[a, b]:List(Varchar) ] ] }'
+  batch_plan: 'BatchValues { rows: [[ARRAY[a, b]:List(Varchar)]] }'
 - name: int[] || text -> err
   sql: |
     with t(s) as (select '2') select array[1] || s from t;
@@ -50,11 +50,11 @@
 - name: jsonb || text -> text
   sql: |
     with t(s) as (select '2') select '1'::jsonb || s from t;
-  batch_plan: 'BatchValues { rows: [ [ ''12'':Varchar ] ] }'
+  batch_plan: 'BatchValues { rows: [[''12'':Varchar]] }'
 - name: jsonb || text -> text
   sql: |
     select '1'::jsonb || '2'::text;
-  batch_plan: 'BatchValues { rows: [ [ ''12'':Varchar ] ] }'
+  batch_plan: 'BatchValues { rows: [[''12'':Varchar]] }'
 - name: int || int -> err
   sql: |
     select 1 || 2;
@@ -66,8 +66,8 @@
 - name: int || unknown (as text) -> text
   sql: |
     select 1 || '2';
-  batch_plan: 'BatchValues { rows: [ [ ''12'':Varchar ] ] }'
+  batch_plan: 'BatchValues { rows: [[''12'':Varchar]] }'
 - name: int || text -> text
   sql: |
     with t(s) as (select '2') select 1 || s from t;
-  batch_plan: 'BatchValues { rows: [ [ ''12'':Varchar ] ] }'
+  batch_plan: 'BatchValues { rows: [[''12'':Varchar]] }'
