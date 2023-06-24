@@ -16,14 +16,16 @@ use std::cmp;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aws_sdk_s3::client::fluent_builders::GetObject;
-use aws_sdk_s3::error::GetObjectError;
-use aws_sdk_s3::model::{
+use aws_sdk_s3::config::{Credentials, Region};
+use aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder;
+use aws_sdk_s3::operation::get_object::GetObjectError;
+use aws_sdk_s3::operation::upload_part::UploadPartOutput;
+use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::{
     AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, CompletedMultipartUpload,
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
-use aws_sdk_s3::output::UploadPartOutput;
-use aws_sdk_s3::{Client, Credentials, Endpoint, Region};
+use aws_sdk_s3::Client;
 use aws_smithy_http::body::SdkBody;
 use aws_smithy_http::result::SdkError;
 use aws_smithy_types::retry::RetryConfig;
@@ -284,7 +286,7 @@ impl StreamingUploader for S3StreamingUploader {
     }
 }
 
-fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
+fn get_upload_body(data: Vec<Bytes>) -> ByteStream {
     SdkBody::retryable(move || {
         Body::wrap_stream(stream::iter(data.clone().into_iter().map(ObjectResult::Ok))).into()
     })
@@ -318,7 +320,7 @@ impl ObjectStore for S3ObjectStore {
             self.client
                 .put_object()
                 .bucket(&self.bucket)
-                .body(aws_sdk_s3::types::ByteStream::from(obj))
+                .body(ByteStream::from(obj))
                 .key(path)
                 .send()
                 .await?;
@@ -601,7 +603,7 @@ impl S3ObjectStore {
                 access_key_secret,
                 None,
             ))
-            .endpoint_resolver(Endpoint::immutable(endpoint.parse().expect("valid URI")))
+            .endpoint_url(endpoint)
             .load()
             .await;
 
@@ -630,10 +632,8 @@ impl S3ObjectStore {
 
         let config = builder
             .region(Region::new("custom"))
-            .endpoint_resolver(Endpoint::immutable(
-                format!("http://{}", address).try_into().unwrap(),
-            ))
-            .credentials_provider(aws_sdk_s3::Credentials::from_keys(
+            .endpoint_url(format!("http://{}", address))
+            .credentials_provider(Credentials::from_keys(
                 access_key_id,
                 secret_access_key,
                 None,
@@ -665,7 +665,7 @@ impl S3ObjectStore {
         path: &str,
         start_pos: Option<usize>,
         end_pos: Option<usize>,
-    ) -> GetObject {
+    ) -> GetObjectFluentBuilder {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
         match (start_pos, end_pos) {
