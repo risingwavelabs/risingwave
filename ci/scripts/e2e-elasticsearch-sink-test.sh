@@ -14,13 +14,13 @@ echo "--- preparing elasticsearch"
 # /bin/systemctl enable elasticsearch.service
 # systemctl start elasticsearch.service
 
-docker pull docker.elastic.co/elasticsearch/elasticsearch:7.17.10
-docker run -p 127.0.0.1:9200:9200 -p 127.0.0.1:9300:9300 -e "discovery.type=single-node" docker.elastic.co/elasticsearch/elasticsearch:7.17.10
+# docker pull docker.elastic.co/elasticsearch/elasticsearch:7.17.10
+# docker run -p 127.0.0.1:9200:9200 -p 127.0.0.1:9300:9300 -e "discovery.type=single-node" docker.elastic.co/elasticsearch/elasticsearch:7.17.10
 
 echo "--- starting elasticsearch"
 # timeout 20 elasticsearch-7.17.10/bin/elasticsearch -E http.port=9200
 # check status of elasticsearch
-curl http://127.0.0.1:9200
+curl http://elasticsearch:9200
 
 echo "--- testing sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch_sink.slt'
