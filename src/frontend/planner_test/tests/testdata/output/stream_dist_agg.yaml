@@ -13,13 +13,13 @@
     select max(v) as a1 from S;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchSimpleAgg { aggs: [max(s.v)] }
-       └──BatchScan { table: s, columns: [s.v], distribution: Single }
+    └─BatchSimpleAgg { aggs: [max(s.v)] }
+      └─BatchScan { table: s, columns: [s.v], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [max(s.v)] }
-       └──StreamSimpleAgg { aggs: [max(s.v), count] }
-          └──StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
+    └─StreamProject { exprs: [max(s.v)] }
+      └─StreamSimpleAgg { aggs: [max(s.v), count] }
+        └─StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -70,13 +70,13 @@
     select sum(v) as a1 from S;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchSimpleAgg { aggs: [sum(s.v)] }
-       └──BatchScan { table: s, columns: [s.v], distribution: Single }
+    └─BatchSimpleAgg { aggs: [sum(s.v)] }
+      └─BatchScan { table: s, columns: [s.v], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [sum(s.v)] }
-       └──StreamSimpleAgg { aggs: [sum(s.v), count] }
-          └──StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
+    └─StreamProject { exprs: [sum(s.v)] }
+      └─StreamSimpleAgg { aggs: [sum(s.v), count] }
+        └─StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -120,13 +120,13 @@
     select count(v) as a1 from S;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchSimpleAgg { aggs: [count(s.v)] }
-       └──BatchScan { table: s, columns: [s.v], distribution: Single }
+    └─BatchSimpleAgg { aggs: [count(s.v)] }
+      └─BatchScan { table: s, columns: [s.v], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [count(s.v)] }
-       └──StreamSimpleAgg { aggs: [count(s.v), count] }
-          └──StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
+    └─StreamProject { exprs: [count(s.v)] }
+      └─StreamSimpleAgg { aggs: [count(s.v), count] }
+        └─StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -170,15 +170,15 @@
     select string_agg(s, ',' order by v) as a1 from S;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchSimpleAgg { aggs: [string_agg(s.s, ',':Varchar order_by(s.v ASC))] }
-       └──BatchProject { exprs: [s.s, ',':Varchar, s.v] }
-          └──BatchScan { table: s, columns: [s.v, s.s], distribution: Single }
+    └─BatchSimpleAgg { aggs: [string_agg(s.s, ',':Varchar order_by(s.v ASC))] }
+      └─BatchProject { exprs: [s.s, ',':Varchar, s.v] }
+        └─BatchScan { table: s, columns: [s.v, s.s], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.v ASC))] }
-       └──StreamSimpleAgg { aggs: [string_agg(s.s, ',':Varchar order_by(s.v ASC)), count] }
-          └──StreamProject { exprs: [s.s, ',':Varchar, s.v, s.t._row_id] }
-             └──StreamTableScan { table: s, columns: [s.v, s.s, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
+    └─StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.v ASC))] }
+      └─StreamSimpleAgg { aggs: [string_agg(s.s, ',':Varchar order_by(s.v ASC)), count] }
+        └─StreamProject { exprs: [s.s, ',':Varchar, s.v, s.t._row_id] }
+          └─StreamTableScan { table: s, columns: [s.v, s.s, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -230,17 +230,17 @@
     select max(v) as a1 from T;
   batch_plan: |-
     BatchSimpleAgg { aggs: [max(max(t.v))] }
-    └──BatchExchange { order: [], dist: Single }
-       └──BatchSimpleAgg { aggs: [max(t.v)] }
-          └──BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [max(t.v)] }
+        └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [max(max(t.v))] }
-       └──StreamSimpleAgg { aggs: [max(max(t.v)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamHashAgg { group_key: [$expr1], aggs: [max(t.v), count] }
-                └──StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
-                   └──StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [max(max(t.v))] }
+      └─StreamSimpleAgg { aggs: [max(max(t.v)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamHashAgg { group_key: [$expr1], aggs: [max(t.v), count] }
+            └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
+              └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -315,11 +315,11 @@
     select max(v) as a1 from AO;
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [max(max(ao.v))] }
-       └──StreamSimpleAgg [append_only] { aggs: [max(max(ao.v)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamStatelessSimpleAgg { aggs: [max(ao.v)] }
-                └──StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
+    └─StreamProject { exprs: [max(max(ao.v))] }
+      └─StreamSimpleAgg [append_only] { aggs: [max(max(ao.v)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [max(ao.v)] }
+            └─StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -367,16 +367,16 @@
     select sum(v) as a1 from T;
   batch_plan: |-
     BatchSimpleAgg { aggs: [sum(sum(t.v))] }
-    └──BatchExchange { order: [], dist: Single }
-       └──BatchSimpleAgg { aggs: [sum(t.v)] }
-          └──BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [sum(t.v)] }
+        └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [sum(sum(t.v))] }
-       └──StreamSimpleAgg { aggs: [sum(sum(t.v)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamStatelessSimpleAgg { aggs: [sum(t.v)] }
-                └──StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(sum(t.v))] }
+      └─StreamSimpleAgg { aggs: [sum(sum(t.v)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [sum(t.v)] }
+            └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -424,11 +424,11 @@
     select sum(v) as a1 from AO;
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [sum(sum(ao.v))] }
-       └──StreamSimpleAgg [append_only] { aggs: [sum(sum(ao.v)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamStatelessSimpleAgg { aggs: [sum(ao.v)] }
-                └──StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
+    └─StreamProject { exprs: [sum(sum(ao.v))] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(ao.v)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [sum(ao.v)] }
+            └─StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -476,16 +476,16 @@
     select count(v) as a1 from T;
   batch_plan: |-
     BatchSimpleAgg { aggs: [sum0(count(t.v))] }
-    └──BatchExchange { order: [], dist: Single }
-       └──BatchSimpleAgg { aggs: [count(t.v)] }
-          └──BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count(t.v)] }
+        └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [sum0(count(t.v))] }
-       └──StreamSimpleAgg { aggs: [sum0(count(t.v)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamStatelessSimpleAgg { aggs: [count(t.v)] }
-                └──StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum0(count(t.v))] }
+      └─StreamSimpleAgg { aggs: [sum0(count(t.v)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [count(t.v)] }
+            └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -533,11 +533,11 @@
     select count(v) as a1 from AO;
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [sum0(count(ao.v))] }
-       └──StreamSimpleAgg [append_only] { aggs: [sum0(count(ao.v)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamStatelessSimpleAgg { aggs: [count(ao.v)] }
-                └──StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
+    └─StreamProject { exprs: [sum0(count(ao.v))] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum0(count(ao.v)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [count(ao.v)] }
+            └─StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -585,16 +585,16 @@
     select string_agg(s, ',' order by o) as a1 from T;
   batch_plan: |-
     BatchSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
-    └──BatchExchange { order: [], dist: Single }
-       └──BatchProject { exprs: [t.s, ',':Varchar, t.o] }
-          └──BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.s, ',':Varchar, t.o] }
+        └─BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
-       └──StreamSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamProject { exprs: [t.s, ',':Varchar, t.o, t._row_id] }
-                └──StreamTableScan { table: t, columns: [t.o, t.s, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
+      └─StreamSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamProject { exprs: [t.s, ',':Varchar, t.o, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.o, t.s, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -649,11 +649,11 @@
     select string_agg(s, ',' order by o) as a1 from AO;
   stream_plan: |-
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
-       └──StreamSimpleAgg [append_only] { aggs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamProject { exprs: [ao.s, ',':Varchar, ao.o, ao._row_id] }
-                └──StreamTableScan { table: ao, columns: [ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
+    └─StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
+      └─StreamSimpleAgg [append_only] { aggs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamProject { exprs: [ao.s, ',':Varchar, ao.o, ao._row_id] }
+            └─StreamTableScan { table: ao, columns: [ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -701,17 +701,17 @@
     select max(v) as a1, count(v) as a2 from T;
   batch_plan: |-
     BatchSimpleAgg { aggs: [max(max(t.v)), sum0(count(t.v))] }
-    └──BatchExchange { order: [], dist: Single }
-       └──BatchSimpleAgg { aggs: [max(t.v), count(t.v)] }
-          └──BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [max(t.v), count(t.v)] }
+        └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [max(max(t.v)), sum0(count(t.v))] }
-       └──StreamSimpleAgg { aggs: [max(max(t.v)), sum0(count(t.v)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamHashAgg { group_key: [$expr1], aggs: [max(t.v), count(t.v), count] }
-                └──StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
-                   └──StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [max(max(t.v)), sum0(count(t.v))] }
+      └─StreamSimpleAgg { aggs: [max(max(t.v)), sum0(count(t.v)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamHashAgg { group_key: [$expr1], aggs: [max(t.v), count(t.v), count] }
+            └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
+              └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -786,11 +786,11 @@
     select max(v) as a1, count(v) as a2 from AO;
   stream_plan: |-
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [max(max(ao.v)), sum0(count(ao.v))] }
-       └──StreamSimpleAgg [append_only] { aggs: [max(max(ao.v)), sum0(count(ao.v)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamStatelessSimpleAgg { aggs: [max(ao.v), count(ao.v)] }
-                └──StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
+    └─StreamProject { exprs: [max(max(ao.v)), sum0(count(ao.v))] }
+      └─StreamSimpleAgg [append_only] { aggs: [max(max(ao.v)), sum0(count(ao.v)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [max(ao.v), count(ao.v)] }
+            └─StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -838,16 +838,16 @@
     select count(v) as a1, string_agg(s, ',' order by o) as a2 from T;
   batch_plan: |-
     BatchSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
-    └──BatchExchange { order: [], dist: Single }
-       └──BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
-          └──BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+        └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
-       └──StreamSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamProject { exprs: [t.v, t.s, ',':Varchar, t.o, t._row_id] }
-                └──StreamTableScan { table: t, columns: [t.v, t.o, t.s, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
+      └─StreamSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamProject { exprs: [t.v, t.s, ',':Varchar, t.o, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.v, t.o, t.s, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -902,11 +902,11 @@
     select count(v) as a1, string_agg(s, ',' order by o) as a2 from AO;
   stream_plan: |-
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
-       └──StreamSimpleAgg [append_only] { aggs: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamProject { exprs: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id] }
-                └──StreamTableScan { table: ao, columns: [ao.v, ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
+    └─StreamProject { exprs: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
+      └─StreamSimpleAgg [append_only] { aggs: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamProject { exprs: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id] }
+            └─StreamTableScan { table: ao, columns: [ao.v, ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -954,16 +954,16 @@
     select max(v) as a1, string_agg(s, ',' order by o) as a2 from T;
   batch_plan: |-
     BatchSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
-    └──BatchExchange { order: [], dist: Single }
-       └──BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
-          └──BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+        └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
-       └──StreamSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamProject { exprs: [t.v, t.s, ',':Varchar, t.o, t._row_id] }
-                └──StreamTableScan { table: t, columns: [t.v, t.o, t.s, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
+      └─StreamSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamProject { exprs: [t.v, t.s, ',':Varchar, t.o, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.v, t.o, t.s, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -1025,11 +1025,11 @@
     select max(v) as a1, string_agg(s, ',' order by o) as a2 from AO;
   stream_plan: |-
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
-       └──StreamSimpleAgg [append_only] { aggs: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-          └──StreamExchange { dist: Single }
-             └──StreamProject { exprs: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id] }
-                └──StreamTableScan { table: ao, columns: [ao.v, ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
+    └─StreamProject { exprs: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
+      └─StreamSimpleAgg [append_only] { aggs: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamProject { exprs: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id] }
+            └─StreamTableScan { table: ao, columns: [ao.v, ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, a2], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
@@ -1077,16 +1077,16 @@
     select max(v) as a1 from T group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [max(t.v)] }
-       └──BatchHashAgg { group_key: [t.k], aggs: [max(t.v)] }
-          └──BatchExchange { order: [], dist: HashShard(t.k) }
-             └──BatchScan { table: t, columns: [t.k, t.v], distribution: SomeShard }
+    └─BatchProject { exprs: [max(t.v)] }
+      └─BatchHashAgg { group_key: [t.k], aggs: [max(t.v)] }
+        └─BatchExchange { order: [], dist: HashShard(t.k) }
+          └─BatchScan { table: t, columns: [t.k, t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1, t.k(hidden)], stream_key: [t.k], pk_columns: [t.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [max(t.v), t.k] }
-       └──StreamHashAgg { group_key: [t.k], aggs: [max(t.v), count] }
-          └──StreamExchange { dist: HashShard(t.k) }
-             └──StreamTableScan { table: t, columns: [t.k, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [max(t.v), t.k] }
+      └─StreamHashAgg { group_key: [t.k], aggs: [max(t.v), count] }
+        └─StreamExchange { dist: HashShard(t.k) }
+          └─StreamTableScan { table: t, columns: [t.k, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, t.k(hidden)], stream_key: [t.k], pk_columns: [t.k], pk_conflict: "NoCheck" }
@@ -1140,14 +1140,14 @@
     select max(v) as a1 from Tk group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [max(tk.v)] }
-       └──BatchSortAgg { group_key: [tk.k], aggs: [max(tk.v)] }
-          └──BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
+    └─BatchProject { exprs: [max(tk.v)] }
+      └─BatchSortAgg { group_key: [tk.k], aggs: [max(tk.v)] }
+        └─BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
   stream_plan: |-
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [max(tk.v), tk.k] }
-       └──StreamHashAgg { group_key: [tk.k], aggs: [max(tk.v), count] }
-          └──StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], dist: UpstreamHashShard(tk.k) }
+    └─StreamProject { exprs: [max(tk.v), tk.k] }
+      └─StreamHashAgg { group_key: [tk.k], aggs: [max(tk.v), count] }
+        └─StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], dist: UpstreamHashShard(tk.k) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: "NoCheck" }
@@ -1198,16 +1198,16 @@
     select max(v) as a1 from S group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [max(s.v)] }
-       └──BatchHashAgg { group_key: [s.k], aggs: [max(s.v)] }
-          └──BatchExchange { order: [], dist: HashShard(s.k) }
-             └──BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
+    └─BatchProject { exprs: [max(s.v)] }
+      └─BatchHashAgg { group_key: [s.k], aggs: [max(s.v)] }
+        └─BatchExchange { order: [], dist: HashShard(s.k) }
+          └─BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [max(s.v), s.k] }
-       └──StreamHashAgg { group_key: [s.k], aggs: [max(s.v), count] }
-          └──StreamExchange { dist: HashShard(s.k) }
-             └──StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
+    └─StreamProject { exprs: [max(s.v), s.k] }
+      └─StreamHashAgg { group_key: [s.k], aggs: [max(s.v), count] }
+        └─StreamExchange { dist: HashShard(s.k) }
+          └─StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: "NoCheck" }
@@ -1260,10 +1260,10 @@
     select max(v) as a1 from AO group by k;
   stream_plan: |-
     StreamMaterialize { columns: [a1, ao.k(hidden)], stream_key: [ao.k], pk_columns: [ao.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [max(ao.v), ao.k] }
-       └──StreamHashAgg [append_only] { group_key: [ao.k], aggs: [max(ao.v), count] }
-          └──StreamExchange { dist: HashShard(ao.k) }
-             └──StreamTableScan { table: ao, columns: [ao.k, ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
+    └─StreamProject { exprs: [max(ao.v), ao.k] }
+      └─StreamHashAgg [append_only] { group_key: [ao.k], aggs: [max(ao.v), count] }
+        └─StreamExchange { dist: HashShard(ao.k) }
+          └─StreamTableScan { table: ao, columns: [ao.k, ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, ao.k(hidden)], stream_key: [ao.k], pk_columns: [ao.k], pk_conflict: "NoCheck" }
@@ -1310,16 +1310,16 @@
     select sum(v) as a1 from T group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [sum(t.v)] }
-       └──BatchHashAgg { group_key: [t.k], aggs: [sum(t.v)] }
-          └──BatchExchange { order: [], dist: HashShard(t.k) }
-             └──BatchScan { table: t, columns: [t.k, t.v], distribution: SomeShard }
+    └─BatchProject { exprs: [sum(t.v)] }
+      └─BatchHashAgg { group_key: [t.k], aggs: [sum(t.v)] }
+        └─BatchExchange { order: [], dist: HashShard(t.k) }
+          └─BatchScan { table: t, columns: [t.k, t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1, t.k(hidden)], stream_key: [t.k], pk_columns: [t.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [sum(t.v), t.k] }
-       └──StreamHashAgg { group_key: [t.k], aggs: [sum(t.v), count] }
-          └──StreamExchange { dist: HashShard(t.k) }
-             └──StreamTableScan { table: t, columns: [t.k, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [sum(t.v), t.k] }
+      └─StreamHashAgg { group_key: [t.k], aggs: [sum(t.v), count] }
+        └─StreamExchange { dist: HashShard(t.k) }
+          └─StreamTableScan { table: t, columns: [t.k, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, t.k(hidden)], stream_key: [t.k], pk_columns: [t.k], pk_conflict: "NoCheck" }
@@ -1366,14 +1366,14 @@
     select sum(v) as a1 from Tk group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [sum(tk.v)] }
-       └──BatchSortAgg { group_key: [tk.k], aggs: [sum(tk.v)] }
-          └──BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
+    └─BatchProject { exprs: [sum(tk.v)] }
+      └─BatchSortAgg { group_key: [tk.k], aggs: [sum(tk.v)] }
+        └─BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
   stream_plan: |-
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [sum(tk.v), tk.k] }
-       └──StreamHashAgg { group_key: [tk.k], aggs: [sum(tk.v), count] }
-          └──StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], dist: UpstreamHashShard(tk.k) }
+    └─StreamProject { exprs: [sum(tk.v), tk.k] }
+      └─StreamHashAgg { group_key: [tk.k], aggs: [sum(tk.v), count] }
+        └─StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], dist: UpstreamHashShard(tk.k) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: "NoCheck" }
@@ -1417,16 +1417,16 @@
     select sum(v) as a1 from S group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [sum(s.v)] }
-       └──BatchHashAgg { group_key: [s.k], aggs: [sum(s.v)] }
-          └──BatchExchange { order: [], dist: HashShard(s.k) }
-             └──BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
+    └─BatchProject { exprs: [sum(s.v)] }
+      └─BatchHashAgg { group_key: [s.k], aggs: [sum(s.v)] }
+        └─BatchExchange { order: [], dist: HashShard(s.k) }
+          └─BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [sum(s.v), s.k] }
-       └──StreamHashAgg { group_key: [s.k], aggs: [sum(s.v), count] }
-          └──StreamExchange { dist: HashShard(s.k) }
-             └──StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
+    └─StreamProject { exprs: [sum(s.v), s.k] }
+      └─StreamHashAgg { group_key: [s.k], aggs: [sum(s.v), count] }
+        └─StreamExchange { dist: HashShard(s.k) }
+          └─StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: "NoCheck" }
@@ -1472,10 +1472,10 @@
     select sum(v) as a1 from AO group by k;
   stream_plan: |-
     StreamMaterialize { columns: [a1, ao.k(hidden)], stream_key: [ao.k], pk_columns: [ao.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [sum(ao.v), ao.k] }
-       └──StreamHashAgg [append_only] { group_key: [ao.k], aggs: [sum(ao.v), count] }
-          └──StreamExchange { dist: HashShard(ao.k) }
-             └──StreamTableScan { table: ao, columns: [ao.k, ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
+    └─StreamProject { exprs: [sum(ao.v), ao.k] }
+      └─StreamHashAgg [append_only] { group_key: [ao.k], aggs: [sum(ao.v), count] }
+        └─StreamExchange { dist: HashShard(ao.k) }
+          └─StreamTableScan { table: ao, columns: [ao.k, ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, ao.k(hidden)], stream_key: [ao.k], pk_columns: [ao.k], pk_conflict: "NoCheck" }
@@ -1522,16 +1522,16 @@
     select count(v) as a1 from T group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [count(t.v)] }
-       └──BatchHashAgg { group_key: [t.k], aggs: [count(t.v)] }
-          └──BatchExchange { order: [], dist: HashShard(t.k) }
-             └──BatchScan { table: t, columns: [t.k, t.v], distribution: SomeShard }
+    └─BatchProject { exprs: [count(t.v)] }
+      └─BatchHashAgg { group_key: [t.k], aggs: [count(t.v)] }
+        └─BatchExchange { order: [], dist: HashShard(t.k) }
+          └─BatchScan { table: t, columns: [t.k, t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1, t.k(hidden)], stream_key: [t.k], pk_columns: [t.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [count(t.v), t.k] }
-       └──StreamHashAgg { group_key: [t.k], aggs: [count(t.v), count] }
-          └──StreamExchange { dist: HashShard(t.k) }
-             └──StreamTableScan { table: t, columns: [t.k, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [count(t.v), t.k] }
+      └─StreamHashAgg { group_key: [t.k], aggs: [count(t.v), count] }
+        └─StreamExchange { dist: HashShard(t.k) }
+          └─StreamTableScan { table: t, columns: [t.k, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, t.k(hidden)], stream_key: [t.k], pk_columns: [t.k], pk_conflict: "NoCheck" }
@@ -1578,14 +1578,14 @@
     select count(v) as a1 from Tk group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [count(tk.v)] }
-       └──BatchSortAgg { group_key: [tk.k], aggs: [count(tk.v)] }
-          └──BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
+    └─BatchProject { exprs: [count(tk.v)] }
+      └─BatchSortAgg { group_key: [tk.k], aggs: [count(tk.v)] }
+        └─BatchScan { table: tk, columns: [tk.k, tk.v], distribution: UpstreamHashShard(tk.k) }
   stream_plan: |-
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [count(tk.v), tk.k] }
-       └──StreamHashAgg { group_key: [tk.k], aggs: [count(tk.v), count] }
-          └──StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], dist: UpstreamHashShard(tk.k) }
+    └─StreamProject { exprs: [count(tk.v), tk.k] }
+      └─StreamHashAgg { group_key: [tk.k], aggs: [count(tk.v), count] }
+        └─StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], dist: UpstreamHashShard(tk.k) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: "NoCheck" }
@@ -1629,16 +1629,16 @@
     select count(v) as a1 from S group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [count(s.v)] }
-       └──BatchHashAgg { group_key: [s.k], aggs: [count(s.v)] }
-          └──BatchExchange { order: [], dist: HashShard(s.k) }
-             └──BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
+    └─BatchProject { exprs: [count(s.v)] }
+      └─BatchHashAgg { group_key: [s.k], aggs: [count(s.v)] }
+        └─BatchExchange { order: [], dist: HashShard(s.k) }
+          └─BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [count(s.v), s.k] }
-       └──StreamHashAgg { group_key: [s.k], aggs: [count(s.v), count] }
-          └──StreamExchange { dist: HashShard(s.k) }
-             └──StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
+    └─StreamProject { exprs: [count(s.v), s.k] }
+      └─StreamHashAgg { group_key: [s.k], aggs: [count(s.v), count] }
+        └─StreamExchange { dist: HashShard(s.k) }
+          └─StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: "NoCheck" }
@@ -1684,10 +1684,10 @@
     select count(v) as a1 from AO group by k;
   stream_plan: |-
     StreamMaterialize { columns: [a1, ao.k(hidden)], stream_key: [ao.k], pk_columns: [ao.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [count(ao.v), ao.k] }
-       └──StreamHashAgg [append_only] { group_key: [ao.k], aggs: [count(ao.v), count] }
-          └──StreamExchange { dist: HashShard(ao.k) }
-             └──StreamTableScan { table: ao, columns: [ao.k, ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
+    └─StreamProject { exprs: [count(ao.v), ao.k] }
+      └─StreamHashAgg [append_only] { group_key: [ao.k], aggs: [count(ao.v), count] }
+        └─StreamExchange { dist: HashShard(ao.k) }
+          └─StreamTableScan { table: ao, columns: [ao.k, ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, ao.k(hidden)], stream_key: [ao.k], pk_columns: [ao.k], pk_conflict: "NoCheck" }
@@ -1734,18 +1734,18 @@
     select string_agg(s, ',' order by o) as a1 from T group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
-       └──BatchHashAgg { group_key: [t.k], aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
-          └──BatchExchange { order: [], dist: HashShard(t.k) }
-             └──BatchProject { exprs: [t.k, t.s, ',':Varchar, t.o] }
-                └──BatchScan { table: t, columns: [t.k, t.o, t.s], distribution: SomeShard }
+    └─BatchProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
+      └─BatchHashAgg { group_key: [t.k], aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
+        └─BatchExchange { order: [], dist: HashShard(t.k) }
+          └─BatchProject { exprs: [t.k, t.s, ',':Varchar, t.o] }
+            └─BatchScan { table: t, columns: [t.k, t.o, t.s], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a1, t.k(hidden)], stream_key: [t.k], pk_columns: [t.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC)), t.k] }
-       └──StreamHashAgg { group_key: [t.k], aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
-          └──StreamExchange { dist: HashShard(t.k) }
-             └──StreamProject { exprs: [t.k, t.s, ',':Varchar, t.o, t._row_id] }
-                └──StreamTableScan { table: t, columns: [t.k, t.o, t.s, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC)), t.k] }
+      └─StreamHashAgg { group_key: [t.k], aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
+        └─StreamExchange { dist: HashShard(t.k) }
+          └─StreamProject { exprs: [t.k, t.s, ',':Varchar, t.o, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.k, t.o, t.s, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, t.k(hidden)], stream_key: [t.k], pk_columns: [t.k], pk_conflict: "NoCheck" }
@@ -1800,16 +1800,16 @@
     select string_agg(s, ',' order by o) as a1 from Tk group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC))] }
-       └──BatchSortAgg { group_key: [tk.k], aggs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC))] }
-          └──BatchProject { exprs: [tk.k, tk.s, ',':Varchar, tk.o] }
-             └──BatchScan { table: tk, columns: [tk.k, tk.o, tk.s], distribution: UpstreamHashShard(tk.k) }
+    └─BatchProject { exprs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC))] }
+      └─BatchSortAgg { group_key: [tk.k], aggs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC))] }
+        └─BatchProject { exprs: [tk.k, tk.s, ',':Varchar, tk.o] }
+          └─BatchScan { table: tk, columns: [tk.k, tk.o, tk.s], distribution: UpstreamHashShard(tk.k) }
   stream_plan: |-
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC)), tk.k] }
-       └──StreamHashAgg { group_key: [tk.k], aggs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC)), count] }
-          └──StreamProject { exprs: [tk.k, tk.s, ',':Varchar, tk.o, tk.t._row_id] }
-             └──StreamTableScan { table: tk, columns: [tk.k, tk.o, tk.s, tk.t._row_id], pk: [tk.t._row_id], dist: UpstreamHashShard(tk.k) }
+    └─StreamProject { exprs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC)), tk.k] }
+      └─StreamHashAgg { group_key: [tk.k], aggs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC)), count] }
+        └─StreamProject { exprs: [tk.k, tk.s, ',':Varchar, tk.o, tk.t._row_id] }
+          └─StreamTableScan { table: tk, columns: [tk.k, tk.o, tk.s, tk.t._row_id], pk: [tk.t._row_id], dist: UpstreamHashShard(tk.k) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, tk.k(hidden)], stream_key: [tk.k], pk_columns: [tk.k], pk_conflict: "NoCheck" }
@@ -1861,18 +1861,18 @@
     select string_agg(s, ',' order by o) as a1 from S group by k;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.o ASC))] }
-       └──BatchHashAgg { group_key: [s.k], aggs: [string_agg(s.s, ',':Varchar order_by(s.o ASC))] }
-          └──BatchExchange { order: [], dist: HashShard(s.k) }
-             └──BatchProject { exprs: [s.k, s.s, ',':Varchar, s.o] }
-                └──BatchScan { table: s, columns: [s.k, s.o, s.s], distribution: Single }
+    └─BatchProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.o ASC))] }
+      └─BatchHashAgg { group_key: [s.k], aggs: [string_agg(s.s, ',':Varchar order_by(s.o ASC))] }
+        └─BatchExchange { order: [], dist: HashShard(s.k) }
+          └─BatchProject { exprs: [s.k, s.s, ',':Varchar, s.o] }
+            └─BatchScan { table: s, columns: [s.k, s.o, s.s], distribution: Single }
   stream_plan: |-
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.o ASC)), s.k] }
-       └──StreamHashAgg { group_key: [s.k], aggs: [string_agg(s.s, ',':Varchar order_by(s.o ASC)), count] }
-          └──StreamExchange { dist: HashShard(s.k) }
-             └──StreamProject { exprs: [s.k, s.s, ',':Varchar, s.o, s.t._row_id] }
-                └──StreamTableScan { table: s, columns: [s.k, s.o, s.s, s.t._row_id], pk: [s.t._row_id], dist: Single }
+    └─StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.o ASC)), s.k] }
+      └─StreamHashAgg { group_key: [s.k], aggs: [string_agg(s.s, ',':Varchar order_by(s.o ASC)), count] }
+        └─StreamExchange { dist: HashShard(s.k) }
+          └─StreamProject { exprs: [s.k, s.s, ',':Varchar, s.o, s.t._row_id] }
+            └─StreamTableScan { table: s, columns: [s.k, s.o, s.s, s.t._row_id], pk: [s.t._row_id], dist: Single }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, s.k(hidden)], stream_key: [s.k], pk_columns: [s.k], pk_conflict: "NoCheck" }
@@ -1927,11 +1927,11 @@
     select string_agg(s, ',' order by o) as a1 from AO group by k;
   stream_plan: |-
     StreamMaterialize { columns: [a1, ao.k(hidden)], stream_key: [ao.k], pk_columns: [ao.k], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), ao.k] }
-       └──StreamHashAgg [append_only] { group_key: [ao.k], aggs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-          └──StreamExchange { dist: HashShard(ao.k) }
-             └──StreamProject { exprs: [ao.k, ao.s, ',':Varchar, ao.o, ao._row_id] }
-                └──StreamTableScan { table: ao, columns: [ao.k, ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
+    └─StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), ao.k] }
+      └─StreamHashAgg [append_only] { group_key: [ao.k], aggs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
+        └─StreamExchange { dist: HashShard(ao.k) }
+          └─StreamProject { exprs: [ao.k, ao.s, ',':Varchar, ao.o, ao._row_id] }
+            └─StreamTableScan { table: ao, columns: [ao.k, ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a1, ao.k(hidden)], stream_key: [ao.k], pk_columns: [ao.k], pk_conflict: "NoCheck" }

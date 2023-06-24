@@ -12,26 +12,26 @@
     select * from t1 except select * from t2;
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
-    └──LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(t1.a, t2.a) AND IsNotDistinctFrom(t1.b, t2.b) AND IsNotDistinctFrom(t1.c, t2.c), output: all }
-       ├──LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
-       └──LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
+    └─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(t1.a, t2.a) AND IsNotDistinctFrom(t1.b, t2.b) AND IsNotDistinctFrom(t1.c, t2.c), output: all }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
+      └─LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
-       └──BatchHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
-          ├──BatchExchange { order: [], dist: HashShard(t1.a, t1.b, t1.c) }
-          │  └──BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
-          └──BatchExchange { order: [], dist: HashShard(t2.a, t2.b, t2.c) }
-             └──BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
+    └─BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+      └─BatchHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(t1.a, t1.b, t1.c) }
+        │ └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: HashShard(t2.a, t2.b, t2.c) }
+          └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [t1.a, t1.b, t1.c] }
-       └──StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
-          └──StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
-             ├──StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
-             │  └──StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-             └──StreamExchange { dist: HashShard(t2.a, t2.b, t2.c) }
-                └──StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
+      └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
+        └─StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
+          ├─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
+          │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+          └─StreamExchange { dist: HashShard(t2.a, t2.b, t2.c) }
+            └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: "NoCheck" } { materialized table: 4294967294 }
@@ -109,24 +109,24 @@
     select * from t1 except select * from t2;
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
-    └──LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(t1.a, t2.a) AND IsNotDistinctFrom(t1.b, t2.b) AND IsNotDistinctFrom(t1.c, t2.c), output: all }
-       ├──LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
-       └──LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
+    └─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(t1.a, t2.a) AND IsNotDistinctFrom(t1.b, t2.b) AND IsNotDistinctFrom(t1.c, t2.c), output: all }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
+      └─LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
-       └──BatchLookupJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
-          └──BatchExchange { order: [], dist: UpstreamHashShard(t1.a) }
-             └──BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: UpstreamHashShard(t1.a) }
+    └─BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+      └─BatchLookupJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
+        └─BatchExchange { order: [], dist: UpstreamHashShard(t1.a) }
+          └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: UpstreamHashShard(t1.a) }
   stream_plan: |-
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    └──StreamProject { exprs: [t1.a, t1.b, t1.c] }
-       └──StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
-          └──StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
-             ├──StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
-             │  └──StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
-             └──StreamExchange { dist: HashShard(t2.a, t2.b, t2.c) }
-                └──StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
+    └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
+      └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
+        └─StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
+          ├─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
+          │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
+          └─StreamExchange { dist: HashShard(t2.a, t2.b, t2.c) }
+            └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: "NoCheck" } { materialized table: 4294967294 }
@@ -194,106 +194,106 @@
     (select * from t1 limit 1) except (select * from t2 limit 1);
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
-    └──LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(t1.a, t2.a) AND IsNotDistinctFrom(t1.b, t2.b) AND IsNotDistinctFrom(t1.c, t2.c), output: all }
-       ├──LogicalLimit { limit: 1, offset: 0 }
-       │  └──LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
-       └──LogicalLimit { limit: 1, offset: 0 }
-          └──LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
+    └─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(t1.a, t2.a) AND IsNotDistinctFrom(t1.b, t2.b) AND IsNotDistinctFrom(t1.c, t2.c), output: all }
+      ├─LogicalLimit { limit: 1, offset: 0 }
+      │ └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
+      └─LogicalLimit { limit: 1, offset: 0 }
+        └─LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
-       └──BatchHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
-          ├──BatchExchange { order: [], dist: HashShard(t1.a, t1.b, t1.c) }
-          │  └──BatchLimit { limit: 1, offset: 0 }
-          │     └──BatchExchange { order: [], dist: Single }
-          │        └──BatchLimit { limit: 1, offset: 0 }
-          │           └──BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
-          └──BatchExchange { order: [], dist: HashShard(t2.a, t2.b, t2.c) }
-             └──BatchLimit { limit: 1, offset: 0 }
-                └──BatchExchange { order: [], dist: Single }
-                   └──BatchLimit { limit: 1, offset: 0 }
-                      └──BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
+    └─BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+      └─BatchHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(t1.a, t1.b, t1.c) }
+        │ └─BatchLimit { limit: 1, offset: 0 }
+        │   └─BatchExchange { order: [], dist: Single }
+        │     └─BatchLimit { limit: 1, offset: 0 }
+        │       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: HashShard(t2.a, t2.b, t2.c) }
+          └─BatchLimit { limit: 1, offset: 0 }
+            └─BatchExchange { order: [], dist: Single }
+              └─BatchLimit { limit: 1, offset: 0 }
+                └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, c bigint);
     select a from ((select * from t1 limit 1) except (select * from t2 limit 1)) T;
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t1.a] }
-    └──LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
-       └──LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(t1.a, t2.a) AND IsNotDistinctFrom(t1.b, t2.b) AND IsNotDistinctFrom(t1.c, t2.c), output: all }
-          ├──LogicalLimit { limit: 1, offset: 0 }
-          │  └──LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
-          └──LogicalLimit { limit: 1, offset: 0 }
-             └──LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
+    └─LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+      └─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(t1.a, t2.a) AND IsNotDistinctFrom(t1.b, t2.b) AND IsNotDistinctFrom(t1.c, t2.c), output: all }
+        ├─LogicalLimit { limit: 1, offset: 0 }
+        │ └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
+        └─LogicalLimit { limit: 1, offset: 0 }
+          └─LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [t1.a] }
-       └──BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
-          └──BatchHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
-             ├──BatchExchange { order: [], dist: HashShard(t1.a, t1.b, t1.c) }
-             │  └──BatchLimit { limit: 1, offset: 0 }
-             │     └──BatchExchange { order: [], dist: Single }
-             │        └──BatchLimit { limit: 1, offset: 0 }
-             │           └──BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
-             └──BatchExchange { order: [], dist: HashShard(t2.a, t2.b, t2.c) }
-                └──BatchLimit { limit: 1, offset: 0 }
-                   └──BatchExchange { order: [], dist: Single }
-                      └──BatchLimit { limit: 1, offset: 0 }
-                         └──BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
+    └─BatchProject { exprs: [t1.a] }
+      └─BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+        └─BatchHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
+          ├─BatchExchange { order: [], dist: HashShard(t1.a, t1.b, t1.c) }
+          │ └─BatchLimit { limit: 1, offset: 0 }
+          │   └─BatchExchange { order: [], dist: Single }
+          │     └─BatchLimit { limit: 1, offset: 0 }
+          │       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(t2.a, t2.b, t2.c) }
+            └─BatchLimit { limit: 1, offset: 0 }
+              └─BatchExchange { order: [], dist: Single }
+                └─BatchLimit { limit: 1, offset: 0 }
+                  └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
 - sql: |
     select 1 except select 2 except select 3 except select 4 except select 5 except select 5
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [1:Int32], aggs: [] }
-    └──LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 5:Int32), output: all }
-       ├──LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 5:Int32), output: all }
-       │  ├──LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 4:Int32), output: all }
-       │  │  ├──LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 3:Int32), output: all }
-       │  │  │  ├──LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 2:Int32), output: all }
-       │  │  │  │  ├──LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
-       │  │  │  │  └──LogicalValues { rows: [[2:Int32]], schema: Schema { fields: [2:Int32:Int32] } }
-       │  │  │  └──LogicalValues { rows: [[3:Int32]], schema: Schema { fields: [3:Int32:Int32] } }
-       │  │  └──LogicalValues { rows: [[4:Int32]], schema: Schema { fields: [4:Int32:Int32] } }
-       │  └──LogicalValues { rows: [[5:Int32]], schema: Schema { fields: [5:Int32:Int32] } }
-       └──LogicalValues { rows: [[5:Int32]], schema: Schema { fields: [5:Int32:Int32] } }
+    └─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 5:Int32), output: all }
+      ├─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 5:Int32), output: all }
+      │ ├─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 4:Int32), output: all }
+      │ │ ├─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 3:Int32), output: all }
+      │ │ │ ├─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 2:Int32), output: all }
+      │ │ │ │ ├─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+      │ │ │ │ └─LogicalValues { rows: [[2:Int32]], schema: Schema { fields: [2:Int32:Int32] } }
+      │ │ │ └─LogicalValues { rows: [[3:Int32]], schema: Schema { fields: [3:Int32:Int32] } }
+      │ │ └─LogicalValues { rows: [[4:Int32]], schema: Schema { fields: [4:Int32:Int32] } }
+      │ └─LogicalValues { rows: [[5:Int32]], schema: Schema { fields: [5:Int32:Int32] } }
+      └─LogicalValues { rows: [[5:Int32]], schema: Schema { fields: [5:Int32:Int32] } }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchHashAgg { group_key: [1:Int32], aggs: [] }
-       └──BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 5:Int32, output: all }
-          ├──BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 5:Int32, output: all }
-          │  ├──BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 4:Int32, output: all }
-          │  │  ├──BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 3:Int32, output: all }
-          │  │  │  ├──BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 2:Int32, output: all }
-          │  │  │  │  ├──BatchExchange { order: [], dist: HashShard(1:Int32) }
-          │  │  │  │  │  └──BatchValues { rows: [[1:Int32]] }
-          │  │  │  │  └──BatchExchange { order: [], dist: HashShard(2:Int32) }
-          │  │  │  │     └──BatchValues { rows: [[2:Int32]] }
-          │  │  │  └──BatchExchange { order: [], dist: HashShard(3:Int32) }
-          │  │  │     └──BatchValues { rows: [[3:Int32]] }
-          │  │  └──BatchExchange { order: [], dist: HashShard(4:Int32) }
-          │  │     └──BatchValues { rows: [[4:Int32]] }
-          │  └──BatchExchange { order: [], dist: HashShard(5:Int32) }
-          │     └──BatchValues { rows: [[5:Int32]] }
-          └──BatchExchange { order: [], dist: HashShard(5:Int32) }
-             └──BatchValues { rows: [[5:Int32]] }
+    └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+      └─BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 5:Int32, output: all }
+        ├─BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 5:Int32, output: all }
+        │ ├─BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 4:Int32, output: all }
+        │ │ ├─BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 3:Int32, output: all }
+        │ │ │ ├─BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 2:Int32, output: all }
+        │ │ │ │ ├─BatchExchange { order: [], dist: HashShard(1:Int32) }
+        │ │ │ │ │ └─BatchValues { rows: [[1:Int32]] }
+        │ │ │ │ └─BatchExchange { order: [], dist: HashShard(2:Int32) }
+        │ │ │ │   └─BatchValues { rows: [[2:Int32]] }
+        │ │ │ └─BatchExchange { order: [], dist: HashShard(3:Int32) }
+        │ │ │   └─BatchValues { rows: [[3:Int32]] }
+        │ │ └─BatchExchange { order: [], dist: HashShard(4:Int32) }
+        │ │   └─BatchValues { rows: [[4:Int32]] }
+        │ └─BatchExchange { order: [], dist: HashShard(5:Int32) }
+        │   └─BatchValues { rows: [[5:Int32]] }
+        └─BatchExchange { order: [], dist: HashShard(5:Int32) }
+          └─BatchValues { rows: [[5:Int32]] }
 - sql: |
     select 1 except (select 2 except select 1);
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [1:Int32], aggs: [] }
-    └──LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 2:Int32), output: all }
-       ├──LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
-       └──LogicalAgg { group_key: [2:Int32], aggs: [] }
-          └──LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(2:Int32, 1:Int32), output: all }
-             ├──LogicalValues { rows: [[2:Int32]], schema: Schema { fields: [2:Int32:Int32] } }
-             └──LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+    └─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(1:Int32, 2:Int32), output: all }
+      ├─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+      └─LogicalAgg { group_key: [2:Int32], aggs: [] }
+        └─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(2:Int32, 1:Int32), output: all }
+          ├─LogicalValues { rows: [[2:Int32]], schema: Schema { fields: [2:Int32:Int32] } }
+          └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchHashAgg { group_key: [1:Int32], aggs: [] }
-       └──BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 2:Int32, output: all }
-          ├──BatchExchange { order: [], dist: HashShard(1:Int32) }
-          │  └──BatchValues { rows: [[1:Int32]] }
-          └──BatchHashAgg { group_key: [2:Int32], aggs: [] }
-             └──BatchHashJoin { type: LeftAnti, predicate: 2:Int32 IS NOT DISTINCT FROM 1:Int32, output: all }
-                ├──BatchExchange { order: [], dist: HashShard(2:Int32) }
-                │  └──BatchValues { rows: [[2:Int32]] }
-                └──BatchExchange { order: [], dist: HashShard(1:Int32) }
-                   └──BatchValues { rows: [[1:Int32]] }
+    └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+      └─BatchHashJoin { type: LeftAnti, predicate: 1:Int32 IS NOT DISTINCT FROM 2:Int32, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(1:Int32) }
+        │ └─BatchValues { rows: [[1:Int32]] }
+        └─BatchHashAgg { group_key: [2:Int32], aggs: [] }
+          └─BatchHashJoin { type: LeftAnti, predicate: 2:Int32 IS NOT DISTINCT FROM 1:Int32, output: all }
+            ├─BatchExchange { order: [], dist: HashShard(2:Int32) }
+            │ └─BatchValues { rows: [[2:Int32]] }
+            └─BatchExchange { order: [], dist: HashShard(1:Int32) }
+              └─BatchValues { rows: [[1:Int32]] }

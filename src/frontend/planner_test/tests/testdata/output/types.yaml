@@ -26,7 +26,7 @@
 - sql: select '1'::iNt2;
   logical_plan: |-
     LogicalProject { exprs: [1:Int16] }
-    └──LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: select ''::"iNt2";
   binder_error: |-
     Bind error: failed to bind expression: CAST('' AS "iNt2")

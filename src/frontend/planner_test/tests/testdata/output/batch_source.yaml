@@ -3,11 +3,11 @@
     select * from s
   logical_plan: |-
     LogicalProject { exprs: [id, value] }
-    └──LogicalSource { source: s, columns: [id, value, _rw_kafka_timestamp, _row_id], time_range: (Unbounded, Unbounded) }
+    └─LogicalSource { source: s, columns: [id, value, _rw_kafka_timestamp, _row_id], time_range: (Unbounded, Unbounded) }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchProject { exprs: [id, value] }
-       └──BatchSource { source: s, columns: [id, value, _rw_kafka_timestamp, _row_id], filter: (None, None) }
+    └─BatchProject { exprs: [id, value] }
+      └─BatchSource { source: s, columns: [id, value, _rw_kafka_timestamp, _row_id], filter: (None, None) }
   create_source:
     row_format: protobuf
     name: s

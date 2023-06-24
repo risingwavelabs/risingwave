@@ -9,44 +9,44 @@
     select * from t1, t2, t3, t4 where v1 = v3 and v2 = v6 and v5 = v7
   logical_plan: |-
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8] }
-    └──LogicalFilter { predicate: (t1.v1 = t2.v3) AND (t1.v2 = t3.v6) AND (t3.v5 = t4.v7) }
-       └──LogicalJoin { type: Inner, on: true, output: all }
-          ├──LogicalJoin { type: Inner, on: true, output: all }
-          │  ├──LogicalJoin { type: Inner, on: true, output: all }
-          │  │  ├──LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
-          │  │  └──LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
-          │  └──LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
-          └──LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
+    └─LogicalFilter { predicate: (t1.v1 = t2.v3) AND (t1.v2 = t3.v6) AND (t3.v5 = t4.v7) }
+      └─LogicalJoin { type: Inner, on: true, output: all }
+        ├─LogicalJoin { type: Inner, on: true, output: all }
+        │ ├─LogicalJoin { type: Inner, on: true, output: all }
+        │ │ ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+        │ │ └─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
+        │ └─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
+        └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: all }
-       ├──BatchExchange { order: [], dist: HashShard(t3.v5) }
-       │  └──BatchHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: all }
-       │     ├──BatchExchange { order: [], dist: HashShard(t1.v2) }
-       │     │  └──BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: all }
-       │     │     ├──BatchExchange { order: [], dist: HashShard(t1.v1) }
-       │     │     │  └──BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
-       │     │     └──BatchExchange { order: [], dist: HashShard(t2.v3) }
-       │     │        └──BatchScan { table: t2, columns: [t2.v3, t2.v4], distribution: SomeShard }
-       │     └──BatchExchange { order: [], dist: HashShard(t3.v6) }
-       │        └──BatchScan { table: t3, columns: [t3.v5, t3.v6], distribution: SomeShard }
-       └──BatchExchange { order: [], dist: HashShard(t4.v7) }
-          └──BatchScan { table: t4, columns: [t4.v7, t4.v8], distribution: SomeShard }
+    └─BatchHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: all }
+      ├─BatchExchange { order: [], dist: HashShard(t3.v5) }
+      │ └─BatchHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: all }
+      │   ├─BatchExchange { order: [], dist: HashShard(t1.v2) }
+      │   │ └─BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: all }
+      │   │   ├─BatchExchange { order: [], dist: HashShard(t1.v1) }
+      │   │   │ └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+      │   │   └─BatchExchange { order: [], dist: HashShard(t2.v3) }
+      │   │     └─BatchScan { table: t2, columns: [t2.v3, t2.v4], distribution: SomeShard }
+      │   └─BatchExchange { order: [], dist: HashShard(t3.v6) }
+      │     └─BatchScan { table: t3, columns: [t3.v5, t3.v6], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t4.v7) }
+        └─BatchScan { table: t4, columns: [t4.v7, t4.v8], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6, v7, v8, t1._row_id(hidden), t2._row_id(hidden), t3._row_id(hidden), t4._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1, t3._row_id, v2, t4._row_id, v5], pk_columns: [t1._row_id, t2._row_id, v1, t3._row_id, v2, t4._row_id, v5], pk_conflict: NoCheck }
-    └──StreamHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8, t1._row_id, t2._row_id, t3._row_id, t4._row_id] }
-       ├──StreamExchange { dist: HashShard(t3.v5) }
-       │  └──StreamHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t1._row_id, t2._row_id, t3._row_id] }
-       │     ├──StreamExchange { dist: HashShard(t1.v2) }
-       │     │  └──StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: [t1.v1, t1.v2, t2.v3, t2.v4, t1._row_id, t2._row_id] }
-       │     │     ├──StreamExchange { dist: HashShard(t1.v1) }
-       │     │     │  └──StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-       │     │     └──StreamExchange { dist: HashShard(t2.v3) }
-       │     │        └──StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
-       │     └──StreamExchange { dist: HashShard(t3.v6) }
-       │        └──StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) }
-       └──StreamExchange { dist: HashShard(t4.v7) }
-          └──StreamTableScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) }
+    └─StreamHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8, t1._row_id, t2._row_id, t3._row_id, t4._row_id] }
+      ├─StreamExchange { dist: HashShard(t3.v5) }
+      │ └─StreamHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t1._row_id, t2._row_id, t3._row_id] }
+      │   ├─StreamExchange { dist: HashShard(t1.v2) }
+      │   │ └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: [t1.v1, t1.v2, t2.v3, t2.v4, t1._row_id, t2._row_id] }
+      │   │   ├─StreamExchange { dist: HashShard(t1.v1) }
+      │   │   │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      │   │   └─StreamExchange { dist: HashShard(t2.v3) }
+      │   │     └─StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+      │   └─StreamExchange { dist: HashShard(t3.v6) }
+      │     └─StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) }
+      └─StreamExchange { dist: HashShard(t4.v7) }
+        └─StreamTableScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) }
 - name: bushy tree join ordering
   sql: |
     create table t1 (v1 int, v2 int);
@@ -56,44 +56,44 @@
     select * from t1, t2, t3, t4 where v1 = v3 and v2 = v6 and v5 = v7
   logical_plan: |-
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8] }
-    └──LogicalFilter { predicate: (t1.v1 = t2.v3) AND (t1.v2 = t3.v6) AND (t3.v5 = t4.v7) }
-       └──LogicalJoin { type: Inner, on: true, output: all }
-          ├──LogicalJoin { type: Inner, on: true, output: all }
-          │  ├──LogicalJoin { type: Inner, on: true, output: all }
-          │  │  ├──LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
-          │  │  └──LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
-          │  └──LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
-          └──LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
+    └─LogicalFilter { predicate: (t1.v1 = t2.v3) AND (t1.v2 = t3.v6) AND (t3.v5 = t4.v7) }
+      └─LogicalJoin { type: Inner, on: true, output: all }
+        ├─LogicalJoin { type: Inner, on: true, output: all }
+        │ ├─LogicalJoin { type: Inner, on: true, output: all }
+        │ │ ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+        │ │ └─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
+        │ └─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
+        └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: all }
-       ├──BatchExchange { order: [], dist: HashShard(t3.v5) }
-       │  └──BatchHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: all }
-       │     ├──BatchExchange { order: [], dist: HashShard(t1.v2) }
-       │     │  └──BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: all }
-       │     │     ├──BatchExchange { order: [], dist: HashShard(t1.v1) }
-       │     │     │  └──BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
-       │     │     └──BatchExchange { order: [], dist: HashShard(t2.v3) }
-       │     │        └──BatchScan { table: t2, columns: [t2.v3, t2.v4], distribution: SomeShard }
-       │     └──BatchExchange { order: [], dist: HashShard(t3.v6) }
-       │        └──BatchScan { table: t3, columns: [t3.v5, t3.v6], distribution: SomeShard }
-       └──BatchExchange { order: [], dist: HashShard(t4.v7) }
-          └──BatchScan { table: t4, columns: [t4.v7, t4.v8], distribution: SomeShard }
+    └─BatchHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: all }
+      ├─BatchExchange { order: [], dist: HashShard(t3.v5) }
+      │ └─BatchHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: all }
+      │   ├─BatchExchange { order: [], dist: HashShard(t1.v2) }
+      │   │ └─BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: all }
+      │   │   ├─BatchExchange { order: [], dist: HashShard(t1.v1) }
+      │   │   │ └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+      │   │   └─BatchExchange { order: [], dist: HashShard(t2.v3) }
+      │   │     └─BatchScan { table: t2, columns: [t2.v3, t2.v4], distribution: SomeShard }
+      │   └─BatchExchange { order: [], dist: HashShard(t3.v6) }
+      │     └─BatchScan { table: t3, columns: [t3.v5, t3.v6], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t4.v7) }
+        └─BatchScan { table: t4, columns: [t4.v7, t4.v8], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6, v7, v8, t2._row_id(hidden), t1._row_id(hidden), t4._row_id(hidden), t3._row_id(hidden)], stream_key: [t2._row_id, t1._row_id, v3, t4._row_id, t3._row_id, v7, v2], pk_columns: [t2._row_id, t1._row_id, v3, t4._row_id, t3._row_id, v7, v2], pk_conflict: NoCheck }
-    └──StreamHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8, t2._row_id, t1._row_id, t4._row_id, t3._row_id] }
-       ├──StreamExchange { dist: HashShard(t1.v2) }
-       │  └──StreamHashJoin { type: Inner, predicate: t2.v3 = t1.v1, output: [t2.v3, t2.v4, t1.v1, t1.v2, t2._row_id, t1._row_id] }
-       │     ├──StreamExchange { dist: HashShard(t2.v3) }
-       │     │  └──StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
-       │     └──StreamExchange { dist: HashShard(t1.v1) }
-       │        └──StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-       └──StreamExchange { dist: HashShard(t3.v6) }
-          └──StreamHashJoin { type: Inner, predicate: t4.v7 = t3.v5, output: [t4.v7, t4.v8, t3.v5, t3.v6, t4._row_id, t3._row_id] }
-             ├──StreamExchange { dist: HashShard(t4.v7) }
-             │  └──StreamTableScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) }
-             └──StreamExchange { dist: HashShard(t3.v5) }
-                └──StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) }
+    └─StreamHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8, t2._row_id, t1._row_id, t4._row_id, t3._row_id] }
+      ├─StreamExchange { dist: HashShard(t1.v2) }
+      │ └─StreamHashJoin { type: Inner, predicate: t2.v3 = t1.v1, output: [t2.v3, t2.v4, t1.v1, t1.v2, t2._row_id, t1._row_id] }
+      │   ├─StreamExchange { dist: HashShard(t2.v3) }
+      │   │ └─StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+      │   └─StreamExchange { dist: HashShard(t1.v1) }
+      │     └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: HashShard(t3.v6) }
+        └─StreamHashJoin { type: Inner, predicate: t4.v7 = t3.v5, output: [t4.v7, t4.v8, t3.v5, t3.v6, t4._row_id, t3._row_id] }
+          ├─StreamExchange { dist: HashShard(t4.v7) }
+          │ └─StreamTableScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) }
+          └─StreamExchange { dist: HashShard(t3.v5) }
+            └─StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) }
 - name: bushy tree join ordering manually
   sql: |
     set rw_enable_join_ordering = false;
@@ -104,43 +104,43 @@
     select * from t1 join t2 on v1 = v3 join (t3 join t4 on v5 = v7) on v2 = v6;
   logical_plan: |-
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8] }
-    └──LogicalJoin { type: Inner, on: (t1.v2 = t3.v6), output: all }
-       ├──LogicalJoin { type: Inner, on: (t1.v1 = t2.v3), output: all }
-       │  ├──LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
-       │  └──LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
-       └──LogicalJoin { type: Inner, on: (t3.v5 = t4.v7), output: all }
-          ├──LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
-          └──LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
+    └─LogicalJoin { type: Inner, on: (t1.v2 = t3.v6), output: all }
+      ├─LogicalJoin { type: Inner, on: (t1.v1 = t2.v3), output: all }
+      │ ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+      │ └─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
+      └─LogicalJoin { type: Inner, on: (t3.v5 = t4.v7), output: all }
+        ├─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
+        └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: all }
-       ├──BatchExchange { order: [], dist: HashShard(t1.v2) }
-       │  └──BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: all }
-       │     ├──BatchExchange { order: [], dist: HashShard(t1.v1) }
-       │     │  └──BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
-       │     └──BatchExchange { order: [], dist: HashShard(t2.v3) }
-       │        └──BatchScan { table: t2, columns: [t2.v3, t2.v4], distribution: SomeShard }
-       └──BatchExchange { order: [], dist: HashShard(t3.v6) }
-          └──BatchHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: all }
-             ├──BatchExchange { order: [], dist: HashShard(t3.v5) }
-             │  └──BatchScan { table: t3, columns: [t3.v5, t3.v6], distribution: SomeShard }
-             └──BatchExchange { order: [], dist: HashShard(t4.v7) }
-                └──BatchScan { table: t4, columns: [t4.v7, t4.v8], distribution: SomeShard }
+    └─BatchHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: all }
+      ├─BatchExchange { order: [], dist: HashShard(t1.v2) }
+      │ └─BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: all }
+      │   ├─BatchExchange { order: [], dist: HashShard(t1.v1) }
+      │   │ └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+      │   └─BatchExchange { order: [], dist: HashShard(t2.v3) }
+      │     └─BatchScan { table: t2, columns: [t2.v3, t2.v4], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t3.v6) }
+        └─BatchHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: all }
+          ├─BatchExchange { order: [], dist: HashShard(t3.v5) }
+          │ └─BatchScan { table: t3, columns: [t3.v5, t3.v6], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(t4.v7) }
+            └─BatchScan { table: t4, columns: [t4.v7, t4.v8], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6, v7, v8, t1._row_id(hidden), t2._row_id(hidden), t3._row_id(hidden), t4._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1, t3._row_id, t4._row_id, v5, v2], pk_columns: [t1._row_id, t2._row_id, v1, t3._row_id, t4._row_id, v5, v2], pk_conflict: NoCheck }
-    └──StreamHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8, t1._row_id, t2._row_id, t3._row_id, t4._row_id] }
-       ├──StreamExchange { dist: HashShard(t1.v2) }
-       │  └──StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: [t1.v1, t1.v2, t2.v3, t2.v4, t1._row_id, t2._row_id] }
-       │     ├──StreamExchange { dist: HashShard(t1.v1) }
-       │     │  └──StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-       │     └──StreamExchange { dist: HashShard(t2.v3) }
-       │        └──StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
-       └──StreamExchange { dist: HashShard(t3.v6) }
-          └──StreamHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: [t3.v5, t3.v6, t4.v7, t4.v8, t3._row_id, t4._row_id] }
-             ├──StreamExchange { dist: HashShard(t3.v5) }
-             │  └──StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) }
-             └──StreamExchange { dist: HashShard(t4.v7) }
-                └──StreamTableScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) }
+    └─StreamHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8, t1._row_id, t2._row_id, t3._row_id, t4._row_id] }
+      ├─StreamExchange { dist: HashShard(t1.v2) }
+      │ └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: [t1.v1, t1.v2, t2.v3, t2.v4, t1._row_id, t2._row_id] }
+      │   ├─StreamExchange { dist: HashShard(t1.v1) }
+      │   │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      │   └─StreamExchange { dist: HashShard(t2.v3) }
+      │     └─StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+      └─StreamExchange { dist: HashShard(t3.v6) }
+        └─StreamHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: [t3.v5, t3.v6, t4.v7, t4.v8, t3._row_id, t4._row_id] }
+          ├─StreamExchange { dist: HashShard(t3.v5) }
+          │ └─StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) }
+          └─StreamExchange { dist: HashShard(t4.v7) }
+            └─StreamTableScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) }
 - name: right deep tree join ordering manually
   sql: |
     set rw_enable_join_ordering = false;
@@ -151,40 +151,40 @@
     select * from t1 join (t2 join (t3 join t4 on v5 = v7) on v4 = v6) on v1 = v3;
   logical_plan: |-
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8] }
-    └──LogicalJoin { type: Inner, on: (t1.v1 = t2.v3), output: all }
-       ├──LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
-       └──LogicalJoin { type: Inner, on: (t2.v4 = t3.v6), output: all }
-          ├──LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
-          └──LogicalJoin { type: Inner, on: (t3.v5 = t4.v7), output: all }
-             ├──LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
-             └──LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v3), output: all }
+      ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+      └─LogicalJoin { type: Inner, on: (t2.v4 = t3.v6), output: all }
+        ├─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
+        └─LogicalJoin { type: Inner, on: (t3.v5 = t4.v7), output: all }
+          ├─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
+          └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: all }
-       ├──BatchExchange { order: [], dist: HashShard(t1.v1) }
-       │  └──BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
-       └──BatchExchange { order: [], dist: HashShard(t2.v3) }
-          └──BatchHashJoin { type: Inner, predicate: t2.v4 = t3.v6, output: all }
-             ├──BatchExchange { order: [], dist: HashShard(t2.v4) }
-             │  └──BatchScan { table: t2, columns: [t2.v3, t2.v4], distribution: SomeShard }
-             └──BatchExchange { order: [], dist: HashShard(t3.v6) }
-                └──BatchHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: all }
-                   ├──BatchExchange { order: [], dist: HashShard(t3.v5) }
-                   │  └──BatchScan { table: t3, columns: [t3.v5, t3.v6], distribution: SomeShard }
-                   └──BatchExchange { order: [], dist: HashShard(t4.v7) }
-                      └──BatchScan { table: t4, columns: [t4.v7, t4.v8], distribution: SomeShard }
+    └─BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: all }
+      ├─BatchExchange { order: [], dist: HashShard(t1.v1) }
+      │ └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t2.v3) }
+        └─BatchHashJoin { type: Inner, predicate: t2.v4 = t3.v6, output: all }
+          ├─BatchExchange { order: [], dist: HashShard(t2.v4) }
+          │ └─BatchScan { table: t2, columns: [t2.v3, t2.v4], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(t3.v6) }
+            └─BatchHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: all }
+              ├─BatchExchange { order: [], dist: HashShard(t3.v5) }
+              │ └─BatchScan { table: t3, columns: [t3.v5, t3.v6], distribution: SomeShard }
+              └─BatchExchange { order: [], dist: HashShard(t4.v7) }
+                └─BatchScan { table: t4, columns: [t4.v7, t4.v8], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6, v7, v8, t1._row_id(hidden), t2._row_id(hidden), t3._row_id(hidden), t4._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, t3._row_id, t4._row_id, v5, v4, v1], pk_columns: [t1._row_id, t2._row_id, t3._row_id, t4._row_id, v5, v4, v1], pk_conflict: NoCheck }
-    └──StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8, t1._row_id, t2._row_id, t3._row_id, t4._row_id] }
-       ├──StreamExchange { dist: HashShard(t1.v1) }
-       │  └──StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-       └──StreamExchange { dist: HashShard(t2.v3) }
-          └──StreamHashJoin { type: Inner, predicate: t2.v4 = t3.v6, output: [t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8, t2._row_id, t3._row_id, t4._row_id] }
-             ├──StreamExchange { dist: HashShard(t2.v4) }
-             │  └──StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
-             └──StreamExchange { dist: HashShard(t3.v6) }
-                └──StreamHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: [t3.v5, t3.v6, t4.v7, t4.v8, t3._row_id, t4._row_id] }
-                   ├──StreamExchange { dist: HashShard(t3.v5) }
-                   │  └──StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) }
-                   └──StreamExchange { dist: HashShard(t4.v7) }
-                      └──StreamTableScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) }
+    └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8, t1._row_id, t2._row_id, t3._row_id, t4._row_id] }
+      ├─StreamExchange { dist: HashShard(t1.v1) }
+      │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: HashShard(t2.v3) }
+        └─StreamHashJoin { type: Inner, predicate: t2.v4 = t3.v6, output: [t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8, t2._row_id, t3._row_id, t4._row_id] }
+          ├─StreamExchange { dist: HashShard(t2.v4) }
+          │ └─StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+          └─StreamExchange { dist: HashShard(t3.v6) }
+            └─StreamHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: [t3.v5, t3.v6, t4.v7, t4.v8, t3._row_id, t4._row_id] }
+              ├─StreamExchange { dist: HashShard(t3.v5) }
+              │ └─StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) }
+              └─StreamExchange { dist: HashShard(t4.v7) }
+                └─StreamTableScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) }

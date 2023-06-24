@@ -3,7 +3,7 @@
   batch_plan: 'BatchValues { rows: [[11:Int32, 22:Int32], [36:Int32, 44:Int32]] }'
   stream_plan: |-
     StreamMaterialize { columns: [*VALUES*_0.column_0, *VALUES*_0.column_1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [*VALUES*_0.column_0, *VALUES*_0.column_1] }
-    └──StreamValues { rows: [[11:Int32, 22:Int32, 0:Int64], [(33:Int32 + (1:Int32 + 2:Int32)), 44:Int32, 1:Int64]] }
+    └─StreamValues { rows: [[11:Int32, 22:Int32, 0:Int64], [(33:Int32 + (1:Int32 + 2:Int32)), 44:Int32, 1:Int64]] }
 - sql: select * from t
   binder_error: 'Catalog error: table or source not found: t'
 - sql: |
@@ -11,10 +11,10 @@
     select * from t;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └──StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t2.* from t;
@@ -24,80 +24,80 @@
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchFilter { predicate: true }
-       └──BatchScan { table: t, columns: [], distribution: SomeShard }
+    └─BatchFilter { predicate: true }
+      └─BatchScan { table: t, columns: [], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └──StreamFilter { predicate: true }
-       └──StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamFilter { predicate: true }
+      └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int);
     select * from t where v1<1;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchFilter { predicate: (t.v1 < 1:Int32) }
-       └──BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    └─BatchFilter { predicate: (t.v1 < 1:Int32) }
+      └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └──StreamFilter { predicate: (t.v1 < 1:Int32) }
-       └──StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamFilter { predicate: (t.v1 < 1:Int32) }
+      └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test boolean expression common factor extraction
   sql: |
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
     select * from t where v1 AND v2 AND ((v1 AND v2) OR (v2 AND v3));
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchFilter { predicate: t.v1 AND t.v2 AND (t.v1 OR t.v3) }
-       └──BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchFilter { predicate: t.v1 AND t.v2 AND (t.v1 OR t.v3) }
+      └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: test boolean expression simplification
   sql: |
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
     select * from t where v1 AND NOT(v1 OR v2 Or NOT(v1 AND v2 AND true));
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchFilter { predicate: t.v1 AND Not(t.v1) AND Not(t.v2) AND t.v2 }
-       └──BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchFilter { predicate: t.v1 AND Not(t.v1) AND Not(t.v2) AND t.v2 }
+      └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: test boolean expression simplification
   sql: |
     create table t (v1 Boolean, v2 Boolean);
     select * from t where (v1 AND v2) OR (v1 AND v2);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchFilter { predicate: t.v1 AND t.v2 }
-       └──BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchFilter { predicate: t.v1 AND t.v2 }
+      └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - name: constant folding for IS TRUE, IS FALSE, IS NULL
   sql: |
     create table t(a Boolean);
     select * from t where (NULL IS NULL) IS TRUE AND FALSE IS FALSE AND a;
   logical_plan: |-
     LogicalProject { exprs: [t.a] }
-    └──LogicalFilter { predicate: t.a }
-       └──LogicalScan { table: t, columns: [t.a, t._row_id] }
+    └─LogicalFilter { predicate: t.a }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
 - name: constant folding for IS NOT TRUE, IS NOT FALSE
   sql: |
     create table t(a Boolean);
     select * from t where (NULL IS NOT TRUE) IS NOT FALSE AND a IS NOT TRUE;
   logical_plan: |-
     LogicalProject { exprs: [t.a] }
-    └──LogicalFilter { predicate: IsNotTrue(t.a) }
-       └──LogicalScan { table: t, columns: [t.a, t._row_id] }
+    └─LogicalFilter { predicate: IsNotTrue(t.a) }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
 - name: constant folding IS NOT NULL
   sql: |
     create table t(a double precision);
     select * from t where (a IS NOT NULL AND 3.14 IS NOT NULL) OR (NULL IS NOT NULL);
   logical_plan: |-
     LogicalProject { exprs: [t.a] }
-    └──LogicalFilter { predicate: IsNotNull(t.a) }
-       └──LogicalScan { table: t, columns: [t.a, t._row_id] }
+    └─LogicalFilter { predicate: IsNotNull(t.a) }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
 - sql: |
     create table t (v1 int, v2 int);
     select v1 from t;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └──StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: select 1
   batch_plan: 'BatchValues { rows: [[1:Int32]] }'
 - sql: |
@@ -105,24 +105,24 @@
     select a from t as t2(a);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+    └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchDelete { table: t }
-       └──BatchExchange { order: [], dist: Single }
-          └──BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─BatchDelete { table: t }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchDelete { table: t }
-       └──BatchExchange { order: [], dist: Single }
-          └──BatchFilter { predicate: (t.v1 = 1:Int32) }
-             └──BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    └─BatchDelete { table: t }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchFilter { predicate: (t.v1 = 1:Int32) }
+          └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     select * from generate_series('2'::INT,'10'::INT,'2'::INT);
   batch_plan: 'BatchTableFunction { table_function: GenerateSeries(2:Int32, 10:Int32, 2:Int32) }'
@@ -151,7 +151,7 @@
     select * from t;
   logical_plan: |-
     LogicalProject { exprs: [] }
-    └──LogicalScan { table: t, columns: [t._row_id] }
+    └─LogicalScan { table: t, columns: [t._row_id] }
 - name: disallow subquery in values
   sql: |
     values(1, (select 1));
@@ -173,39 +173,39 @@
     select * from t limit 1
   batch_plan: |-
     BatchLimit { limit: 1, offset: 0 }
-    └──BatchExchange { order: [], dist: Single }
-       └──BatchLimit { limit: 1, offset: 0 }
-          └──BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchLimit { limit: 1, offset: 0 }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 limit 1
   batch_plan: |-
     BatchTopN { order: [t.v1 ASC], limit: 1, offset: 0 }
-    └──BatchExchange { order: [], dist: Single }
-       └──BatchTopN { order: [t.v1 ASC], limit: 1, offset: 0 }
-          └──BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchTopN { order: [t.v1 ASC], limit: 1, offset: 0 }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - sql: |
     create table t (v1 int, v2 int);
     create materialized view mv(A,b) as select * from t;
     select a, b from mv;
   stream_plan: |-
     StreamMaterialize { columns: [a, b, mv.t._row_id(hidden)], stream_key: [mv.t._row_id], pk_columns: [mv.t._row_id], pk_conflict: NoCheck }
-    └──StreamTableScan { table: mv, columns: [mv.a, mv.b, mv.t._row_id], pk: [mv.t._row_id], dist: UpstreamHashShard(mv.t._row_id) }
+    └─StreamTableScan { table: mv, columns: [mv.a, mv.b, mv.t._row_id], pk: [mv.t._row_id], dist: UpstreamHashShard(mv.t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     create materialized view mv(a,b) as select v1+1,v2+1 from t;
     select * from mv;
   stream_plan: |-
     StreamMaterialize { columns: [a, b, mv.t._row_id(hidden)], stream_key: [mv.t._row_id], pk_columns: [mv.t._row_id], pk_conflict: NoCheck }
-    └──StreamTableScan { table: mv, columns: [mv.a, mv.b, mv.t._row_id], pk: [mv.t._row_id], dist: UpstreamHashShard(mv.t._row_id) }
+    └─StreamTableScan { table: mv, columns: [mv.a, mv.b, mv.t._row_id], pk: [mv.t._row_id], dist: UpstreamHashShard(mv.t._row_id) }
 - sql: |
     create table t (id int primary key, col int);
     create index idx on t(col);
     select id from idx;
   stream_plan: |-
     StreamMaterialize { columns: [id], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
-    └──StreamExchange { dist: HashShard(idx.id) }
-       └──StreamTableScan { table: idx, columns: [idx.id], pk: [idx.id], dist: SomeShard }
+    └─StreamExchange { dist: HashShard(idx.id) }
+      └─StreamTableScan { table: idx, columns: [idx.id], pk: [idx.id], dist: SomeShard }
 - sql: |
     select * from generate_series(1, 10000000, 1) where Now() is null;
   batch_plan: 'BatchValues { rows: [] }'
@@ -214,16 +214,16 @@
     select * from t natural join (select * from t where 1=0);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └──BatchHashJoin { type: Inner, predicate: t.v = t.v, output: [t.v] }
-       ├──BatchExchange { order: [], dist: HashShard(t.v) }
-       │  └──BatchScan { table: t, columns: [t.v], distribution: SomeShard }
-       └──BatchExchange { order: [], dist: HashShard(t.v) }
-          └──BatchValues { rows: [] }
+    └─BatchHashJoin { type: Inner, predicate: t.v = t.v, output: [t.v] }
+      ├─BatchExchange { order: [], dist: HashShard(t.v) }
+      │ └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t.v) }
+        └─BatchValues { rows: [] }
   stream_plan: |-
     StreamMaterialize { columns: [v, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, v], pk_columns: [t._row_id, t._row_id#1, v], pk_conflict: NoCheck }
-    └──StreamHashJoin { type: Inner, predicate: t.v = t.v, output: [t.v, t._row_id, t._row_id] }
-       ├──StreamExchange { dist: HashShard(t.v) }
-       │  └──StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-       └──StreamExchange { dist: HashShard(t.v) }
-          └──StreamFilter { predicate: false:Boolean }
-             └──StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamHashJoin { type: Inner, predicate: t.v = t.v, output: [t.v, t._row_id, t._row_id] }
+      ├─StreamExchange { dist: HashShard(t.v) }
+      │ └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamExchange { dist: HashShard(t.v) }
+        └─StreamFilter { predicate: false:Boolean }
+          └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

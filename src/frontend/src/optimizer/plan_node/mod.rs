@@ -444,8 +444,7 @@ impl Explain for PlanRef {
     fn explain<'a>(&self) -> Pretty<'a> {
         let mut node = self.distill();
         let inputs = self.inputs();
-        let mut inputs_iter = inputs.iter().peekable();
-        for input in inputs_iter {
+        for input in inputs.iter().peekable() {
             node.children.push(input.explain());
         }
         Pretty::Record(node)
@@ -457,10 +456,10 @@ impl Explain for PlanRef {
 
         let mut output = String::with_capacity(2048);
         let mut config = PrettyConfig {
+            indent: 3,
             need_boundaries: false,
             width: 360,
             reduced_spaces: true,
-            ..Default::default()
         };
         config.unicode(&mut output, &plan.explain());
         output
