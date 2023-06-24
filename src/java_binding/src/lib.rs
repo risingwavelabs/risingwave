@@ -23,7 +23,6 @@ mod stream_chunk_iterator;
 use std::backtrace::Backtrace;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::panic::catch_unwind;
 use std::slice::from_raw_parts;
 use std::sync::{Arc, LazyLock};
 
@@ -39,6 +38,7 @@ use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
@@ -199,7 +199,7 @@ where
     F: FnOnce() -> Result<Ret>,
     Ret: Default,
 {
-    match catch_unwind(std::panic::AssertUnwindSafe(inner)) {
+    match rw_catch_unwind(std::panic::AssertUnwindSafe(inner)) {
         Ok(Ok(ret)) => ret,
         Ok(Err(e)) => {
             match e {
