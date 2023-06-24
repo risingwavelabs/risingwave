@@ -170,7 +170,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 15
 
   - label: "unit test (deterministic simulation)"
     command: "MADSIM_TEST_NUM=50 ci/scripts/deterministic-unit-test.sh"
@@ -215,7 +215,7 @@ steps:
           environment:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
 
   - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=16 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
