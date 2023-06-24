@@ -62,7 +62,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
     ) -> Result<Vec<Statement>> {
         let mut updates = vec![];
         for insert in inserts {
-            if self.rng.gen_bool(0.1) {
+            if self.rng.gen_bool(0.2) {
                 match insert {
                     Statement::Insert {
                         table_name, source, ..

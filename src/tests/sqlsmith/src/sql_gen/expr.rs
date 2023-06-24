@@ -43,7 +43,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             // Stop recursion with a simple scalar or column.
             // Weight it more towards columns, scalar has much higher chance of being generated,
             // since it is usually used as fail-safe expression.
-            return match self.rng.gen_bool(0.2) {
+            return match self.rng.gen_bool(0.1) {
                 true => self.gen_simple_scalar(typ),
                 false => self.gen_col(typ, context),
             };
@@ -91,12 +91,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // - `a1 >= a2 IN b`
         // ...
         // We just nest compound expressions to avoid this.
-        let range = if context.can_gen_agg() { 99 } else { 90 };
+        let range = if context.can_gen_agg() { 100 } else { 50 };
         match self.rng.gen_range(0..=range) {
-            0..=70 => Expr::Nested(Box::new(self.gen_func(typ, context))),
-            71..=80 => self.gen_exists(typ, context),
-            81..=90 => self.gen_explicit_cast(typ, context),
-            91..=99 => self.gen_agg(typ),
+            0..=35 => Expr::Nested(Box::new(self.gen_func(typ, context))),
+            36..=40 => self.gen_exists(typ, context),
+            41..=50 => self.gen_explicit_cast(typ, context),
+            51..=100 => self.gen_agg(typ),
             _ => unreachable!(),
         }
     }
