@@ -23,6 +23,8 @@ use risingwave_common::types::{DataType, Date, Datum, Interval, ScalarImpl, F32,
 use risingwave_pb::plan_common::ColumnDesc;
 
 const RW_DECIMAL_MAX_PRECISION: usize = 28;
+const DBZ_VARIABLE_SCALE_DECIMAL_NAME: &str = "VariableScaleDecimal";
+const DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE: &str = "io.debezium.data";
 
 pub(crate) fn avro_field_to_column_desc(
     name: &str,
@@ -70,14 +72,29 @@ fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
         Schema::Boolean => DataType::Boolean,
         Schema::Float => DataType::Float32,
         Schema::Double => DataType::Float64,
-        Schema::Decimal { .. } => DataType::Decimal,
+        Schema::Decimal { precision, .. } => {
+            if precision > &RW_DECIMAL_MAX_PRECISION {
+                tracing::warn!(
+                    "RisingWave supports decimal precision up to {}, but got {}. Will truncate.",
+                    RW_DECIMAL_MAX_PRECISION,
+                    precision
+                );
+            }
+            DataType::Decimal
+        }
         Schema::Date => DataType::Date,
         Schema::TimestampMillis => DataType::Timestamptz,
         Schema::TimestampMicros => DataType::Timestamptz,
         Schema::Duration => DataType::Interval,
         Schema::Bytes => DataType::Bytea,
         Schema::Enum { .. } => DataType::Varchar,
-        Schema::Record { fields, .. } => {
+        Schema::Record { fields, name, .. } => {
+            if name.name == DBZ_VARIABLE_SCALE_DECIMAL_NAME
+                && name.namespace == Some(DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE.into())
+            {
+                return Ok(DataType::Decimal);
+            }
+
             let struct_fields = fields
                 .iter()
                 .map(|f| avro_type_mapping(&f.schema))
@@ -139,20 +156,24 @@ pub(crate) fn get_field_from_avro_value<'a>(
 
 pub(crate) fn avro_decimal_to_rust_decimal(
     avro_decimal: AvroDecimal,
-    precision: usize,
+    _precision: usize,
     scale: usize,
 ) -> Result<rust_decimal::Decimal> {
-    if precision > RW_DECIMAL_MAX_PRECISION {
-        return Err(RwError::from(ProtocolError(format!(
-            "only support decimal with max precision {} but given avro decimal with precision {}",
-            RW_DECIMAL_MAX_PRECISION, precision
-        ))));
-    }
-
     let negative = !avro_decimal.is_positive();
     let bytes = avro_decimal.to_vec_unsigned();
 
-    let (lo, mid, hi) = match bytes.len() {
+    let (lo, mid, hi) = extract_decimal(bytes);
+    Ok(rust_decimal::Decimal::from_parts(
+        lo,
+        mid,
+        hi,
+        negative,
+        scale as u32,
+    ))
+}
+
+pub(crate) fn extract_decimal(bytes: Vec<u8>) -> (u32, u32, u32) {
+    match bytes.len() {
         len @ 0..=4 => {
             let mut pad = vec![0; 4 - len];
             pad.extend_from_slice(&bytes);
@@ -175,14 +196,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
             (lo, mid, hi)
         }
         _ => unreachable!(),
-    };
-    Ok(rust_decimal::Decimal::from_parts(
-        lo,
-        mid,
-        hi,
-        negative,
-        scale as u32,
-    ))
+    }
 }
 
 pub(crate) fn unix_epoch_days() -> i32 {
