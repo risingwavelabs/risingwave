@@ -5,14 +5,17 @@
 # set -euo pipefail
 
 echo "--- preparing elasticsearch"
-wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
-apt-get install apt-transport-https
-echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/7.x/apt stable main" | tee /etc/apt/sources.list.d/elastic-7.x.list
-apt-get update
-apt-get install elasticsearch
-/bin/systemctl daemon-reload
-/bin/systemctl enable elasticsearch.service
-systemctl start elasticsearch.service
+# wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+# apt-get install apt-transport-https
+# echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/7.x/apt stable main" | tee /etc/apt/sources.list.d/elastic-7.x.list
+# apt-get update
+# apt-get install elasticsearch
+# /bin/systemctl daemon-reload
+# /bin/systemctl enable elasticsearch.service
+# systemctl start elasticsearch.service
+
+docker pull docker.elastic.co/elasticsearch/elasticsearch:7.17.10
+docker run -p 127.0.0.1:9200:9200 -p 127.0.0.1:9300:9300 -e "discovery.type=single-node" docker.elastic.co/elasticsearch/elasticsearch:7.17.10
 
 echo "--- starting elasticsearch"
 # timeout 20 elasticsearch-7.17.10/bin/elasticsearch -E http.port=9200
