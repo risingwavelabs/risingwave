@@ -27,7 +27,6 @@ pub(super) struct DeltaBTreeMap<'part, K: Ord, V> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumAsInner)]
 pub(super) enum Change<V> {
-    Update(V),
     Insert(V),
     Delete,
 }
@@ -74,14 +73,7 @@ impl<'part, K: Ord, V> DeltaBTreeMap<'part, K, V> {
         let dt_cursor = self.delta.lower_bound(Bound::Included(key));
         let curr_key_value = if dt_cursor.key() == Some(key) {
             match dt_cursor.key_value().unwrap() {
-                (key, Change::Update(value)) => {
-                    assert!(ss_cursor.key() == Some(key));
-                    (key, value)
-                }
-                (key, Change::Insert(value)) => {
-                    assert!(ss_cursor.key() != Some(key));
-                    (key, value)
-                }
+                (key, Change::Insert(value)) => (key, value),
                 (_key, Change::Delete) => {
                     // the key is deleted
                     return None;
@@ -163,8 +155,8 @@ pub(super) struct CursorWithDelta<'a, K: Ord, V> {
 pub(super) enum PositionType {
     Ghost,
     Snapshot,
-    DiffUpdate,
-    DiffInsert,
+    DeltaUpdate,
+    DeltaInsert,
 }
 
 #[derive(PartialEq, Eq)]
@@ -178,12 +170,11 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
     pub fn position(&self) -> PositionType {
         let Some((key, _)) = self.curr_key_value else { return PositionType::Ghost; };
         if self.delta.contains_key(key) {
-            if matches!(self.delta.get(key).unwrap(), Change::Update(_)) {
-                assert!(self.snapshot.contains_key(key));
-                PositionType::DiffUpdate
+            assert!(matches!(self.delta.get(key).unwrap(), Change::Insert(_)));
+            if self.snapshot.contains_key(key) {
+                PositionType::DeltaUpdate
             } else {
-                assert!(!self.snapshot.contains_key(key));
-                PositionType::DiffInsert
+                PositionType::DeltaInsert
             }
         } else {
             assert!(self.snapshot.contains_key(key));
@@ -233,8 +224,7 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
                         }
                     }
                     Ordering::Equal => match dt_change {
-                        Change::Update(v) => return Some((ss_key, v)),
-                        Change::Insert(_) => panic!("bad delta"),
+                        Change::Insert(v) => return Some((ss_key, v)),
                         Change::Delete => continue,
                     },
                 },
@@ -415,7 +405,7 @@ mod tests {
         assert_eq!(delta_map.upper_bound(Bound::Excluded(&10)).key(), Some(&2));
 
         let mut cursor = delta_map.find(&2).unwrap();
-        assert_eq!(cursor.position(), PositionType::DiffInsert);
+        assert_eq!(cursor.position(), PositionType::DeltaInsert);
         assert_eq!(cursor.key(), Some(&2));
         assert_eq!(cursor.value(), Some(&"2"));
         assert_eq!(cursor.key_value(), Some((&2, &"2")));
@@ -512,7 +502,7 @@ mod tests {
         assert_eq!(delta_map.upper_bound(Bound::Excluded(&2)).key(), Some(&1));
 
         let mut cursor = delta_map.find(&2).unwrap();
-        assert_eq!(cursor.position(), PositionType::DiffInsert);
+        assert_eq!(cursor.position(), PositionType::DeltaInsert);
         assert_eq!(cursor.key(), Some(&2));
         assert_eq!(cursor.value(), Some(&"2"));
         assert_eq!(cursor.key_value(), Some((&2, &"2")));
@@ -529,14 +519,14 @@ mod tests {
         map.insert(1, "1");
         map.insert(3, "3");
         let mut delta = BTreeMap::new();
-        delta.insert(1, Change::Update("1 new"));
+        delta.insert(1, Change::Insert("1 new"));
         let delta_map = DeltaBTreeMap::new(&map, delta);
 
         assert_eq!(delta_map.first_key(), Some(&1));
         assert_eq!(delta_map.last_key(), Some(&3));
 
         let mut cursor = delta_map.find(&1).unwrap();
-        assert_eq!(cursor.position(), PositionType::DiffUpdate);
+        assert_eq!(cursor.position(), PositionType::DeltaUpdate);
         assert_eq!(cursor.key(), Some(&1));
         assert_eq!(cursor.value(), Some(&"1 new"));
         assert_eq!(cursor.key_value(), Some((&1, &"1 new")));
@@ -556,14 +546,14 @@ mod tests {
         map.insert(1, "1");
         map.insert(3, "3");
         let mut delta = BTreeMap::new();
-        delta.insert(3, Change::Update("3 new"));
+        delta.insert(3, Change::Insert("3 new"));
         let delta_map = DeltaBTreeMap::new(&map, delta);
 
         assert_eq!(delta_map.first_key(), Some(&1));
         assert_eq!(delta_map.last_key(), Some(&3));
 
         let mut cursor = delta_map.find(&3).unwrap();
-        assert_eq!(cursor.position(), PositionType::DiffUpdate);
+        assert_eq!(cursor.position(), PositionType::DeltaUpdate);
         assert_eq!(cursor.key(), Some(&3));
         assert_eq!(cursor.value(), Some(&"3 new"));
         assert_eq!(cursor.key_value(), Some((&3, &"3 new")));
@@ -585,7 +575,7 @@ mod tests {
         map.insert(3, "3");
         let mut delta = BTreeMap::new();
         delta.insert(0, Change::Insert("0"));
-        delta.insert(1, Change::Update("1 new"));
+        delta.insert(1, Change::Insert("1 new"));
         delta.insert(3, Change::Delete);
         delta.insert(4, Change::Insert("4"));
         let delta_map = DeltaBTreeMap::new(&map, delta);
@@ -603,36 +593,36 @@ mod tests {
         assert_eq!(delta_map.upper_bound(Bound::Excluded(&2)).key(), Some(&1));
 
         let mut cursor = delta_map.find(&0).unwrap();
-        assert_eq!(cursor.position(), PositionType::DiffInsert);
+        assert_eq!(cursor.position(), PositionType::DeltaInsert);
         assert_eq!(cursor.key_value(), Some((&0, &"0")));
         cursor.move_next();
-        assert_eq!(cursor.position(), PositionType::DiffUpdate);
+        assert_eq!(cursor.position(), PositionType::DeltaUpdate);
         assert_eq!(cursor.key_value(), Some((&1, &"1 new")));
         cursor.move_next();
         assert_eq!(cursor.position(), PositionType::Snapshot);
         assert_eq!(cursor.key_value(), Some((&2, &"2")));
         cursor.move_next();
-        assert_eq!(cursor.position(), PositionType::DiffInsert);
+        assert_eq!(cursor.position(), PositionType::DeltaInsert);
         assert_eq!(cursor.key_value(), Some((&4, &"4")));
         cursor.move_next();
         assert_eq!(cursor.position(), PositionType::Ghost);
         assert_eq!(cursor.key_value(), None);
         cursor.move_next();
-        assert_eq!(cursor.position(), PositionType::DiffInsert);
+        assert_eq!(cursor.position(), PositionType::DeltaInsert);
         assert_eq!(cursor.key_value(), Some((&0, &"0")));
         cursor.move_prev();
         assert_eq!(cursor.position(), PositionType::Ghost);
         cursor.move_prev();
-        assert_eq!(cursor.position(), PositionType::DiffInsert);
+        assert_eq!(cursor.position(), PositionType::DeltaInsert);
         assert_eq!(cursor.key_value(), Some((&4, &"4")));
         cursor.move_prev();
         assert_eq!(cursor.position(), PositionType::Snapshot);
         assert_eq!(cursor.key_value(), Some((&2, &"2")));
         cursor.move_prev();
-        assert_eq!(cursor.position(), PositionType::DiffUpdate);
+        assert_eq!(cursor.position(), PositionType::DeltaUpdate);
         assert_eq!(cursor.key_value(), Some((&1, &"1 new")));
         cursor.move_prev();
-        assert_eq!(cursor.position(), PositionType::DiffInsert);
+        assert_eq!(cursor.position(), PositionType::DeltaInsert);
         assert_eq!(cursor.key_value(), Some((&0, &"0")));
         cursor.move_prev();
         assert_eq!(cursor.position(), PositionType::Ghost);
@@ -648,7 +638,7 @@ mod tests {
         map.insert(9, "9");
         let mut delta = BTreeMap::new();
         delta.insert(0, Change::Insert("0"));
-        delta.insert(1, Change::Update("1 new"));
+        delta.insert(1, Change::Insert("1 new"));
         delta.insert(5, Change::Delete);
         delta.insert(7, Change::Delete);
         delta.insert(9, Change::Delete);

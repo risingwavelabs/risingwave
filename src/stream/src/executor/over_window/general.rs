@@ -370,7 +370,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     if old_part_key == new_part_key && old_state_key == new_state_key {
                         // not a key-change update
                         let part_delta = deltas.entry(old_part_key).or_insert(Delta::new());
-                        part_delta.insert(old_state_key, Change::Update(new_row.into_owned_row()));
+                        part_delta.insert(old_state_key, Change::Insert(new_row.into_owned_row()));
                     } else if old_part_key == new_part_key {
                         // order-change update
                         key_change_updated_pks.insert(this.get_input_pk(old_row));
@@ -540,14 +540,14 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
                 match curr_key_cursor.position() {
                     PositionType::Ghost => unreachable!(),
-                    PositionType::Snapshot | PositionType::DiffUpdate => {
+                    PositionType::Snapshot | PositionType::DeltaUpdate => {
                         // update
                         let old_row = snapshot.get(key).unwrap().clone();
                         if old_row != new_row {
                             part_changes.insert(key.clone(), Record::Update { old_row, new_row });
                         }
                     }
-                    PositionType::DiffInsert => {
+                    PositionType::DeltaInsert => {
                         // insert
                         part_changes.insert(key.clone(), Record::Insert { new_row });
                     }
@@ -808,8 +808,8 @@ mod tests {
             (Delete) => {
                 Change::Delete
             };
-            ($other:ident) => {
-                Change::$other(OwnedRow::empty())
+            (Insert) => {
+                Change::Insert(OwnedRow::empty())
             };
         }
 
@@ -868,7 +868,7 @@ mod tests {
         {
             // test simple
             let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
-            let delta = create_delta!((2, Update), (3, Delete));
+            let delta = create_delta!((2, Insert), (3, Delete));
             let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
 
             {
