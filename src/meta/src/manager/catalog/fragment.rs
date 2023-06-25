@@ -164,8 +164,8 @@ where
     }
 
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
+        // Notify all fragment mapping to frontend nodes
         for fragment in table_fragment.fragments.values() {
-            // Notify all fragment mapping to frontend nodes
             let mapping = fragment
                 .vnode_mapping
                 .clone()
