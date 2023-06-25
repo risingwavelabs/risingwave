@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::Bound;
 
@@ -343,7 +343,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         chunk: StreamChunk,
     ) {
         // `partition key` => `Diff`.
-        let mut diffs: HashMap<_, Diff> = HashMap::new();
+        let mut diffs: BTreeMap<DefaultOrdered<OwnedRow>, Diff> = BTreeMap::new();
         // `input pk` of update records of which the `partition key` or `order key` is changed.
         let mut key_change_updated_pks = HashSet::new();
 
@@ -351,7 +351,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         for record in Self::merge_changes_in_chunk(this, &chunk) {
             match record {
                 Record::Insert { new_row } => {
-                    let part_key = this.get_partition_key(new_row);
+                    let part_key = this.get_partition_key(new_row).into();
                     let part_diff = diffs.entry(part_key).or_insert(Diff::new());
                     part_diff.insert(
                         this.row_to_state_key(new_row)?,
@@ -359,13 +359,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     );
                 }
                 Record::Delete { old_row } => {
-                    let part_key = this.get_partition_key(old_row);
+                    let part_key = this.get_partition_key(old_row).into();
                     let part_diff = diffs.entry(part_key).or_insert(Diff::new());
                     part_diff.insert(this.row_to_state_key(old_row)?, Change::Delete);
                 }
                 Record::Update { old_row, new_row } => {
-                    let old_part_key = this.get_partition_key(old_row);
-                    let new_part_key = this.get_partition_key(new_row);
+                    let old_part_key = this.get_partition_key(old_row).into();
+                    let new_part_key = this.get_partition_key(new_row).into();
                     let old_state_key = this.row_to_state_key(old_row)?;
                     let new_state_key = this.row_to_state_key(new_row)?;
                     if old_part_key == new_part_key && old_state_key == new_state_key {
@@ -394,43 +394,50 @@ impl<S: StateStore> OverWindowExecutor<S> {
         }
 
         // `input pk` => `Record`
-        let mut final_changes = BTreeMap::new();
+        let mut key_change_update_buffer = BTreeMap::new();
+        let mut chunk_builder = ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types());
 
         // Build final changes partition by partition.
         for (part_key, diff) in diffs {
             Self::ensure_partition_in_cache(this, &mut vars.partitions, &part_key).await?;
             let mut partition = vars.partitions.get_mut(&part_key).unwrap();
-            let partition_with_diff = DiffBTreeMap::new(partition.cache(), diff);
-            let mut part_final_changes = BTreeMap::new();
 
-            let yield_change = |key: StateKey, record: Record<OwnedRow>| {
-                // Buffer the change inside current partition for later mutation of state table and
-                // partition cache.
-                part_final_changes.insert(key.clone(), record.clone());
+            // Build changes for current partition.
+            let part_changes = Self::build_changes_for_partition(
+                this,
+                DiffBTreeMap::new(partition.cache(), diff),
+            )?;
 
-                // Buffer the change at chunk level (may cross partition) for later mutation of
-                // state table and yielding output chunk.
+            for (key, record) in part_changes {
+                // Build chunk and yield if needed.
                 if !key_change_updated_pks.contains(&key.pk) {
-                    // not a key-change update, just keep the change as it is
-                    final_changes.insert(key.pk, record);
-                } else if let Some(existed) = final_changes.remove(&key.pk) {
-                    match (existed, record) {
-                        (Record::Insert { new_row }, Record::Delete { old_row })
-                        | (Record::Delete { old_row }, Record::Insert { new_row }) => {
-                            // merge delete and insert
-                            final_changes.insert(key.pk, Record::Update { old_row, new_row });
-                        }
-                        _ => panic!("other cases should not exist"),
+                    if let Some(chunk) = chunk_builder.append_record(record.as_ref()) {
+                        yield chunk;
                     }
                 } else {
-                    final_changes.insert(key.pk, record);
+                    // For key-change updates, we should wait for both `Delete` and `Insert` changes
+                    // and merge them together.
+                    let pk = key.pk.clone();
+                    let record = record.clone();
+                    if let Some(existed) = key_change_update_buffer.remove(&key.pk) {
+                        match (existed, record) {
+                            (Record::Insert { new_row }, Record::Delete { old_row })
+                            | (Record::Delete { old_row }, Record::Insert { new_row }) => {
+                                // merge `Delete` and `Insert` into `Update`
+                                if let Some(chunk) =
+                                    chunk_builder.append_record(Record::Update { old_row, new_row })
+                                {
+                                    yield chunk;
+                                }
+                            }
+                            _ => panic!("other cases should not exist"),
+                        }
+                    } else {
+                        key_change_update_buffer.insert(pk, record);
+                    }
                 }
-            };
 
-            Self::build_changes_for_partition(this, partition_with_diff, yield_change)?;
-
-            // Update state table and partition cache.
-            for (key, record) in part_final_changes {
+                // Update state table and partition cache.
                 this.state_table.write_record(record.as_ref());
                 match record {
                     Record::Insert { new_row } | Record::Update { new_row, .. } => {
@@ -445,13 +452,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             }
         }
 
-        // Yield changes to downstream.
-        let mut chunk_builder = ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types());
-        for record in final_changes.into_values() {
-            if let Some(chunk) = chunk_builder.append_record(record) {
-                yield chunk;
-            }
-        }
+        // Yield remaining changes to downstream.
         if let Some(chunk) = chunk_builder.take() {
             yield chunk;
         }
@@ -460,17 +461,18 @@ impl<S: StateStore> OverWindowExecutor<S> {
     fn build_changes_for_partition(
         this: &ExecutorInner<S>,
         part_with_diff: DiffBTreeMap<'_, StateKey, OwnedRow>,
-        mut yield_change: impl FnMut(StateKey, Record<OwnedRow>),
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<BTreeMap<StateKey, Record<OwnedRow>>> {
         let snapshot = part_with_diff.snapshot();
         let diff = part_with_diff.diff();
         assert!(!diff.is_empty(), "if there's no diff, we won't be here");
+
+        let mut part_changes = BTreeMap::new();
 
         // Generate delete changes first, because deletes are skipped during iteration over
         // `part_with_diff` in the next step.
         for (key, change) in diff {
             if change.is_delete() {
-                yield_change(
+                part_changes.insert(
                     key.clone(),
                     Record::Delete {
                         old_row: snapshot.get(key).unwrap().clone(),
@@ -544,12 +546,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         // update
                         let old_row = snapshot.get(key).unwrap().clone();
                         if old_row != new_row {
-                            yield_change(key.clone(), Record::Update { old_row, new_row });
+                            part_changes.insert(key.clone(), Record::Update { old_row, new_row });
                         }
                     }
                     PositionType::DiffInsert => {
                         // insert
-                        yield_change(key.clone(), Record::Insert { new_row });
+                        part_changes.insert(key.clone(), Record::Insert { new_row });
                     }
                 }
 
@@ -560,7 +562,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             } {}
         }
 
-        Ok(())
+        Ok(part_changes)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
