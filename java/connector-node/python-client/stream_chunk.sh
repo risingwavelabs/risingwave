@@ -20,7 +20,7 @@ DATA_FILE=${PYTHON_DIRECTORY}/data/stream_chunk_data
 # cd ${CONNECTOR_ROOT}/assembly/target && java -classpath "./libs/*" -Djava.library.path=${RISINGWAVE_ROOT}/target/debug com.risingwave.connector.ConnectorService
 
 # Generate data
-cd ${RISINGWAVE_ROOT} && cargo run --bin data-chunk-payload-generator unit-test > ${DATA_FILE}
+cd ${RISINGWAVE_ROOT} && cargo run --bin data-chunk-payload-generator 30 > ${DATA_FILE}
 
 # Run unit test
 cd $PYTHON_DIRECTORY

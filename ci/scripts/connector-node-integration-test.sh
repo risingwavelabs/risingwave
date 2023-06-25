@@ -83,9 +83,7 @@ CONVERTOR=data-chunk-payload-convert-generator-$profile
 download-and-decompress-artifact $GENERATOR ./
 download-and-decompress-artifact $CONVERTOR ./
 ./$CONVERTOR data/sink_input_new.json > ./data/sink_input
-./$GENERATOR unit-test > ./data/stream_chunk_data
-# cargo run --bin data-chunk-payload-convert-generator data/sink_input_new.json > ./data/sink_input
-# cargo run --bin data-chunk-payload-generator unit-test > ./data/stream_chunk_data
+./$GENERATOR 30 > ./data/stream_chunk_data
 
 echo "--- prepare integration tests"
 cd ${RISINGWAVE_ROOT}/java/connector-node

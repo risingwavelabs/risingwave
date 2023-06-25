@@ -132,8 +132,8 @@ steps:
     timeout_in_minutes: 18
     cancel_on_build_failing: true
 
-  - label: "connector node integration test Java {{matrix.version}}"
-    command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v {{matrix.version}}"
+  - label: "connector node integration test Java {{matrix.java_version}}"
+    command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v {{matrix.java_version}}"
     depends_on:
       - "build"
       - "build-other"
@@ -145,7 +145,7 @@ steps:
       - ./ci/plugins/upload-failure-logs
     matrix:
       setup:
-        version:
+        java_version:
           - "11"
           - "17"
     timeout_in_minutes: 10

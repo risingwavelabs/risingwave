@@ -48,10 +48,10 @@ fn build_row(index: usize) -> OwnedRow {
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut flag = false;
-    let mut row_count = 30000;
-    if args.len() > 1 && &args[1] == "unit-test" {
+    let mut row_count: usize = 30000;
+    if args.len() > 1 {
         flag = true;
-        row_count = 30;
+        row_count = args[1].parse().unwrap();
     }
     let data_types = vec![
         DataType::Int16,
