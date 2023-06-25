@@ -2520,21 +2520,35 @@ impl Parser {
     ) -> Result<Vec<SqlOption>, ParserError> {
         if self.parse_keyword(keyword) {
             self.expect_token(&Token::LParen)?;
-            let mut values = vec![];
-            loop {
-                values.push(Parser::parse_sql_option(self)?);
-                let comma = self.consume_token(&Token::Comma);
-                if self.consume_token(&Token::RParen) {
-                    // allow a trailing comma, even though it's not in standard
-                    break;
-                } else if !comma {
-                    return self.expected("',' or ')' after option definition", self.peek_token());
-                }
-            }
-            Ok(values)
+            self.parse_options_inner()
         } else {
             Ok(vec![])
         }
+    }
+
+    pub fn parse_options(&mut self) -> Result<Vec<SqlOption>, ParserError> {
+        if self.peek_token() == Token::LParen {
+            self.next_token();
+            self.parse_options_inner()
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    // has parsed a LParen
+    pub fn parse_options_inner(&mut self) -> Result<Vec<SqlOption>, ParserError> {
+        let mut values = vec![];
+        loop {
+            values.push(Parser::parse_sql_option(self)?);
+            let comma = self.consume_token(&Token::Comma);
+            if self.consume_token(&Token::RParen) {
+                // allow a trailing comma, even though it's not in standard
+                break;
+            } else if !comma {
+                return self.expected("',' or ')' after option definition", self.peek_token());
+            }
+        }
+        Ok(values)
     }
 
     pub fn parse_sql_option(&mut self) -> Result<SqlOption, ParserError> {
