@@ -134,7 +134,7 @@ pub fn gen_create_mv_plan(
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Materialized View:");
-        ctx.trace(plan.explain_to_string().unwrap());
+        ctx.trace(plan.explain_to_string());
     }
 
     Ok((plan, table))
