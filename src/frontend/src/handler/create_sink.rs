@@ -50,7 +50,7 @@ pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     }];
     let select = Select {
         from,
-        projection: vec![SelectItem::Wildcard],
+        projection: vec![SelectItem::WildcardOrWithExcept(None)],
         ..Default::default()
     };
     let body = SetExpr::Select(Box::new(select));
