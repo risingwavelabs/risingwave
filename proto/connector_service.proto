@@ -21,10 +21,6 @@ message ValidationError {
   string error_message = 1;
 }
 
-message DropError {
-  string error_message = 1;
-}
-
 /* Sink Service */
 
 message SinkConfig {
@@ -145,17 +141,6 @@ message GetEventStreamResponse {
   repeated CdcMessage events = 2;
 }
 
-message DropEventStreamRequest {
-  uint64 source_id = 1;
-  SourceType source_type = 2;
-  map<string, string> properties = 3;
-}
-
-message DropEventStreamResponse {
-  // On drop failure, we return the error.
-  DropError error = 1;
-}
-
 message ValidateSourceRequest {
   uint64 source_id = 1;
   SourceType source_type = 2;
@@ -168,10 +153,17 @@ message ValidateSourceResponse {
   ValidationError error = 1;
 }
 
+message DropReplicationSlotRequest {
+  uint64 source_id = 1;
+  string slot_name = 2;
+}
+
+message DropReplicationSlotResponse {}
+
 service ConnectorService {
   rpc SinkStream(stream SinkStreamRequest) returns (stream SinkResponse);
   rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
-  rpc DropEventStream(DropEventStreamRequest) returns (DropEventStreamResponse);
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
+  rpc DropReplicationSlot(DropReplicationSlotRequest) returns (DropReplicationSlotResponse);
 }

@@ -26,12 +26,16 @@ public abstract class SourceHandlerFactory {
     static final Logger LOG = LoggerFactory.getLogger(SourceHandlerFactory.class);
 
     public static SourceHandler createSourceHandler(
-            SourceTypeE source, long sourceId, String startOffset, Map<String, String> userProps) {
+            SourceTypeE source,
+            long sourceId,
+            String startOffset,
+            Map<String, String> userProps,
+            Map<Long, String> replicationSlotMap) {
         // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
         Map<String, String> modifiableUserProps = new HashMap<>(userProps);
         modifiableUserProps.put("source.id", Long.toString(sourceId));
         var config = new DbzConnectorConfig(source, sourceId, startOffset, modifiableUserProps);
         LOG.info("resolved config for source#{}: {}", sourceId, config.getResolvedDebeziumProps());
-        return new DbzSourceHandler(config);
+        return new DbzSourceHandler(replicationSlotMap, config);
     }
 }

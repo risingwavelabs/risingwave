@@ -19,12 +19,16 @@ import com.risingwave.connector.source.core.SourceHandlerFactory;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
+import java.util.Map;
 
 public class SourceRequestHandler {
+    private Map<Long, String> replicationSlotMap;
     private final StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver;
 
     public SourceRequestHandler(
+            Map<Long, String> replicationSlotMap,
             StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver) {
+        this.replicationSlotMap = replicationSlotMap;
         this.responseObserver = responseObserver;
     }
 
@@ -34,7 +38,8 @@ public class SourceRequestHandler {
                         SourceTypeE.valueOf(request.getSourceType()),
                         request.getSourceId(),
                         request.getStartOffset(),
-                        request.getPropertiesMap());
+                        request.getPropertiesMap(),
+                        replicationSlotMap);
         handler.startSource(
                 (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>)
                         responseObserver);

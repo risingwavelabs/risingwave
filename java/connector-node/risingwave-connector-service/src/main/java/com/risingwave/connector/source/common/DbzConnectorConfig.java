@@ -16,6 +16,7 @@ package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
+import io.grpc.Status;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
@@ -125,6 +126,16 @@ public class DbzConnectorConfig {
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
+    }
+
+    public String getPropNotNull(String key) {
+        String value = resolvedDbzProps.getProperty(key);
+        if (value == null) {
+            throw Status.INVALID_ARGUMENT
+                    .withDescription(String.format("debezium property '%s' not found", key))
+                    .asRuntimeException();
+        }
+        return value;
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {
