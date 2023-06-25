@@ -25,7 +25,7 @@ use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
-use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
+use crate::source::base::SourceMessage;
 use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
@@ -164,9 +164,10 @@ impl KafkaSplitReader {
         interval.tick().await;
         let mut bytes_current_second = 0;
         let mut num_messages = 0;
-        let mut res = Vec::with_capacity(MAX_CHUNK_SIZE);
+        let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
+        let mut res = Vec::with_capacity(max_chunk_size);
         #[for_await]
-        'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(MAX_CHUNK_SIZE) {
+        'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
             for msg in msgs {
                 let msg = msg?;
                 let cur_offset = msg.offset();

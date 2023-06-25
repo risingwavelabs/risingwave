@@ -19,7 +19,8 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceContext, SplitMetaData, StreamChunkWithState,
+    BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
+    StreamChunkWithState,
 };
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -55,6 +56,9 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Expected barrier latency.
     expected_barrier_latency_ms: u64,
+
+    // control options for connector level
+    source_ctrl_opts: SourceCtrlOpts,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -68,6 +72,7 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         expected_barrier_latency_ms: u64,
         executor_id: u64,
+        source_ctrl_opts: SourceCtrlOpts,
     ) -> Self {
         Self {
             ctx,
@@ -78,6 +83,7 @@ impl<S: StateStore> SourceExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             expected_barrier_latency_ms,
+            source_ctrl_opts,
         }
     }
 
@@ -96,6 +102,7 @@ impl<S: StateStore> SourceExecutor<S> {
             self.stream_source_core.as_ref().unwrap().source_id,
             self.ctx.fragment_id,
             source_desc.metrics.clone(),
+            self.source_ctrl_opts.clone(),
         );
         source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
         source_desc
@@ -649,6 +656,7 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
+            SourceCtrlOpts::default(),
         );
         let mut executor = Box::new(executor).execute();
 
@@ -736,6 +744,7 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
+            SourceCtrlOpts::default(),
         );
         let mut handler = Box::new(executor).execute();
 
