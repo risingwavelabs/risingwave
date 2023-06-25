@@ -553,7 +553,9 @@ pub struct WithProperties(pub Vec<SqlOption>);
 
 impl ParseTo for WithProperties {
     fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
-        Ok(Self(parser.parse_options(Keyword::WITH)?))
+        Ok(Self(
+            parser.parse_options_with_preceding_keyword(Keyword::WITH)?,
+        ))
     }
 }
 

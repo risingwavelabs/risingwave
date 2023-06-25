@@ -1906,7 +1906,7 @@ impl Parser {
         } else {
             None
         };
-        let with_options = self.parse_options(Keyword::WITH)?;
+        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
         self.expect_keyword(Keyword::AS)?;
         let query = Box::new(self.parse_query()?);
         // Optional `WITH [ CASCADED | LOCAL ] CHECK OPTION` is widely supported here.
@@ -2117,7 +2117,9 @@ impl Parser {
     }
 
     fn parse_with_properties(&mut self) -> Result<Vec<SqlOption>, ParserError> {
-        Ok(self.parse_options(Keyword::WITH)?.to_vec())
+        Ok(self
+            .parse_options_with_preceding_keyword(Keyword::WITH)?
+            .to_vec())
     }
 
     pub fn parse_drop(&mut self) -> Result<Statement, ParserError> {
@@ -2512,7 +2514,10 @@ impl Parser {
         }
     }
 
-    pub fn parse_options(&mut self, keyword: Keyword) -> Result<Vec<SqlOption>, ParserError> {
+    pub fn parse_options_with_preceding_keyword(
+        &mut self,
+        keyword: Keyword,
+    ) -> Result<Vec<SqlOption>, ParserError> {
         if self.parse_keyword(keyword) {
             self.expect_token(&Token::LParen)?;
             let mut values = vec![];
