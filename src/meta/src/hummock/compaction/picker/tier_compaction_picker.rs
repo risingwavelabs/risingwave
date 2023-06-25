@@ -14,6 +14,8 @@
 
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::can_concat;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
@@ -44,11 +46,28 @@ impl TierCompactionPicker {
                 continue;
             }
 
-            let mut select_level_inputs = vec![InputLevel {
+            let mut input_level = InputLevel {
                 level_idx: 0,
                 level_type: level.level_type,
                 table_infos: level.table_infos.clone(),
-            }];
+            };
+            // Since the level is overlapping, we can change the order of origin sstable infos in
+            // task.
+            input_level.table_infos.sort_by(|sst1, sst2| {
+                let a = sst1.key_range.as_ref().unwrap();
+                let b = sst2.key_range.as_ref().unwrap();
+                a.compare(b)
+            });
+
+            if can_concat(&input_level.table_infos) {
+                return Some(CompactionInput {
+                    input_levels: vec![input_level],
+                    target_level: 0,
+                    target_sub_level_id: level.sub_level_id,
+                });
+            }
+
+            let mut select_level_inputs = vec![input_level];
 
             // We assume that the maximum size of each sub_level is sub_level_max_compaction_bytes,
             // so the design here wants to merge multiple overlapping-levels in one compaction
