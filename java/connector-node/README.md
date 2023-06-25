@@ -37,14 +37,6 @@ java -classpath "./libs/*" com.risingwave.connector.ConnectorService
 
 Currently, during the Maven build process, all the required shared libraries are built and added to the JAR file. These shared libraries can then be loaded directly from the Java code.
 
-Here are some tips to follow:
-
-If you encounter an error stating that the program cannot access the library, it may be due to merging new features or outdated documentation. In such cases, you will need to manually build the corresponding Java shared library file.
-
-After building the shared library file, move it into the `java/connector-node/assembly/target directory`, make sure to specify the shared library path using the `-Djava.library.path=java/connector-node/assembly/target` flag. This tells Java where to find the required shared library files.
-
-By following these steps, you should be able to resolve any issues related to accessing the shared libraries in your Java program.
-
 ## Docker image
 Alternatively, to build and run the Docker image, run the following command from the project's root directory:
 
