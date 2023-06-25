@@ -17,8 +17,48 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Error, Result};
 use regex::{Match, Regex};
 use risingwave_pb::meta::reschedule_request::Reschedule;
+use serde::{Deserialize, Serialize};
+use serde_yaml;
 
 use crate::CtlContext;
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ReschedulePayload {
+    #[serde(rename = "reschedule_revision")]
+    reschedule_revision: u64,
+
+    #[serde(rename = "reschedule_plan")]
+    reschedule_plan: HashMap<u32, FragmentReschedulePlan>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct FragmentReschedulePlan {
+    #[serde(rename = "added_parallel_units")]
+    added_parallel_units: Vec<u32>,
+
+    #[serde(rename = "removed_parallel_units")]
+    removed_parallel_units: Vec<u32>,
+}
+
+#[derive(Debug)]
+pub enum RescheduleInput {
+    String(String),
+    FilePath(String),
+}
+
+impl From<FragmentReschedulePlan> for Reschedule {
+    fn from(value: FragmentReschedulePlan) -> Self {
+        let FragmentReschedulePlan {
+            added_parallel_units,
+            removed_parallel_units,
+        } = value;
+
+        Reschedule {
+            added_parallel_units,
+            removed_parallel_units,
+        }
+    }
+}
 
 const RESCHEDULE_MATCH_REGEXP: &str =
     r"^(?P<fragment>\d+)(?:-\[(?P<removed>\d+(?:,\d+)*)])?(?:\+\[(?P<added>\d+(?:,\d+)*)])?$";
@@ -54,14 +94,70 @@ const RESCHEDULE_ADDED_KEY: &str = "added";
 // }
 pub async fn reschedule(
     context: &CtlContext,
-    mut plan: String,
+    plan: Option<String>,
+    revision: Option<u64>,
+    from: Option<String>,
     dry_run: bool,
-    revision: u64,
 ) -> Result<()> {
     let meta_client = context.meta_client().await?;
 
-    let regex = Regex::new(RESCHEDULE_MATCH_REGEXP)?;
+    let (reschedules, revision) = match (plan, revision, from) {
+        (Some(plan), Some(revision), None) => (parse_plan(plan)?, revision),
+        (None, None, Some(path)) => {
+            let file = std::fs::File::open(path)?;
+            let ReschedulePayload {
+                reschedule_revision,
+                reschedule_plan,
+            } = serde_yaml::from_reader(file)?;
+            (
+                reschedule_plan
+                    .into_iter()
+                    .map(|(fragment_id, fragment_reschedule_plan)| {
+                        (fragment_id, fragment_reschedule_plan.into())
+                    })
+                    .collect(),
+                reschedule_revision,
+            )
+        }
+        _ => unreachable!(),
+    };
+
+    for (fragment_id, reschedule) in &reschedules {
+        println!("For fragment #{}", fragment_id);
+        if !reschedule.removed_parallel_units.is_empty() {
+            println!("\tRemove: {:?}", reschedule.removed_parallel_units);
+        }
+
+        if !reschedule.added_parallel_units.is_empty() {
+            println!("\tAdd:    {:?}", reschedule.added_parallel_units);
+        }
+
+        println!();
+    }
+
+    if !dry_run {
+        println!("---------------------------");
+        let (success, revision) = meta_client.reschedule(reschedules, revision).await?;
+
+        if !success {
+            println!(
+                "Reschedule failed, please check the plan or the revision, current revision is {}",
+                revision
+            );
+
+            return Err(anyhow!("reschedule failed"));
+        }
+
+        println!("Reschedule success, current revision is {}", revision);
+    }
+
+    Ok(())
+}
+
+fn parse_plan(mut plan: String) -> Result<HashMap<u32, Reschedule>, Error> {
     let mut reschedules = HashMap::new();
+
+    let regex = Regex::new(RESCHEDULE_MATCH_REGEXP)?;
 
     plan.retain(|c| !c.is_whitespace());
 
@@ -103,35 +199,5 @@ pub async fn reschedule(
             );
         }
     }
-
-    for (fragment_id, reschedule) in &reschedules {
-        println!("For fragment #{}", fragment_id);
-        if !reschedule.removed_parallel_units.is_empty() {
-            println!("\tRemove: {:?}", reschedule.removed_parallel_units);
-        }
-
-        if !reschedule.added_parallel_units.is_empty() {
-            println!("\tAdd:    {:?}", reschedule.added_parallel_units);
-        }
-
-        println!();
-    }
-
-    if !dry_run {
-        println!("---------------------------");
-        let (success, revision) = meta_client.reschedule(reschedules, revision).await?;
-
-        if !success {
-            println!(
-                "Reschedule failed, please check the plan or the revision, current revision is {}",
-                revision
-            );
-
-            return Err(anyhow!("reschedule failed"));
-        }
-
-        println!("Reschedule success, current revision is {}", revision);
-    }
-
-    Ok(())
+    Ok(reschedules)
 }

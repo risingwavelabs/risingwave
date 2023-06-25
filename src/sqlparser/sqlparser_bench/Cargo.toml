@@ -14,7 +14,7 @@ normal = ["workspace-hack"]
 risingwave_sqlparser = { path = "../" }
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = { workspace = true }
 
 [[bench]]
 name = "sqlparser_bench"

@@ -18,6 +18,7 @@ use std::io::{Error, ErrorKind};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_connector::sink::catalog::desc::SinkDesc;
@@ -30,7 +31,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
-use super::utils::{formatter_debug_plan_node, IndicesDisplay};
+use super::utils::{childless_record, formatter_debug_plan_node, Distill, IndicesDisplay};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -75,7 +76,7 @@ impl StreamSink {
             Distribution::Single => RequiredDist::single(),
             _ => {
                 match properties.get("connector") {
-                    Some(s) if s == "iceberg" => {
+                    Some(s) if s == "iceberg" || s == "deltalake" => {
                         // iceberg with multiple parallelism will fail easily with concurrent commit
                         // on metadata
                         // TODO: reset iceberg sink to have multiple parallelism
@@ -256,6 +257,39 @@ impl PlanTreeNodeUnary for StreamSink {
 
 impl_plan_tree_node_for_unary! { StreamSink }
 
+impl Distill for StreamSink {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let sink_type = if self.sink_desc.sink_type.is_append_only() {
+            "append-only"
+        } else {
+            "upsert"
+        };
+        let column_names = self
+            .sink_desc
+            .columns
+            .iter()
+            .map(|col| col.name_with_hidden().to_string())
+            .map(Pretty::from)
+            .collect();
+        let column_names = Pretty::Array(column_names);
+        let mut vec = Vec::with_capacity(3);
+        vec.push(("type", Pretty::from(sink_type)));
+        vec.push(("columns", column_names));
+        if self.sink_desc.sink_type.is_upsert() {
+            let pk = IndicesDisplay {
+                indices: &self
+                    .sink_desc
+                    .plan_pk
+                    .iter()
+                    .map(|k| k.column_index)
+                    .collect_vec(),
+                input_schema: &self.base.schema,
+            };
+            vec.push(("pk", Pretty::display(&pk)));
+        }
+        childless_record("StreamSink", vec)
+    }
+}
 impl fmt::Display for StreamSink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = formatter_debug_plan_node!(f, "StreamSink");

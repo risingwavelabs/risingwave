@@ -153,6 +153,17 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytesps(
+                    "Commit Flush Bytes by Table",
+                    "The  of bytes that have been written by commit epoch per second.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_commit_write_throughput')}[$__rate_interval])) by (table_id)",
+                            "write - {{table_id}}",
+                        ),
+                    ],
+                ),
+
                 panels.timeseries_count(
                     "Compactor Core Count To Scale",
                     "The number of CPUs needed to meet the demand of compaction.",
@@ -2027,6 +2038,39 @@ def section_hummock(panels):
                 ),
             ],
         ),
+
+        panels.timeseries_count(
+            "Move State Table Count",
+            "The times of move_state_table occurs",
+            [
+                panels.target(
+                    f"sum({table_metric('storage_move_state_table_count')}[$__rate_interval]) by (group)",
+                    "move table cg{{group}}",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "State Table Count",
+            "The number of state_tables in each CG",
+            [
+                panels.target(
+                    f"sum(irate({table_metric('storage_state_table_count')}[$__rate_interval])) by (group)",
+                    "state table cg{{group}}",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Branched SST Count",
+            "The number of branched_sst in each CG",
+            [
+                panels.target(
+                    f"sum(irate({table_metric('storage_branched_sst_count')}[$__rate_interval])) by (group)",
+                    "branched sst cg{{group}}",
+                ),
+            ],
+        ),
     ]
 
 
@@ -2614,6 +2658,16 @@ def section_memory_manager(outer_panels):
                         panels.target(
                             f"{metric('jemalloc_active_bytes')}",
                             "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ms(
+                    "LRU manager diff between current watermark and evicted watermark time (ms) for actors",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('lru_evicted_watermark_time_diff_ms')}",
+                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
                         ),
                     ],
                 ),

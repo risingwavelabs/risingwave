@@ -44,7 +44,6 @@ risingwave_hummock_trace = { path = "../storage/hummock_trace" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
-risingwave_tracing = { path = "../tracing" }
 scopeguard = "1"
 sled = "0.34.7"
 spin = "0.9"
@@ -64,6 +63,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tracing = "0.1"
+tracing-futures = { version = "0.2", features = ["futures-03"] }
 xorf = "0.8.1"
 xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.12", default-features = false }
@@ -82,7 +82,7 @@ mach2 = "0.4"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-criterion = { version = "0.4", features = ["async_futures"] }
+criterion = { workspace = true, features = ["async_futures"] }
 moka = { version = "0.10", features = ["future"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }

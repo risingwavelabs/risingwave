@@ -156,6 +156,11 @@ def validate_jdbc_sink(input_file):
                                                                                                    rows[i][j]))
                 exit(1)
 
+def test_elasticsearch_sink(input_file):
+    test_sink("elasticsearch",
+              {"url": "http://127.0.0.1:9200",
+               "index": "test"},
+              input_file)
 
 def test_iceberg_sink(input_file):
     test_sink("iceberg",
@@ -196,6 +201,7 @@ if __name__ == "__main__":
     parser.add_argument('--iceberg_sink', action='store_true', help="run iceberg sink test")
     parser.add_argument('--upsert_iceberg_sink', action='store_true', help="run upsert iceberg sink test")
     parser.add_argument('--deltalake_sink', action='store_true', help="run deltalake sink test")
+    parser.add_argument('--es_sink', action='store_true', help='run elasticsearch sink test')
     parser.add_argument('--input_file', default="./data/sink_input.json", help="input data to run tests")
     args = parser.parse_args()
     if args.file_sink:
@@ -208,3 +214,5 @@ if __name__ == "__main__":
         test_upsert_iceberg_sink(args.input_file)
     if args.deltalake_sink:
         test_deltalake_sink(args.input_file)
+    if args.es_sink:
+        test_elasticsearch_sink(args.input_file)

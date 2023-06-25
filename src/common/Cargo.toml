@@ -39,7 +39,6 @@ enum-as-inner = "0.5"
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = { workspace = true }
 hex = "0.4.3"
 humantime = "2.1"
 hytra = { workspace = true }
@@ -50,6 +49,7 @@ memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
 number_prefix = "0.4.0"
+opentelemetry = { version = "0.19", default-features = false }
 parking_lot = "0.12"
 parse-display = "0.6"
 paste = "1"
@@ -90,6 +90,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 toml = "0.7"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+tracing-opentelemetry = "0.19"
 tracing-subscriber = "0.3.16"
 twox-hash = "1"
 url = "2"
@@ -108,7 +109,7 @@ libc = "0.2.72"
 mach2 = "0.4"
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = { workspace = true }
 more-asserts = "0.3"
 pretty_assertions = "1"
 rand = "0.8"

@@ -16,6 +16,7 @@ min_delta_log_num_for_hummock_version_checkpoint = 10
 max_heartbeat_interval_secs = 300
 disable_recovery = false
 meta_leader_lease_secs = 30
+default_parallelism = "Full"
 enable_compaction_deterministic = false
 enable_committed_sst_sanity_check = false
 node_num_monitor_interval_sec = 10
@@ -24,10 +25,12 @@ periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
 periodic_split_compact_group_interval_sec = 180
 max_compactor_task_multiplier = 2
-move_table_size_limit = 2147483648
-split_group_size_limit = 21474836480
+move_table_size_limit = 4294967296
+split_group_size_limit = 68719476736
 do_not_config_object_storage_lifecycle = false
 partition_vnode_count = 64
+table_write_throughput_threshold = 134217728
+min_table_split_write_throughput = 33554432
 
 [batch]
 enable_barrier_read = true
@@ -39,7 +42,6 @@ batch_chunk_size = 1024
 
 [streaming]
 in_flight_barrier_nums = 10000
-enable_jaeger_tracing = false
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
 

@@ -9,7 +9,6 @@ proc-macro = true
 
 [dependencies]
 itertools = "0.10"
-proc-macro-error = "1"
 proc-macro2 = "1"
 quote = "1"
 syn = "1"

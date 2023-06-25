@@ -35,7 +35,7 @@ pub struct ComputeNodeConfig {
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
-    pub provide_jaeger: Option<Vec<JaegerConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
     pub user_managed: bool,
     pub connector_rpc_endpoint: String,
 
@@ -68,6 +68,8 @@ pub struct MetaNodeConfig {
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
 
+    pub provide_tempo: Option<Vec<TempoConfig>>,
+
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
@@ -90,6 +92,8 @@ pub struct FrontendConfig {
     pub health_check_port: u16,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
+
     pub user_managed: bool,
 }
 
@@ -110,6 +114,8 @@ pub struct CompactorConfig {
     pub provide_minio: Option<Vec<MinioConfig>>,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
+
     pub user_managed: bool,
     pub max_concurrent_task_number: u64,
     pub compaction_worker_threads_number: Option<usize>,
@@ -198,18 +204,24 @@ pub struct GrafanaConfig {
     pub address: String,
     pub listen_address: String,
     pub port: u16,
+
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
-pub struct JaegerConfig {
+pub struct TempoConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
-    pub dashboard_address: String,
-    pub dashboard_port: u16,
+
+    pub listen_address: String,
+    pub port: u16,
+
+    pub otlp_address: String,
+    pub otlp_port: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -332,7 +344,7 @@ pub enum ServiceConfig {
     Etcd(EtcdConfig),
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
-    Jaeger(JaegerConfig),
+    Tempo(TempoConfig),
     OpenDal(OpendalConfig),
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
@@ -354,7 +366,7 @@ impl ServiceConfig {
             Self::Etcd(c) => &c.id,
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,
-            Self::Jaeger(c) => &c.id,
+            Self::Tempo(c) => &c.id,
             Self::AwsS3(c) => &c.id,
             Self::ZooKeeper(c) => &c.id,
             Self::Kafka(c) => &c.id,

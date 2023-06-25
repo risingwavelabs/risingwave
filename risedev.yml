@@ -24,7 +24,7 @@ profile:
 
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
-        # bucket: test-bucket
+      #   bucket: test-bucket
 
       # If you want to create CDC source table, uncomment the following line
       # - use: connector-node
@@ -32,19 +32,18 @@ profile:
       # if you want to enable etcd backend, uncomment the following lines.
       # - use: etcd
       #   unsafe-no-fsync: true
+
+      # If you want to enable metrics or tracing, uncomment the following lines.
+      # - use: prometheus  # metrics
+      # - use: tempo       # tracing
+      # - use: grafana     # visualization
+
       - use: meta-node
       - use: compute-node
       - use: frontend
 
       # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
       # - use: compactor
-
-      # If you want to enable metrics, uncomment those two lines.
-      # - use: prometheus
-      # - use: grafana
-
-      # If you want to enable tracing, uncomment the following line.
-      # - use: jaeger
 
       # If you want to create source from Kafka, uncomment the following lines
       # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
@@ -838,8 +837,8 @@ template:
     # Meta-nodes used by this compute node
     provide-meta-node: "meta-node*"
 
-    # Jaeger used by this compute node
-    provide-jaeger: "jaeger*"
+    # Tempo used by this compute node
+    provide-tempo: "tempo*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
@@ -897,6 +896,9 @@ template:
 
     # AWS s3 bucket used by the cluster
     provide-aws-s3: "aws-s3*"
+
+    # Tempo used by this meta node
+    provide-tempo: "tempo*"
 
     # Whether to enable in-memory pure KV state backend
     enable-in-memory-kv-state-backend: false
@@ -969,6 +971,9 @@ template:
     # Meta-nodes used by this frontend instance
     provide-meta-node: "meta-node*"
 
+    # Tempo used by this frontend instance
+    provide-tempo: "tempo*"
+
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
@@ -991,8 +996,11 @@ template:
     # Minio instances used by this compactor
     provide-minio: "minio*"
 
-    # Meta-nodes used by this compute node
+    # Meta-nodes used by this compactor
     provide-meta-node: "meta-node*"
+
+    # Tempo used by this compator
+    provide-tempo: "tempo*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
@@ -1029,20 +1037,23 @@ template:
     # Prometheus used by this Grafana instance
     provide-prometheus: "prometheus*"
 
-  jaeger:
+    # Tempo used by this Grafana instance
+    provide-tempo: "tempo*"
+
+  tempo:
     # Id of this instance
-    id: jaeger
+    id: tempo
 
-    # Dashboard listen address of Jaeger
-    dashboard-address: "127.0.0.1"
+    listen-address: "127.0.0.1"
 
-    # Dashboard listen port of Jaeger
-    dashboard-port: 16680
+    port: 3200
 
-    # Jaeger has a lot of ports open, and we don't want to make this config more complex.
-    # So we keep the default value of jaeger instead of making it part of RiseDev config.
+    # gRPC listen address of the OTLP collector
+    otlp-address: "127.0.0.1"
 
-  # opendal:
+    # gRPC listen port of the OTLP collector
+    otlp-port: 4317
+
   opendal:
     id: opendal
 
@@ -1063,7 +1074,6 @@ template:
     bucket: test-bucket
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
-
 
   # Apache Kafka service
   kafka:

@@ -14,13 +14,13 @@
 //
 use std::fmt;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::generic::{self, push_down_into_join, push_down_join_condition, GenericPlanNode};
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
@@ -54,7 +54,7 @@ pub struct LogicalApply {
 }
 
 impl Distill for LogicalApply {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let mut vec = Vec::with_capacity(if self.max_one_row { 4 } else { 3 });
         vec.push(("type", Pretty::debug(&self.join_type)));
 
@@ -70,7 +70,7 @@ impl Distill for LogicalApply {
             vec.push(("max_one_row", Pretty::debug(&true)));
         }
 
-        Pretty::childless_record("LogicalApply", vec)
+        childless_record("LogicalApply", vec)
     }
 }
 impl fmt::Display for LogicalApply {

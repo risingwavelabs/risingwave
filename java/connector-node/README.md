@@ -21,6 +21,11 @@ If you meet problem, you can try the following to skip the unit test:
 mvn clean package -DskipTests=true
 ```
 
+To disable building the rust library, you can try the following:
+```
+mvn clean package -Dno-build-rust
+```
+
 This will create a `.tar.gz` file with the Connector Node and all its dependencies in the `risingwave/java/connector-node/assembly/target` directory. To run the Connector Node, execute the following command:
 
 ```
