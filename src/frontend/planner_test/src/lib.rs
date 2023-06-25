@@ -776,7 +776,7 @@ impl TestCase {
 }
 
 fn explain_plan(plan: &PlanRef) -> String {
-    plan.explain_to_string().expect("failed to explain")
+    plan.explain_to_string()
 }
 
 /// Checks that the result matches `test_case.expected_outputs`.

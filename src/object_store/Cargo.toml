@@ -23,10 +23,8 @@ hyper = "0.14"
 itertools = "0.10"
 opendal = "0.34"
 prometheus = { version = "0.13", features = ["process"] }
-random-string = "1.0"
 risingwave_common = { path = "../common" }
 spin = "0.9"
-tempfile = "3"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",

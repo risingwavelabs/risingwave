@@ -51,7 +51,6 @@ tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
-uuid = "1.2.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tikv-jemalloc-ctl = "0.5"

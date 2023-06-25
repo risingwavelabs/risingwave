@@ -46,7 +46,7 @@ impl PlanRef {
         if explain_trace && stats.has_applied_rule() {
             ctx.trace(format!("{}:", stage_name));
             ctx.trace(format!("{}", stats));
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         plan
@@ -70,7 +70,7 @@ impl PlanRef {
             if explain_trace && stats.has_applied_rule() {
                 ctx.trace(format!("{}:", stage_name));
                 ctx.trace(format!("{}", stats));
-                ctx.trace(output_plan.explain_to_string().unwrap());
+                ctx.trace(output_plan.explain_to_string());
             }
 
             if !stats.has_applied_rule() {
@@ -294,7 +294,7 @@ impl LogicalOptimizer {
         );
         if explain_trace {
             ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
         plan
     }
@@ -342,7 +342,7 @@ impl LogicalOptimizer {
         // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         if column_pruning_ctx.need_second_round() {
@@ -351,7 +351,7 @@ impl LogicalOptimizer {
             plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
             if explain_trace {
                 ctx.trace("Prune Columns (For DAG):");
-                ctx.trace(plan.explain_to_string().unwrap());
+                ctx.trace(plan.explain_to_string());
             }
         }
         plan
@@ -370,7 +370,7 @@ impl LogicalOptimizer {
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Now and ProcTime:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
         plan
     }
@@ -381,7 +381,7 @@ impl LogicalOptimizer {
 
         if explain_trace {
             ctx.trace("Begin:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         // Remove project to make common sub-plan sharing easier.
@@ -397,7 +397,7 @@ impl LogicalOptimizer {
             plan = plan.prune_share();
             if explain_trace {
                 ctx.trace("Common Sub-plan Sharing:");
-                ctx.trace(plan.explain_to_string().unwrap());
+                ctx.trace(plan.explain_to_string());
             }
         } else {
             plan = plan.optimize_by_rules(&DAG_TO_TREE);
@@ -408,7 +408,7 @@ impl LogicalOptimizer {
             plan = ShareSourceRewriter::share_source(plan);
             if explain_trace {
                 ctx.trace("Share Source:");
-                ctx.trace(plan.explain_to_string().unwrap());
+                ctx.trace(plan.explain_to_string());
             }
         }
 
@@ -468,7 +468,7 @@ impl LogicalOptimizer {
         InputRefValidator.validate(plan.clone());
 
         if ctx.is_explain_logical() {
-            ctx.store_logical(plan.explain_to_string().unwrap());
+            ctx.store_logical(plan.explain_to_string());
         }
 
         Ok(plan)
@@ -480,7 +480,7 @@ impl LogicalOptimizer {
 
         if explain_trace {
             ctx.trace("Begin:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         // Inline `NOW()` and `PROCTIME()`, only for batch queries.
@@ -543,7 +543,7 @@ impl LogicalOptimizer {
         InputRefValidator.validate(plan.clone());
 
         if ctx.is_explain_logical() {
-            ctx.store_logical(plan.explain_to_string().unwrap());
+            ctx.store_logical(plan.explain_to_string());
         }
 
         Ok(plan)
