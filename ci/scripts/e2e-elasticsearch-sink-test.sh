@@ -8,7 +8,7 @@ echo "--- check elasticsearch"
 curl http://elasticsearch:9200
 
 echo "--- testing sink"
-sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch_sink.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch/elasticsearch_sink.slt'
 
 
 echo "testing sink result"
