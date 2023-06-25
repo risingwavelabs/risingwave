@@ -14,11 +14,10 @@
 
 use std::time::Duration;
 
-use opendal::layers::RetryLayer;
 use opendal::services::Azblob;
 use opendal::Operator;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{config_retry, EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal azblob engine.
@@ -38,14 +37,8 @@ impl OpendalObjectStore {
         builder.endpoint(&endpoint);
         builder.account_name(&account_name);
         builder.account_key(&account_key);
-        let op: Operator = Operator::new(builder)?
-            .layer(
-                RetryLayer::new()
-                    .with_factor(2.0)
-                    .with_min_delay(Duration::from_secs(1))
-                    .with_max_times(4),
-            )
-            .finish();
+        let op: Operator =
+            config_retry(Operator::new(builder)?, 2.0, Duration::from_secs(1), 3).finish();
         Ok(Self {
             op,
             engine_type: EngineType::Azblob,

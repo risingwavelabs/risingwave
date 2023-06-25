@@ -14,11 +14,10 @@
 
 use std::time::Duration;
 
-use opendal::layers::RetryLayer;
 use opendal::services::Oss;
 use opendal::Operator;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{config_retry, EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal oss engine.
@@ -41,14 +40,8 @@ impl OpendalObjectStore {
         builder.endpoint(&endpoint);
         builder.access_key_id(&access_key_id);
         builder.access_key_secret(&access_key_secret);
-        let op: Operator = Operator::new(builder)?
-            .layer(
-                RetryLayer::new()
-                    .with_factor(2.0)
-                    .with_min_delay(Duration::from_secs(1))
-                    .with_max_times(4),
-            )
-            .finish();
+        let op: Operator =
+            config_retry(Operator::new(builder)?, 2.0, Duration::from_secs(1), 3).finish();
         Ok(Self {
             op,
             engine_type: EngineType::Oss,
