@@ -56,10 +56,15 @@ pub fn channel(
     )
 }
 
+/// The configuration for tests.
+pub mod for_test {
+    pub const INITIAL_PERMITS: usize = (u32::MAX / 2) as _;
+    pub const BATCHED_PERMITS: usize = 1;
+    pub const CONCURRENT_BARRIERS: usize = (u32::MAX / 2) as _;
+}
+
 pub fn channel_for_test() -> (Sender, Receiver) {
-    const INITIAL_PERMITS: usize = (u32::MAX / 2) as _;
-    const BATCHED_PERMITS: usize = 1;
-    const CONCURRENT_BARRIERS: usize = (u32::MAX / 2) as _;
+    use for_test::*;
 
     channel(INITIAL_PERMITS, BATCHED_PERMITS, CONCURRENT_BARRIERS)
 }

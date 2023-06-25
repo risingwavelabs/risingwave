@@ -104,6 +104,8 @@ impl SharedContext {
 
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use risingwave_common::config::StreamingDeveloperConfig;
+
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
@@ -112,7 +114,15 @@ impl SharedContext {
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(
                 StateStoreImpl::for_test(),
             ))),
-            config: StreamingConfig::default(),
+            config: StreamingConfig {
+                developer: StreamingDeveloperConfig {
+                    exchange_initial_permits: permit::for_test::INITIAL_PERMITS,
+                    exchange_batched_permits: permit::for_test::BATCHED_PERMITS,
+                    exchange_concurrent_barriers: permit::for_test::CONCURRENT_BARRIERS,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         }
     }
 
