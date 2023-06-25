@@ -719,7 +719,7 @@ impl ToStream for LogicalOverWindow {
 
             let mut logical = self.core.clone();
             logical.input = sort.into();
-            return Ok(StreamEowcOverWindow::new(logical).into());
+            Ok(StreamEowcOverWindow::new(logical).into())
         } else {
             // General (Emit-On-Update) case
 
@@ -757,8 +757,8 @@ impl ToStream for LogicalOverWindow {
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .enforce_if_not_satisfies(stream_input, &Order::any())?;
             let mut logical = self.core.clone();
-            logical.input = new_input.into();
-            return Ok(StreamOverWindow::new(logical).into());
+            logical.input = new_input;
+            Ok(StreamOverWindow::new(logical).into())
         }
     }
 
