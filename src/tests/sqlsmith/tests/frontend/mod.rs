@@ -102,7 +102,7 @@ async fn create_tables(
     }
 
     // Generate some mviews
-    for i in 0..10 {
+    for i in 0..20 {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         reproduce_failing_queries(&setup_sql, &sql);
         setup_sql.push_str(&format!("{};", &sql));

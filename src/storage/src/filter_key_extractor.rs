@@ -200,7 +200,7 @@ impl MultiFilterKeyExtractor {
         self.id_to_filter_key_extractor.len()
     }
 
-    pub fn get_exsting_table_ids(&self) -> HashSet<u32> {
+    pub fn get_existing_table_ids(&self) -> HashSet<u32> {
         self.id_to_filter_key_extractor.keys().cloned().collect()
     }
 }
@@ -492,6 +492,7 @@ mod tests {
                 String::from("300"),
             )]),
             fragment_id: 0,
+            dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index: Some(0),
             value_indices: vec![0],

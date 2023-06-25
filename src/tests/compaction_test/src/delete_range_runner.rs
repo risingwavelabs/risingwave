@@ -121,6 +121,7 @@ async fn compaction_test(
             0.to_string(),
         )]),
         fragment_id: 0,
+        dml_fragment_id: None,
         vnode_col_index: None,
         value_indices: vec![],
         definition: "".to_string(),
@@ -197,7 +198,6 @@ async fn compaction_test(
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
         Arc::new(FilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
         compactor_metrics.clone(),
     )
     .await?;
@@ -561,6 +561,7 @@ fn run_compactor_thread(
         output_memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
+        await_tree_reg: None,
     });
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,

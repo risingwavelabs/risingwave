@@ -136,6 +136,7 @@ where
             Info::HummockSnapshot(_) => true,
             Info::MetaBackupManifestId(_) => true,
             Info::SystemParams(_) => true,
+            Info::ServingParallelUnitMappings(_) => true,
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
         });
 

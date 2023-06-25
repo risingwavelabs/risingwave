@@ -51,10 +51,12 @@ for the latest madsim build instructions.
 ```sh
 # Build madsim
 cargo make sslt-build-all --profile ci-sim
-# The target bin can be found here:
-# target/sim/ci-sim/risingwave_simulation
 # Run fuzzing
-RUST_BACKTRACE=1 MADSIM_TEST_SEED=1 ./target/sim/ci-sim/risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata
+RUST_LOG=info RUST_BACKTRACE=1 MADSIM_TEST_SEED=1 ./target/sim/ci-sim/risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata
+
+# Run fuzzing and save contents, since it takes a while to run each time.
+RUST_LOG=info RUST_BACKTRACE=1 MADSIM_TEST_SEED=1 ./target/sim/ci-sim/risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 1>sqlsmith.log 2>&1
+cat sqlsmith.log | less
 ```
 
 ## E2E

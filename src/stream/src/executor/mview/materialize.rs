@@ -38,6 +38,7 @@ use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::StateStore;
 
 use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
@@ -97,8 +98,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             StateTableInner::from_table_catalog(table_catalog, store, vnodes).await
         };
 
-        let actor_id = actor_context.id;
-        let table_id = table_catalog.id;
+        let metrics_info =
+            MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
+
         Self {
             input,
             state_table,
@@ -109,7 +111,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch, metrics, actor_id, table_id),
+            materialize_cache: MaterializeCache::new(watermark_epoch, metrics_info),
             conflict_behavior,
         }
     }
@@ -235,12 +237,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(
-                watermark_epoch,
-                Arc::new(StreamingMetrics::unused()),
-                0,
-                0,
-            ),
+            materialize_cache: MaterializeCache::new(watermark_epoch, MetricsInfo::for_test()),
             conflict_behavior,
         }
     }
@@ -436,10 +433,8 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 /// A cache for materialize executors.
 pub struct MaterializeCache<SD> {
     data: ManagedLruCache<Vec<u8>, CacheValue>,
+    metrics_info: MetricsInfo,
     _serde: PhantomData<SD>,
-    metrics: Arc<StreamingMetrics>,
-    actor_id: String,
-    table_id: String,
 }
 
 #[derive(EnumAsInner, EstimateSize)]
@@ -451,19 +446,12 @@ pub enum CacheValue {
 type EmptyValue = ();
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    pub fn new(
-        watermark_epoch: AtomicU64Ref,
-        metrics: Arc<StreamingMetrics>,
-        actor_id: u32,
-        table_id: u32,
-    ) -> Self {
-        let cache = new_unbounded(watermark_epoch);
+    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = new_unbounded(watermark_epoch, metrics_info.clone());
         Self {
             data: cache,
+            metrics_info,
             _serde: PhantomData,
-            metrics,
-            actor_id: actor_id.to_string(),
-            table_id: table_id.to_string(),
         }
     }
 
@@ -604,14 +592,16 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
-            self.metrics
+            self.metrics_info
+                .metrics
                 .materialize_cache_total_count
-                .with_label_values(&[&self.table_id, &self.actor_id])
+                .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
                 .inc();
             if self.data.contains(key) {
-                self.metrics
+                self.metrics_info
+                    .metrics
                     .materialize_cache_hit_count
-                    .with_label_values(&[&self.table_id, &self.actor_id])
+                    .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
                     .inc();
                 continue;
             }

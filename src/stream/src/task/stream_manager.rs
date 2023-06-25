@@ -205,8 +205,8 @@ impl LocalStreamManager {
 
     /// Get await-tree contexts for all actors.
     pub async fn get_actor_traces(&self) -> HashMap<ActorId, await_tree::TreeContext> {
-        let mut core = self.core.lock().await;
-        match &mut core.await_tree_reg {
+        let core = self.core.lock().await;
+        match &core.await_tree_reg {
             Some(mgr) => mgr.iter().map(|(k, v)| (*k, v)).collect(),
             None => Default::default(),
         }
@@ -557,9 +557,13 @@ impl LocalStreamManagerCore {
 
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
         let executor = if has_stateful && is_stateful {
-            let (subtask, executor) = subtask::wrap(executor, actor_context.id);
-            subtasks.push(subtask);
-            executor.boxed()
+            // TODO(bugen): subtask does not work with tracing spans.
+            // let (subtask, executor) = subtask::wrap(executor, actor_context.id);
+            // subtasks.push(subtask);
+            // executor.boxed()
+
+            let _ = subtasks;
+            executor
         } else {
             executor
         };

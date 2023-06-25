@@ -90,14 +90,14 @@ where
         let table_fragments = self
             .fragment_manager
             .list_table_fragments()
-            .await?
+            .await
             .iter()
             .map(|tf| tf.to_protobuf())
             .collect();
 
         let worker_nodes = self
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None)
+            .list_worker_node(WorkerType::ComputeNode, None, true)
             .await;
 
         let actor_splits = self

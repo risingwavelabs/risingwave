@@ -15,10 +15,11 @@
 use std::fmt;
 
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{FieldDisplay, Schema};
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
 
@@ -55,8 +56,8 @@ impl<PlanRef: GenericPlanRef> Dedup<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for Dedup<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
-        Pretty::childless_record(name, vec![("dedup_cols", self.dedup_cols_pretty())])
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
+        childless_record(name, vec![("dedup_cols", self.dedup_cols_pretty())])
     }
 }
 

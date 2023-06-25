@@ -44,7 +44,7 @@ impl DistributedQueryMetrics {
 
         let completed_query_counter = register_int_counter_with_registry!(
             "distributed_completed_query_counter",
-            "The number of query ended sccessfully in distributed execution mode",
+            "The number of query ended successfully in distributed execution mode",
             &registry
         )
         .unwrap();

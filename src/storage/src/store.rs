@@ -409,6 +409,10 @@ pub struct NewLocalOptions {
     /// `update` and `delete` should match the original stored value.
     pub is_consistent_op: bool,
     pub table_option: TableOption,
+
+    /// Indicate if this is replicated. If it is, we should not
+    /// upload its ReadVersions.
+    pub is_replicated: bool,
 }
 
 impl From<TracedNewLocalOptions> for NewLocalOptions {
@@ -417,11 +421,34 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
             table_id: value.table_id.into(),
             is_consistent_op: value.is_consistent_op,
             table_option: value.table_option.into(),
+            is_replicated: value.is_replicated,
         }
     }
 }
 
 impl NewLocalOptions {
+    pub fn new(table_id: TableId, is_consistent_op: bool, table_option: TableOption) -> Self {
+        NewLocalOptions {
+            table_id,
+            is_consistent_op,
+            table_option,
+            is_replicated: false,
+        }
+    }
+
+    pub fn new_replicated(
+        table_id: TableId,
+        is_consistent_op: bool,
+        table_option: TableOption,
+    ) -> Self {
+        NewLocalOptions {
+            table_id,
+            is_consistent_op,
+            table_option,
+            is_replicated: true,
+        }
+    }
+
     pub fn for_test(table_id: TableId) -> Self {
         Self {
             table_id,
@@ -429,6 +456,7 @@ impl NewLocalOptions {
             table_option: TableOption {
                 retention_seconds: None,
             },
+            is_replicated: false,
         }
     }
 }

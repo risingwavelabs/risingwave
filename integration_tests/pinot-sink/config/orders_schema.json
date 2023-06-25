@@ -1,0 +1,42 @@
+{
+  "schemaName": "orders",
+  "primaryKeyColumns": [
+    "id"
+  ],
+  "dimensionFieldSpecs": [
+    {
+      "name": "id",
+      "dataType": "INT"
+    },
+    {
+      "name": "user_id",
+      "dataType": "INT"
+    },
+    {
+      "name": "product_id",
+      "dataType": "INT"
+    },
+    {
+      "name": "status",
+      "dataType": "STRING"
+    }
+  ],
+  "metricFieldSpecs": [
+    {
+      "name": "quantity",
+      "dataType": "INT"
+    },
+    {
+      "name": "total",
+      "dataType": "FLOAT"
+    }
+  ],
+  "dateTimeFieldSpecs": [
+    {
+      "name": "updated_at",
+      "dataType": "LONG",
+      "format": "1:MILLISECONDS:EPOCH",
+      "granularity": "1:MILLISECONDS"
+    }
+  ]
+}

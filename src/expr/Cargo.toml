@@ -9,10 +9,10 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
+ignored = ["workspace-hack", "ctor"]
 
 [package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
+normal = ["workspace-hack", "ctor"]
 
 [dependencies]
 aho-corasick = "1"
@@ -34,7 +34,6 @@ hex = "0.4.3"
 itertools = "0.10"
 md5 = "0.7.0"
 num-traits = "0.2"
-ouroboros = "0.15"
 parse-display = "0.6"
 paste = "1"
 regex = "1"
@@ -43,6 +42,7 @@ risingwave_expr_macro = { path = "macro" }
 risingwave_pb = { path = "../prost" }
 risingwave_udf = { path = "../udf" }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+self_cell = "1.0.0"
 serde_json = "1"
 sha1 = "0.10.5"
 sha2 = "0.10.6"
@@ -55,7 +55,7 @@ tracing = "0.1"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = { workspace = true }
 expect-test = "1"
 serde_json = "1"
 

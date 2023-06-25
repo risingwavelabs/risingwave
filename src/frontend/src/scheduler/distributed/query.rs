@@ -599,8 +599,9 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(0, 0),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
         };
         let worker2 = WorkerNode {
@@ -613,8 +614,9 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(8, 1),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
         };
         let worker3 = WorkerNode {
@@ -627,8 +629,9 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(16, 2),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
         };
         let workers = vec![worker1, worker2, worker3];
@@ -636,6 +639,11 @@ pub(crate) mod tests {
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
         worker_node_manager
             .insert_streaming_fragment_mapping(0, ParallelUnitMapping::new_single(0));
+        worker_node_manager.set_serving_fragment_mapping(
+            vec![(0, ParallelUnitMapping::new_single(0))]
+                .into_iter()
+                .collect(),
+        );
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);

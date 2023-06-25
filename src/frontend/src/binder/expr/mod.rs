@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::{
     TrimWhereField, UnaryOperator,
 };
 
+use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Parameter, SubqueryKind};
 
@@ -87,7 +88,7 @@ impl Binder {
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
             Expr::Identifier(ident) => {
-                if ["session_user", "current_schema", "current_timestamp"]
+                if SYS_FUNCTION_WITHOUT_ARGS
                     .iter()
                     .any(|e| ident.real_value().as_str() == *e)
                 {
@@ -156,7 +157,7 @@ impl Binder {
                 timestamp,
                 time_zone,
             } => self.bind_at_time_zone(*timestamp, time_zone),
-            // special syntaxt for string
+            // special syntax for string
             Expr::Trim {
                 expr,
                 trim_where,

@@ -21,8 +21,8 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceContext, SplitId, SplitImpl, SplitMetaData,
-    StreamChunkWithState,
+    BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    SplitMetaData, StreamChunkWithState,
 };
 use risingwave_source::source_desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -57,6 +57,8 @@ pub struct FsSourceExecutor<S: StateStore> {
 
     /// Expected barrier latency
     expected_barrier_latency_ms: u64,
+
+    source_ctrl_opts: SourceCtrlOpts,
 }
 
 impl<S: StateStore> FsSourceExecutor<S> {
@@ -70,6 +72,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         expected_barrier_latency_ms: u64,
         executor_id: u64,
+        source_ctrl_opts: SourceCtrlOpts,
     ) -> StreamResult<Self> {
         Ok(Self {
             ctx,
@@ -80,6 +83,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             expected_barrier_latency_ms,
+            source_ctrl_opts,
         })
     }
 
@@ -98,6 +102,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.stream_source_core.source_id,
             self.ctx.fragment_id,
             source_desc.metrics.clone(),
+            self.source_ctrl_opts.clone(),
         );
         source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
         let stream_reader = source_desc

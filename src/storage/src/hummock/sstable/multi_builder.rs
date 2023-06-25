@@ -245,6 +245,11 @@ where
         }
 
         if self.current_builder.is_none() {
+            if let Some(progress) = &self.task_progress {
+                progress
+                    .num_pending_write_io
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
             let builder = self.builder_factory.open_builder().await?;
             self.current_builder = Some(builder);
         }
@@ -266,7 +271,6 @@ where
             let builder_output = builder.finish().await?;
             {
                 // report
-
                 if let Some(progress) = &self.task_progress {
                     progress.inc_ssts_sealed();
                 }
@@ -320,6 +324,11 @@ where
             .del_agg
             .get_tombstone_between(self.last_sealed_key.as_ref(), largest_user_key.as_ref());
         if !monotonic_deletes.is_empty() && self.current_builder.is_none() {
+            if let Some(progress) = &self.task_progress {
+                progress
+                    .num_pending_write_io
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
             let builder = self.builder_factory.open_builder().await?;
             self.current_builder = Some(builder);
         }

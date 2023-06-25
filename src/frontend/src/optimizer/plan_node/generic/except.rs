@@ -14,11 +14,12 @@
 
 use std::fmt;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 
 /// `Except` returns the rows of its first input except any
@@ -56,7 +57,7 @@ impl<PlanRef: GenericPlanRef> Except<PlanRef> {
 }
 
 impl<PlanRef> DistillUnit for Except<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
-        Pretty::childless_record(name, vec![("all", Pretty::debug(&self.all))])
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
+        childless_record(name, vec![("all", Pretty::debug(&self.all))])
     }
 }

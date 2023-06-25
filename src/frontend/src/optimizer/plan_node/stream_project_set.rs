@@ -60,6 +60,7 @@ impl StreamProjectSet {
     }
 }
 impl_distill_by_unit!(StreamProjectSet, logical, "StreamProjectSet");
+impl_plan_tree_node_for_unary! { StreamProjectSet }
 
 impl PlanTreeNodeUnary for StreamProjectSet {
     fn input(&self) -> PlanRef {
@@ -72,8 +73,6 @@ impl PlanTreeNodeUnary for StreamProjectSet {
         Self::new(logical)
     }
 }
-
-impl_plan_tree_node_for_unary! { StreamProjectSet }
 
 impl StreamNode for StreamProjectSet {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {

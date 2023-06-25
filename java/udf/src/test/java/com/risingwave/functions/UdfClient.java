@@ -17,13 +17,10 @@ package com.risingwave.functions;
 import org.apache.arrow.flight.*;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class UdfClient implements AutoCloseable {
 
     private FlightClient client;
-    private static final Logger logger = LoggerFactory.getLogger(UdfClient.class);
 
     public UdfClient(String host, int port) {
         var allocator = new RootAllocator();

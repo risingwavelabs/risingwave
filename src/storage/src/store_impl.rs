@@ -546,7 +546,6 @@ impl StateStoreImpl {
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
-        tracing: Arc<risingwave_tracing::RwTracingService>,
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
@@ -604,7 +603,6 @@ impl StateStoreImpl {
                     notification_client,
                     key_filter_manager,
                     state_store_metrics.clone(),
-                    tracing,
                     compactor_metrics.clone(),
                 )
                 .await?;

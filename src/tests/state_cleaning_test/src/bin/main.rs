@@ -154,7 +154,7 @@ async fn validate_case(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     risingwave_rt::init_risingwave_logger(
-        risingwave_rt::LoggerSettings::new(),
+        risingwave_rt::LoggerSettings::default(),
         prometheus::Registry::new(),
     );
 

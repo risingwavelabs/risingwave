@@ -719,7 +719,6 @@ pub async fn create_hummock_store_with_metrics(
         metrics.state_store_metrics.clone(),
         metrics.object_store_metrics.clone(),
         TieredCacheMetricsBuilder::unused(),
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
         metrics.storage_metrics.clone(),
         metrics.compactor_metrics.clone(),
     )

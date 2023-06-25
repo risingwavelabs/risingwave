@@ -122,7 +122,7 @@ async fn do_handle_explain(
                     .map(|x| x.0),
 
                     Statement::CreateSink { stmt } => {
-                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.0)
+                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.1)
                     }
 
                     Statement::CreateIndex {
@@ -200,8 +200,7 @@ async fn do_handle_explain(
             ExplainType::Physical => {
                 // if explain trace is on, the plan has been in the rows
                 if !explain_trace && let Ok(plan) = &plan {
-                    let output = plan.explain_to_string()?;
-                    blocks.push(output);
+                    blocks.push(plan.explain_to_string());
                 }
             }
             ExplainType::Logical => {

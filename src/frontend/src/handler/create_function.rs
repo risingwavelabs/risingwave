@@ -59,9 +59,9 @@ pub async fn handle_create_function(
             )
         }
     };
-    if language != "python" {
+    if !matches!(language.as_str(), "python" | "java") {
         return Err(ErrorCode::InvalidParameterValue(
-            "LANGUAGE should be one of: python".to_string(),
+            "LANGUAGE should be one of: python, java".to_string(),
         )
         .into());
     }

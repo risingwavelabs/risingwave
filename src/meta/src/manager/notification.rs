@@ -29,7 +29,7 @@ use tokio::sync::Mutex;
 use tonic::Status;
 
 use crate::manager::cluster::WorkerKey;
-use crate::model::NotificationVersion as Version;
+use crate::model::{FragmentId, NotificationVersion as Version};
 use crate::storage::MetaStore;
 
 pub type MessageStatus = Status;
@@ -39,9 +39,12 @@ pub type NotificationVersion = u64;
 
 #[derive(Clone, Debug)]
 pub enum LocalNotification {
-    WorkerNodeIsDeleted(WorkerNode),
+    WorkerNodeDeleted(WorkerNode),
+    WorkerNodeActivated(WorkerNode),
     CompactionTaskNeedCancel(CompactTask),
     SystemParamsChange(SystemParamsReader),
+    FragmentMappingsUpsert(Vec<FragmentId>),
+    FragmentMappingsDelete(Vec<FragmentId>),
 }
 
 #[derive(Debug)]
@@ -245,6 +248,16 @@ where
 
     pub fn notify_hummock_without_version(&self, operation: Operation, info: Info) {
         self.notify_without_version(SubscribeType::Hummock.into(), operation, info)
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn notify_hummock_with_version(
+        &self,
+        operation: Operation,
+        info: Info,
+        version: Option<NotificationVersion>,
+    ) {
+        self.notify(SubscribeType::Hummock.into(), operation, info, version)
     }
 
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {

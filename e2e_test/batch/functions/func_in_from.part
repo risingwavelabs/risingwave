@@ -1,0 +1,14 @@
+query I
+select abs.abs from abs(-1);
+----
+1
+
+query I
+select alias.alias from abs(-1) alias;
+----
+1
+
+query I
+select alias.col from abs(-1) alias(col);
+----
+1
