@@ -198,28 +198,27 @@ impl KvSize {
         Self(size)
     }
 
-    pub fn add<K: EstimateSize, V: EstimateSize>(&mut self, key: &K, val: &V) -> usize {
+    pub fn add<K: EstimateSize, V: EstimateSize>(&mut self, key: &K, val: &V) {
         self.0 = self
             .0
             .saturating_add(key.estimated_size() + val.estimated_size());
-        self.0
     }
 
-    pub fn sub<K: EstimateSize, V: EstimateSize>(&mut self, key: &K, val: &V) -> usize {
+    pub fn sub<K: EstimateSize, V: EstimateSize>(&mut self, key: &K, val: &V) {
         self.0 = self
             .0
             .saturating_sub(key.estimated_size() + val.estimated_size());
-        self.0
     }
 
+    /// Add the size of `val` and return it.
     pub fn add_val<V: EstimateSize>(&mut self, val: &V) -> usize {
-        self.0 = self.0.saturating_add(val.estimated_size());
-        self.0
+        let size = val.estimated_size();
+        self.0 = self.0.saturating_add(size);
+        size
     }
 
-    pub fn sub_val<V: EstimateSize>(&mut self, val: &V) -> usize {
+    pub fn sub_val<V: EstimateSize>(&mut self, val: &V) {
         self.0 = self.0.saturating_sub(val.estimated_size());
-        self.0
     }
 
     pub fn add_size(&mut self, size: usize) {

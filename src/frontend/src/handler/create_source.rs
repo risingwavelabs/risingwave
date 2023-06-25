@@ -97,7 +97,10 @@ async fn extract_upsert_avro_table_schema(
     )
     .await?;
     let vec_column_desc = conf.map_to_columns()?;
-    let vec_pk_desc = conf.extract_pks()?;
+
+    let vec_pk_desc = conf.extract_pks().map_err(|e| RwError::from(ErrorCode::InternalError(
+            format!("Kafka message key schema is invalid. Record type is required, or specify a primary key column to bypass the primary key detection. {:?}", e)
+        )))?;
     let pks = vec_pk_desc
         .into_iter()
         .map(|desc| {
@@ -132,7 +135,7 @@ async fn extract_debezium_avro_table_pk_columns(
     let conf =
         DebeziumAvroParserConfig::new(with_properties, schema.row_schema_location.0.as_str())
             .await?;
-    conf.get_pk_names()
+    Ok(conf.extract_pks()?.drain(..).map(|c| c.name).collect())
 }
 
 // Map an Avro schema to a relational schema and return the pk_column_ids.

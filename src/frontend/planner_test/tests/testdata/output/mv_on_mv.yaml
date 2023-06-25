@@ -10,10 +10,10 @@
   - create_tables
   sql: |
     select m1.v1 as m1v1, m1.v2 as m1v2, m2.v1 as m2v1, m2.v2 as m2v2 from m1 join m2 on m1.v1 = m2.v1;
-  stream_plan: |
-    StreamMaterialize { columns: [m1v1, m1v2, m2v1, m2v2, m1.t1._row_id(hidden), m2.t1._row_id(hidden)], stream_key: [m1.t1._row_id, m2.t1._row_id, m1v1], pk_columns: [m1.t1._row_id, m2.t1._row_id, m1v1], pk_conflict: "NoCheck" }
+  stream_plan: |-
+    StreamMaterialize { columns: [m1v1, m1v2, m2v1, m2v2, m1.t1._row_id(hidden), m2.t1._row_id(hidden)], stream_key: [m1.t1._row_id, m2.t1._row_id, m1v1], pk_columns: [m1.t1._row_id, m2.t1._row_id, m1v1], pk_conflict: NoCheck }
     └─StreamHashJoin { type: Inner, predicate: m1.v1 = m2.v1, output: [m1.v1, m1.v2, m2.v1, m2.v2, m1.t1._row_id, m2.t1._row_id] }
       ├─StreamExchange { dist: HashShard(m1.v1) }
-      | └─StreamTableScan { table: m1, columns: [m1.v1, m1.v2, m1.t1._row_id], pk: [m1.t1._row_id], dist: UpstreamHashShard(m1.t1._row_id) }
+      │ └─StreamTableScan { table: m1, columns: [m1.v1, m1.v2, m1.t1._row_id], pk: [m1.t1._row_id], dist: UpstreamHashShard(m1.t1._row_id) }
       └─StreamExchange { dist: HashShard(m2.v1) }
         └─StreamTableScan { table: m2, columns: [m2.v1, m2.v2, m2.t1._row_id], pk: [m2.t1._row_id], dist: UpstreamHashShard(m2.t1._row_id) }

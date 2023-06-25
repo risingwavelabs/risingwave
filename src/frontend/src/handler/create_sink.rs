@@ -50,7 +50,7 @@ pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     }];
     let select = Select {
         from,
-        projection: vec![SelectItem::Wildcard],
+        projection: vec![SelectItem::WildcardOrWithExcept(None)],
         ..Default::default()
     };
     let body = SetExpr::Select(Box::new(select));
@@ -115,7 +115,7 @@ pub fn gen_sink_plan(
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Sink:");
-        ctx.trace(sink_plan.explain_to_string().unwrap());
+        ctx.trace(sink_plan.explain_to_string());
     }
 
     let dependent_relations =

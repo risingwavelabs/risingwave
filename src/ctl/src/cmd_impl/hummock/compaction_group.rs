@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
+
+use comfy_table::{Row, Table};
+use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 
 use crate::CtlContext;
@@ -101,5 +105,106 @@ pub async fn split_compaction_group(
         "Succeed: split compaction group {}. tables {:#?} are moved to new group {}.",
         group_id, table_ids_to_new_group, new_group_id
     );
+    Ok(())
+}
+
+pub async fn list_compaction_status(context: &CtlContext, verbose: bool) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    let (status, assignment, progress) = meta_client.risectl_list_compaction_status().await?;
+    if !verbose {
+        let mut table = Table::new();
+        table.set_header({
+            let mut row = Row::new();
+            row.add_cell("Compaction Group".into());
+            row.add_cell("Level".into());
+            row.add_cell("Task Count".into());
+            row.add_cell("Tasks".into());
+            row
+        });
+        for s in status {
+            let cg_id = s.compaction_group_id;
+            for l in s.level_handlers {
+                let level = l.level;
+                let mut task_ids = HashSet::new();
+                for t in l.tasks {
+                    task_ids.insert(t.task_id);
+                }
+                let mut row = Row::new();
+                row.add_cell(cg_id.into());
+                row.add_cell(level.into());
+                row.add_cell(task_ids.len().into());
+                row.add_cell(
+                    task_ids
+                        .into_iter()
+                        .sorted()
+                        .map(|t| t.to_string())
+                        .join(",")
+                        .into(),
+                );
+                table.add_row(row);
+            }
+        }
+        println!("{table}");
+
+        let mut table = Table::new();
+        table.set_header({
+            let mut row = Row::new();
+            row.add_cell("Hummock Context".into());
+            row.add_cell("Task Count".into());
+            row.add_cell("Tasks".into());
+            row
+        });
+        let mut assignment_lite: HashMap<HummockContextId, Vec<u64>> = HashMap::new();
+        for a in assignment {
+            assignment_lite
+                .entry(a.context_id)
+                .or_insert(vec![])
+                .push(a.compact_task.unwrap().task_id);
+        }
+        for (k, v) in assignment_lite {
+            let mut row = Row::new();
+            row.add_cell(k.into());
+            row.add_cell(v.len().into());
+            row.add_cell(
+                v.into_iter()
+                    .sorted()
+                    .map(|t| t.to_string())
+                    .join(",")
+                    .into(),
+            );
+            table.add_row(row);
+        }
+        println!("{table}");
+
+        let mut table = Table::new();
+        table.set_header({
+            let mut row = Row::new();
+            row.add_cell("Task".into());
+            row.add_cell("Num SSTs Sealed".into());
+            row.add_cell("Num SSTs Uploaded".into());
+            row.add_cell("Num Progress Key".into());
+            row.add_cell("Num Pending Read IO".into());
+            row.add_cell("Num Pending Write IO".into());
+            row
+        });
+        for p in progress {
+            let mut row = Row::new();
+            row.add_cell(p.task_id.into());
+            row.add_cell(p.num_ssts_sealed.into());
+            row.add_cell(p.num_ssts_uploaded.into());
+            row.add_cell(p.num_progress_key.into());
+            row.add_cell(p.num_pending_read_io.into());
+            row.add_cell(p.num_pending_write_io.into());
+            table.add_row(row);
+        }
+        println!("{table}");
+    } else {
+        println!("--- LSMtree Status ---");
+        println!("{:#?}", status);
+        println!("--- Task Assignment ---");
+        println!("{:#?}", assignment);
+        println!("--- Task Progress ---");
+        println!("{:#?}", progress);
+    }
     Ok(())
 }
