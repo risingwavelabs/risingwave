@@ -29,7 +29,6 @@ use super::{
     PkIndices, PkIndicesRef,
 };
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::task::ActorId;
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
 /// table. The two streams will be merged into one and then sent to downstream.
@@ -53,8 +52,6 @@ pub struct DmlExecutor {
 
     // Column descriptions of the table.
     column_descs: Vec<ColumnDesc>,
-
-    actor_id: ActorId,
 }
 
 /// If a transaction's data is less than `MAX_CHUNK_FOR_ATOMICITY` * `CHUNK_SIZE`, we can provide
@@ -84,7 +81,6 @@ impl DmlExecutor {
         table_id: TableId,
         table_version_id: TableVersionId,
         column_descs: Vec<ColumnDesc>,
-        actor_id: ActorId,
     ) -> Self {
         Self {
             upstream,
@@ -95,7 +91,6 @@ impl DmlExecutor {
             table_id,
             table_version_id,
             column_descs,
-            actor_id,
         }
     }
 
@@ -117,7 +112,7 @@ impl DmlExecutor {
             .dml_manager
             .register_reader(self.table_id, self.table_version_id, &self.column_descs)
             .map_err(StreamExecutorError::connector_error)?;
-        let batch_reader = batch_reader.stream_reader(self.actor_id).into_stream();
+        let batch_reader = batch_reader.stream_reader().into_stream();
 
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
@@ -132,7 +127,7 @@ impl DmlExecutor {
 
         yield Message::Barrier(barrier);
 
-        // Active transactions: txn_id -> (the epoch of `Begin`, transaction chunks).
+        // Active transactions: txn_id -> TxnBuffer with transaction chunks.
         let mut active_txn_map: BTreeMap<TxnId, TxnBuffer> = Default::default();
 
         while let Some(input_msg) = stream.next().await {
@@ -148,12 +143,6 @@ impl DmlExecutor {
                                 Mutation::Resume => stream.resume_stream(),
                                 _ => {}
                             }
-                        }
-
-                        // Stop barrier. It could be issued by scaling or DDLs(e.g. add column).
-                        if barrier.is_stop(self.actor_id) {
-                            self.dml_manager
-                                .unregister_changes_sender(self.table_id, self.actor_id);
                         }
                     }
                     yield msg;
@@ -245,7 +234,6 @@ mod tests {
     use crate::task::WorkerNodeId;
 
     const TEST_TRANSACTION_ID: TxnId = 0;
-    const ACTOR_ID1: ActorId = 1;
 
     #[tokio::test]
     async fn test_dml_executor() {
@@ -272,7 +260,6 @@ mod tests {
             table_id,
             INITIAL_TABLE_VERSION_ID,
             column_descs,
-            ACTOR_ID1,
         ));
         let mut dml_executor = dml_executor.execute();
 

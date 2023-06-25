@@ -20,7 +20,6 @@ use parking_lot::RwLock;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::ActorId;
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_connector::source::StreamChunkWithState;
@@ -28,11 +27,7 @@ use tokio::sync::{mpsc, oneshot};
 
 pub type TableDmlHandleRef = Arc<TableDmlHandle>;
 
-#[derive(Debug)]
-pub struct ChangesSender {
-    pub actor_id: ActorId,
-    pub tx: mpsc::UnboundedSender<(TxnMsg, oneshot::Sender<usize>)>,
-}
+pub type ChangesSender = mpsc::UnboundedSender<(TxnMsg, oneshot::Sender<usize>)>;
 
 #[derive(Debug)]
 pub struct TableDmlHandleCore {
@@ -69,11 +64,11 @@ impl TableDmlHandle {
         }
     }
 
-    pub fn stream_reader(&self, actor_id: ActorId) -> TableStreamReader {
+    pub fn stream_reader(&self) -> TableStreamReader {
         let mut core = self.core.write();
         // TODO: use an unbounded channel with permits to limit the buffer size for data chunks.
         let (tx, rx) = mpsc::unbounded_channel();
-        core.changes_txs.push(ChangesSender { actor_id, tx });
+        core.changes_txs.push(tx);
 
         TableStreamReader { rx }
     }
@@ -98,7 +93,6 @@ impl TableDmlHandle {
                 .changes_txs
                 .get((txn_id % len as u64) as usize)
                 .context("no available table reader in streaming source executors")?
-                .tx
                 .clone();
 
             drop(guard);
@@ -108,7 +102,7 @@ impl TableDmlHandle {
                 self.core
                     .write()
                     .changes_txs
-                    .retain(|sender| !sender.tx.is_closed());
+                    .retain(|sender| !sender.is_closed());
             } else {
                 return Ok(WriteHandle::new(txn_id, tx));
             }
@@ -276,7 +270,6 @@ mod tests {
     use super::*;
 
     const TEST_TRANSACTION_ID: TxnId = 0;
-    const ACTOR_ID1: ActorId = 1;
 
     fn new_table_dml_handle() -> TableDmlHandle {
         TableDmlHandle::new(vec![ColumnDesc::unnamed(
@@ -288,7 +281,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_dml_handle() -> Result<()> {
         let table_dml_handle = Arc::new(new_table_dml_handle());
-        let mut reader = table_dml_handle.stream_reader(ACTOR_ID1).into_stream();
+        let mut reader = table_dml_handle.stream_reader().into_stream();
         let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
         write_handle.begin().unwrap();
 
@@ -331,7 +324,7 @@ mod tests {
     #[tokio::test]
     async fn test_write_handle_rollback_on_drop() -> Result<()> {
         let table_dml_handle = Arc::new(new_table_dml_handle());
-        let mut reader = table_dml_handle.stream_reader(ACTOR_ID1).into_stream();
+        let mut reader = table_dml_handle.stream_reader().into_stream();
         let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
         write_handle.begin().unwrap();
 

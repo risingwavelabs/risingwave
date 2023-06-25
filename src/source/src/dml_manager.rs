@@ -22,7 +22,6 @@ use parking_lot::RwLock;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::error::Result;
-use risingwave_common::hash::ActorId;
 use risingwave_common::transaction::transaction_id::{TxnId, TxnIdGenerator};
 use risingwave_common::util::worker_util::WorkerNodeId;
 
@@ -117,21 +116,6 @@ impl DmlManager {
         Ok(handle)
     }
 
-    /// Unregister a new DML reader for a table.
-    /// By providing an actor id, we can unregister the specific changes sender of a `DMLExecutor`.
-    pub fn unregister_changes_sender(&self, table_id: TableId, actor_id: ActorId) {
-        let table_readers = self.table_readers.write();
-        let table_reader = table_readers.get(&table_id).unwrap();
-        let table_dml_handle = table_reader
-            .handle
-            .upgrade()
-            .expect("should be able to upgrade");
-        let mut guard = table_dml_handle.core.write();
-        guard
-            .changes_txs
-            .retain(|sender| sender.actor_id != actor_id);
-    }
-
     pub fn table_dml_handle(
         &self,
         table_id: TableId,
@@ -180,7 +164,6 @@ impl DmlManager {
 mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
-    use risingwave_common::hash::ActorId;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
@@ -188,8 +171,6 @@ mod tests {
     use super::*;
 
     const TEST_TRANSACTION_ID: TxnId = 0;
-    const ACTOR_ID1: ActorId = 1;
-    const ACTOR_ID2: ActorId = 2;
 
     #[test]
     fn test_register_and_drop() {
@@ -210,8 +191,8 @@ mod tests {
         assert!(Arc::ptr_eq(&h1, &h2));
 
         // Start reading.
-        let r1 = h1.stream_reader(ACTOR_ID1);
-        let r2 = h2.stream_reader(ACTOR_ID2);
+        let r1 = h1.stream_reader();
+        let r2 = h2.stream_reader();
 
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, table_version_id)
@@ -224,10 +205,7 @@ mod tests {
 
         // After dropping the corresponding reader, the write handle should be not allowed to write.
         // This is to simulate the scale-in of DML executors.
-        {
-            dml_manager.unregister_changes_sender(table_id, ACTOR_ID1);
-            drop(r1);
-        }
+        drop(r1);
 
         write_handle.write_chunk(chunk()).unwrap_err();
 
@@ -238,10 +216,7 @@ mod tests {
 
         // After dropping the last reader, no more writes are allowed.
         // This is to simulate the dropping of the table.
-        {
-            dml_manager.unregister_changes_sender(table_id, ACTOR_ID2);
-            drop(r2);
-        }
+        drop(r2);
         write_handle.write_chunk(chunk()).unwrap_err();
     }
 
@@ -265,7 +240,7 @@ mod tests {
         let old_h = dml_manager
             .register_reader(table_id, old_version_id, &old_column_descs)
             .unwrap();
-        let _old_r = old_h.stream_reader(ACTOR_ID1);
+        let _old_r = old_h.stream_reader();
 
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, old_version_id)
@@ -280,7 +255,7 @@ mod tests {
         let new_h = dml_manager
             .register_reader(table_id, new_version_id, &new_column_descs)
             .unwrap();
-        let _new_r = new_h.stream_reader(ACTOR_ID2);
+        let _new_r = new_h.stream_reader();
 
         // Still be able to write to the old write handle, if the channel is not closed.
         write_handle.write_chunk(old_chunk()).unwrap();

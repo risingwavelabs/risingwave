@@ -57,7 +57,6 @@ use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices,
 };
-use risingwave_stream::task::ActorId;
 use tokio::sync::mpsc::unbounded_channel;
 
 struct SingleChunkExecutor {
@@ -179,7 +178,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         SourceCtrlOpts::default(),
     );
 
-    const ACTOR_ID1: ActorId = 1;
     // Create a `DmlExecutor` to accept data change from users.
     let dml_executor = DmlExecutor::new(
         Box::new(source_executor),
@@ -190,7 +188,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         table_id,
         INITIAL_TABLE_VERSION_ID,
         column_descs.clone(),
-        ACTOR_ID1,
     );
 
     let row_id_gen_executor = RowIdGenExecutor::new(

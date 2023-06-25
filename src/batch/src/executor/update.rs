@@ -240,7 +240,6 @@ mod tests {
     use risingwave_common::catalog::{
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
-    use risingwave_common::hash::ActorId;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::util::worker_util::WorkerNodeId;
     use risingwave_expr::expr::InputRefExpression;
@@ -291,8 +290,7 @@ mod tests {
         let reader = dml_manager
             .register_reader(table_id, INITIAL_TABLE_VERSION_ID, &column_descs)
             .unwrap();
-        const ACTOR_ID1: ActorId = 1;
-        let mut reader = reader.stream_reader(ACTOR_ID1).into_stream();
+        let mut reader = reader.stream_reader().into_stream();
 
         // Update
         let update_executor = Box::new(UpdateExecutor::new(

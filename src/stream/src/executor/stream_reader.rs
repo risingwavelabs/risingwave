@@ -149,11 +149,9 @@ mod tests {
 
     use super::*;
     use crate::executor::{barrier_to_message_stream, Barrier};
-    use crate::task::ActorId;
 
     const TEST_TRANSACTION_ID1: TxnId = 0;
     const TEST_TRANSACTION_ID2: TxnId = 1;
-    const ACTOR_ID1: ActorId = 1;
 
     #[tokio::test]
     async fn test_pause_and_resume() {
@@ -161,9 +159,7 @@ mod tests {
 
         let table_dml_handle = TableDmlHandle::new(vec![]);
 
-        let source_stream = table_dml_handle
-            .stream_reader(ACTOR_ID1)
-            .into_data_stream_for_test();
+        let source_stream = table_dml_handle.stream_reader().into_data_stream_for_test();
 
         let mut write_handle1 = table_dml_handle.write_handle(TEST_TRANSACTION_ID1).unwrap();
         let mut write_handle2 = table_dml_handle.write_handle(TEST_TRANSACTION_ID2).unwrap();
