@@ -172,6 +172,72 @@ async fn test_resize_single() -> Result<()> {
 
     Ok(())
 }
+
+#[madsim::test]
+async fn test_resize_single_failed() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut session = cluster.start_session();
+
+    session.run("create table t (v int);").await?;
+    session
+        .run("create materialized view mv1 as select count(*) from t;")
+        .await?;
+
+    session
+        .run("create materialized view mv2 as select * from mv1;")
+        .await?;
+
+    let upstream_fragment = cluster
+        .locate_one_fragment([
+            identity_contains("simpleAgg"),
+            identity_contains("materialize"),
+        ])
+        .await?;
+
+    let upstream_fragment_id = upstream_fragment.inner.fragment_id;
+
+    let downstream_fragment = cluster
+        .locate_one_fragment([identity_contains("chain"), identity_contains("materialize")])
+        .await?;
+
+    let downstream_fragment_id = downstream_fragment.inner.fragment_id;
+
+    let mut workers: Vec<WorkerNode> = cluster
+        .get_cluster_info()
+        .await?
+        .worker_nodes
+        .into_iter()
+        .filter(|worker| worker.r#type() == WorkerType::ComputeNode)
+        .collect();
+
+    let worker_a = workers.pop().unwrap();
+    let worker_b = workers.pop().unwrap();
+
+    let resp = cluster
+        .get_reschedule_plan(StableResizePolicy(PbStableResizePolicy {
+            fragment_worker_changes: HashMap::from([
+                (
+                    upstream_fragment_id,
+                    WorkerChanges {
+                        include_worker_ids: vec![],
+                        exclude_worker_ids: vec![worker_a.id],
+                    },
+                ),
+                (
+                    downstream_fragment_id,
+                    WorkerChanges {
+                        include_worker_ids: vec![],
+                        exclude_worker_ids: vec![worker_b.id],
+                    },
+                ),
+            ]),
+        }))
+        .await;
+
+    assert!(resp.is_err());
+
+    Ok(())
+}
 #[madsim::test]
 async fn test_resize_no_shuffle() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
