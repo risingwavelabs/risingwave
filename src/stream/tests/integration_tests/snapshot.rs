@@ -29,7 +29,8 @@ pub struct SnapshotOptions {
     /// Whether to sort the output chunk, required if the output chunk has no specified order.
     pub sort_chunk: bool,
 
-    /// Whether to include the result after applying the changes from each output chunk.
+    /// Whether to include the result after applying the changes from each output chunk. One can
+    /// imagine this as the result of a `SELECT * FROM mv` after each output chunk.
     pub include_applied: bool,
 }
 
