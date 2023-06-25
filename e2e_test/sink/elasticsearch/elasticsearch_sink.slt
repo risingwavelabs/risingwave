@@ -8,7 +8,7 @@ statement ok
 CREATE SINK s7 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH (
     connector = 'elasticsearch',
     index = 'test',
-    url = 'http://127.0.0.1:9200'
+    url = 'http://elasticsearch:9200'
 );
 
 statement ok

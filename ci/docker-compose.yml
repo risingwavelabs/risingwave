@@ -83,6 +83,7 @@ services:
     depends_on:
       - mysql
       - db
+      - elasticsearch
     volumes:
       - ..:/risingwave
 
