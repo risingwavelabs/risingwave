@@ -39,7 +39,7 @@ use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 use crate::source::cdc::{
-    CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, CITUS_CDC_CONNECTOR,
+    CdcProperties, CdcSplitReader, DebeziumCdcSplit, DebeziumSplitEnumerator, CITUS_CDC_CONNECTOR,
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use crate::source::datagen::{
@@ -297,9 +297,9 @@ pub enum SplitImpl {
     Nexmark(NexmarkSplit),
     Datagen(DatagenSplit),
     GooglePubsub(PubsubSplit),
-    MySqlCdc(CdcSplit),
-    PostgresCdc(CdcSplit),
-    CitusCdc(CdcSplit),
+    MySqlCdc(DebeziumCdcSplit),
+    PostgresCdc(DebeziumCdcSplit),
+    CitusCdc(DebeziumCdcSplit),
     S3(FsSplit),
 }
 
@@ -381,9 +381,9 @@ impl_split! {
     { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
     { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit },
-    { MySqlCdc, MYSQL_CDC_CONNECTOR, CdcSplit },
-    { PostgresCdc, POSTGRES_CDC_CONNECTOR, CdcSplit },
-    { CitusCdc, CITUS_CDC_CONNECTOR, CdcSplit },
+    { MySqlCdc, MYSQL_CDC_CONNECTOR, DebeziumCdcSplit },
+    { PostgresCdc, POSTGRES_CDC_CONNECTOR, DebeziumCdcSplit },
+    { CitusCdc, CITUS_CDC_CONNECTOR, DebeziumCdcSplit },
     { S3, S3_CONNECTOR, FsSplit }
 }
 
@@ -473,6 +473,7 @@ mod tests {
     use nexmark::event::EventType;
 
     use super::*;
+    use crate::source::cdc::MySqlCdcSplit;
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {
@@ -489,7 +490,9 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let split_impl = SplitImpl::MySqlCdc(CdcSplit::new(1001, offset_str.to_string()));
+        let mysql_split = MySqlCdcSplit::new(1001, offset_str.to_string());
+        let split = DebeziumCdcSplit::new(Some(mysql_split), None);
+        let split_impl = SplitImpl::MySqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
         assert_eq!(
