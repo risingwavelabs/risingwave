@@ -33,6 +33,27 @@ CREATE TABLE t_remote_1 (
 );
 
 statement ok
+CREATE TABLE rw_types (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB,
+    array_column VARCHAR[],
+    array_column2 FLOAT[]
+);
+
+statement ok
 create materialized view mv_remote_0 as select * from t_remote_0;
 
 statement ok
@@ -71,6 +92,22 @@ CREATE SINK s_mysql_1 FROM mv_remote_1 WITH (
 );
 
 statement ok
+CREATE SINK s2_postgres FROM rw_types WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name='t_types',
+    type='upsert'
+);
+
+statement ok
+CREATE SINK s2_mysql FROM rw_types WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
+    table.name='t_types',
+    type='upsert'
+);
+
+statement ok
 INSERT INTO t_remote_0 VALUES
     (1, 'Alice', 28208, 281620391, 4986480304337356659, 28162.0391, 2.03, 28162.0391, '2023-03-20 10:18:30'),
     (2, 'Bob', 10580, 2131030003, 3074255027698877876, 21310.30003, 10.3, 21310.30003, '2023-03-20 10:18:31'),
@@ -93,6 +130,12 @@ INSERT INTO t_remote_1 VALUES
     (4, 'Varchar value 4', 'Text value 4', 456, 789, 012, 45.67, 89.01, 23.45, FALSE, '2023-05-25', '23:45:01', '2023-05-25 23:45:01', '2023-05-25 23:45:01', '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', '{"key": "value4"}', E'\\xBABEC0DE'),
     (5, 'Varchar value 5', 'Text value 5', 567, 890, 123, 56.78, 90.12, 34.56, TRUE, '2023-05-26', '12:34:56', '2023-05-26 12:34:56', '2023-05-26 12:34:56', '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', '{"key": "value5"}', E'\\xDEADBABE'),
     (6, 'Varchar value 6', 'Text value 6', 789, 123, 456, 67.89, 34.56, 78.91, FALSE, '2023-05-27', '23:45:01', '2023-05-27 23:45:01', '2023-05-27 23:45:01', '2 years 3 months 4 days 5 hours 6 minutes 7 seconds', '{"key": "value6"}', E'\\xDEADBABE');
+
+statement ok
+INSERT INTO rw_types (id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, interval_column, jsonb_column, array_column, array_column2) VALUES
+    (1, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}', ARRAY['Value 1', 'Value 2'], '{12.345,56.789}'),
+    (2, 'Varcharvalue2', 'Textvalue2', 234, 567, 890, 23.45, 67.89, 01.23, FALSE, '2023-05-23', '23:45:01', '2023-05-23 23:45:01', '2 days', '{"key": "value2"}', ARRAY['Value 3', 'Value 4'], '{43.21,65.432}'),
+    (3, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}', ARRAY['How''re you?', '"hello\ \world"'], ARRAY[12.345,56.789]);
 
 statement ok
 FLUSH;
@@ -119,6 +162,12 @@ statement ok
 DROP SINK s_postgres_1;
 
 statement ok
+DROP SINK s2_postgres;
+
+statement ok
+DROP SINK s2_mysql;
+
+statement ok
 DROP SINK s_mysql_0;
 
 statement ok
@@ -135,6 +184,9 @@ DROP TABLE t_remote_0;
 
 statement ok
 DROP TABLE t_remote_1;
+
+statement ok
+DROP TABLE rw_types;
 
 statement ok
 FLUSH;

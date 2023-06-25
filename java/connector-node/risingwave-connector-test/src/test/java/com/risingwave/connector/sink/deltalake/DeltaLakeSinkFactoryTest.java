@@ -15,7 +15,7 @@
 package com.risingwave.connector.sink.deltalake;
 
 import com.risingwave.connector.DeltaLakeSinkFactory;
-import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.TestUtils;
 import io.delta.standalone.DeltaLog;
 import io.delta.standalone.Operation;
 import io.delta.standalone.OptimisticTransaction;
@@ -49,7 +49,7 @@ public class DeltaLakeSinkFactoryTest {
         Configuration conf = new Configuration();
         DeltaLog log = DeltaLog.forTable(conf, location);
 
-        // should be synchronized with `TableSchema.getMockTableSchema()`;
+        // should be synchronized with `TestUtils.getMockTableSchema()`;
         StructType schema =
                 new StructType(
                         new StructField[] {
@@ -73,7 +73,7 @@ public class DeltaLakeSinkFactoryTest {
         createMockTable(location);
         DeltaLakeSinkFactory sinkFactory = new DeltaLakeSinkFactory();
         sinkFactory.create(
-                TableSchema.getMockTableSchema(),
+                TestUtils.getMockTableSchema(),
                 new HashMap<>() {
                     {
                         put("location", String.format("file://%s", location));
