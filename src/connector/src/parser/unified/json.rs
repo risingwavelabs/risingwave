@@ -107,7 +107,7 @@ impl JsonParseOptions {
             string_parsing: false,
             string_integer_parsing: false,
         },
-        ignoring_keycase: false,
+        ignoring_keycase: true,
     };
     pub const DEFAULT: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,

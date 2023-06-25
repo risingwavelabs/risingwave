@@ -83,10 +83,29 @@ pub trait SplitEnumerator: Sized {
 
 pub type SourceContextRef = Arc<SourceContext>;
 
+/// The max size of a chunk yielded by source stream.
+pub const MAX_CHUNK_SIZE: usize = 1024;
+
+#[derive(Debug, Clone)]
+pub struct SourceCtrlOpts {
+    // comes from developer::stream_chunk_size in stream scenario and developer::batch_chunk_size
+    // in batch scenario
+    pub chunk_size: usize,
+}
+
+impl Default for SourceCtrlOpts {
+    fn default() -> Self {
+        Self {
+            chunk_size: MAX_CHUNK_SIZE,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct SourceContext {
     pub source_info: SourceInfo,
     pub metrics: Arc<SourceMetrics>,
+    pub source_ctrl_opts: SourceCtrlOpts,
     error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
 impl SourceContext {
@@ -95,6 +114,7 @@ impl SourceContext {
         table_id: TableId,
         fragment_id: u32,
         metrics: Arc<SourceMetrics>,
+        source_ctrl_opts: SourceCtrlOpts,
     ) -> Self {
         Self {
             source_info: SourceInfo {
@@ -104,6 +124,7 @@ impl SourceContext {
             },
             metrics,
             error_suppressor: None,
+            source_ctrl_opts,
         }
     }
 
@@ -208,9 +229,6 @@ pub trait SplitReader: Sized {
 
     fn into_stream(self) -> BoxSourceWithStateStream;
 }
-
-/// The max size of a chunk yielded by source stream.
-pub const MAX_CHUNK_SIZE: usize = 1024;
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum ConnectorProperties {
