@@ -75,11 +75,10 @@ mod private {
         }
 
         pub fn insert(&mut self, key: StateKey, row: OwnedRow) {
-            let key_heap_size = key.estimated_heap_size();
-            self.heap_size.add_size(key_heap_size);
+            let key_size = self.heap_size.add_val(&key);
             self.heap_size.add_val(&row);
             if let Some(old_row) = self.cache.insert(key, row) {
-                self.heap_size.sub_size(key_heap_size);
+                self.heap_size.sub_size(key_size);
                 self.heap_size.sub_val(&old_row);
             }
         }
