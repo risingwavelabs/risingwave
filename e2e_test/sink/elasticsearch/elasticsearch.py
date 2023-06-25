@@ -9,11 +9,14 @@ test_shard = []
 with open(expected_output_file) as file:
     line = file.readline()
     file = json.loads(line)
-    expected_shard = file["hits"]
+    expected_shard = sorted(file["hits"].items())
 
 with open(test_output_file) as file:
     line = file.readline()
     file = json.loads(line)
-    test_shard = file["hits"]
+    test_shard = sorted(file["hits"].items())
 
-assert sorted(expected_shard.items()) == sorted(test_shard.items())
+if test_shard != expected_shard:
+    print(test_shard)
+    print(expected_shard)
+assert test_shard == expected_shard
