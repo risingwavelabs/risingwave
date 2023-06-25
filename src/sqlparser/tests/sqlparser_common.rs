@@ -260,7 +260,10 @@ fn parse_select_all_distinct() {
 fn parse_select_wildcard() {
     let sql = "SELECT * FROM foo";
     let select = verified_only_select(sql);
-    assert_eq!(&SelectItem::Wildcard, only(&select.projection));
+    assert_eq!(
+        &SelectItem::WildcardOrWithExcept(None),
+        only(&select.projection)
+    );
 
     let sql = "SELECT foo.* FROM foo";
     let select = verified_only_select(sql);
@@ -282,6 +285,16 @@ fn parse_select_wildcard() {
     let sql = "SELECT * + * FROM foo;";
     let result = parse_sql_statements(sql);
     assert!(format!("{}", result.unwrap_err()).contains("Expected end of statement, found: +"));
+}
+
+#[test]
+fn parse_select_except() {
+    let sql = "SELEC * EXCEPT (v1) FROM foo";
+    let select = verified_only_select(sql);
+    assert_eq!(
+        &SelectItem::WildcardOrWithExcept(Some(vec![Expr::Identifier(Ident::new_unchecked("v1"))])),
+        only(&select.projection)
+    );
 }
 
 #[test]
@@ -331,7 +344,9 @@ fn parse_select_count_wildcard() {
     assert_eq!(
         &Expr::Function(Function {
             name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
-            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)],
+            args: vec![FunctionArg::Unnamed(FunctionArgExpr::WildcardOrWithExcept(
+                None
+            ))],
             over: None,
             distinct: false,
             order_by: vec![],
@@ -1071,7 +1086,9 @@ fn parse_select_having() {
         Some(Expr::BinaryOp {
             left: Box::new(Expr::Function(Function {
                 name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
-                args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)],
+                args: vec![FunctionArg::Unnamed(FunctionArgExpr::WildcardOrWithExcept(
+                    None
+                ))],
                 over: None,
                 distinct: false,
                 order_by: vec![],

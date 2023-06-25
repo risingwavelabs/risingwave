@@ -244,7 +244,8 @@ impl QueryRewriter<'_> {
                 FunctionArgExpr::Expr(expr) | FunctionArgExpr::ExprQualifiedWildcard(expr, _) => {
                     self.visit_expr(expr)
                 }
-                FunctionArgExpr::QualifiedWildcard(_) | FunctionArgExpr::WildcardOrWithExcept(None) => {}
+                FunctionArgExpr::QualifiedWildcard(_)
+                | FunctionArgExpr::WildcardOrWithExcept(None) => {}
                 FunctionArgExpr::WildcardOrWithExcept(Some(exprs)) => {
                     for expr in exprs {
                         self.visit_expr(expr);

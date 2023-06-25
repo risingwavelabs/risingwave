@@ -197,48 +197,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_select_list(&mut self, num_select_items: usize) -> (Vec<SelectItem>, Vec<Column>) {
         let can_agg = self.flip_coin();
         let context = SqlGeneratorContext::new_with_can_agg(can_agg);
-        let mut i = 0;
-        let mut select_items = vec![];
-        let mut columns = vec![];
-        while i < num_select_items {
-            match self.rng.gen_bool(0.5) {
-                true => {
-                    let (select_item, column) = self.gen_select_item(i, context);
-                    select_items.push(select_item);
-                    columns.push(column);
-                    i += 1;
-                }
-                false => {
-                    let num_included_items = cmp::min(self.rng.gen_range(1..=self.bound_columns.len()), num_select_items - i);
-                    let (select_item, select_columns) = self.gen_select_except_item(num_included_items);
-                    select_items.push(select_item);
-                    columns.extend(select_columns);
-                    i += num_included_items;
-                }
-            }
-        }
-        (select_items, columns)
-    }
-
-    fn gen_select_except_item(&mut self, num_included_items: usize) -> (SelectItem, Vec<Column>) {
-        let mut mask = vec![1; num_included_items];
-        mask.append(&mut vec![
-            0;
-            self.bound_relations.len() - num_included_items
-        ]);
-        mask.shuffle(self.rng);
-        let columns: Vec<Column> = self
-            .bound_columns
-            .iter()
-            .enumerate()
-            .filter(|(&i, _)| mask[i])
-            .map(|(_, e)| e)
-            .collect();
-        let exprs: Vec<Expr> = columns
-            .iter()
-            .map(|col| Expr::Identifier(Ident::new_unchecked(col.name)))
-            .collect();
-        (SelectItem::WildcardOrWithExcept(Some(exprs)), columns)
+        (0..num_select_items)
+            .map(|i| self.gen_select_item(i, context))
+            .unzip()
     }
 
     fn gen_select_item(&mut self, i: usize, context: SqlGeneratorContext) -> (SelectItem, Column) {

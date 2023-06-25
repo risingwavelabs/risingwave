@@ -129,7 +129,9 @@ fn make_agg_func(
     let args = if exprs.is_empty() {
         // The only agg without args is `count`.
         // `select proname from pg_proc where array_length(proargtypes, 1) = 0 and prokind = 'a';`
-        vec![FunctionArg::Unnamed(FunctionArgExpr::WildcardOrWithExcept(None))]
+        vec![FunctionArg::Unnamed(FunctionArgExpr::WildcardOrWithExcept(
+            None,
+        ))]
     } else {
         exprs
             .iter()

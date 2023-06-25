@@ -327,21 +327,19 @@ impl fmt::Display for SelectItem {
                     .format_with("", |i, f| f(&format_args!(".{i}")))
             ),
             SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            SelectItem::WildcardOrWithExcept(w) => {
-                match w {
-                    Some(exprs) => write!(
-                        f,
-                        "* EXCEPT ({})",
-                        exprs
-                            .iter()
-                            .map(|v| v.to_string())
-                            .collect::<Vec<String>>()
-                            .as_slice()
-                            .join(", ")
-                    ),
-                    None => write!(f, "*"),
-                }
-            }
+            SelectItem::WildcardOrWithExcept(w) => match w {
+                Some(exprs) => write!(
+                    f,
+                    "* EXCEPT ({})",
+                    exprs
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => write!(f, "*"),
+            },
         }
     }
 }
