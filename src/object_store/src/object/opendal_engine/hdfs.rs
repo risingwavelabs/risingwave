@@ -28,7 +28,14 @@ impl OpendalObjectStore {
         // NOTE: the root must be absolute path.
         builder.root(&root);
 
-        let op: Operator = Operator::new(builder)?.finish();
+        let op: Operator = Operator::new(builder)?
+            .layer(
+                RetryLayer::new()
+                    .with_factor(2.0)
+                    .with_min_delay(Duration::from_secs(1))
+                    .with_max_times(4),
+            )
+            .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Hdfs,

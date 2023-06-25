@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
+use opendal::layers::RetryLayer;
 use opendal::services::Oss;
 use opendal::Operator;
 
@@ -38,7 +41,14 @@ impl OpendalObjectStore {
         builder.endpoint(&endpoint);
         builder.access_key_id(&access_key_id);
         builder.access_key_secret(&access_key_secret);
-        let op: Operator = Operator::new(builder)?.finish();
+        let op: Operator = Operator::new(builder)?
+            .layer(
+                RetryLayer::new()
+                    .with_factor(2.0)
+                    .with_min_delay(Duration::from_secs(1))
+                    .with_max_times(4),
+            )
+            .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Oss,

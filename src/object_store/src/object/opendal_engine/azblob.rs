@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
+use opendal::layers::RetryLayer;
 use opendal::services::Azblob;
 use opendal::Operator;
 
@@ -35,7 +38,14 @@ impl OpendalObjectStore {
         builder.endpoint(&endpoint);
         builder.account_name(&account_name);
         builder.account_key(&account_key);
-        let op: Operator = Operator::new(builder)?.finish();
+        let op: Operator = Operator::new(builder)?
+            .layer(
+                RetryLayer::new()
+                    .with_factor(2.0)
+                    .with_min_delay(Duration::from_secs(1))
+                    .with_max_times(4),
+            )
+            .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Azblob,
