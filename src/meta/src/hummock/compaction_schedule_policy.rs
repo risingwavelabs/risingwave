@@ -442,32 +442,10 @@ mod tests {
         CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy,
     };
     use crate::hummock::test_utils::{
-        commit_from_meta_node, generate_test_tables, get_sst_ids,
-        register_sstable_infos_to_compaction_group, setup_compute_env_with_config,
+        commit_from_meta_node, generate_test_sstables_with_table_id, get_sst_ids,
+        register_table_ids_to_compaction_group, setup_compute_env_with_config,
         to_local_sstable_info,
     };
-    use crate::hummock::HummockManager;
-    use crate::storage::MetaStore;
-
-    async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
-    where
-        S: MetaStore,
-    {
-        let original_tables = generate_test_tables(epoch, get_sst_ids(hummock_manager, 2).await);
-        register_sstable_infos_to_compaction_group(
-            hummock_manager,
-            &original_tables,
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
-        commit_from_meta_node(
-            hummock_manager,
-            epoch,
-            to_local_sstable_info(&original_tables),
-        )
-        .await
-        .unwrap();
-    }
 
     fn dummy_compact_task(task_id: u64, input_file_size: u64) -> CompactTask {
         CompactTask {
@@ -563,7 +541,26 @@ mod tests {
         let (_, hummock_manager, _, worker_node) = setup_compute_env_with_config(80, config).await;
         let context_id = worker_node.id;
         let mut compactor_manager = RoundRobinPolicy::new();
-        add_compact_task(hummock_manager.as_ref(), context_id, 1).await;
+        register_table_ids_to_compaction_group(
+            hummock_manager.as_ref(),
+            &[1],
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
+        for epoch in 1..3 {
+            let original_tables = generate_test_sstables_with_table_id(
+                epoch,
+                1,
+                get_sst_ids(hummock_manager.as_ref(), 2).await,
+            );
+            commit_from_meta_node(
+                hummock_manager.as_ref(),
+                epoch,
+                to_local_sstable_info(&original_tables),
+            )
+            .await
+            .unwrap();
+        }
 
         // No compactor available.
         assert!(compactor_manager.next_compactor().is_none());
