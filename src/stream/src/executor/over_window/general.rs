@@ -32,12 +32,12 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use self::private::Partition;
-use super::diff_btree_map::{Change, DeltaBTreeMap};
+use super::delta_btree_map::{Change, DeltaBTreeMap};
 use super::state::{create_window_state, StateKey};
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::aggregation::ChunkBuilder;
-use crate::executor::over_window::diff_btree_map::PositionType;
+use crate::executor::over_window::delta_btree_map::PositionType;
 use crate::executor::over_window::window_states::WindowStates;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{
