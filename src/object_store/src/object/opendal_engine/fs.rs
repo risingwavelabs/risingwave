@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use opendal::layers::RetryLayer;
 use opendal::services::Fs;
 use opendal::Operator;
 
@@ -25,7 +26,9 @@ impl OpendalObjectStore {
 
         builder.root(&root);
 
-        let op: Operator = Operator::new(builder)?.finish();
+        let op: Operator = Operator::new(builder)?
+            .layer(RetryLayer::default())
+            .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Fs,
