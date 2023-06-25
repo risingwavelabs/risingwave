@@ -16,10 +16,10 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::XmlNode;
 use risingwave_common::error::Result;
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
@@ -139,8 +139,8 @@ impl fmt::Display for LogicalProject {
     }
 }
 impl Distill for LogicalProject {
-    fn distill<'a>(&self) -> Pretty<'a> {
-        Pretty::childless_record(
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        childless_record(
             "LogicalProject",
             self.core.fields_pretty(self.base.schema()),
         )

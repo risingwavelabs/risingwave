@@ -360,9 +360,23 @@ where
             .into_iter()
             .map(|worker_node| (worker_node.id, worker_node))
             .collect();
-
         if worker_nodes.is_empty() {
             bail!("no available compute node in the cluster");
+        }
+
+        // Check if we are trying to move a fragment to a node marked as unschedulable
+        let unschedulable_pu_ids: HashSet<ParallelUnitId> = worker_nodes
+            .values()
+            .filter(|w| w.property.as_ref().unwrap().is_unschedulable)
+            .flat_map(|w| w.parallel_units.iter().map(|pu| pu.id))
+            .collect();
+
+        if reschedule
+            .values()
+            .flat_map(|p| &p.added_parallel_units)
+            .any(|pu| unschedulable_pu_ids.contains(pu))
+        {
+            bail!("unable to move fragment to unschedulable node");
         }
 
         // Associating ParallelUnit with Worker
@@ -554,7 +568,16 @@ where
             }
 
             match fragment.distribution_type() {
-                FragmentDistributionType::Hash => {}
+                FragmentDistributionType::Hash => {
+                    if current_parallel_units.len() + added_parallel_units.len()
+                        <= removed_parallel_units.len()
+                    {
+                        bail!(
+                            "can't remove all parallel units from fragment {}",
+                            fragment_id
+                        );
+                    }
+                }
                 FragmentDistributionType::Single => {
                     if added_parallel_units.len() != removed_parallel_units.len() {
                         bail!("single distribution fragment only support migration");
@@ -684,12 +707,11 @@ where
                 }
             }
 
-            if new_actor_ids.is_empty() {
-                bail!(
-                    "should be at least one actor in fragment {} after rescheduling",
-                    fragment_id
-                );
-            }
+            assert!(
+                !new_actor_ids.is_empty(),
+                "should be at least one actor in fragment {} after rescheduling",
+                fragment_id
+            );
 
             fragment_actors_after_reschedule.insert(*fragment_id, new_actor_ids);
         }

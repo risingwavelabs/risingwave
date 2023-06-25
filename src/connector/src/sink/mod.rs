@@ -14,8 +14,10 @@
 
 pub mod catalog;
 pub mod kafka;
+pub mod kinesis;
 pub mod redis;
 pub mod remote;
+pub mod utils;
 
 use std::collections::HashMap;
 
@@ -39,6 +41,7 @@ pub use tracing;
 
 use self::catalog::{SinkCatalog, SinkType};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
+use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
 use crate::ConnectorParams;
@@ -71,6 +74,7 @@ pub enum SinkConfig {
     Redis(RedisConfig),
     Kafka(Box<KafkaConfig>),
     Remote(RemoteConfig),
+    Kinesis(Box<KinesisSinkConfig>),
     BlackHole,
 }
 
@@ -123,6 +127,9 @@ impl SinkConfig {
             KAFKA_SINK => Ok(SinkConfig::Kafka(Box::new(KafkaConfig::from_hashmap(
                 properties,
             )?))),
+            KINESIS_SINK => Ok(SinkConfig::Kinesis(Box::new(
+                KinesisSinkConfig::from_hashmap(properties)?,
+            ))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
             _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
@@ -134,6 +141,7 @@ impl SinkConfig {
             SinkConfig::Redis(_) => "redis",
             SinkConfig::Remote(_) => "remote",
             SinkConfig::BlackHole => "blackhole",
+            SinkConfig::Kinesis(_) => "kinesis",
         }
     }
 }
@@ -146,6 +154,8 @@ pub enum SinkImpl {
     Remote(RemoteSink<true>),
     UpsertRemote(RemoteSink<false>),
     BlackHole(BlockHoleSink),
+    Kinesis(KinesisSink<true>),
+    UpsertKinesis(KinesisSink<false>),
 }
 
 #[macro_export]
@@ -160,6 +170,8 @@ macro_rules! dispatch_sink {
             SinkImpl::Remote($sink) => $body,
             SinkImpl::UpsertRemote($sink) => $body,
             SinkImpl::BlackHole($sink) => $body,
+            SinkImpl::Kinesis($sink) => $body,
+            SinkImpl::UpsertKinesis($sink) => $body,
         }
     }};
 }
@@ -182,6 +194,17 @@ impl SinkImpl {
                 } else {
                     // Upsert Kafka sink
                     SinkImpl::UpsertKafka(KafkaSink::<false>::new(*cfg, schema, pk_indices).await?)
+                }
+            }
+            SinkConfig::Kinesis(cfg) => {
+                if sink_type.is_append_only() {
+                    // Append-only Kinesis sink
+                    SinkImpl::Kinesis(KinesisSink::<true>::new(*cfg, schema, pk_indices).await?)
+                } else {
+                    // Upsert Kinesis sink
+                    SinkImpl::UpsertKinesis(
+                        KinesisSink::<false>::new(*cfg, schema, pk_indices).await?,
+                    )
                 }
             }
             SinkConfig::Remote(cfg) => {
@@ -223,6 +246,13 @@ impl SinkImpl {
                     KafkaSink::<false>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
                 }
             }
+            SinkConfig::Kinesis(cfg) => {
+                if sink_catalog.sink_type.is_append_only() {
+                    KinesisSink::<true>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
+                } else {
+                    KinesisSink::<false>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
+                }
+            }
             SinkConfig::Remote(cfg) => {
                 if sink_catalog.sink_type.is_append_only() {
                     RemoteSink::<true>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
@@ -241,6 +271,8 @@ pub type Result<T> = std::result::Result<T, SinkError>;
 pub enum SinkError {
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
+    #[error("Kinesis error: {0}")]
+    Kinesis(anyhow::Error),
     #[error("Remote sink error: {0}")]
     Remote(String),
     #[error("Json parse error: {0}")]

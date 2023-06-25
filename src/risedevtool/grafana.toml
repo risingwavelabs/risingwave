@@ -3,7 +3,7 @@ extend = "common.toml"
 [env]
 GRAFANA_SYSTEM = "${SYSTEM_AMD64}"
 GRAFANA_DOWNLOAD_PATH = "${PREFIX_TMP}/grafana.tar.gz"
-GRAFANA_VERSION = "9.0.0"
+GRAFANA_VERSION = "10.0.0"
 GRAFANA_RELEASE = "grafana-${GRAFANA_VERSION}"
 GRAFANA_DOWNLOAD_TAR_GZ = "https://dl.grafana.com/oss/release/${GRAFANA_RELEASE}.${GRAFANA_SYSTEM}.tar.gz"
 

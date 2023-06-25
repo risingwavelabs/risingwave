@@ -15,18 +15,18 @@
 use std::vec::IntoIter;
 
 use futures::stream::FusedStream;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
 use crate::pg_protocol::Conn;
-use crate::pg_response::{PgResponse, RowSetResult};
+use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Row;
 
 pub struct ResultCache<VS>
 where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    VS: ValuesStream,
 {
     result: PgResponse<VS>,
     row_cache: IntoIter<Row>,
@@ -34,7 +34,7 @@ where
 
 impl<VS> ResultCache<VS>
 where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    VS: ValuesStream,
 {
     pub fn new(result: PgResponse<VS>) -> Self {
         ResultCache {

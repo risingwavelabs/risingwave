@@ -16,12 +16,12 @@ use std::sync::Arc;
 use std::{fmt, vec};
 
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
     StreamValues, ToBatch, ToStream,
@@ -87,6 +87,18 @@ impl LogicalValues {
     pub fn rows(&self) -> &[Vec<ExprImpl>] {
         self.rows.as_ref()
     }
+
+    pub(super) fn rows_pretty<'a>(&self) -> Pretty<'a> {
+        let data = self
+            .rows()
+            .iter()
+            .map(|row| {
+                let collect = row.iter().map(Pretty::debug).collect();
+                Pretty::Array(collect)
+            })
+            .collect();
+        Pretty::Array(data)
+    }
 }
 
 impl_plan_tree_node_for_leaf! { LogicalValues }
@@ -100,18 +112,10 @@ impl fmt::Display for LogicalValues {
     }
 }
 impl Distill for LogicalValues {
-    fn distill<'a>(&self) -> Pretty<'a> {
-        let data = self
-            .rows()
-            .iter()
-            .map(|row| {
-                let collect = row.iter().map(Pretty::debug).collect();
-                Pretty::Array(collect)
-            })
-            .collect();
-        let data = Pretty::Array(data);
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = self.rows_pretty();
         let fields = vec![("rows", data), ("schema", Pretty::debug(&self.schema()))];
-        Pretty::childless_record("BatchValues", fields)
+        childless_record("LogicalValues", fields)
     }
 }
 

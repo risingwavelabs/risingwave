@@ -15,6 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
@@ -140,6 +141,14 @@ impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
                 input_schema,
             },
         );
+    }
+
+    pub fn pretty_field<'a>(&self) -> Pretty<'a> {
+        let (condition, input_schema) = &self.condition_display();
+        Pretty::debug(&ConditionDisplay {
+            condition,
+            input_schema,
+        })
     }
 }
 

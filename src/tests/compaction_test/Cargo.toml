@@ -33,7 +33,6 @@ risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_rt = { path = "../../utils/runtime" }
 risingwave_storage = { path = "../../storage", features = ["test"] }
-risingwave_tracing = { path = "../../tracing" }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",
