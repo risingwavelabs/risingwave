@@ -7,7 +7,7 @@ USE mydb;
 
 EXEC sys.sp_cdc_enable_db;
 
-CREATE TABLE IF NOT EXISTS orders (
+CREATE TABLE orders (
   order_id INT PRIMARY KEY,
   order_date BIGINT,
   customer_name NVARCHAR(200),
