@@ -139,7 +139,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                 .iter()
                 .map(|c| Column {
                     name: c.name.clone(),
-                    data_type: c.data_type().to_protobuf().type_name,
+                    data_type: Some(c.data_type().to_protobuf()),
                 })
                 .collect(),
             pk_indices: pk_indices.iter().map(|i| *i as u32).collect(),
@@ -203,20 +203,22 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                     | DataType::Boolean
                     | DataType::Decimal
                     | DataType::Timestamp
+                    | DataType::Timestamptz
                     | DataType::Varchar
                     | DataType::Date
                     | DataType::Time
                     | DataType::Interval
                     | DataType::Jsonb
                     | DataType::Bytea
+                    | DataType::List(_)
             ) {
                 Ok( Column {
                     name: column.column_desc.name.clone(),
-                    data_type: column.column_desc.data_type.to_protobuf().type_name,
+                    data_type: Some(column.column_desc.data_type.to_protobuf()),
                 })
                 } else {
                     Err(SinkError::Remote(format!(
-                        "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Bytea and Varchar, got {:?}: {:?}",
+                        "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, List, Bytea and Varchar, got {:?}: {:?}",
                         column.column_desc.name,
                         column.column_desc.data_type
                     )))

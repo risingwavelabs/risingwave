@@ -22,6 +22,7 @@ import com.risingwave.connector.JDBCSink;
 import com.risingwave.connector.JDBCSinkConfig;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
+import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
 import java.io.ByteArrayInputStream;
@@ -62,13 +63,13 @@ public class JDBCSinkTest {
                 Lists.newArrayList(
                         "id", "v_varchar", "v_date", "v_time", "v_timestamp", "v_jsonb", "v_bytea"),
                 Lists.newArrayList(
-                        TypeName.INT32,
-                        TypeName.VARCHAR,
-                        TypeName.DATE,
-                        TypeName.TIME,
-                        TypeName.TIMESTAMP,
-                        TypeName.JSONB,
-                        TypeName.BYTEA),
+                        Data.DataType.newBuilder().setTypeName(TypeName.INT32).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.VARCHAR).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.DATE).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.TIME).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.TIMESTAMP).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.JSONB).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.BYTEA).build()),
                 Lists.newArrayList("id"));
     }
 
