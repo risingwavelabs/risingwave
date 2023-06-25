@@ -1018,7 +1018,8 @@ impl Binder {
             FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr)?]),
             FunctionArgExpr::QualifiedWildcard(_) => todo!(),
             FunctionArgExpr::ExprQualifiedWildcard(_, _) => todo!(),
-            FunctionArgExpr::Wildcard => Ok(vec![]),
+            FunctionArgExpr::WildcardOrWithExcept(None) => Ok(vec![]),
+            FunctionArgExpr::WildcardOrWithExcept(Some(_)) => unreachable!(),
         }
     }
 
