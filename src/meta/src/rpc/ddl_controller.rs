@@ -345,6 +345,7 @@ where
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
         let stream_job = &*stream_job;
 
         // 3. Mark current relation as "creating" and add reference count to dependent relations.
@@ -613,6 +614,7 @@ where
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
         let stream_job = &*stream_job;
 
         // 3. Mark current relation as "updating".
