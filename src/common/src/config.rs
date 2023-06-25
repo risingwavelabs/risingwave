@@ -742,7 +742,7 @@ mod default {
         }
 
         pub fn max_preload_wait_time_mill() -> u64 {
-            50
+            500
         }
     }
 
