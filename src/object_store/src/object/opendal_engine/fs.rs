@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
+use opendal::layers::RetryLayer;
 use opendal::services::Fs;
 use opendal::Operator;
 
-use super::{config_retry, EngineType, OpendalObjectStore};
+use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal fs engine.
@@ -27,8 +26,9 @@ impl OpendalObjectStore {
 
         builder.root(&root);
 
-        let op: Operator =
-            config_retry(Operator::new(builder)?, 2.0, Duration::from_secs(1), 3).finish();
+        let op: Operator = Operator::new(builder)?
+            .layer(RetryLayer::default())
+            .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Fs,

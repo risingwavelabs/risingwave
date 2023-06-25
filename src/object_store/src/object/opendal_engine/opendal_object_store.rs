@@ -12,17 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use bytes::Bytes;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::StreamExt;
 use itertools::Itertools;
-use opendal::layers::RetryLayer;
-use opendal::raw::Accessor;
 use opendal::services::Memory;
-use opendal::{Metakey, Operator, OperatorBuilder, Writer};
+use opendal::{Metakey, Operator, Writer};
 use tokio::io::AsyncRead;
 
 use crate::object::{
@@ -193,20 +189,6 @@ impl ObjectStore for OpendalObjectStore {
             EngineType::Fs => "Fs",
         }
     }
-}
-
-pub fn config_retry(
-    builder: OperatorBuilder<impl Accessor>,
-    factor: f32,
-    min_delay: Duration,
-    retry_times: usize,
-) -> OperatorBuilder<impl Accessor> {
-    builder.layer(
-        RetryLayer::new()
-            .with_factor(factor)
-            .with_min_delay(min_delay)
-            .with_max_times(retry_times),
-    )
 }
 
 /// Store multiple parts in a map, and concatenate them on finish.
