@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::worker_node::{Property, State};
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
-use risingwave_pb::meta::add_worker_node_request::Property as RegisterProperty;
+use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
@@ -98,14 +100,58 @@ where
         &self,
         r#type: WorkerType,
         host_address: HostAddress,
-        property: RegisterProperty,
+        property: AddNodeProperty,
     ) -> MetaResult<WorkerNode> {
         let worker_node_parallelism = property.worker_node_parallelism as usize;
-        let property = self.parse_property(r#type, property);
+        let mut property = self.parse_property(r#type, property);
         let mut core = self.core.write().await;
+
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
-            // TODO: update parallelism when the worker exists.
+            if let Some(property) = &mut property {
+                property.is_unschedulable = worker
+                    .worker_node
+                    .property
+                    .as_ref()
+                    .unwrap()
+                    .is_unschedulable;
+            }
+
             worker.update_ttl(self.max_heartbeat_interval);
+            let current_parallelism = worker.worker_node.parallel_units.len();
+            if current_parallelism == worker_node_parallelism
+                && worker.worker_node.property == property
+            {
+                return Ok(worker.to_protobuf());
+            }
+            match current_parallelism.cmp(&worker_node_parallelism) {
+                Ordering::Less => {
+                    tracing::info!(
+                        "worker {} parallelism updated from {} to {}",
+                        worker.worker_node.id,
+                        current_parallelism,
+                        worker_node_parallelism
+                    );
+                    let parallel_units = self
+                        .generate_cn_parallel_units(
+                            worker_node_parallelism - current_parallelism,
+                            worker.worker_id(),
+                        )
+                        .await?;
+                    worker.worker_node.parallel_units.extend(parallel_units);
+                }
+                Ordering::Greater => {
+                    // Simply reject the request if the worker registered with a smaller
+                    // parallelism.
+                    return Err(MetaError::invalid_worker(
+                        worker.worker_id(),
+                        format!(
+                            "parallelism is less than current, current is {}, but received {}",
+                            current_parallelism, worker_node_parallelism
+                        ),
+                    ));
+                }
+                Ordering::Equal => {}
+            }
             if property != worker.worker_node.property {
                 tracing::info!(
                     "worker {} property updated from {:?} to {:?}",
@@ -113,17 +159,21 @@ where
                     worker.worker_node.property,
                     property
                 );
+
                 worker.worker_node.property = property;
-                worker.insert(self.env.meta_store()).await?;
             }
+
+            worker.insert(self.env.meta_store()).await?;
             return Ok(worker.to_protobuf());
         }
+
         // Generate worker id.
         let worker_id = self
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::Worker }>()
             .await? as WorkerId;
+
         // Generate parallel units.
         let parallel_units = if r#type == WorkerType::ComputeNode {
             self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
@@ -140,6 +190,7 @@ where
             parallel_units,
             property,
         };
+
         let worker = Worker::from_protobuf(worker_node.clone());
         // Persist worker node.
         worker.insert(self.env.meta_store()).await?;
@@ -159,8 +210,7 @@ where
 
         // Notify frontends of new compute node.
         // Always notify because a running worker's property may have been changed.
-        let worker_type = worker.worker_type();
-        if worker_type == WorkerType::ComputeNode {
+        if worker.worker_type() == WorkerType::ComputeNode {
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Node(worker.worker_node.clone()))
@@ -172,6 +222,32 @@ where
             .await;
 
         Ok(())
+    }
+
+    pub async fn update_schedulability(
+        &self,
+        host_address: HostAddress,
+        is_unschedulable: bool,
+    ) -> MetaResult<WorkerType> {
+        let mut core = self.core.write().await;
+        let worker = core
+            .workers
+            .get_mut(&WorkerKey(host_address.clone()))
+            .ok_or_else(|| anyhow!("Worker node does not exist!"))?;
+        let worker_type = worker.worker_type();
+
+        if let Some(property) = &mut worker.worker_node.property {
+            if property.is_unschedulable == is_unschedulable {
+                return Ok(worker_type);
+            }
+            property.is_unschedulable = is_unschedulable;
+        } else {
+            return Err(MetaError::invalid_parameter(
+                "Worker node does not have property",
+            ));
+        }
+        Worker::insert(worker, self.env.meta_store()).await?;
+        Ok(worker_type)
     }
 
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
@@ -220,7 +296,10 @@ where
                 return Ok(());
             }
         }
-        Err(MetaError::invalid_worker(worker_id))
+        Err(MetaError::invalid_worker(
+            worker_id,
+            "worker not found".into(),
+        ))
     }
 
     pub async fn start_heartbeat_checker(
@@ -313,15 +392,17 @@ where
         &self,
         worker_type: WorkerType,
         worker_state: Option<State>,
+        list_unschedulable: bool,
     ) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_worker_node(worker_type, worker_state)
+        core.list_worker_node(worker_type, worker_state, list_unschedulable)
     }
 
-    /// A convenient method to get all running compute nodes that can be used for streaming.
+    /// A convenient method to get all running compute nodes that may have running actors on them
+    /// i.e. CNs which are running
     pub async fn list_active_streaming_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_streaming_worker_node(Some(State::Running))
+        core.list_streaming_worker_node(Some(State::Running), true)
     }
 
     pub async fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
@@ -329,6 +410,8 @@ where
         core.list_active_streaming_parallel_units()
     }
 
+    /// Get the cluster info used for scheduling a streaming job, containing all nodes that are
+    /// running and schedulable
     pub async fn list_active_serving_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
         core.list_serving_worker_node(Some(State::Running))
@@ -343,12 +426,13 @@ where
     fn parse_property(
         &self,
         worker_type: WorkerType,
-        worker_property: RegisterProperty,
+        worker_property: AddNodeProperty,
     ) -> Option<Property> {
         if worker_type == WorkerType::ComputeNode {
             Some(Property {
                 is_streaming: worker_property.is_streaming,
                 is_serving: worker_property.is_serving,
+                is_unschedulable: worker_property.is_unschedulable,
             })
         } else {
             None
@@ -442,6 +526,7 @@ impl ClusterManagerCore {
     fn add_worker_node(&mut self, worker: Worker) {
         self.parallel_units
             .extend(worker.worker_node.parallel_units.clone());
+
         self.workers
             .insert(WorkerKey(worker.key().unwrap()), worker);
     }
@@ -466,27 +551,42 @@ impl ClusterManagerCore {
         &self,
         worker_type: WorkerType,
         worker_state: Option<State>,
+        list_unschedulable: bool,
     ) -> Vec<WorkerNode> {
+        let worker_state = worker_state.map(|worker_state| worker_state as i32);
+
         self.workers
             .values()
             .map(|worker| worker.to_protobuf())
             .filter(|w| w.r#type == worker_type as i32)
             .filter(|w| match worker_state {
                 None => true,
-                Some(state) => state as i32 == w.state,
+                Some(state) => state == w.state,
+            })
+            .filter(|w| {
+                if list_unschedulable {
+                    true
+                } else {
+                    !w.property.as_ref().map_or(false, |p| p.is_unschedulable)
+                }
             })
             .collect_vec()
     }
 
-    pub fn list_streaming_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
-        self.list_worker_node(WorkerType::ComputeNode, worker_state)
+    pub fn list_streaming_worker_node(
+        &self,
+        worker_state: Option<State>,
+        list_unschedulable: bool,
+    ) -> Vec<WorkerNode> {
+        self.list_worker_node(WorkerType::ComputeNode, worker_state, list_unschedulable)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
             .collect()
     }
 
+    // List all parallel units on running nodes
     pub fn list_serving_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
-        self.list_worker_node(WorkerType::ComputeNode, worker_state)
+        self.list_worker_node(WorkerType::ComputeNode, worker_state, false)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
             .collect()
@@ -494,7 +594,7 @@ impl ClusterManagerCore {
 
     fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
         let active_workers: HashSet<_> = self
-            .list_streaming_worker_node(Some(State::Running))
+            .list_streaming_worker_node(Some(State::Running), true)
             .into_iter()
             .map(|w| w.id)
             .collect();
@@ -506,9 +606,10 @@ impl ClusterManagerCore {
             .collect()
     }
 
+    // Lists active worker nodes
     fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let active_workers: HashMap<_, _> = self
-            .list_streaming_worker_node(Some(State::Running))
+            .list_streaming_worker_node(Some(State::Running), false)
             .into_iter()
             .map(|w| (w.id, w))
             .collect();
@@ -577,10 +678,11 @@ mod tests {
                 .add_worker_node(
                     WorkerType::ComputeNode,
                     fake_host_address,
-                    RegisterProperty {
+                    AddNodeProperty {
                         worker_node_parallelism: fake_parallelism as _,
                         is_streaming: true,
                         is_serving: true,
+                        is_unschedulable: false,
                     },
                 )
                 .await
@@ -647,10 +749,11 @@ mod tests {
             .add_worker_node(
                 WorkerType::ComputeNode,
                 fake_host_address_2,
-                RegisterProperty {
+                AddNodeProperty {
                     worker_node_parallelism: fake_parallelism as _,
                     is_streaming: true,
                     is_serving: true,
+                    is_unschedulable: false,
                 },
             )
             .await
@@ -658,7 +761,7 @@ mod tests {
         // Two live nodes
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(WorkerType::ComputeNode, None, false)
                 .await
                 .len(),
             2
@@ -685,7 +788,7 @@ mod tests {
         // started.
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(WorkerType::ComputeNode, None, false)
                 .await
                 .len(),
             2
@@ -698,7 +801,7 @@ mod tests {
         // One live node left.
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(WorkerType::ComputeNode, None, false)
                 .await
                 .len(),
             1

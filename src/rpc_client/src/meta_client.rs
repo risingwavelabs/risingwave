@@ -220,6 +220,9 @@ impl MetaClient {
             true,
         );
 
+        if property.is_unschedulable {
+            tracing::warn!("worker {:?} registered as unschedulable", addr.clone());
+        }
         let init_result: Result<_> = tokio_retry::Retry::spawn(retry_strategy, || async {
             let grpc_meta_client = GrpcMetaClient::new(&addr_strategy, meta_config.clone()).await?;
 
@@ -230,6 +233,11 @@ impl MetaClient {
                     property: Some(property.clone()),
                 })
                 .await?;
+            if let Some(status) = &add_worker_resp.status
+                && status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+                tracing::error!("invalid worker: {}", status.message);
+                std::process::exit(1);
+            }
 
             let system_params_resp = grpc_meta_client
                 .get_system_params(GetSystemParamsRequest {})
@@ -569,6 +577,22 @@ impl MetaClient {
         };
         self.inner.delete_worker_node(request).await?;
         Ok(())
+    }
+
+    pub async fn update_schedulability(
+        &self,
+        host: HostAddress,
+        set_is_unschedulable: bool,
+    ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
+        let request = UpdateWorkerNodeSchedulabilityRequest {
+            host: Some(host),
+            set_is_unschedulable,
+        };
+        let resp = self
+            .inner
+            .update_worker_node_schedulability(request)
+            .await?;
+        Ok(resp)
     }
 
     pub async fn list_worker_nodes(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
@@ -930,6 +954,22 @@ impl MetaClient {
             })
             .collect();
         Ok(mappings)
+    }
+
+    pub async fn risectl_list_compaction_status(
+        &self,
+    ) -> Result<(
+        Vec<CompactStatus>,
+        Vec<CompactTaskAssignment>,
+        Vec<CompactTaskProgress>,
+    )> {
+        let req = RiseCtlListCompactionStatusRequest {};
+        let resp = self.inner.rise_ctl_list_compaction_status(req).await?;
+        Ok((
+            resp.compaction_statuses,
+            resp.task_assignment,
+            resp.task_progress,
+        ))
     }
 }
 
@@ -1489,6 +1529,8 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
+            ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
+            //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
@@ -1549,6 +1591,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_resume_version_checkpoint, RiseCtlResumeVersionCheckpointRequest, RiseCtlResumeVersionCheckpointResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
+            ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

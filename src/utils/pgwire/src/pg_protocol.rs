@@ -23,7 +23,6 @@ use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
-use futures::Stream;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
@@ -39,18 +38,14 @@ use crate::pg_message::{
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
     FePasswordMessage, FeStartupMessage,
 };
-use crate::pg_response::RowSetResult;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
-pub struct PgProtocol<S, SM, VS, PS, PO>
+pub struct PgProtocol<S, SM>
 where
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
-    SM: SessionManager<VS, PS, PO>,
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    SM: SessionManager,
 {
     /// Used for write/read pg messages.
     stream: Conn<S>,
@@ -62,11 +57,11 @@ where
     session_mgr: Arc<SM>,
     session: Option<Arc<SM::Session>>,
 
-    result_cache: HashMap<String, ResultCache<VS>>,
-    unnamed_prepare_statement: Option<PS>,
-    prepare_statement_store: HashMap<String, PS>,
-    unnamed_portal: Option<PO>,
-    portal_store: HashMap<String, PO>,
+    result_cache: HashMap<String, ResultCache<<SM::Session as Session>::ValuesStream>>,
+    unnamed_prepare_statement: Option<<SM::Session as Session>::PreparedStatement>,
+    prepare_statement_store: HashMap<String, <SM::Session as Session>::PreparedStatement>,
+    unnamed_portal: Option<<SM::Session as Session>::Portal>,
+    portal_store: HashMap<String, <SM::Session as Session>::Portal>,
     // Used to store the dependency of portal and prepare statement.
     // When we close a prepare statement, we need to close all the portals that depend on it.
     statement_portal_dependency: HashMap<String, Vec<String>>,
@@ -103,12 +98,9 @@ impl TlsConfig {
     }
 }
 
-impl<S, SM, VS, PS, PO> Drop for PgProtocol<S, SM, VS, PS, PO>
+impl<S, SM> Drop for PgProtocol<S, SM>
 where
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
-    SM: SessionManager<VS, PS, PO>,
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    SM: SessionManager,
 {
     fn drop(&mut self) {
         if let Some(session) = &self.session {
@@ -136,13 +128,10 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
     std::str::from_utf8(without_null)
 }
 
-impl<S, SM, VS, PS, PO> PgProtocol<S, SM, VS, PS, PO>
+impl<S, SM> PgProtocol<S, SM>
 where
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
     S: AsyncWrite + AsyncRead + Unpin,
-    SM: SessionManager<VS, PS, PO>,
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    SM: SessionManager,
 {
     pub fn new(stream: S, session_mgr: Arc<SM>, tls_config: Option<TlsConfig>) -> Self {
         Self {
@@ -686,7 +675,7 @@ where
         self.result_cache.remove(portal_name);
     }
 
-    fn get_portal(&self, portal_name: &str) -> PsqlResult<PO> {
+    fn get_portal(&self, portal_name: &str) -> PsqlResult<<SM::Session as Session>::Portal> {
         if portal_name.is_empty() {
             Ok(self
                 .unnamed_portal
@@ -704,7 +693,10 @@ where
         }
     }
 
-    fn get_statement(&self, statement_name: &str) -> PsqlResult<PS> {
+    fn get_statement(
+        &self,
+        statement_name: &str,
+    ) -> PsqlResult<<SM::Session as Session>::PreparedStatement> {
         if statement_name.is_empty() {
             Ok(self
                 .unnamed_prepare_statement

@@ -14,20 +14,22 @@
 
 package com.example;
 
+import com.google.gson.Gson;
+import com.risingwave.functions.DataTypeHint;
+import com.risingwave.functions.PeriodDuration;
+import com.risingwave.functions.ScalarFunction;
+import com.risingwave.functions.TableFunction;
+import com.risingwave.functions.UdfServer;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.Iterator;
-import java.util.stream.Stream;
 import java.util.stream.IntStream;
-
-import com.google.gson.Gson;
-
-import com.risingwave.functions.DataTypeHint;
-import com.risingwave.functions.ScalarFunction;
-import com.risingwave.functions.TableFunction;
-import com.risingwave.functions.UdfServer;
+import java.util.stream.Stream;
 
 public class UdfExample {
     public static void main(String[] args) throws IOException {
@@ -42,6 +44,7 @@ public class UdfExample {
             server.addFunction("jsonb_concat", new JsonbConcat());
             server.addFunction("jsonb_array_identity", new JsonbArrayIdentity());
             server.addFunction("jsonb_array_struct_identity", new JsonbArrayStructIdentity());
+            server.addFunction("return_all", new ReturnAll());
             server.addFunction("series", new Series());
             server.addFunction("split", new Split());
 
@@ -95,8 +98,9 @@ public class UdfExample {
         }
 
         static String intToIpAddr(int addr) {
-            return String.format("%d.%d.%d.%d", (addr >> 24) & 0xff, (addr >> 16) & 0xff, (addr >> 8) & 0xff,
-                    addr & 0xff);
+            return String.format(
+                    "%d.%d.%d.%d",
+                    (addr >> 24) & 0xff, (addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff);
         }
     }
 
@@ -119,11 +123,13 @@ public class UdfExample {
         static Gson gson = new Gson();
 
         public @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB") String json, int index) {
-            if (json == null)
+            if (json == null) {
                 return null;
+            }
             var array = gson.fromJson(json, Object[].class);
-            if (index >= array.length || index < 0)
+            if (index >= array.length || index < 0) {
                 return null;
+            }
             var obj = array[index];
             return gson.toJson(obj);
         }
@@ -131,8 +137,9 @@ public class UdfExample {
 
     public static class JsonbConcat implements ScalarFunction {
         public @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB[]") String[] jsons) {
-            if (jsons == null)
+            if (jsons == null) {
                 return null;
+            }
             return "[" + String.join(",", jsons) + "]";
         }
     }
@@ -154,6 +161,58 @@ public class UdfExample {
         }
     }
 
+    public static class ReturnAll implements ScalarFunction {
+        public static class Row {
+            public Boolean bool;
+            public Short i16;
+            public Integer i32;
+            public Long i64;
+            public Float f32;
+            public Double f64;
+            public BigDecimal decimal;
+            public LocalDate date;
+            public LocalTime time;
+            public LocalDateTime timestamp;
+            public PeriodDuration interval;
+            public String str;
+            public byte[] bytes;
+            public @DataTypeHint("JSONB") String jsonb;
+        }
+
+        public Row eval(
+                Boolean bool,
+                Short i16,
+                Integer i32,
+                Long i64,
+                Float f32,
+                Double f64,
+                BigDecimal decimal,
+                LocalDate date,
+                LocalTime time,
+                LocalDateTime timestamp,
+                PeriodDuration interval,
+                String str,
+                byte[] bytes,
+                @DataTypeHint("JSONB") String jsonb) {
+            var row = new Row();
+            row.bool = bool;
+            row.i16 = i16;
+            row.i32 = i32;
+            row.i64 = i64;
+            row.f32 = f32;
+            row.f64 = f64;
+            row.decimal = decimal;
+            row.date = date;
+            row.time = time;
+            row.timestamp = timestamp;
+            row.interval = interval;
+            row.str = str;
+            row.bytes = bytes;
+            row.jsonb = jsonb;
+            return row;
+        }
+    }
+
     public static class Series implements TableFunction {
         public Iterator<Integer> eval(int n) {
             return IntStream.range(0, n).iterator();
@@ -167,12 +226,15 @@ public class UdfExample {
         }
 
         public Iterator<Row> eval(String str) {
-            return Stream.of(str.split(" ")).map(s -> {
-                Row row = new Row();
-                row.word = s;
-                row.length = s.length();
-                return row;
-            }).iterator();
+            return Stream.of(str.split(" "))
+                    .map(
+                            s -> {
+                                Row row = new Row();
+                                row.word = s;
+                                row.length = s.length();
+                                return row;
+                            })
+                    .iterator();
         }
     }
 }

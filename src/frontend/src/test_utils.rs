@@ -47,14 +47,13 @@ use tempfile::{Builder, NamedTempFile};
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId};
-use crate::handler::extended_handle::{Portal, PrepareStatement};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserId;
-use crate::{FrontendOpts, PgResponseStream};
+use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
@@ -62,7 +61,7 @@ pub struct LocalFrontend {
     env: FrontendEnv,
 }
 
-impl SessionManager<PgResponseStream, PrepareStatement, Portal> for LocalFrontend {
+impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
     fn connect(
