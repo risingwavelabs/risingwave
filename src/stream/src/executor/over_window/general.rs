@@ -32,7 +32,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use self::private::Partition;
-use super::diff_btree_map::{Change, DiffBTreeMap};
+use super::diff_btree_map::{Change, DeltaBTreeMap};
 use super::state::{create_window_state, StateKey};
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
@@ -98,7 +98,7 @@ mod private {
 }
 
 /// Changes happened in one partition in the chunk. `StateKey (order key, input pk)` => `Change`.
-type Diff = BTreeMap<StateKey, Change<OwnedRow>>;
+type Delta = BTreeMap<StateKey, Change<OwnedRow>>;
 
 /// `partition key` => `Partition`.
 type PartitionCache = ManagedLruCache<OwnedRow, Partition>;
@@ -341,8 +341,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
         vars: &'a mut ExecutionVars<S>,
         chunk: StreamChunk,
     ) {
-        // `partition key` => `Diff`.
-        let mut diffs: BTreeMap<DefaultOrdered<OwnedRow>, Diff> = BTreeMap::new();
+        // `partition key` => `Delta`.
+        let mut deltas: BTreeMap<DefaultOrdered<OwnedRow>, Delta> = BTreeMap::new();
         // `input pk` of update records of which the `partition key` or `order key` is changed.
         let mut key_change_updated_pks = HashSet::new();
 
@@ -351,16 +351,16 @@ impl<S: StateStore> OverWindowExecutor<S> {
             match record {
                 Record::Insert { new_row } => {
                     let part_key = this.get_partition_key(new_row).into();
-                    let part_diff = diffs.entry(part_key).or_insert(Diff::new());
-                    part_diff.insert(
+                    let part_delta = deltas.entry(part_key).or_insert(Delta::new());
+                    part_delta.insert(
                         this.row_to_state_key(new_row)?,
                         Change::Insert(new_row.into_owned_row()),
                     );
                 }
                 Record::Delete { old_row } => {
                     let part_key = this.get_partition_key(old_row).into();
-                    let part_diff = diffs.entry(part_key).or_insert(Diff::new());
-                    part_diff.insert(this.row_to_state_key(old_row)?, Change::Delete);
+                    let part_delta = deltas.entry(part_key).or_insert(Delta::new());
+                    part_delta.insert(this.row_to_state_key(old_row)?, Change::Delete);
                 }
                 Record::Update { old_row, new_row } => {
                     let old_part_key = this.get_partition_key(old_row).into();
@@ -369,23 +369,23 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     let new_state_key = this.row_to_state_key(new_row)?;
                     if old_part_key == new_part_key && old_state_key == new_state_key {
                         // not a key-change update
-                        let part_diff = diffs.entry(old_part_key).or_insert(Diff::new());
-                        part_diff.insert(old_state_key, Change::Update(new_row.into_owned_row()));
+                        let part_delta = deltas.entry(old_part_key).or_insert(Delta::new());
+                        part_delta.insert(old_state_key, Change::Update(new_row.into_owned_row()));
                     } else if old_part_key == new_part_key {
                         // order-change update
                         key_change_updated_pks.insert(this.get_input_pk(old_row));
-                        let part_diff = diffs.entry(old_part_key).or_insert(Diff::new());
+                        let part_delta = deltas.entry(old_part_key).or_insert(Delta::new());
                         // split into delete + insert, will be merged after building changes
-                        part_diff.insert(old_state_key, Change::Delete);
-                        part_diff.insert(new_state_key, Change::Insert(new_row.into_owned_row()));
+                        part_delta.insert(old_state_key, Change::Delete);
+                        part_delta.insert(new_state_key, Change::Insert(new_row.into_owned_row()));
                     } else {
                         // partition-change update
                         key_change_updated_pks.insert(this.get_input_pk(old_row));
                         // split into delete + insert, will be merged after building changes
-                        let old_part_diff = diffs.entry(old_part_key).or_insert(Diff::new());
-                        old_part_diff.insert(old_state_key, Change::Delete);
-                        let new_part_diff = diffs.entry(new_part_key).or_insert(Diff::new());
-                        new_part_diff
+                        let old_part_delta = deltas.entry(old_part_key).or_insert(Delta::new());
+                        old_part_delta.insert(old_state_key, Change::Delete);
+                        let new_part_delta = deltas.entry(new_part_key).or_insert(Delta::new());
+                        new_part_delta
                             .insert(new_state_key, Change::Insert(new_row.into_owned_row()));
                     }
                 }
@@ -397,15 +397,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let mut chunk_builder = ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types());
 
         // Build final changes partition by partition.
-        for (part_key, diff) in diffs {
+        for (part_key, delta) in deltas {
             Self::ensure_partition_in_cache(this, &mut vars.partitions, &part_key).await?;
             let mut partition = vars.partitions.get_mut(&part_key).unwrap();
 
             // Build changes for current partition.
-            let part_changes = Self::build_changes_for_partition(
-                this,
-                DiffBTreeMap::new(partition.cache(), diff),
-            )?;
+            let part_changes = Self::build_changes_for_partition(this, &partition, delta)?;
 
             for (key, record) in part_changes {
                 // Build chunk and yield if needed.
@@ -459,17 +456,19 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
     fn build_changes_for_partition(
         this: &ExecutorInner<S>,
-        part_with_diff: DiffBTreeMap<'_, StateKey, OwnedRow>,
+        partition: &Partition,
+        delta: Delta,
     ) -> StreamExecutorResult<BTreeMap<StateKey, Record<OwnedRow>>> {
-        let snapshot = part_with_diff.snapshot();
-        let diff = part_with_diff.diff();
-        assert!(!diff.is_empty(), "if there's no diff, we won't be here");
+        let snapshot = partition.cache();
+        let part_with_delta = DeltaBTreeMap::new(snapshot, delta);
+        let delta = part_with_delta.delta();
+        assert!(!delta.is_empty(), "if there's no delta, we won't be here");
 
         let mut part_changes = BTreeMap::new();
 
         // Generate delete changes first, because deletes are skipped during iteration over
-        // `part_with_diff` in the next step.
-        for (key, change) in diff {
+        // `part_with_delta` in the next step.
+        for (key, change) in delta {
             if change.is_delete() {
                 part_changes.insert(
                     key.clone(),
@@ -481,7 +480,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         }
 
         for (first_frame_start, first_curr_key, last_curr_key, last_frame_end) in
-            find_affected_ranges(&this.calls, &part_with_diff)
+            find_affected_ranges(&this.calls, &part_with_delta)
         {
             assert!(first_frame_start <= first_curr_key);
             assert!(first_curr_key <= last_curr_key);
@@ -492,7 +491,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
             // Populate window states with the affected range of rows.
             {
-                let mut cursor = part_with_diff
+                let mut cursor = part_with_delta
                     .find(&first_frame_start)
                     .expect("first frame start key must exist");
                 while {
@@ -521,7 +520,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             while states.curr_key() != Some(&first_curr_key) {
                 states.just_slide_forward();
             }
-            let mut curr_key_cursor = part_with_diff.find(&first_curr_key).unwrap();
+            let mut curr_key_cursor = part_with_delta.find(&first_curr_key).unwrap();
             assert_eq!(states.curr_key(), curr_key_cursor.key());
 
             // Slide and generate changes.
@@ -626,20 +625,20 @@ impl<S: StateStore> OverWindowExecutor<S> {
     }
 }
 
-/// Find all affected ranges in the given partition with diff.
+/// Find all affected ranges in the given partition with delta.
 ///
 /// # Returns
 ///
 /// `Vec<(first_frame_start, first_curr_key, last_curr_key, last_frame_end_incl)>`
 ///
 /// Each affected range is a union of many small window frames affected by some adajcent
-/// keys in the diff.
+/// keys in the delta.
 ///
 /// Example:
 /// - frame 1: `rows between 2 preceding and current row`
 /// - frame 2: `rows between 1 preceding and 2 following`
 /// - partition: `[1, 2, 4, 5, 7, 8, 9, 10, 11, 12, 14]`
-/// - diff: `[3, 4, 15]`
+/// - delta: `[3, 4, 15]`
 /// - affected ranges: `[(1, 1, 7, 9), (10, 12, 15, 15)]`
 ///
 /// TODO(rc):
@@ -648,27 +647,27 @@ impl<S: StateStore> OverWindowExecutor<S> {
 /// `(1, 1, 15, 15)`. Later we may optimize this.
 fn find_affected_ranges(
     calls: &[WindowFuncCall],
-    part_with_diff: &DiffBTreeMap<'_, StateKey, OwnedRow>,
+    part_with_delta: &DeltaBTreeMap<'_, StateKey, OwnedRow>,
 ) -> Vec<(StateKey, StateKey, StateKey, StateKey)> {
-    let diff = part_with_diff.diff();
+    let delta = part_with_delta.delta();
 
-    if part_with_diff.first_key().is_none() {
-        // all keys are deleted in the diff
+    if part_with_delta.first_key().is_none() {
+        // all keys are deleted in the delta
         return vec![];
     }
 
-    if part_with_diff.snapshot().is_empty() {
-        // all existing keys are inserted in the diff
+    if part_with_delta.snapshot().is_empty() {
+        // all existing keys are inserted in the delta
         return vec![(
-            diff.first_key_value().unwrap().0.clone(),
-            diff.first_key_value().unwrap().0.clone(),
-            diff.last_key_value().unwrap().0.clone(),
-            diff.last_key_value().unwrap().0.clone(),
+            delta.first_key_value().unwrap().0.clone(),
+            delta.first_key_value().unwrap().0.clone(),
+            delta.last_key_value().unwrap().0.clone(),
+            delta.last_key_value().unwrap().0.clone(),
         )];
     }
 
     let (first_frame_start, first_curr_key) = {
-        let first_key = part_with_diff.first_key().unwrap();
+        let first_key = part_with_delta.first_key().unwrap();
         if calls
             .iter()
             .any(|call| call.frame.bounds.end_is_unbounded())
@@ -681,23 +680,23 @@ fn find_affected_ranges(
                 .iter()
                 .map(|call| match &call.frame.bounds {
                     FrameBounds::Rows(start, end) => {
-                        let mut ss_cursor = part_with_diff
-                            .lower_bound(Bound::Included(diff.first_key_value().unwrap().0));
+                        let mut cursor = part_with_delta
+                            .lower_bound(Bound::Included(delta.first_key_value().unwrap().0));
                         let n_following_rows = end.to_offset().unwrap().max(0) as usize;
                         for _ in 0..n_following_rows {
-                            if ss_cursor.key().is_some() {
-                                ss_cursor.move_prev();
+                            if cursor.key().is_some() {
+                                cursor.move_prev();
                             }
                         }
-                        let first_curr_key = ss_cursor.key().unwrap_or(first_key);
+                        let first_curr_key = cursor.key().unwrap_or(first_key);
                         let first_frame_start = if let Some(offset) = start.to_offset() {
                             let n_preceding_rows = offset.min(0).unsigned_abs();
                             for _ in 0..n_preceding_rows {
-                                if ss_cursor.key().is_some() {
-                                    ss_cursor.move_prev();
+                                if cursor.key().is_some() {
+                                    cursor.move_prev();
                                 }
                             }
-                            ss_cursor.key().unwrap_or(first_key)
+                            cursor.key().unwrap_or(first_key)
                         } else {
                             // The frame start is unbounded, so the first affected frame starts
                             // from the beginning.
@@ -713,7 +712,7 @@ fn find_affected_ranges(
     };
 
     let (last_curr_key, last_frame_end) = {
-        let last_key = part_with_diff.last_key().unwrap();
+        let last_key = part_with_delta.last_key().unwrap();
         if calls
             .iter()
             .any(|call| call.frame.bounds.start_is_unbounded())
@@ -726,23 +725,23 @@ fn find_affected_ranges(
                 .iter()
                 .map(|call| match &call.frame.bounds {
                     FrameBounds::Rows(start, end) => {
-                        let mut ss_cursor = part_with_diff
-                            .upper_bound(Bound::Included(diff.last_key_value().unwrap().0));
+                        let mut cursor = part_with_delta
+                            .upper_bound(Bound::Included(delta.last_key_value().unwrap().0));
                         let n_preceding_rows = start.to_offset().unwrap().min(0).unsigned_abs();
                         for _ in 0..n_preceding_rows {
-                            if ss_cursor.key().is_some() {
-                                ss_cursor.move_next();
+                            if cursor.key().is_some() {
+                                cursor.move_next();
                             }
                         }
-                        let last_curr_key = ss_cursor.key().unwrap_or(last_key);
+                        let last_curr_key = cursor.key().unwrap_or(last_key);
                         let last_frame_end = if let Some(offset) = end.to_offset() {
                             let n_following_rows = offset.max(0) as usize;
                             for _ in 0..n_following_rows {
-                                if ss_cursor.key().is_some() {
-                                    ss_cursor.move_next();
+                                if cursor.key().is_some() {
+                                    cursor.move_next();
                                 }
                             }
-                            ss_cursor.key().unwrap_or(last_key)
+                            cursor.key().unwrap_or(last_key)
                         } else {
                             // The frame end is unbounded, so the last affected frame ends at
                             // the end.
@@ -814,13 +813,13 @@ mod tests {
             };
         }
 
-        macro_rules! create_diff {
+        macro_rules! create_delta {
             ($(( $pk:literal, $change:ident )),* $(,)?) => {
                 {
                     #[allow(unused_mut)]
-                    let mut diff = BTreeMap::new();
+                    let mut delta = BTreeMap::new();
                     $(
-                        diff.insert(
+                        delta.insert(
                             StateKey {
                                 // order key doesn't matter here
                                 order_key: vec![].into(),
@@ -830,7 +829,7 @@ mod tests {
                             create_change!( $change ),
                         );
                     )*
-                    diff
+                    delta
                 }
             };
         }
@@ -838,25 +837,25 @@ mod tests {
         {
             // test all empty
             let snapshot = create_snapshot!();
-            let diff = create_diff!();
-            let part_with_diff = DiffBTreeMap::new(&snapshot, diff);
+            let delta = create_delta!();
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
             let calls = vec![create_call(Frame::rows(
                 FrameBound::Preceding(2),
                 FrameBound::Preceding(1),
             ))];
-            assert!(find_affected_ranges(&calls, &part_with_diff).is_empty());
+            assert!(find_affected_ranges(&calls, &part_with_delta).is_empty());
         }
 
         {
-            // test insert diff only
+            // test insert delta only
             let snapshot = create_snapshot!();
-            let diff = create_diff!((1, Insert), (2, Insert), (3, Insert));
-            let part_with_diff = DiffBTreeMap::new(&snapshot, diff);
+            let delta = create_delta!((1, Insert), (2, Insert), (3, Insert));
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
             let calls = vec![create_call(Frame::rows(
                 FrameBound::Preceding(2),
                 FrameBound::Preceding(1),
             ))];
-            let affected_ranges = find_affected_ranges(&calls, &part_with_diff);
+            let affected_ranges = find_affected_ranges(&calls, &part_with_delta);
             assert_eq!(affected_ranges.len(), 1);
             let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
                 affected_ranges.into_iter().next().unwrap();
@@ -869,8 +868,8 @@ mod tests {
         {
             // test simple
             let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
-            let diff = create_diff!((2, Update), (3, Delete));
-            let part_with_diff = DiffBTreeMap::new(&snapshot, diff);
+            let delta = create_delta!((2, Update), (3, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
 
             {
                 let calls = vec![create_call(Frame::rows(
@@ -878,7 +877,7 @@ mod tests {
                     FrameBound::Preceding(1),
                 ))];
                 let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
-                    find_affected_ranges(&calls, &part_with_diff)
+                    find_affected_ranges(&calls, &part_with_delta)
                         .into_iter()
                         .next()
                         .unwrap();
@@ -894,7 +893,7 @@ mod tests {
                     FrameBound::Following(2),
                 ))];
                 let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
-                    find_affected_ranges(&calls, &part_with_diff)
+                    find_affected_ranges(&calls, &part_with_delta)
                         .into_iter()
                         .next()
                         .unwrap();
@@ -910,7 +909,7 @@ mod tests {
                     FrameBound::Following(2),
                 ))];
                 let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
-                    find_affected_ranges(&calls, &part_with_diff)
+                    find_affected_ranges(&calls, &part_with_delta)
                         .into_iter()
                         .next()
                         .unwrap();
