@@ -5,6 +5,25 @@
 # set -euo pipefail
 
 echo "--- preparing elasticsearch"
+# install elasticsearch
+wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.17.10-linux-x86_64.tar.gz
+wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.17.10-linux-x86_64.tar.gz.sha512
+shasum -a 512 -c elasticsearch-7.17.10-linux-x86_64.tar.gz.sha512
+tar -xzf elasticsearch-7.17.10-linux-x86_64.tar.gz
+
+# adjust ownership and permissions to make it possible to run elasticsearch as a custom user
+chmod -R 750 ./elasticsearch-7.17.10
+
+# create a user and add it to elasticsearch group
+useradd non_root -m
+usermod -a -G elasticsearch non_root
+
+su - non_root
+
+timeout 20 elasticsearch-7.17.10/bin/elasticsearch -E http.port=9200
+
+su - root
+
 # wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
 # apt-get install apt-transport-https
 # echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/7.x/apt stable main" | tee /etc/apt/sources.list.d/elastic-7.x.list
