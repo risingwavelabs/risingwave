@@ -859,7 +859,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            "rate(actor_memory_usage[$__rate_interval])",
+                            f"{metric('actor_memory_usage')}",
                             "{{actor_id}}",
                         ),
                     ],
@@ -869,7 +869,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            "stream_memory_usage",
+                            f"{metric('stream_memory_usage')}",
                             "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
                         ),
                     ],
