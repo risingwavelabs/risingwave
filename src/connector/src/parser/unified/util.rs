@@ -23,11 +23,20 @@ pub fn apply_row_operation_on_stream_chunk_writer(
 ) -> std::result::Result<WriteGuard, RwError> {
     match row_op.op()? {
         super::ChangeEventOperation::Upsert => writer.insert(|column| {
-            let res = row_op.access_field(&column.name, &column.data_type);
-            tracing::debug!(
-                "inserted {:?} {:?} {:?}",
+            let res = match row_op.access_field(&column.name, &column.data_type) {
+                Ok(o) => Ok(o),
+                Err(AccessError::Undefined { name, .. }) if !column.is_pk && name == column.name => {
+                    // Fill in null value for non-pk column
+                    // TODO: figure out a way to fill in not-null default value if user specifies one
+                    Ok(None)
+                },
+                Err(e) => Err(e)
+            };
+            tracing::trace!(
+                "inserted {:?} {:?} is_pk:{:?} {:?} ",
                 &column.name,
                 &column.data_type,
+                &column.is_pk,
                 res
             );
             Ok(res?)
@@ -38,7 +47,12 @@ pub fn apply_row_operation_on_stream_chunk_writer(
                 Ok(datum) => Ok(datum),
                 Err(e) => {
                     tracing::error!(name=?column.name, data_type=?&column.data_type, err=?e, "delete column error");
-                    Ok(None)
+                    if column.is_pk {
+                        // It should be an error when pk column is missing in the message
+                        Err(e)?
+                    } else {
+                        Ok(None)
+                    }
                 }
             }
         }),

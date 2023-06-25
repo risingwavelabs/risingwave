@@ -389,15 +389,22 @@ def _string_to_data_type(type_str: str):
     elif type_str in ("FLOAT8", "DOUBLE PRECISION"):
         return pa.float64()
     elif type_str.startswith("DECIMAL") or type_str.startswith("NUMERIC"):
-        return pa.decimal128(28)
+        if type_str == "DECIMAL" or type_str == "NUMERIC":
+            return pa.decimal128(38)
+        rest = type_str[8:-1]  # remove "DECIMAL(" and ")"
+        if "," in rest:
+            precision, scale = rest.split(",")
+            return pa.decimal128(int(precision), int(scale))
+        else:
+            return pa.decimal128(int(rest), 0)
     elif type_str in ("DATE"):
         return pa.date32()
     elif type_str in ("TIME", "TIME WITHOUT TIME ZONE"):
-        return pa.time32("ms")
+        return pa.time64("us")
     elif type_str in ("TIMESTAMP", "TIMESTAMP WITHOUT TIME ZONE"):
-        return pa.timestamp("ms")
+        return pa.timestamp("us")
     elif type_str.startswith("INTERVAL"):
-        return pa.duration("us")
+        return pa.month_day_nano_interval()
     elif type_str in ("VARCHAR"):
         return pa.string()
     elif type_str in ("JSONB"):

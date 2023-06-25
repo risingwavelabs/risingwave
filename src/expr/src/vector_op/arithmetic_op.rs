@@ -286,33 +286,6 @@ pub fn timestamp_interval_sub(l: Timestamp, r: Interval) -> Result<Timestamp> {
     interval_timestamp_add(r.checked_neg().ok_or(ExprError::NumericOutOfRange)?, l)
 }
 
-#[function("add(timestamptz, interval) -> timestamptz")]
-pub fn timestamptz_interval_add(l: i64, r: Interval) -> Result<i64> {
-    timestamptz_interval_inner(l, r, i64::checked_add)
-}
-
-#[function("subtract(timestamptz, interval) -> timestamptz")]
-pub fn timestamptz_interval_sub(l: i64, r: Interval) -> Result<i64> {
-    timestamptz_interval_inner(l, r, i64::checked_sub)
-}
-
-#[function("add(interval, timestamptz) -> timestamptz")]
-pub fn interval_timestamptz_add(l: Interval, r: i64) -> Result<i64> {
-    timestamptz_interval_add(r, l)
-}
-
-#[inline(always)]
-fn timestamptz_interval_inner(l: i64, r: Interval, f: fn(i64, i64) -> Option<i64>) -> Result<i64> {
-    // Without session TimeZone, we cannot add month/day in local time. See #5826.
-    if r.months() != 0 || r.days() != 0 {
-        return Err(ExprError::UnsupportedFunction(
-            "timestamp with time zone +/- interval of days".into(),
-        ));
-    }
-    let delta_usecs = r.usecs();
-    f(l, delta_usecs).ok_or(ExprError::NumericOutOfRange)
-}
-
 #[function("multiply(interval, *int) -> interval")]
 pub fn interval_int_mul(l: Interval, r: impl TryInto<i32> + Debug) -> Result<Interval> {
     l.checked_mul_int(r).ok_or(ExprError::NumericOutOfRange)

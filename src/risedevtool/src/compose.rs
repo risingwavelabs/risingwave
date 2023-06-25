@@ -457,7 +457,7 @@ impl Compose for GrafanaConfig {
 
         fs_err::write(
             config_root.join("grafana-risedev-datasource.yml"),
-            GrafanaGen.gen_datasource_yml(self)?,
+            GrafanaGen.gen_prometheus_datasource_yml(self)?,
         )?;
 
         fs_err::write(

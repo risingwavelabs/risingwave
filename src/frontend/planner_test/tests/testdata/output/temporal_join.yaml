@@ -58,7 +58,7 @@
   stream_plan: |
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
-      └─StreamAppendOnlySimpleAgg { aggs: [sum0(count), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count] }
             └─StreamTemporalJoin { type: Inner, predicate: stream.id1 = version.id2 AND (version.a2 < 10:Int32), output: [stream._row_id, stream.id1, version.id2] }

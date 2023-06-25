@@ -49,6 +49,7 @@ use smallvec::SmallVec;
 use self::batch::BatchPlanRef;
 use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
+use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
 pub trait PlanNodeMeta {
@@ -66,6 +67,7 @@ pub trait PlanNode:
     + DynClone
     + DynEq
     + DynHash
+    + Distill
     + Debug
     + Display
     + Downcast
