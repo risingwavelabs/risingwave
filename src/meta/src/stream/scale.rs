@@ -416,14 +416,14 @@ where
         let mut no_shuffle_source_fragment_ids = HashSet::new();
         let mut no_shuffle_target_fragment_ids = HashSet::new();
 
-        let mut fragment_dispatcher_map = HashMap::new();
-
-        Self::build_no_shuffle_index(
+        Self::build_no_shuffle_relation_index(
             &actor_map,
             &mut no_shuffle_source_fragment_ids,
             &mut no_shuffle_target_fragment_ids,
-            &mut fragment_dispatcher_map,
         );
+
+        let mut fragment_dispatcher_map = HashMap::new();
+        Self::build_fragment_dispatcher_index(&actor_map, &mut fragment_dispatcher_map);
 
         // Then, we collect all available upstreams
         let mut upstream_dispatchers: HashMap<
@@ -600,25 +600,41 @@ where
         })
     }
 
-    fn build_no_shuffle_index(
+    fn build_fragment_dispatcher_index(
         actor_map: &HashMap<ActorId, StreamActor>,
-        no_shuffle_source_fragment_ids: &mut HashSet<u32>,
-        no_shuffle_target_fragment_ids: &mut HashSet<u32>,
-        fragment_dispatcher_map: &mut HashMap<u32, HashMap<u32, DispatcherType>>,
+        fragment_dispatcher_map: &mut HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
     ) {
         for actor in actor_map.values() {
             for dispatcher in &actor.dispatcher {
                 for downstream_actor_id in &dispatcher.downstream_actor_id {
                     if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
                         fragment_dispatcher_map
-                            .entry(actor.fragment_id)
+                            .entry(actor.fragment_id as FragmentId)
                             .or_insert(HashMap::new())
-                            .insert(downstream_actor.fragment_id, dispatcher.r#type());
+                            .insert(
+                                downstream_actor.fragment_id as FragmentId,
+                                dispatcher.r#type(),
+                            );
+                    }
+                }
+            }
+        }
+    }
 
+    fn build_no_shuffle_relation_index(
+        actor_map: &HashMap<ActorId, StreamActor>,
+        no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
+        no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
+    ) {
+        for actor in actor_map.values() {
+            for dispatcher in &actor.dispatcher {
+                for downstream_actor_id in &dispatcher.downstream_actor_id {
+                    if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
                         // Checking for no shuffle dispatchers
                         if dispatcher.r#type() == DispatcherType::NoShuffle {
-                            no_shuffle_source_fragment_ids.insert(actor.fragment_id);
-                            no_shuffle_target_fragment_ids.insert(downstream_actor.fragment_id);
+                            no_shuffle_source_fragment_ids.insert(actor.fragment_id as FragmentId);
+                            no_shuffle_target_fragment_ids
+                                .insert(downstream_actor.fragment_id as FragmentId);
                         }
                     }
                 }
@@ -1558,8 +1574,8 @@ where
                 Some(fragment) => fragment,
             };
 
-            let include_worker_ids: HashSet<_> = include_worker_ids.into_iter().collect();
-            let exclude_worker_ids: HashSet<_> = exclude_worker_ids.into_iter().collect();
+            let include_worker_ids: BTreeSet<_> = include_worker_ids.into_iter().collect();
+            let exclude_worker_ids: BTreeSet<_> = exclude_worker_ids.into_iter().collect();
 
             let intersection_ids = include_worker_ids
                 .intersection(&exclude_worker_ids)
@@ -1580,7 +1596,7 @@ where
                 }
             }
 
-            let fragment_parallel_unit_ids: HashSet<_> = fragment
+            let fragment_parallel_unit_ids: BTreeSet<_> = fragment
                 .actors
                 .iter()
                 .map(|actor| {
@@ -1595,27 +1611,26 @@ where
             match fragment.get_distribution_type().unwrap() {
                 FragmentDistributionType::Unspecified => unreachable!(),
                 FragmentDistributionType::Single => {
-                    assert_eq!(fragment_parallel_unit_ids.len(), 1);
-
                     let single_parallel_unit_id =
                         fragment_parallel_unit_ids.iter().exactly_one().unwrap();
 
-                    let target_parallel_unit_ids: HashSet<_> = worker_parallel_units
+                    let target_parallel_unit_ids: BTreeSet<_> = worker_parallel_units
                         .keys()
-                        .chain(include_worker_ids.iter())
                         .filter(|id| !exclude_worker_ids.contains(*id))
                         .flat_map(|id| worker_parallel_units.get(id).cloned().unwrap())
                         .collect();
 
                     if !target_parallel_unit_ids.contains(single_parallel_unit_id) {
-                        // todo: choose a target parallel unit by single actor count
-                        let chosen_target_parallel_unit_id =
-                            target_parallel_unit_ids.iter().next().unwrap();
+                        let sorted_target_parallel_unit_ids =
+                            target_parallel_unit_ids.into_iter().sorted().collect_vec();
+
+                        let chosen_target_parallel_unit_id = sorted_target_parallel_unit_ids
+                            [fragment_id as usize % sorted_target_parallel_unit_ids.len()];
 
                         target_plan.insert(
                             fragment_id,
                             ParallelUnitReschedule {
-                                added_parallel_units: vec![*chosen_target_parallel_unit_id],
+                                added_parallel_units: vec![chosen_target_parallel_unit_id],
                                 removed_parallel_units: vec![*single_parallel_unit_id],
                             },
                         );
@@ -1634,7 +1649,7 @@ where
                         .cloned()
                         .collect_vec();
 
-                    let mut target_parallel_unit_ids: HashSet<_> =
+                    let mut target_parallel_unit_ids: BTreeSet<_> =
                         fragment_parallel_unit_ids.clone();
                     target_parallel_unit_ids.extend(include_worker_parallel_unit_ids.iter());
                     target_parallel_unit_ids
@@ -1663,7 +1678,7 @@ where
             }
         }
 
-        Self::clone_no_shuffle_plan(&mut target_plan, &actor_map, &fragment_map)?;
+        Self::normalize_no_shuffle_plan(&mut target_plan, &actor_map, &fragment_map)?;
 
         target_plan.drain_filter(|_, plan| {
             plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty()
@@ -1672,7 +1687,7 @@ where
         Ok(target_plan)
     }
 
-    fn clone_no_shuffle_plan(
+    fn normalize_no_shuffle_plan(
         target_plan: &mut HashMap<FragmentId, ParallelUnitReschedule>,
         actor_map: &HashMap<ActorId, StreamActor>,
         fragment_map: &HashMap<FragmentId, Fragment>,
@@ -1680,14 +1695,14 @@ where
         let mut no_shuffle_source_fragment_ids = HashSet::new();
         let mut no_shuffle_target_fragment_ids = HashSet::new();
 
-        let mut fragment_dispatcher_map = HashMap::new();
-
-        Self::build_no_shuffle_index(
+        Self::build_no_shuffle_relation_index(
             actor_map,
             &mut no_shuffle_source_fragment_ids,
             &mut no_shuffle_target_fragment_ids,
-            &mut fragment_dispatcher_map,
         );
+
+        let mut fragment_dispatcher_map = HashMap::new();
+        Self::build_fragment_dispatcher_index(actor_map, &mut fragment_dispatcher_map);
 
         let mut queue: VecDeque<FragmentId> = target_plan.keys().cloned().collect();
 

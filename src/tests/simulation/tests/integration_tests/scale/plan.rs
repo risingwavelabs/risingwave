@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use itertools::Itertools;
+use rand::seq::SliceRandom;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::get_reschedule_plan_request::Policy::StableResizePolicy;
 use risingwave_pb::meta::get_reschedule_plan_request::{
@@ -46,9 +47,9 @@ async fn test_resize_normal() -> Result<()> {
     let join_fragment_id = join_fragment.inner.fragment_id;
 
     let mut workers: Vec<WorkerNode> = cluster
-        .list_workers()
-        .await
-        .unwrap()
+        .get_cluster_info()
+        .await?
+        .worker_nodes
         .into_iter()
         .filter(|worker| worker.r#type() == WorkerType::ComputeNode)
         .collect();
@@ -116,9 +117,9 @@ async fn test_resize_single() -> Result<()> {
     let used_parallel_unit_id = used_parallel_unit_ids.iter().next().unwrap();
 
     let mut workers: Vec<WorkerNode> = cluster
-        .list_workers()
-        .await
-        .unwrap()
+        .get_cluster_info()
+        .await?
+        .worker_nodes
         .into_iter()
         .filter(|worker| worker.r#type() == WorkerType::ComputeNode)
         .collect();
@@ -204,13 +205,14 @@ join mv5 on mv1.v = mv5.v;",
         .try_into()
         .unwrap();
 
-    let selected_fragment = &chain_fragments[0];
+    let selected_fragment = chain_fragments.choose(&mut rand::thread_rng()).unwrap();
 
     let selected_fragment_id = selected_fragment.inner.fragment_id;
 
     let mut workers: Vec<WorkerNode> = cluster
-        .list_workers()
+        .get_cluster_info()
         .await?
+        .worker_nodes
         .into_iter()
         .filter(|worker: &WorkerNode| worker.r#type() == WorkerType::ComputeNode)
         .collect();
@@ -235,7 +237,7 @@ join mv5 on mv1.v = mv5.v;",
 
     assert_eq!(reschedules.len(), 1);
 
-    let root_materialize_fragment = cluster
+    let top_materialize_fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
             no_identity_contains("chain"),
@@ -243,11 +245,11 @@ join mv5 on mv1.v = mv5.v;",
         ])
         .await?;
 
-    let root_materialize_fragment_id = reschedules.keys().exactly_one().cloned().unwrap();
+    let top_materialize_fragment_id = reschedules.keys().exactly_one().cloned().unwrap();
 
     assert_eq!(
-        root_materialize_fragment_id,
-        root_materialize_fragment.inner.fragment_id
+        top_materialize_fragment_id,
+        top_materialize_fragment.inner.fragment_id
     );
 
     Ok(())

@@ -378,6 +378,9 @@ message GetReschedulePlanRequest {
   }
 
   oneof policy {
+    // The StableResizePolicy will generate a stable ReschedulePlan, without altering the distribution on WorkerId that's not involved.
+    // Note that this "Stable" doesn't refer to the "determinacy" of the algorithm.
+    // Multiple repeated calls may yield different ReschedulePlan results.
     StableResizePolicy stable_resize_policy = 2;
   }
 }

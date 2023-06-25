@@ -356,22 +356,6 @@ impl Cluster {
         Ok(())
     }
 
-    pub async fn list_workers(&self) -> Result<Vec<WorkerNode>> {
-        let workers = self
-            .ctl
-            .spawn(async move {
-                let r = risingwave_ctl::cmd_impl::meta::get_cluster_info(
-                    &risingwave_ctl::common::CtlContext::default(),
-                )
-                .await?;
-
-                Ok::<_, anyhow::Error>(r.worker_nodes)
-            })
-            .await??;
-
-        Ok(workers)
-    }
-
     pub async fn get_reschedule_plan(&self, policy: PbPolicy) -> Result<GetReschedulePlanResponse> {
         let revision = self
             .ctl
