@@ -149,6 +149,7 @@ async fn preload_l1_data(
     }
 
     const MIN_OVERLAP_HOT_BLOCK_COUNT: usize = 32;
+    const PRELOAD_TIMES: usize = 16;
     for sst in insert_ssts {
         let key_range = sst.key_range.as_ref().unwrap();
         let mut replace_hot_block = 0;
@@ -250,7 +251,7 @@ async fn preload_l1_data(
             sstable_store.insert_block_cache(sstable_meta.id, index as u64, block);
             index += 1;
             if index >= sstable_meta.meta.block_metas.len()
-                || index - start_index > replace_hot_block
+                || index - start_index > replace_hot_block * PRELOAD_TIMES
                 || KeyComparator::encoded_full_key_less_than(
                     &largest_key,
                     &sstable_meta.meta.block_metas[index].smallest_key,
