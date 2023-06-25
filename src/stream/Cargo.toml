@@ -25,7 +25,6 @@ dyn-clone = "1"
 educe = "0.4"
 either = "1"
 enum-as-inner = "0.5"
-fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hytra = "0.1.2"
@@ -76,7 +75,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
-criterion = { version = "0.4", features = ["async_tokio", "async"] }
+criterion = { workspace = true, features = ["async_tokio", "async"] }
 expect-test = "1"
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
     "test",
