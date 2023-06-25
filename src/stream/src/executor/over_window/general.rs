@@ -525,7 +525,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             let mut curr_key_cursor = part_with_diff.find(&first_curr_key).unwrap();
             assert_eq!(states.curr_key(), curr_key_cursor.key());
 
-            // Slide and yield changes.
+            // Slide and generate changes.
             while {
                 let (key, row) = curr_key_cursor
                     .key_value()
