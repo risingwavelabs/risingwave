@@ -289,7 +289,7 @@ fn parse_select_wildcard() {
 
 #[test]
 fn parse_select_except() {
-    let sql = "SELEC * EXCEPT (v1) FROM foo";
+    let sql = "SELECT * EXCEPT (v1) FROM foo";
     let select = verified_only_select(sql);
     assert_eq!(
         &SelectItem::WildcardOrWithExcept(Some(vec![Expr::Identifier(Ident::new_unchecked("v1"))])),
