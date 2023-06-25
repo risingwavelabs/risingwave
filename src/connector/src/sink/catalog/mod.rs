@@ -95,6 +95,10 @@ impl SinkType {
     }
 }
 
+/// the catalog of the sink. There are two kind of schema here. The full schema is all columns
+/// stored in the `column` which is the sink executor/fragment's output schema. The visible
+/// schema contains the columns whose `is_hidden` is false, which is the columns sink out to the
+/// external system. The distribution key and all other keys are indexed in the full schema.
 #[derive(Clone, Debug)]
 pub struct SinkCatalog {
     /// Id of the sink.
