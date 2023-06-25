@@ -59,17 +59,6 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         self.inner.iter().map(|(_k, v)| v)
     }
 
-    pub fn put(&mut self, k: K, v: V) -> Option<V> {
-        let key_size = self.kv_heap_size.add_val(&k);
-        self.kv_heap_size.add_val(&v);
-        let old_val = self.inner.put(k, v);
-        if let Some(old_val) = &old_val {
-            self.kv_heap_size.sub_size(key_size);
-            self.kv_heap_size.sub_val(old_val);
-        }
-        old_val
-    }
-
     pub fn get_mut(&mut self, k: &K) -> Option<MutGuard<'_, V>> {
         let v = self.inner.get_mut(k);
         v.map(|inner| MutGuard::new(inner, &mut self.kv_heap_size))
