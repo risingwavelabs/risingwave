@@ -16,7 +16,8 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Error, Result};
 use regex::{Match, Regex};
-use risingwave_pb::meta::reschedule_request::Reschedule;
+use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
+use risingwave_pb::meta::{GetReschedulePlanResponse, Reschedule};
 use serde::{Deserialize, Serialize};
 use serde_yaml;
 
@@ -200,4 +201,14 @@ fn parse_plan(mut plan: String) -> Result<HashMap<u32, Reschedule>, Error> {
         }
     }
     Ok(reschedules)
+}
+
+pub async fn get_reschedule_plan(
+    context: &CtlContext,
+    policy: PbPolicy,
+    revision: u64,
+) -> Result<GetReschedulePlanResponse> {
+    let meta_client = context.meta_client().await?;
+    let response = meta_client.get_reschedule_plan(policy, revision).await?;
+    Ok(response)
 }
