@@ -11,14 +11,15 @@ wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.17.10-
 shasum -a 512 -c elasticsearch-7.17.10-linux-x86_64.tar.gz.sha512
 tar -xzf elasticsearch-7.17.10-linux-x86_64.tar.gz
 
-# adjust ownership and permissions to make it possible to run elasticsearch as a custom user
-chmod -R 750 ./elasticsearch-7.17.10
+groupadd elasticsearch
+useradd elasticsearch -g elasticsearch -p elasticsearch
 
-# create a user and add it to elasticsearch group
-useradd non_root -m
-usermod -a -G elasticsearch non_root
+chown -R elasticsearch:elasticsearch ./elasticsearch-7.17.10
+chmod o+x ./elasticsearch-7.17.10
+chgrp elasticsearch ./elasticsearch-7.17.10
+su - elasticsearch
 
-su - non_root
+./bin/elasticsearch
 
 timeout 20 elasticsearch-7.17.10/bin/elasticsearch -E http.port=9200
 
