@@ -672,7 +672,7 @@ pub async fn handle_create_table(
 
     if source_schema == Some(SourceSchema::Json) && columns.is_empty() {
         return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-            "Json schema definition not specified".to_owned(),
+            "schema definition is required for ROW FORMAT JSON".to_owned(),
         )));
     }
 

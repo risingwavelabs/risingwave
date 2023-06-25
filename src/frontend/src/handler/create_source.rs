@@ -726,7 +726,7 @@ pub async fn handle_create_source(
 
     if stmt.source_schema == SourceSchema::Json && stmt.columns.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
-            "Json schema definition not specified".to_owned(),
+            "schema definition is required for ROW FORMAT JSON".to_owned(),
         )));
     }
 
