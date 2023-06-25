@@ -262,17 +262,22 @@ pub(crate) async fn resolve_source_schema(
                 }
                 let pk_name = columns[0].column_desc.name.clone();
 
-                *columns = extract_avro_table_schema(avro_schema, with_properties).await?;
-                let pk_col = columns
+                let value_columns = extract_avro_table_schema(avro_schema, with_properties).await?;
+                if let Some(pk_col) = value_columns
                     .iter()
                     .find(|col| col.column_desc.name == pk_name)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(format!(
-                            "Primary key {pk_name} is not found."
-                        )))
-                    })?;
+                {
+                    *pk_column_ids = vec![pk_col.column_id()];
+                    *columns = value_columns;
+                } else {
+                    columns_extend(columns, value_columns);
+                    *pk_column_ids = vec![columns
+                        .iter()
+                        .find(|c| c.column_desc.name == pk_name)
+                        .unwrap()
+                        .column_id()];
+                }
 
-                *pk_column_ids = vec![pk_col.column_id()];
                 upsert_avro_primary_key = pk_name;
             } else {
                 // contains row_id, user specify some columns without pk
