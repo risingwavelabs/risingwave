@@ -64,7 +64,7 @@ impl BuildingFragment {
     fn new(
         id: GlobalFragmentId,
         fragment: StreamFragment,
-        job: &mut StreamingJob,
+        job: &StreamingJob,
         table_id_gen: GlobalTableIdGen,
     ) -> Self {
         let mut fragment = StreamFragment {
@@ -112,7 +112,7 @@ impl BuildingFragment {
     }
 
     /// Fill the information of the job in the fragment.
-    fn fill_job(fragment: &mut StreamFragment, job: &mut StreamingJob) -> bool {
+    fn fill_job(fragment: &mut StreamFragment, job: &StreamingJob) -> bool {
         let table_id = job.id();
         let fragment_id = fragment.fragment_id;
         let mut has_table = false;
@@ -138,8 +138,6 @@ impl BuildingFragment {
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = table_id;
                 dml_node.table_version_id = job.table_version_id().unwrap();
-                let table = job.table_mut().unwrap();
-                table.dml_fragment_id = Some(fragment_id);
             }
             _ => {}
         });
@@ -260,7 +258,7 @@ impl StreamFragmentGraph {
     pub async fn new<S: MetaStore>(
         proto: StreamFragmentGraphProto,
         id_gen: IdGeneratorManagerRef<S>,
-        job: &mut StreamingJob,
+        job: &StreamingJob,
     ) -> MetaResult<Self> {
         let fragment_id_gen =
             GlobalFragmentIdGen::new(&id_gen, proto.fragments.len() as u64).await?;
