@@ -13,7 +13,6 @@ curl -s -X PUT -H "Content-Type: application/json" http://debezium:8083/connecto
     "database.server.name": "sqlserver",
     "database.history.kafka.bootstrap.servers": "message_queue:29092",
     "database.history.kafka.topic": "sqlserver-history",
-    "table.whitelist": "mydb.orders",
     "database.history.skip.unparseable.ddl": true,
     "database.history.store.only.captured.table.ddl": true
  }'
