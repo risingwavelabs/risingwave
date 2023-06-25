@@ -406,7 +406,6 @@ where
             })
             .collect();
 
-
         // Index for StreamActor
         let mut actor_map = HashMap::new();
         // Index for Fragment
@@ -1553,7 +1552,7 @@ where
         for changes in fragment_worker_changes.values() {
             for worker_id in &changes.include_worker_ids {
                 if unschedulable_worker_ids.contains(worker_id) {
-                    bail!("Cannot scale out to cordoned worker {}", worker_id)
+                    bail!("Cannot include unscheduable worker {}", worker_id)
                 }
             }
         }
@@ -1717,9 +1716,17 @@ where
 
                     let target_parallel_unit_ids: BTreeSet<_> = worker_parallel_units
                         .keys()
+                        .filter(|id| !unschedulable_worker_ids.contains(*id))
                         .filter(|id| !exclude_worker_ids.contains(*id))
                         .flat_map(|id| worker_parallel_units.get(id).cloned().unwrap())
                         .collect();
+
+                    if target_parallel_unit_ids.is_empty() {
+                        bail!(
+                            "No schedulable ParallelUnits available for single distribution fragment {}",
+                            fragment_id
+                        );
+                    }
 
                     if !target_parallel_unit_ids.contains(single_parallel_unit_id) {
                         let sorted_target_parallel_unit_ids =
@@ -1755,6 +1762,13 @@ where
                     target_parallel_unit_ids.extend(include_worker_parallel_unit_ids.iter());
                     target_parallel_unit_ids
                         .retain(|id| !exclude_worker_parallel_unit_ids.contains(id));
+
+                    if target_parallel_unit_ids.is_empty() {
+                        bail!(
+                            "No schedulable ParallelUnits available for fragment {}",
+                            fragment_id
+                        );
+                    }
 
                     let to_expand_parallel_units = target_parallel_unit_ids
                         .difference(&fragment_parallel_unit_ids)
