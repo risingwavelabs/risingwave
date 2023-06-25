@@ -260,62 +260,54 @@ impl Binder {
                     aliases.extend(names);
                 }
                 SelectItem::WildcardOrWithExcept(w) => {
-                    match w {
-                        Some(exprs) => {
-                            let mut indices = HashSet::new();
-                            for expr in exprs {
-                                let bound = self.bind_expr(expr)?;
-                                if let ExprImpl::InputRef(inner) = bound {
-                                    indices.insert(inner.index);
-                                } else {
-                                    unreachable!();
-                                }
-                            }
-                            let (exprs, names) = Self::iter_bound_columns(
-                                self.context.columns[..]
-                                    .iter()
-                                    .filter(|c| !c.is_hidden && !indices.contains(&c.index)),
-                            );
-                            select_list.extend(exprs);
-                            aliases.extend(names);
-                        }
-                        None => {
-                            if self.context.range_of.is_empty() {
-                                return Err(ErrorCode::BindError(
-                                    "SELECT * with no tables specified is not valid".into(),
-                                )
-                                .into());
-                            }
-                            // Bind the column groups
-                            // In psql, the USING and NATURAL columns come before the rest of the
-                            // columns in a SELECT * statement
-                            let (exprs, names) = self.iter_column_groups();
-                            select_list.extend(exprs);
-                            aliases.extend(names);
+                    if self.context.range_of.is_empty() {
+                        return Err(ErrorCode::BindError(
+                            "SELECT * with no tables specified is not valid".into(),
+                        )
+                        .into());
+                    }
 
-                            // Bind columns that are not in groups
-                            let (exprs, names) = Self::iter_bound_columns(
-                                self.context.columns[..].iter().filter(|c| {
-                                    !c.is_hidden
-                                        && !self
-                                            .context
-                                            .column_group_context
-                                            .mapping
-                                            .contains_key(&c.index)
-                                }),
-                            );
-                            select_list.extend(exprs);
-                            aliases.extend(names);
-                            // TODO: we will need to be able to handle wildcard expressions bound to
-                            // aliases in the future. We'd then need a
-                            // `NaturalGroupContext` bound to each alias
-                            // to correctly disambiguate column
-                            // references
-                            //
-                            // We may need to refactor `NaturalGroupContext` to become span aware in
-                            // that case.
+                    // Bind the column groups
+                    // In psql, the USING and NATURAL columns come before the rest of the
+                    // columns in a SELECT * statement
+                    let (exprs, names) = self.iter_column_groups();
+                    select_list.extend(exprs);
+                    aliases.extend(names);
+
+                    let mut except_indices: HashSet<usize> = HashSet::new();
+                    if let Some(exprs) = w {
+                        for expr in exprs {
+                            let bound = self.bind_expr(expr)?;
+                            if let ExprImpl::InputRef(inner) = bound {
+                                except_indices.insert(inner.index);
+                            } else {
+                                unreachable!();
+                            }
                         }
                     }
+
+                    // Bind columns that are not in groups
+                    let (exprs, names) =
+                        Self::iter_bound_columns(self.context.columns[..].iter().filter(|c| {
+                            !c.is_hidden
+                                && !self
+                                    .context
+                                    .column_group_context
+                                    .mapping
+                                    .contains_key(&c.index)
+                                && !except_indices.contains(&c.index)
+                        }));
+
+                    select_list.extend(exprs);
+                    aliases.extend(names);
+                    // TODO: we will need to be able to handle wildcard expressions bound to
+                    // aliases in the future. We'd then need a
+                    // `NaturalGroupContext` bound to each alias
+                    // to correctly disambiguate column
+                    // references
+                    //
+                    // We may need to refactor `NaturalGroupContext` to become span aware in
+                    // that case.
                 }
             }
         }
