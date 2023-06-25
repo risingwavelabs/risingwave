@@ -210,6 +210,7 @@ impl KvSize {
             .saturating_sub(key.estimated_size() + val.estimated_size());
     }
 
+    /// Add the size of `val` and return it.
     pub fn add_val<V: EstimateSize>(&mut self, val: &V) -> usize {
         let size = val.estimated_size();
         self.0 = self.0.saturating_add(size);
