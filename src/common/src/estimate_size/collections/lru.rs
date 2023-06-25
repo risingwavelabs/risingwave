@@ -60,7 +60,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     pub fn put(&mut self, k: K, v: V) -> Option<V> {
-        let key_size = self.kv_heap_size.add_val(&v);
+        let key_size = self.kv_heap_size.add_val(&k);
         self.kv_heap_size.add_val(&v);
         let old_val = self.inner.put(k, v);
         if let Some(old_val) = &old_val {
