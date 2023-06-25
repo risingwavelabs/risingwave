@@ -82,7 +82,7 @@ mach2 = "0.4"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-criterion = { version = "0.4", features = ["async_futures"] }
+criterion = { workspace = true, features = ["async_futures"] }
 moka = { version = "0.10", features = ["future"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }

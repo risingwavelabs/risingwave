@@ -15,7 +15,6 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-async-stream = "0.3"
 async-trait = "0.1"
 bytes = { version = "1" }
 clap = { version = "4", features = ["derive"] }
@@ -41,7 +40,7 @@ tokio = { version = "0.2", package = "madsim-tokio" }
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-criterion = { version = "0.4", features = ["async_futures"] }
+criterion = { workspace = true, features = ["async_futures"] }
 expect-test = "1"
 futures = { version = "0.3", default-features = false, features = [
     "alloc",
