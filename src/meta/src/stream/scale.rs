@@ -26,7 +26,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
-use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy, WorkerChanges};
+use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
@@ -1561,6 +1561,77 @@ where
             actor_status.extend(table_fragments.actor_status.clone());
         }
 
+        let mut no_shuffle_source_fragment_ids = HashSet::new();
+        let mut no_shuffle_target_fragment_ids = HashSet::new();
+
+        Self::build_no_shuffle_relation_index(
+            &actor_map,
+            &mut no_shuffle_source_fragment_ids,
+            &mut no_shuffle_target_fragment_ids,
+        );
+
+        let mut fragment_dispatcher_map = HashMap::new();
+        Self::build_fragment_dispatcher_index(&actor_map, &mut fragment_dispatcher_map);
+
+        #[derive(PartialEq, Eq, Clone)]
+        struct WorkerChanges {
+            include_worker_ids: BTreeSet<WorkerId>,
+            exclude_worker_ids: BTreeSet<WorkerId>,
+        }
+
+        let mut fragment_worker_changes: HashMap<_, _> = fragment_worker_changes
+            .into_iter()
+            .map(|(fragment_id, changes)| {
+                (
+                    fragment_id as FragmentId,
+                    WorkerChanges {
+                        include_worker_ids: changes.include_worker_ids.into_iter().collect(),
+                        exclude_worker_ids: changes.exclude_worker_ids.into_iter().collect(),
+                    },
+                )
+            })
+            .collect();
+
+        let mut queue: VecDeque<FragmentId> = fragment_worker_changes.keys().cloned().collect();
+
+        // We trace the upstreams of each downstream under the hierarchy until we reach the top for
+        // every no_shuffle relation.
+        while let Some(fragment_id) = queue.pop_front() {
+            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
+                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
+            {
+                continue;
+            }
+
+            // for upstream
+            for upstream_fragment_id in &fragment_map
+                .get(&fragment_id)
+                .unwrap()
+                .upstream_fragment_ids
+            {
+                if !no_shuffle_source_fragment_ids.contains(upstream_fragment_id) {
+                    continue;
+                }
+
+                let change = fragment_worker_changes.get(&fragment_id).unwrap();
+
+                if let Some(upstream_change) = fragment_worker_changes.get(upstream_fragment_id) {
+                    if upstream_change != change {
+                        bail!("Inconsistent NO_SHUFFLE plan, check target worker ids of fragment {} and {}", fragment_id, upstream_fragment_id);
+                    }
+
+                    continue;
+                }
+
+                fragment_worker_changes.insert(*upstream_fragment_id, change.clone());
+
+                queue.push_back(*upstream_fragment_id);
+            }
+        }
+
+        fragment_worker_changes
+            .drain_filter(|worker_id, _| no_shuffle_target_fragment_ids.contains(worker_id));
+
         for (
             fragment_id,
             WorkerChanges {
@@ -1573,9 +1644,6 @@ where
                 None => bail!("Fragment id {} not found", fragment_id),
                 Some(fragment) => fragment,
             };
-
-            let include_worker_ids: BTreeSet<_> = include_worker_ids.into_iter().collect();
-            let exclude_worker_ids: BTreeSet<_> = exclude_worker_ids.into_iter().collect();
 
             let intersection_ids = include_worker_ids
                 .intersection(&exclude_worker_ids)
@@ -1678,73 +1746,11 @@ where
             }
         }
 
-        Self::normalize_no_shuffle_plan(&mut target_plan, &actor_map, &fragment_map)?;
-
         target_plan.drain_filter(|_, plan| {
             plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty()
         });
 
         Ok(target_plan)
-    }
-
-    fn normalize_no_shuffle_plan(
-        target_plan: &mut HashMap<FragmentId, ParallelUnitReschedule>,
-        actor_map: &HashMap<ActorId, StreamActor>,
-        fragment_map: &HashMap<FragmentId, Fragment>,
-    ) -> MetaResult<()> {
-        let mut no_shuffle_source_fragment_ids = HashSet::new();
-        let mut no_shuffle_target_fragment_ids = HashSet::new();
-
-        Self::build_no_shuffle_relation_index(
-            actor_map,
-            &mut no_shuffle_source_fragment_ids,
-            &mut no_shuffle_target_fragment_ids,
-        );
-
-        let mut fragment_dispatcher_map = HashMap::new();
-        Self::build_fragment_dispatcher_index(actor_map, &mut fragment_dispatcher_map);
-
-        let mut queue: VecDeque<FragmentId> = target_plan.keys().cloned().collect();
-
-        // We trace the upstreams of each downstream under the hierarchy until we reach the top for
-        // every no_shuffle relation.
-        while let Some(fragment_id) = queue.pop_front() {
-            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
-                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
-            {
-                continue;
-            }
-
-            // for upstream
-            for upstream_fragment_id in &fragment_map
-                .get(&fragment_id)
-                .unwrap()
-                .upstream_fragment_ids
-            {
-                if !no_shuffle_source_fragment_ids.contains(upstream_fragment_id) {
-                    continue;
-                }
-
-                let plan = target_plan.get(&fragment_id).unwrap();
-
-                if let Some(upstream_plan) = target_plan.get(upstream_fragment_id) {
-                    if upstream_plan != plan {
-                        bail!("Inconsistent NO_SHUFFLE plan, check target worker ids of fragment {} and {}", fragment_id, upstream_fragment_id);
-                    }
-
-                    continue;
-                }
-
-                target_plan.insert(*upstream_fragment_id, plan.clone());
-
-                queue.push_back(*upstream_fragment_id);
-            }
-        }
-
-        target_plan
-            .drain_filter(|fragment_id, _| no_shuffle_target_fragment_ids.contains(fragment_id));
-
-        Ok(())
     }
 
     pub async fn get_reschedule_plan(

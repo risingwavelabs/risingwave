@@ -101,6 +101,10 @@ async fn test_resize_single() -> Result<()> {
         .run("create materialized view mv1 as select count(*) from t;")
         .await?;
 
+    session
+        .run("create materialized view mv2 as select * from mv1;")
+        .await?;
+
     let agg_fragment = cluster
         .locate_one_fragment([
             identity_contains("simpleAgg"),
