@@ -989,6 +989,7 @@ pub enum Statement {
     CreateView {
         or_replace: bool,
         materialized: bool,
+        if_not_exists: bool,
         /// View name
         name: ObjectName,
         columns: Vec<Ident>,
@@ -1361,6 +1362,7 @@ impl fmt::Display for Statement {
             Statement::CreateView {
                 name,
                 or_replace,
+                if_not_exists,
                 columns,
                 query,
                 materialized,
@@ -1369,9 +1371,10 @@ impl fmt::Display for Statement {
             } => {
                 write!(
                     f,
-                    "CREATE {or_replace}{materialized}VIEW {name}",
+                    "CREATE {or_replace}{materialized}VIEW {if_not_exists}{name}",
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
                     materialized = if *materialized { "MATERIALIZED " } else { "" },
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     name = name
                 )?;
                 if let Some(emit_mode) = emit_mode {

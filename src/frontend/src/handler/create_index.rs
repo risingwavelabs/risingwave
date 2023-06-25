@@ -30,6 +30,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::CatalogError;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
@@ -37,7 +38,7 @@ use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMa
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::SessionImpl;
+use crate::session::{CheckRelationError, SessionImpl};
 use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn gen_create_index_plan(
@@ -402,16 +403,18 @@ pub async fn handle_create_index(
 
     let (graph, index_table, index) = {
         {
-            if let Err(e) = session.check_relation_name_duplicated(index_name.clone()) {
-                if if_not_exists {
+            match session.check_relation_name_duplicated(index_name.clone()) {
+                Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name)))
+                    if if_not_exists =>
+                {
                     return Ok(PgResponse::empty_result_with_notice(
                         StatementType::CREATE_INDEX,
-                        format!("relation \"{}\" already exists, skipping", index_name),
+                        format!("relation \"{}\" already exists, skipping", name),
                     ));
-                } else {
-                    return Err(e);
                 }
-            }
+                Err(e) => return Err(e.into()),
+                Ok(_) => {}
+            };
         }
 
         let context = OptimizerContext::from_handler_args(handler_args);
