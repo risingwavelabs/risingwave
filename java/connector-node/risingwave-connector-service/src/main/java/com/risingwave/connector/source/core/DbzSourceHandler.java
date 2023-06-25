@@ -63,10 +63,12 @@ public class DbzSourceHandler implements SourceHandler {
                                 "Engine#{}: Connection broken detected, stop the engine",
                                 config.getSourceId());
                         runner.stop();
+                        // for pg source, check if its replication slot was marked to be removed
                         if (config.getSourceType() == SourceTypeE.POSTGRES) {
                             String slotName = replicationSlotMap.get(config.getSourceId());
                             if (slotName != null) {
-                                dropReplicationSlot(config, slotName);
+                                dropReplicationSlot(slotName);
+                                replicationSlotMap.remove(config.getSourceId());
                             }
                         }
                         return;
@@ -129,14 +131,14 @@ public class DbzSourceHandler implements SourceHandler {
         }
     }
 
-    private void dropReplicationSlot(DbzConnectorConfig config, String slotName) throws Exception {
-        String dbHost = config.getPropNotNull(DbzConnectorConfig.HOST);
-        String dbPort = config.getPropNotNull(DbzConnectorConfig.PORT);
-        String dbName = config.getPropNotNull(DbzConnectorConfig.DB_NAME);
+    private void dropReplicationSlot(String slotName) throws Exception {
+        String dbHost = config.getPropNotNull("database.hostname");
+        String dbPort = config.getPropNotNull("database.port");
+        String dbName = config.getPropNotNull("database.dbname");
         String jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.POSTGRES, dbHost, dbPort, dbName);
 
-        String user = config.getPropNotNull(DbzConnectorConfig.USER);
-        String password = config.getPropNotNull(DbzConnectorConfig.PASSWORD);
+        String user = config.getPropNotNull("database.user");
+        String password = config.getPropNotNull("database.password");
         Connection jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
         // check if replication slot used by active process
         try (var stmt0 =
