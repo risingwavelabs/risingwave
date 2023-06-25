@@ -93,9 +93,9 @@ impl<'a> HeuristicOptimizer<'a> {
             panic!("{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
                    rule.description(),
                    input_plan.schema(),
-                   input_plan.explain_to_string().unwrap(),
+                   input_plan.explain_to_string(),
                    output_plan.schema(),
-                   output_plan.explain_to_string().unwrap(),
+                   output_plan.explain_to_string(),
                    output_plan.ctx().sql());
         }
     }
