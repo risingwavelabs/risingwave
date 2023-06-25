@@ -16,7 +16,6 @@
 //! We construct Query based on the AST representation,
 //! as defined in the [`risingwave_sqlparser`] module.
 
-use std::task::Context;
 use std::vec;
 
 use itertools::Itertools;
