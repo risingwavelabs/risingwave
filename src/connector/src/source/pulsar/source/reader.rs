@@ -30,7 +30,7 @@ use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
-    SplitMetaData, SplitReader, MAX_CHUNK_SIZE,
+    SplitMetaData, SplitReader,
 };
 
 impl_common_split_reader_logic!(PulsarSplitReader, PulsarProperties);
@@ -177,8 +177,9 @@ impl SplitReader for PulsarSplitReader {
 impl PulsarSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub(crate) async fn into_data_stream(self) {
+        let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         #[for_await]
-        for msgs in self.consumer.ready_chunks(MAX_CHUNK_SIZE) {
+        for msgs in self.consumer.ready_chunks(max_chunk_size) {
             let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
                 let msg = SourceMessage::from(msg?);

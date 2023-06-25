@@ -263,11 +263,11 @@
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
-      | └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id] }
+      | └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: ["t1.v1", "t1._row_id"] }
       |   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       |   └─StreamExchange { dist: Broadcast }
-      |     └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '01:00:00':Interval) as $expr1], output_watermarks: [$expr1] }
-      |       └─StreamNow { output: [now] }
+      |     └─StreamProject { exprs: [AddWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+      |       └─StreamNow { output: ["now"] }
       └─StreamExchange { dist: HashShard(t2.v2) }
         └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: now() in a complex cmp expr does not get pushed down
@@ -300,12 +300,12 @@
     LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v1 > ('2021-04-01 00:00:00+00:00':Timestamptz + '00:30:00':Interval)) AND (t1.v2 > 5:Int32) }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck", watermark_columns: [v1] }
-    └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: [t1.v1, t1.v2, t1._row_id] }
+    └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: ["t1.v1", "t1.v2", "t1._row_id"] }
       ├─StreamFilter { predicate: (t1.v2 > 5:Int32) }
       | └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '00:30:00':Interval) as $expr1], output_watermarks: [$expr1] }
-          └─StreamNow { output: [now] }
+        └─StreamProject { exprs: [AddWithTimeZone(now, '00:30:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+          └─StreamNow { output: ["now"] }
 - name: eq-predicate derived condition other side pushdown in inner join
   sql: |
     create table t1(v1 int, v2 int);
@@ -347,9 +347,9 @@
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
-      | └─StreamDynamicFilter { predicate: (t1.v1 > now), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id] }
+      | └─StreamDynamicFilter { predicate: (t1.v1 > now), output_watermarks: [t1.v1], output: ["t1.v1", "t1._row_id"] }
       |   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       |   └─StreamExchange { dist: Broadcast }
-      |     └─StreamNow { output: [now] }
+      |     └─StreamNow { output: ["now"] }
       └─StreamExchange { dist: HashShard(t2.v2) }
         └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }

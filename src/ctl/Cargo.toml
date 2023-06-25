@@ -31,8 +31,9 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
 risingwave_stream = { path = "../stream" }
-risingwave_tracing = { path = "../tracing" }
+serde = "1"
 serde_json = "1"
+serde_yaml = "0.9.21"
 size = "0.4"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

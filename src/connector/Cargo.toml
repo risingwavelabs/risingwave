@@ -25,7 +25,6 @@ async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
-aws-sdk-ec2 = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
@@ -45,17 +44,11 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 glob = "0.3"
 google-cloud-pubsub = "0.14"
-hex = "0.4"
-http = "0.2"
-http-serde = "1.1.0"
-hyper = "0.14"
-hyper-tls = "0.5"
 itertools = "0.10"
 maplit = "1.0.2"
 moka = { version = "0.10", features = ["future"] }
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
-num-traits = "0.2"
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11.0", features = ["no-recursion-limit"] }
@@ -107,7 +100,7 @@ urlencoding = "2"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-criterion = { version = "0.4", features = ["async_tokio", "async"] }
+criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
 

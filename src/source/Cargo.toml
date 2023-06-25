@@ -32,7 +32,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
-criterion = { version = "0.4", features = ["async_tokio"] }
+criterion = { workspace = true, features = ["async_tokio"] }
 tempfile = "3"
 
 [[bench]]

@@ -605,6 +605,7 @@ mod tests {
                     fields: vec![],
                     is_row_id: false,
                     is_meta: false,
+                    is_pk: false,
                 },
                 SourceColumnDesc::simple("o_enum", DataType::Varchar, ColumnId::from(8)),
                 SourceColumnDesc::simple("o_char", DataType::Varchar, ColumnId::from(9)),

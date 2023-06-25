@@ -15,27 +15,21 @@
 package com.risingwave.functions;
 
 /**
- * Base interface for a user-defined table function. A user-defined table
- * function maps zero, one, or multiple scalar values to zero, one, or multiple
- * rows (or structured types). If an output record consists of only one field,
- * the structured record can be omitted, and a scalar value can be emitted that
- * will be implicitly wrapped into a row by the runtime.
+ * Base interface for a user-defined table function. A user-defined table function maps zero, one,
+ * or multiple scalar values to zero, one, or multiple rows (or structured types). If an output
+ * record consists of only one field, the structured record can be omitted, and a scalar value can
+ * be emitted that will be implicitly wrapped into a row by the runtime.
  *
- * <p>
- * The behavior of a {@link TableFunction} can be defined by implementing a
- * custom evaluation method. An evaluation method must be declared publicly, not
- * static, and named <code>eval</code>. The return type must be an Iterator.
- * Multiple overloaded methods named <code>eval</code> are not supported yet.
+ * <p>The behavior of a {@link TableFunction} can be defined by implementing a custom evaluation
+ * method. An evaluation method must be declared publicly, not static, and named <code>eval</code>.
+ * The return type must be an Iterator. Multiple overloaded methods named <code>eval</code> are not
+ * supported yet.
  *
- * <p>
- * By default, input and output data types are automatically extracted using
- * reflection.
+ * <p>By default, input and output data types are automatically extracted using reflection.
  *
- * <p>
- * The following examples show how to specify a table function:
+ * <p>The following examples show how to specify a table function:
  *
- * <pre>
- * {@code
+ * <pre>{@code
  * // a function that accepts an INT arguments and emits the range from 0 to the
  * // given number.
  * class Series implements TableFunction {
@@ -43,7 +37,7 @@ package com.risingwave.functions;
  *         return java.util.stream.IntStream.range(0, n).iterator();
  *     }
  * }
- * 
+ *
  * // a function that accepts an String arguments and emits the words of the
  * // given string.
  * class Split implements TableFunction {
@@ -51,7 +45,7 @@ package com.risingwave.functions;
  *         public String word;
  *         public int length;
  *     }
- * 
+ *
  *     public Iterator<Row> eval(String str) {
  *         return Stream.of(str.split(" ")).map(s -> {
  *             Row row = new Row();
@@ -63,5 +57,4 @@ package com.risingwave.functions;
  * }
  * }</pre>
  */
-public interface TableFunction extends UserDefinedFunction {
-}
+public interface TableFunction extends UserDefinedFunction {}

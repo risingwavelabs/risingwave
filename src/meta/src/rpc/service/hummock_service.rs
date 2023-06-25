@@ -539,4 +539,18 @@ where
             checkpoint_version: Some(checkpoint_version),
         }))
     }
+
+    async fn rise_ctl_list_compaction_status(
+        &self,
+        _request: Request<RiseCtlListCompactionStatusRequest>,
+    ) -> Result<Response<RiseCtlListCompactionStatusResponse>, Status> {
+        let (compaction_statuses, task_assignment) =
+            self.hummock_manager.list_compaction_status().await;
+        let task_progress = self.hummock_manager.compactor_manager.get_progress();
+        Ok(Response::new(RiseCtlListCompactionStatusResponse {
+            compaction_statuses,
+            task_assignment,
+            task_progress,
+        }))
+    }
 }

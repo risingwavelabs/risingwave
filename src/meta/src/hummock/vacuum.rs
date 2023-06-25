@@ -296,7 +296,7 @@ where
     let workers = vec![
         cluster_manager.list_active_streaming_compute_nodes().await,
         cluster_manager
-            .list_worker_node(WorkerType::Compactor, Some(Running))
+            .list_worker_node(WorkerType::Compactor, Some(Running), true)
             .await,
     ]
     .concat();

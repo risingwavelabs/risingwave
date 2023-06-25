@@ -18,13 +18,13 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
@@ -290,7 +290,7 @@ impl LogicalScan {
 impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl Distill for LogicalScan {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut vec = Vec::with_capacity(5);
         vec.push(("table", Pretty::from(self.table_name().to_owned())));
@@ -332,7 +332,7 @@ impl Distill for LogicalScan {
             ))
         }
 
-        Pretty::childless_record("LogicalScan", vec)
+        childless_record("LogicalScan", vec)
     }
 }
 impl fmt::Display for LogicalScan {

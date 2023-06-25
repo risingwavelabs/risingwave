@@ -39,7 +39,6 @@ enum-as-inner = "0.5"
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = { workspace = true }
 hex = "0.4.3"
 humantime = "2.1"
 hytra = { workspace = true }
@@ -110,7 +109,7 @@ libc = "0.2.72"
 mach2 = "0.4"
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = { workspace = true }
 more-asserts = "0.3"
 pretty_assertions = "1"
 rand = "0.8"
