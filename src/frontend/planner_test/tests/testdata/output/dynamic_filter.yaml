@@ -8,14 +8,14 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;
-  optimized_logical_plan_for_stream: |
+  optimized_logical_plan_for_stream: |-
     LogicalJoin { type: Inner, on: (t1.v1 > max(t2.v2)), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalAgg { aggs: [max(t2.v2)] }
       └─LogicalScan { table: t2, columns: [t2.v2] }
-  stream_plan: |
-    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
-    └─StreamDynamicFilter { predicate: (t1.v1 > max(max(t2.v2))), output: ["t1.v1", "t1._row_id"] }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
+    └─StreamDynamicFilter { predicate: (t1.v1 > max(max(t2.v2))), output: [t1.v1, t1._row_id] }
       ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [max(max(t2.v2))] }
@@ -31,10 +31,10 @@
   - create_tables
   sql: |
     with max_v2 as (select v2 max from t2 order by v2 desc limit 1) select v1 from t1, max_v2 where v1 > max;
-  optimized_logical_plan_for_stream: |
+  optimized_logical_plan_for_stream: |-
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
-    └─LogicalTopN { order: "[t2.v2 DESC]", limit: 1, offset: 0 }
+    └─LogicalTopN { order: [t2.v2 DESC], limit: 1, offset: 0 }
       └─LogicalProject { exprs: [t2.v2, t2.v2] }
         └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_error: |-
@@ -48,18 +48,18 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 + v1 > max;
-  optimized_logical_plan_for_stream: |
+  optimized_logical_plan_for_stream: |-
     LogicalJoin { type: Inner, on: ($expr1 > max(t2.v2)), output: [t1.v1] }
     ├─LogicalProject { exprs: [t1.v1, (t1.v1 + t1.v1) as $expr1] }
-    | └─LogicalScan { table: t1, columns: [t1.v1] }
+    │ └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalAgg { aggs: [max(t2.v2)] }
       └─LogicalScan { table: t2, columns: [t2.v2] }
-  stream_plan: |
-    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t1.v1, t1._row_id] }
-      └─StreamDynamicFilter { predicate: ($expr1 > max(max(t2.v2))), output: ["t1.v1", "$expr1", "t1._row_id"] }
+      └─StreamDynamicFilter { predicate: ($expr1 > max(max(t2.v2))), output: [t1.v1, $expr1, t1._row_id] }
         ├─StreamProject { exprs: [t1.v1, (t1.v1 + t1.v1) as $expr1, t1._row_id] }
-        | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [max(max(t2.v2))] }
             └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
@@ -72,10 +72,10 @@
   - create_tables
   sql: |
     with max_v2 as (select v2 max from t2 order by v2 desc limit 2) select v1 from t1, max_v2 where v1 > max;
-  optimized_logical_plan_for_stream: |
+  optimized_logical_plan_for_stream: |-
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
-    └─LogicalTopN { order: "[t2.v2 DESC]", limit: 2, offset: 0 }
+    └─LogicalTopN { order: [t2.v2 DESC], limit: 2, offset: 0 }
       └─LogicalProject { exprs: [t2.v2, t2.v2] }
         └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_error: |-
@@ -87,7 +87,7 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1, max from t1, max_v2 where v1 > max;
-  optimized_logical_plan_for_stream: |
+  optimized_logical_plan_for_stream: |-
     LogicalJoin { type: Inner, on: (t1.v1 > max(t2.v2)), output: all }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalAgg { aggs: [max(t2.v2)] }
@@ -101,16 +101,16 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1, max from t1, max_v2 where v1 = max;
-  optimized_logical_plan_for_stream: |
+  optimized_logical_plan_for_stream: |-
     LogicalJoin { type: Inner, on: (t1.v1 = max(t2.v2)), output: all }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalAgg { aggs: [max(t2.v2)] }
       └─LogicalScan { table: t2, columns: [t2.v2] }
-  stream_plan: |
-    StreamMaterialize { columns: [v1, max, t1._row_id(hidden)], stream_key: [t1._row_id, v1], pk_columns: [t1._row_id, v1], pk_conflict: "NoCheck" }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, max, t1._row_id(hidden)], stream_key: [t1._row_id, v1], pk_columns: [t1._row_id, v1], pk_conflict: NoCheck }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = max(max(t2.v2)), output: [t1.v1, max(max(t2.v2)), t1._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
-      | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard(max(max(t2.v2))) }
         └─StreamProject { exprs: [max(max(t2.v2))] }
           └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
@@ -123,18 +123,18 @@
     create table t1 (v1 int);
     create table t2 (v2 bigint);
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;
-  optimized_logical_plan_for_stream: |
+  optimized_logical_plan_for_stream: |-
     LogicalJoin { type: Inner, on: ($expr1 > max(t2.v2)), output: [t1.v1] }
     ├─LogicalProject { exprs: [t1.v1, t1.v1::Int64 as $expr1] }
-    | └─LogicalScan { table: t1, columns: [t1.v1] }
+    │ └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalAgg { aggs: [max(t2.v2)] }
       └─LogicalScan { table: t2, columns: [t2.v2] }
-  stream_plan: |
-    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t1.v1, t1._row_id] }
-      └─StreamDynamicFilter { predicate: ($expr1 > max(max(t2.v2))), output: ["t1.v1", "$expr1", "t1._row_id"] }
+      └─StreamDynamicFilter { predicate: ($expr1 > max(max(t2.v2))), output: [t1.v1, $expr1, t1._row_id] }
         ├─StreamProject { exprs: [t1.v1, t1.v1::Int64 as $expr1, t1._row_id] }
-        | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [max(max(t2.v2))] }
             └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
@@ -147,9 +147,9 @@
     create table t1 (v1 int);
     create table t2 (v2 int);
     with max_v2 as (select max(v2) max from t2) select v1 from t1 where exists (select * from max_v2 where v1 > max);
-  stream_plan: |
-    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
-    └─StreamDynamicFilter { predicate: (t1.v1 > max(max(t2.v2))), output: ["t1.v1", "t1._row_id"] }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
+    └─StreamDynamicFilter { predicate: (t1.v1 > max(max(t2.v2))), output: [t1.v1, t1._row_id] }
       ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [max(max(t2.v2))] }
@@ -163,15 +163,15 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > 2 * max;
-  optimized_logical_plan_for_stream: |
+  optimized_logical_plan_for_stream: |-
     LogicalJoin { type: Inner, on: (t1.v1 > $expr1), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalProject { exprs: [(2:Int32 * max(t2.v2)) as $expr1] }
       └─LogicalAgg { aggs: [max(t2.v2)] }
         └─LogicalScan { table: t2, columns: [t2.v2] }
-  stream_plan: |
-    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck" }
-    └─StreamDynamicFilter { predicate: (t1.v1 > $expr2), output: ["t1.v1", "t1._row_id"] }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
+    └─StreamDynamicFilter { predicate: (t1.v1 > $expr2), output: [t1.v1, t1._row_id] }
       ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(2:Int32 * max(max(t2.v2))) as $expr2] }

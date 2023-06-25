@@ -176,7 +176,7 @@
 - sql: |
     explain create table t (v1 int, v2 varchar);
   explain_output: |
-    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "Overwrite" }
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
     └─StreamExchange { dist: HashShard(_row_id) }
       └─StreamRowIdGen { row_id_index: 2 }
         └─StreamDml { columns: [v1, v2, _row_id] }
@@ -184,8 +184,8 @@
 - sql: |
     explain create table t (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) row format json;
   explain_output: |
-    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "Overwrite" }
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
     └─StreamExchange { dist: HashShard(_row_id) }
       └─StreamRowIdGen { row_id_index: 2 }
         └─StreamDml { columns: [v1, v2, _row_id] }
-          └─StreamSource { source: "t", columns: ["v1", "v2", "_row_id"] }
+          └─StreamSource { source: t, columns: [v1, v2, _row_id] }

@@ -3,11 +3,11 @@
   sql: |
     create table t (a int, b int);
     delete from t returning *, a, a+b;
-  logical_plan: |
+  logical_plan: |-
     LogicalProject { exprs: [t.a, t.b, t.a, (t.a + t.b) as $expr1] }
     └─LogicalDelete { table: t, returning: true }
       └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.a, t.b, t.a, (t.a + t.b) as $expr1] }
       └─BatchDelete { table: t, returning: true }
@@ -17,11 +17,11 @@
   sql: |
     create table t (v int);
     delete from t returning 114514;
-  logical_plan: |
+  logical_plan: |-
     LogicalProject { exprs: [114514:Int32] }
     └─LogicalDelete { table: t, returning: true }
       └─LogicalScan { table: t, columns: [t.v, t._row_id] }
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [114514:Int32] }
       └─BatchDelete { table: t, returning: true }
