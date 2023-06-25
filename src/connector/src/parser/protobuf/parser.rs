@@ -141,7 +141,6 @@ impl ProtobufParserConfig {
         index: &mut i32,
         parse_trace: &mut Vec<String>,
     ) -> Result<ColumnDesc> {
-        detect_loop_and_push(parse_trace, field_descriptor)?;
         let field_type = protobuf_type_mapping(field_descriptor, parse_trace)?;
         if let Kind::Message(m) = field_descriptor.kind() {
             let field_descs = if let DataType::List { .. } = field_type {
@@ -152,7 +151,6 @@ impl ProtobufParserConfig {
                     .collect::<Result<Vec<_>>>()?
             };
             *index += 1;
-            _ = parse_trace.pop();
             Ok(ColumnDesc {
                 column_id: *index,
                 name: field_descriptor.name().to_string(),
@@ -163,7 +161,6 @@ impl ProtobufParserConfig {
             })
         } else {
             *index += 1;
-            _ = parse_trace.pop();
             Ok(ColumnDesc {
                 column_id: *index,
                 name: field_descriptor.name().to_string(),
@@ -329,6 +326,7 @@ fn protobuf_type_mapping(
     field_descriptor: &FieldDescriptor,
     parse_trace: &mut Vec<String>,
 ) -> Result<DataType> {
+    detect_loop_and_push(parse_trace, field_descriptor)?;
     let field_type = field_descriptor.kind();
     let mut t = match field_type {
         Kind::Bool => DataType::Boolean,
@@ -343,13 +341,7 @@ fn protobuf_type_mapping(
         Kind::Message(m) => {
             let fields = m
                 .fields()
-                .map(|f| {
-                    detect_loop_and_push(parse_trace, &f)?;
-                    let resp = protobuf_type_mapping(&f, parse_trace)?;
-                    parse_trace.pop();
-
-                    Ok(resp)
-                })
+                .map(|f| protobuf_type_mapping(&f, parse_trace))
                 .collect::<Result<Vec<_>>>()?;
             let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
             DataType::new_struct(fields, field_names)
@@ -366,6 +358,7 @@ fn protobuf_type_mapping(
     if field_descriptor.cardinality() == Cardinality::Repeated {
         t = DataType::List(Box::new(t))
     }
+    _ = parse_trace.pop();
     Ok(t)
 }
 
