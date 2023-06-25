@@ -38,6 +38,7 @@ use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
@@ -120,8 +121,13 @@ async fn test_table_materialize() -> StreamResult<()> {
         "fields.v1.seed" => "12345",
     ));
     let row_id_index: usize = 0;
-    let source_builder =
-        create_source_desc_builder(&schema, Some(row_id_index), source_info, properties);
+    let source_builder = create_source_desc_builder(
+        &schema,
+        Some(row_id_index),
+        source_info,
+        properties,
+        vec![row_id_index],
+    );
 
     // Ensure the source exists.
     let source_desc = source_builder.build().await.unwrap();
@@ -168,6 +174,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         barrier_rx,
         u64::MAX,
         1,
+        SourceCtrlOpts::default(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.

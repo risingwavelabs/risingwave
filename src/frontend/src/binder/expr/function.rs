@@ -932,6 +932,7 @@ impl Binder {
                 | Clause::GroupBy
                 | Clause::Having
                 | Clause::Filter
+                | Clause::GeneratedColumn
                 | Clause::From => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
@@ -957,6 +958,13 @@ impl Binder {
             ))
             .into());
         }
+        if matches!(self.context.clause, Some(Clause::GeneratedColumn)) {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Cannot use `NOW()` function in generated columns. Do you want `PROCTIME()`?"
+                    .to_string(),
+            )
+            .into());
+        }
         Ok(())
     }
 
@@ -973,7 +981,7 @@ impl Binder {
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::From => {
+                Clause::Where | Clause::Values | Clause::From | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
                         clause
@@ -989,7 +997,7 @@ impl Binder {
     fn ensure_table_function_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values => {
+                Clause::Where | Clause::Values | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",
                         clause

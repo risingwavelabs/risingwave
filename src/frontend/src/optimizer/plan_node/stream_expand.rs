@@ -65,8 +65,6 @@ impl StreamExpand {
     }
 }
 
-impl_distill_by_unit!(StreamExpand, logical, "StreamExpand");
-
 impl PlanTreeNodeUnary for StreamExpand {
     fn input(&self) -> PlanRef {
         self.logical.input.clone()
@@ -80,6 +78,7 @@ impl PlanTreeNodeUnary for StreamExpand {
 }
 
 impl_plan_tree_node_for_unary! { StreamExpand }
+impl_distill_by_unit!(StreamExpand, logical, "StreamExpand");
 
 impl StreamNode for StreamExpand {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {

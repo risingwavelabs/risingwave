@@ -16,7 +16,8 @@ use std::collections::{BTreeSet, VecDeque};
 
 use educe::Educe;
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
-use risingwave_common::types::{Datum, DefaultOrdered, ScalarImpl};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{Datum, DefaultOrdered};
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
@@ -30,8 +31,8 @@ mod aggregate;
 /// Unique and ordered identifier for a row in internal states.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, EstimateSize)]
 pub(super) struct StateKey {
-    pub order_key: DefaultOrdered<ScalarImpl>,
-    pub encoded_pk: MemcmpEncoded,
+    pub order_key: MemcmpEncoded,
+    pub pk: DefaultOrdered<OwnedRow>,
 }
 
 #[derive(Debug)]

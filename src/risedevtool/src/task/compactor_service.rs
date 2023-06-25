@@ -20,7 +20,7 @@ use std::process::Command;
 use anyhow::Result;
 
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_jaeger_endpoint, add_meta_node, CompactorConfig, ExecuteContext, Task};
+use crate::{add_meta_node, add_tempo_endpoint, CompactorConfig, ExecuteContext, Task};
 
 pub struct CompactorService {
     config: CompactorConfig,
@@ -68,8 +68,8 @@ impl CompactorService {
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
 
-        let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
-        add_jaeger_endpoint(provide_jaeger, cmd)?;
+        let provide_tempo = config.provide_tempo.as_ref().unwrap();
+        add_tempo_endpoint(provide_tempo, cmd)?;
 
         Ok(())
     }

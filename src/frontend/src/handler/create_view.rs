@@ -23,8 +23,10 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::CatalogError;
 use crate::handler::HandlerArgs;
 use crate::optimizer::OptimizerContext;
+use crate::session::CheckRelationError;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,
@@ -41,16 +43,16 @@ pub async fn handle_create_view(
 
     let properties = handler_args.with_options.clone();
 
-    if let Err(e) = session.check_relation_name_duplicated(name.clone()) {
-        if if_not_exists {
+    match session.check_relation_name_duplicated(name.clone()) {
+        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
             return Ok(PgResponse::empty_result_with_notice(
                 StatementType::CREATE_VIEW,
                 format!("relation \"{}\" already exists, skipping", name),
             ));
-        } else {
-            return Err(e);
         }
-    }
+        Err(e) => return Err(e.into()),
+        Ok(_) => {}
+    };
 
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {

@@ -2,9 +2,11 @@
 
 This library provides a Python API for creating user-defined functions (UDF) in RisingWave.
 
-Currently, RisingWave supports user-defined functions implemented as external functions.
-Users need to define functions using the API provided by this library, and then start a Python process as a UDF server.
-RisingWave calls the function remotely by accessing the UDF server at a given address.
+## Introduction
+
+RisingWave supports user-defined functions implemented as external functions.
+With the RisingWave Python UDF SDK, users can define custom UDFs using Python and start a Python process as a UDF server.
+RisingWave can then remotely access the UDF server to execute the defined functions.
 
 ## Installation
 
@@ -19,6 +21,8 @@ Define functions in a Python file:
 ```python
 # udf.py
 from risingwave.udf import udf, udtf, UdfServer
+import struct
+import socket
 
 # Define a scalar function
 @udf(input_types=['INT', 'INT'], result_type='INT')
@@ -26,6 +30,15 @@ def gcd(x, y):
     while y != 0:
         (x, y) = (y, x % y)
     return x
+
+# Define a scalar function that returns multiple values (within a struct)
+@udf(input_types=['BYTEA'], result_type='STRUCT<VARCHAR, VARCHAR, SMALLINT, SMALLINT>')
+def extract_tcp_info(tcp_packet: bytes):
+    src_addr, dst_addr = struct.unpack('!4s4s', tcp_packet[12:20])
+    src_port, dst_port = struct.unpack('!HH', tcp_packet[20:24])
+    src_addr = socket.inet_ntoa(src_addr)
+    dst_addr = socket.inet_ntoa(dst_addr)
+    return src_addr, dst_addr, src_port, dst_port
 
 # Define a table function
 @udtf(input_types='INT', result_types='INT')
@@ -73,3 +86,27 @@ select gcd(25, 15);
 
 select * from series(10);
 ```
+
+## Data Types
+
+The RisingWave Python UDF SDK supports the following data types:
+
+| SQL Type         | Python Type                    | Notes              |
+| ---------------- | -----------------------------  | ------------------ |
+| BOOLEAN          | bool                           |                    |
+| SMALLINT         | int                            |                    |
+| INT              | int                            |                    |
+| BIGINT           | int                            |                    |
+| REAL             | float                          |                    |
+| DOUBLE PRECISION | float                          |                    |
+| DECIMAL          | decimal.Decimal                |                    |
+| DATE             | datetime.date                  |                    |
+| TIME             | datetime.time                  |                    |
+| TIMESTAMP        | datetime.datetime              |                    |
+| INTERVAL         | MonthDayNano / (int, int, int) | Fields can be obtained by `months()`, `days()` and `nanoseconds()` from `MonthDayNano` |
+| VARCHAR          | str                            |                    |
+| BYTEA            | bytes                          |                    |
+| JSONB            | any                            |                    |
+| T[]              | list[T]                        |                    |
+| STRUCT<>         | tuple                          |                    |
+| ...others        |                                | Not supported yet. |

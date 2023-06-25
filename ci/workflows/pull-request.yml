@@ -59,6 +59,7 @@ steps:
     command: "ci/scripts/e2e-test.sh -p ci-dev"
     depends_on:
       - "build"
+      - "build-other"
       - "docslt"
     plugins:
       - docker-compose#v4.9.0:

@@ -17,6 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -24,7 +25,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
-use super::utils::formatter_debug_plan_node;
+use super::utils::{childless_record, formatter_debug_plan_node, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
@@ -227,12 +228,50 @@ impl StreamMaterialize {
     }
 }
 
+impl Distill for StreamMaterialize {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let table = self.table();
+
+        let column_names = (table.columns.iter())
+            .map(|col| col.name_with_hidden().to_string())
+            .map(Pretty::from)
+            .collect();
+
+        let stream_key = (table.stream_key.iter())
+            .map(|&k| table.columns[k].name().to_string())
+            .map(Pretty::from)
+            .collect();
+
+        let pk_columns = (table.pk.iter())
+            .map(|o| table.columns[o.column_index].name().to_string())
+            .map(Pretty::from)
+            .collect();
+        let mut vec = Vec::with_capacity(5);
+        vec.push(("columns", Pretty::Array(column_names)));
+        vec.push(("stream_key", Pretty::Array(stream_key)));
+        vec.push(("pk_columns", Pretty::Array(pk_columns)));
+        let pk_conflict_behavior = self.table.conflict_behavior().debug_to_string();
+
+        vec.push(("pk_conflict", Pretty::from(pk_conflict_behavior)));
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let watermark_column_names = watermark_columns
+                .ones()
+                .map(|i| table.columns()[i].name_with_hidden().to_string())
+                .map(Pretty::from)
+                .collect();
+            vec.push(("watermark_columns", Pretty::Array(watermark_column_names)));
+        };
+        childless_record("StreamMaterialize", vec)
+    }
+}
 impl fmt::Display for StreamMaterialize {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let table = self.table();
 
         let column_names = table
-            .columns()
+            .columns
             .iter()
             .map(|c| c.name_with_hidden())
             .join(", ");
@@ -240,13 +279,13 @@ impl fmt::Display for StreamMaterialize {
         let stream_key = table
             .stream_key
             .iter()
-            .map(|&k| &table.columns[k].column_desc.name)
+            .map(|&k| table.columns[k].name())
             .join(", ");
 
         let pk_columns = table
             .pk
             .iter()
-            .map(|o| table.columns()[o.column_index].column_desc.name.clone())
+            .map(|o| table.columns[o.column_index].name().to_string())
             .join(", ");
 
         let mut builder = formatter_debug_plan_node!(f, "StreamMaterialize");
