@@ -555,27 +555,9 @@ where
             self.source_manager
                 .unregister_sources(vec![source_id])
                 .await;
-            // for postgres sources, drop replication slot
+            // drop replication slot for pg sources
             if source.get_properties().get("connector") == Some(&POSTGRES_CDC_CONNECTOR.to_string())
             {
-                // create connector client
-                let connector_address =
-                    self.env
-                        .opts
-                        .connector_rpc_endpoint
-                        .as_ref()
-                        .ok_or_else(|| {
-                            MetaError::invalid_parameter("connector endpoint not specified")
-                        })?;
-                let connector_client = ConnectorClient::new(
-                    HostAddr::from_str(connector_address.as_str()).map_err(|e| {
-                        MetaError::invalid_parameter(format!(
-                            "parse connector node endpoint fail: {}",
-                            e
-                        ))
-                    })?,
-                )
-                .await?;
                 let slot_name = source
                     .get_properties()
                     .get("slot.name")
@@ -585,11 +567,32 @@ where
                         )
                     })?
                     .to_string();
-                // send rpc
-                connector_client
-                    .drop_replication_slot(source_id.into(), slot_name)
-                    .await
-                    .map_err(MetaError::from)?;
+                // only drop slot if no `slot.name` specified in with properties
+                if slot_name.starts_with("rw_cdc_") {
+                    // create connector client
+                    let connector_address = self
+                        .env
+                        .opts
+                        .connector_rpc_endpoint
+                        .as_ref()
+                        .ok_or_else(|| {
+                            MetaError::invalid_parameter("connector endpoint not specified")
+                        })?;
+                    let connector_client = ConnectorClient::new(
+                        HostAddr::from_str(connector_address.as_str()).map_err(|e| {
+                            MetaError::invalid_parameter(format!(
+                                "parse connector node endpoint fail: {}",
+                                e
+                            ))
+                        })?,
+                    )
+                    .await?;
+                    // send rpc
+                    connector_client
+                        .drop_replication_slot(source_id.into(), slot_name)
+                        .await
+                        .map_err(MetaError::from)?;
+                }
             }
             Ok((version, delete_jobs))
         } else {
