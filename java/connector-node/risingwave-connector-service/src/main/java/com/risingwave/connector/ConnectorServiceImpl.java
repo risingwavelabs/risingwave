@@ -63,6 +63,8 @@ public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceI
         Long sourceId = request.getSourceId();
         String slotName = request.getSlotName();
         replicationSlotMap.put(sourceId, slotName);
+        responseObserver.onNext(
+                ConnectorServiceProto.DropReplicationSlotResponse.newBuilder().build());
         responseObserver.onCompleted();
     }
 }
