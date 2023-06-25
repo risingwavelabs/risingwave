@@ -86,21 +86,33 @@ impl TableDmlHandle {
         // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
         // error instead of asserting here.
         // TODO: may reject DML when streaming executors are not recovered.
-        let guard = self.core.read();
-        if guard.changes_txs.is_empty() {
-            return Err(RwError::from(anyhow!(
-                "no available table reader in streaming source executors"
-            )));
-        }
-        let len = guard.changes_txs.len();
-        let tx = guard
-            .changes_txs
-            .get((txn_id % len as u64) as usize)
-            .context("no available table reader in streaming source executors")?
-            .tx
-            .clone();
+        loop {
+            let guard = self.core.read();
+            if guard.changes_txs.is_empty() {
+                return Err(RwError::from(anyhow!(
+                    "no available table reader in streaming source executors"
+                )));
+            }
+            let len = guard.changes_txs.len();
+            let tx = guard
+                .changes_txs
+                .get((txn_id % len as u64) as usize)
+                .context("no available table reader in streaming source executors")?
+                .tx
+                .clone();
 
-        Ok(WriteHandle::new(txn_id, tx))
+            drop(guard);
+
+            if tx.is_closed() {
+                // Remove all closed channels.
+                self.core
+                    .write()
+                    .changes_txs
+                    .retain(|sender| !sender.tx.is_closed());
+            } else {
+                return Ok(WriteHandle::new(txn_id, tx));
+            }
+        }
     }
 
     /// Get the reference of all columns in this table.
