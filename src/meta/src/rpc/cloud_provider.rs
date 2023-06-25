@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use aws_config::retry::RetryConfig;
+use aws_sdk_ec2::error::ProvideErrorMetadata;
 use aws_sdk_ec2::types::{Filter, State, VpcEndpointType};
 use itertools::Itertools;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
@@ -44,6 +45,33 @@ impl AwsEc2Client {
             vpc_id: vpc_id.to_string(),
             security_group_id: security_group_id.to_string(),
         }
+    }
+
+    pub async fn delete_vpc_endpoint(&self, vpc_endpoint_id: &str) -> MetaResult<()> {
+        let output = self
+            .client
+            .delete_vpc_endpoints()
+            .vpc_endpoint_ids(vpc_endpoint_id)
+            .send()
+            .await
+            .map_err(|e| {
+                MetaError::from(anyhow!(
+                    "Failed to delete VPC endpoint. endpoint_id {vpc_endpoint_id}, error: {:?}, aws_request_id: {:?}",
+                    e.message(),
+                    e.meta().extra("aws_request_id")
+                ))
+            })?;
+
+        if let Some(ret) = output.unsuccessful() {
+            if !ret.is_empty() {
+                return Err(MetaError::from(anyhow!(
+                    "Failed to delete VPC endpoint {}, error: {:?}",
+                    vpc_endpoint_id,
+                    ret
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// `service_name`: The name of the endpoint service we want to access
@@ -111,7 +139,14 @@ impl AwsEc2Client {
             .describe_vpc_endpoints()
             .set_filters(Some(vec![filter]))
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                MetaError::from(anyhow!(
+                    "Failed to check availability of VPC endpoint. endpoint_id: {vpc_endpoint_id}, error: {:?}, aws_request_id: {:?}",
+                    e.message(),
+                    e.meta().extra("aws_request_id")
+                ))
+            })?;
 
         match output.vpc_endpoints {
             Some(endpoints) => {
@@ -147,7 +182,14 @@ impl AwsEc2Client {
             .describe_vpc_endpoint_services()
             .set_service_names(Some(vec![service_name.to_string()]))
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                MetaError::from(anyhow!(
+                    "Failed to describe VPC endpoint service, error: {:?}, aws_request_id: {:?}",
+                    e.message(),
+                    e.meta().extra("aws_request_id")
+                ))
+            })?;
 
         match output.service_details {
             Some(details) => {
@@ -185,7 +227,12 @@ impl AwsEc2Client {
             .describe_subnets()
             .set_filters(Some(vec![vpc_filter, az_filter]))
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                MetaError::from(anyhow!("Failed to describe subnets for vpc_id {vpc_id}. error: {:?}, aws_request_id: {:?}",
+                    e.message(),
+                    e.meta().extra("aws_request_id")))
+            })?;
 
         let subnets = output
             .subnets
@@ -219,7 +266,15 @@ impl AwsEc2Client {
             .service_name(service_name)
             .set_subnet_ids(Some(subnet_ids.to_owned()))
             .send()
-            .await?;
+            .await
+            .map_err(|e| {
+                MetaError::from(anyhow!(
+                    "Failed to create vpc endpoint: vpc_id {vpc_id}, \
+                service_name {service_name}. error: {:?}, aws_request_id: {:?}",
+                    e.message(),
+                    e.meta().extra("aws_request_id")
+                ))
+            })?;
 
         let endpoint = output.vpc_endpoint().unwrap();
         let mut dns_names = Vec::new();

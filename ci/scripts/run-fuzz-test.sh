@@ -45,11 +45,11 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     echo "--- e2e, ci-3cn-1fe, run fuzzing"
     ./target/debug/sqlsmith test \
       --count "$SQLSMITH_COUNT" \
-      --testdata ./src/tests/sqlsmith/tests/testdata \
-      2>"$LOGDIR/fuzzing.log" && rm "$LOGDIR/fuzzing.log"
+      --testdata ./src/tests/sqlsmith/tests/testdata
+
     # Sqlsmith does not write to stdout, so we need this to ensure buildkite
     # shows the right timing.
-    echo "fuzzing complete"
+    echo "Fuzzing complete"
 
     # Using `kill` instead of `ci-kill` avoids storing excess logs.
     # If there's errors, the failing query will be printed to stderr.

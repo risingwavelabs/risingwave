@@ -4959,9 +4959,9 @@ dependencies = [
 
 [[package]]
 name = "pretty-xmlish"
-version = "0.1.11"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd3571b8a349f2ae161a00e08b9c36cd34dfb53a3451a5a266becd0ff1d83b0c"
+checksum = "4b8521f917709e972580e93427ac30d777c94689f61abeaf211b518ccc4e324d"
 
 [[package]]
 name = "pretty_assertions"
@@ -5935,7 +5935,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_rt",
  "risingwave_storage",
- "risingwave_tracing",
  "tracing",
  "workspace-hack",
 ]
@@ -5994,7 +5993,6 @@ dependencies = [
  "risingwave_source",
  "risingwave_storage",
  "risingwave_stream",
- "risingwave_tracing",
  "serde",
  "serde_json",
  "tempfile",
@@ -6098,7 +6096,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "risingwave_stream",
- "risingwave_tracing",
  "serde",
  "serde_derive",
  "serde_json",
@@ -6265,6 +6262,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "bytes",
+ "clap 4.3.4",
  "criterion",
  "expect-test",
  "fail",
@@ -6277,13 +6275,14 @@ dependencies = [
  "risingwave_common",
  "risingwave_common_service",
  "risingwave_hummock_sdk",
+ "risingwave_hummock_trace",
  "risingwave_meta",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
  "risingwave_test_runner",
- "risingwave_tracing",
+ "serde",
  "serial_test",
  "sync-point",
  "workspace-hack",
@@ -6706,7 +6705,6 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_test_runner",
- "risingwave_tracing",
  "scopeguard",
  "sled",
  "spin 0.9.8",
@@ -6789,18 +6787,6 @@ version = "1.0.0-alpha"
 dependencies = [
  "fail",
  "sync-point",
- "workspace-hack",
-]
-
-[[package]]
-name = "risingwave_tracing"
-version = "1.0.0-alpha"
-dependencies = [
- "anyhow",
- "futures",
- "madsim-tokio",
- "rand",
- "tracing",
  "workspace-hack",
 ]
 

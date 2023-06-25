@@ -14,13 +14,13 @@
 
 use std::fmt;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::XmlNode;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
@@ -49,14 +49,14 @@ impl LogicalNow {
 }
 
 impl Distill for LogicalNow {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let vec = if self.base.ctx.is_explain_verbose() {
             vec![("output", column_names_pretty(self.schema()))]
         } else {
             vec![]
         };
 
-        Pretty::childless_record("LogicalNow", vec)
+        childless_record("LogicalNow", vec)
     }
 }
 impl fmt::Display for LogicalNow {

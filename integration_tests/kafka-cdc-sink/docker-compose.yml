@@ -3,39 +3,39 @@ version: "3"
 services:
   compactor-0:
     extends:
-      file: ../../docker/docker-compose-with-minio.yml
+      file: ../../docker/docker-compose.yml
       service: compactor-0
   compute-node-0:
     extends:
-      file: ../../docker/docker-compose-with-minio.yml
+      file: ../../docker/docker-compose.yml
       service: compute-node-0
   etcd-0:
     extends:
-      file: ../../docker/docker-compose-with-minio.yml
+      file: ../../docker/docker-compose.yml
       service: etcd-0
   frontend-node-0:
     extends:
-      file: ../../docker/docker-compose-with-minio.yml
+      file: ../../docker/docker-compose.yml
       service: frontend-node-0
   grafana-0:
     extends:
-      file: ../../docker/docker-compose-with-minio.yml
+      file: ../../docker/docker-compose.yml
       service: grafana-0
   meta-node-0:
     extends:
-      file: ../../docker/docker-compose-with-minio.yml
+      file: ../../docker/docker-compose.yml
       service: meta-node-0
   minio-0:
     extends:
-      file: ../../docker/docker-compose-with-minio.yml
+      file: ../../docker/docker-compose.yml
       service: minio-0
   prometheus-0:
     extends:
-      file: ../../docker/docker-compose-with-minio.yml
+      file: ../../docker/docker-compose.yml
       service: prometheus-0
   message_queue:
     extends:
-      file: ../../docker/docker-compose-with-minio.yml
+      file: ../../docker/docker-compose.yml
       service: message_queue
 
   postgres:

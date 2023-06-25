@@ -606,7 +606,7 @@ impl ActorGraphBuilder {
     pub fn new(
         fragment_graph: CompleteStreamFragmentGraph,
         cluster_info: StreamingClusterInfo,
-        default_parallelism: Option<NonZeroUsize>,
+        default_parallelism: NonZeroUsize,
     ) -> MetaResult<Self> {
         let existing_distributions = fragment_graph.existing_distribution();
 
@@ -614,7 +614,7 @@ impl ActorGraphBuilder {
         let distributions = schedule::Scheduler::new(
             cluster_info.parallel_units.values().cloned(),
             default_parallelism,
-        )?
+        )
         .schedule(&fragment_graph)?;
 
         Ok(Self {

@@ -14,12 +14,13 @@
 
 use std::fmt;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{Condition, ConditionDisplay};
 
@@ -34,13 +35,13 @@ pub struct Filter<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for Filter<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let input_schema = self.input.schema();
         let predicate = ConditionDisplay {
             condition: &self.predicate,
             input_schema,
         };
-        Pretty::childless_record(name, vec![("predicate", Pretty::display(&predicate))])
+        childless_record(name, vec![("predicate", Pretty::display(&predicate))])
     }
 }
 

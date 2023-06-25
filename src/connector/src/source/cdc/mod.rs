@@ -45,7 +45,7 @@ pub struct CdcProperties {
 }
 
 impl CdcProperties {
-    pub fn get_source_type(&self) -> anyhow::Result<SourceType> {
+    pub fn get_source_type_pb(&self) -> anyhow::Result<SourceType> {
         SourceType::from_str_name(&self.source_type.to_ascii_uppercase())
             .ok_or(anyhow!("unknown source type: {}", self.source_type))
     }
