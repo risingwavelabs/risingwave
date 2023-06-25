@@ -10,7 +10,7 @@ curl http://elasticsearch:9200
 echo "--- testing sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch/elasticsearch_sink.slt'
 
-
+sleep 5
 echo "testing sink result"
 # curl result is of the form
 # {"took":3,"timed_out":false,"_shards": .. }, took varies from query and therefore
