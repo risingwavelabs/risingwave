@@ -33,6 +33,7 @@
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(async_fn_in_trait)]
 #![recursion_limit = "256"]
 
 #[macro_use]

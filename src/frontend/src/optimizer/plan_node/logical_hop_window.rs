@@ -416,8 +416,8 @@ mod test {
         );
         println!(
             "{}\n{}",
-            hop_window.explain_to_string().unwrap(),
-            plan.explain_to_string().unwrap()
+            hop_window.explain_to_string(),
+            plan.explain_to_string()
         );
         // Check the result
         let hop_window = plan.as_logical_hop_window().unwrap();

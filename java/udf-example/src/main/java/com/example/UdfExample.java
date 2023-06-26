@@ -16,6 +16,7 @@ package com.example;
 
 import com.google.gson.Gson;
 import com.risingwave.functions.DataTypeHint;
+import com.risingwave.functions.PeriodDuration;
 import com.risingwave.functions.ScalarFunction;
 import com.risingwave.functions.TableFunction;
 import com.risingwave.functions.UdfServer;
@@ -23,6 +24,9 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.Iterator;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -40,6 +44,7 @@ public class UdfExample {
             server.addFunction("jsonb_concat", new JsonbConcat());
             server.addFunction("jsonb_array_identity", new JsonbArrayIdentity());
             server.addFunction("jsonb_array_struct_identity", new JsonbArrayStructIdentity());
+            server.addFunction("return_all", new ReturnAll());
             server.addFunction("series", new Series());
             server.addFunction("split", new Split());
 
@@ -153,6 +158,58 @@ public class UdfExample {
 
         public Row eval(Row s) {
             return s;
+        }
+    }
+
+    public static class ReturnAll implements ScalarFunction {
+        public static class Row {
+            public Boolean bool;
+            public Short i16;
+            public Integer i32;
+            public Long i64;
+            public Float f32;
+            public Double f64;
+            public BigDecimal decimal;
+            public LocalDate date;
+            public LocalTime time;
+            public LocalDateTime timestamp;
+            public PeriodDuration interval;
+            public String str;
+            public byte[] bytes;
+            public @DataTypeHint("JSONB") String jsonb;
+        }
+
+        public Row eval(
+                Boolean bool,
+                Short i16,
+                Integer i32,
+                Long i64,
+                Float f32,
+                Double f64,
+                BigDecimal decimal,
+                LocalDate date,
+                LocalTime time,
+                LocalDateTime timestamp,
+                PeriodDuration interval,
+                String str,
+                byte[] bytes,
+                @DataTypeHint("JSONB") String jsonb) {
+            var row = new Row();
+            row.bool = bool;
+            row.i16 = i16;
+            row.i32 = i32;
+            row.i64 = i64;
+            row.f32 = f32;
+            row.f64 = f64;
+            row.decimal = decimal;
+            row.date = date;
+            row.time = time;
+            row.timestamp = timestamp;
+            row.interval = interval;
+            row.str = str;
+            row.bytes = bytes;
+            row.jsonb = jsonb;
+            return row;
         }
     }
 

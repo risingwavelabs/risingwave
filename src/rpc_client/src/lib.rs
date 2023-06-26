@@ -24,6 +24,7 @@
 #![feature(iterator_try_collect)]
 #![feature(hash_drain_filter)]
 #![feature(try_blocks)]
+#![feature(let_chains)]
 
 #[cfg(madsim)]
 use std::collections::HashMap;
