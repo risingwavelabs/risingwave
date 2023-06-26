@@ -281,9 +281,6 @@ with (
   properties.bootstrap.server = 'message_queue:29092'
 ) row format avro (schema.registry = 'http://127.0.0.1:8081');
 
-row format avro
-row schema location confluent schema registry 'http://127.0.0.1:8081'
-
 # we cannot create debezium source with generated column
 statement error
 create table s20 (
