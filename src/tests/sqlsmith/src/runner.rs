@@ -596,15 +596,13 @@ async fn diff_stream_and_batch(
     let n_batch_rows = batch_result.len();
     let formatted_stream_rows = format_rows(&batch_result);
     let formatted_batch_rows = format_rows(&stream_result);
-    tracing::trace!(
-        "[EXECUTING DIFF - STREAM_FORMATTED_ROW id={}]: {:#?}",
+    tracing::info!(
+        "[EXECUTING DIFF - STREAM_FORMATTED_ROW id={}]: {formatted_stream_rows}",
         i,
-        formatted_stream_rows
     );
-    tracing::trace!(
-        "[EXECUTING DIFF - BATCH_FORMATTED_ROW id={}]: {:#?}",
+    tracing::info!(
+        "[EXECUTING DIFF - BATCH_FORMATTED_ROW id={}]: {formatted_batch_rows}",
         i,
-        formatted_batch_rows
     );
     if formatted_batch_rows == formatted_stream_rows {
         tracing::info!(
@@ -636,13 +634,11 @@ STREAM_ROW_LEN:
 {n_stream_rows}
 
 BATCH_ROWS:
-{:#?}
+{formatted_batch_rows}
 
 STREAM_ROWS:
-{:#?}
+{formatted_stream_rows}
 ",
-            &formatted_batch_rows,
-            &formatted_stream_rows,
         )
     }
 }
@@ -654,7 +650,12 @@ fn format_rows(rows: &[SimpleQueryMessage]) -> String {
             SimpleQueryMessage::Row(row) => {
                 let n_cols = row.columns().len();
                 let formatted_row: String =
-                    (0..n_cols).map(|i| format!("{:#?}", row.get(i))).collect();
+                    (0..n_cols)
+                        .map(|i| format!("{:#?}", match row.get(i) {
+                            Some(s) => s,
+                            _ => "NULL",
+                        }))
+                        .join(", ");
                 Some(formatted_row)
             }
             SimpleQueryMessage::CommandComplete(_n_rows) => None,
