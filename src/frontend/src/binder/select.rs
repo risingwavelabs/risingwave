@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use itertools::Itertools;
@@ -259,19 +259,32 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
-                SelectItem::Wildcard => {
+                SelectItem::WildcardOrWithExcept(w) => {
                     if self.context.range_of.is_empty() {
                         return Err(ErrorCode::BindError(
                             "SELECT * with no tables specified is not valid".into(),
                         )
                         .into());
                     }
+
                     // Bind the column groups
-                    // In psql, the USING and NATURAL columns come before the rest of the columns in
-                    // a SELECT * statement
+                    // In psql, the USING and NATURAL columns come before the rest of the
+                    // columns in a SELECT * statement
                     let (exprs, names) = self.iter_column_groups();
                     select_list.extend(exprs);
                     aliases.extend(names);
+
+                    let mut except_indices: HashSet<usize> = HashSet::new();
+                    if let Some(exprs) = w {
+                        for expr in exprs {
+                            let bound = self.bind_expr(expr)?;
+                            if let ExprImpl::InputRef(inner) = bound {
+                                except_indices.insert(inner.index);
+                            } else {
+                                unreachable!();
+                            }
+                        }
+                    }
 
                     // Bind columns that are not in groups
                     let (exprs, names) =
@@ -282,17 +295,19 @@ impl Binder {
                                     .column_group_context
                                     .mapping
                                     .contains_key(&c.index)
+                                && !except_indices.contains(&c.index)
                         }));
+
                     select_list.extend(exprs);
                     aliases.extend(names);
-
-                    // TODO: we will need to be able to handle wildcard expressions bound to aliases
-                    // in the future. We'd then need a `NaturalGroupContext`
-                    // bound to each alias to correctly disambiguate column
+                    // TODO: we will need to be able to handle wildcard expressions bound to
+                    // aliases in the future. We'd then need a
+                    // `NaturalGroupContext` bound to each alias
+                    // to correctly disambiguate column
                     // references
                     //
-                    // We may need to refactor `NaturalGroupContext` to become span aware in that
-                    // case.
+                    // We may need to refactor `NaturalGroupContext` to become span aware in
+                    // that case.
                 }
             }
         }

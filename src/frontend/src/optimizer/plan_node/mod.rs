@@ -39,6 +39,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
+use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
@@ -432,63 +433,36 @@ pub fn reorganize_elements_id(plan: PlanRef) -> PlanRef {
 
 pub trait Explain {
     /// Write explain the whole plan tree.
-    fn explain(
-        &self,
-        is_last: &mut Vec<bool>,
-        level: usize,
-        f: &mut impl std::fmt::Write,
-    ) -> std::fmt::Result;
+    fn explain<'a>(&self) -> Pretty<'a>;
 
     /// Explain the plan node and return a string.
-    fn explain_to_string(&self) -> Result<String>;
+    fn explain_to_string(&self) -> String;
 }
 
 impl Explain for PlanRef {
     /// Write explain the whole plan tree.
-    fn explain(
-        &self,
-        is_last: &mut Vec<bool>,
-        level: usize,
-        f: &mut impl std::fmt::Write,
-    ) -> std::fmt::Result {
-        if level > 0 {
-            let mut last_iter = is_last.iter().peekable();
-            while let Some(last) = last_iter.next() {
-                // We are at the current level
-                if last_iter.peek().is_none() {
-                    if *last {
-                        writeln!(f, "└─{}", self)?;
-                    } else {
-                        writeln!(f, "├─{}", self)?;
-                    }
-                } else if *last {
-                    write!(f, "  ")?;
-                } else {
-                    write!(f, "| ")?;
-                }
-            }
-        } else {
-            writeln!(f, "{}", self)?;
-        }
+    fn explain<'a>(&self) -> Pretty<'a> {
+        let mut node = self.distill();
         let inputs = self.inputs();
-        let mut inputs_iter = inputs.iter().peekable();
-        while let Some(input) = inputs_iter.next() {
-            let last = inputs_iter.peek().is_none();
-            is_last.push(last);
-            input.explain(is_last, level + 1, f)?;
-            is_last.pop();
+        for input in inputs.iter().peekable() {
+            node.children.push(input.explain());
         }
-        Ok(())
+        Pretty::Record(node)
     }
 
     /// Explain the plan node and return a string.
-    fn explain_to_string(&self) -> Result<String> {
+    fn explain_to_string(&self) -> String {
         let plan = reorganize_elements_id(self.clone());
 
-        let mut output = String::new();
-        plan.explain(&mut vec![], 0, &mut output)
-            .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
-        Ok(output)
+        let mut output = String::with_capacity(2048);
+        let mut config = PrettyConfig {
+            indent: 3,
+            need_boundaries: false,
+            width: 2048,
+            reduced_spaces: true,
+        };
+        config.unicode(&mut output, &plan.explain());
+        output
     }
 }
 
