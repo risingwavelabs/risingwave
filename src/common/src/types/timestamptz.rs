@@ -84,6 +84,11 @@ impl Timestamptz {
         self.0
     }
 
+    /// Returns the number of non-leap-milliseconds since January 1, 1970 UTC.
+    pub fn timestamp_millis(&self) -> i64 {
+        self.0.div_euclid(1_000)
+    }
+
     /// Returns the number of non-leap seconds since January 1, 1970 0:00:00 UTC (aka "UNIX
     /// timestamp").
     pub fn timestamp(&self) -> i64 {

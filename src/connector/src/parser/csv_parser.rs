@@ -96,7 +96,7 @@ impl CsvParser {
             DataType::Date => str_to_date(v.as_str())?.into(),
             DataType::Time => str_to_date(v.as_str())?.into(),
             DataType::Timestamp => str_to_timestamp(v.as_str())?.into(),
-            DataType::Timestamptz => ScalarImpl::Timestamptz(to_rust_type!(v, Timestamptz).into()),
+            DataType::Timestamptz => ScalarImpl::Timestamptz(to_rust_type!(v, Timestamptz)),
             _ => {
                 return Err(RwError::from(InternalError(format!(
                     "CSV data source not support type {}",

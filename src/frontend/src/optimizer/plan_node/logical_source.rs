@@ -369,7 +369,7 @@ fn expr_to_kafka_timestamp_range(
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            datum.unwrap().into_int64() / 1000,
+                            datum.unwrap().into_timestamptz().timestamp_millis(),
                             false,
                         )))
                     }
@@ -380,7 +380,7 @@ fn expr_to_kafka_timestamp_range(
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            datum.unwrap().into_int64() / 1000,
+                            datum.unwrap().into_timestamptz().timestamp_millis(),
                             true,
                         )))
                     }

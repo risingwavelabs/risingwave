@@ -543,9 +543,10 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampV
     execute_and_catch(env, move || {
         let scalar_value = pointer.as_ref().datum_at(idx as usize).unwrap();
         let millis = match scalar_value {
-            // supports sinking rw timestamptz (ScalarRefImpl::Int64) to mysql timestamp
-            ScalarRefImpl::Int64(v) => v / 1000,
-            _ => scalar_value.into_timestamp().0.timestamp_millis(),
+            // supports sinking rw timestamptz to mysql timestamp
+            ScalarRefImpl::Timestamptz(tz) => tz.timestamp_millis(),
+            ScalarRefImpl::Timestamp(ts) => ts.0.timestamp_millis(),
+            _ => panic!("expect timestamp or timestamptz"),
         };
         let (ts_class_ref, constructor) = pointer
             .as_ref()
