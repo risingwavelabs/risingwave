@@ -28,8 +28,8 @@ use tokio_postgres::Client;
 use crate::utils::read_file_contents;
 use crate::validation::{is_permissible_error, is_recovery_in_progress_error};
 use crate::{
-    generate_update_statements, insert_sql_gen, mview_sql_gen, parse_create_table_statements,
-    parse_sql, session_sql_gen, sql_gen, Table,
+    differential_sql_gen, generate_update_statements, insert_sql_gen, mview_sql_gen,
+    parse_create_table_statements, parse_sql, session_sql_gen, sql_gen, Table,
 };
 
 type PgResult<A> = std::result::Result<A, PgError>;
@@ -194,7 +194,7 @@ pub async fn run_differential_testing(
     testdata: &str,
     count: usize,
     seed: Option<u64>,
-) {
+) -> Result<()> {
     let mut rng = generate_rng(seed);
 
     set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
@@ -227,17 +227,43 @@ pub async fn run_differential_testing(
     .await;
     tracing::info!("Passed sqlsmith tests");
 
-    test_batch_queries(client, &mut rng, tables.clone(), count)
-        .await
-        .unwrap();
-    tracing::info!("Passed batch queries");
-    test_stream_queries(client, &mut rng, tables.clone(), count)
-        .await
-        .unwrap();
-    tracing::info!("Passed stream queries");
+    for i in 0..count {
+        diff_stream_and_batch(&mut rng, tables.clone(), client, i).await?
+    }
 
     drop_tables(&mviews, testdata, client).await;
     tracing::info!("[EXECUTION SUCCESS]");
+    Ok(())
+}
+
+/// Create the tables defined in testdata, along with some mviews.
+/// Just test number of rows for now.
+/// TODO(kwannoel): Test row contents as well. That requires us to run a batch query
+/// with select * ORDER BY <all columns>.
+async fn diff_stream_and_batch(
+    rng: &mut impl Rng,
+    mvs_and_base_tables: Vec<Table>,
+    client: &Client,
+    i: usize,
+) -> Result<()> {
+    // Generate some mviews
+    let mview_name = &format!("stream_{}", i);
+    let (batch, stream, _) = differential_sql_gen(rng, mvs_and_base_tables, mview_name)?;
+    tracing::info!("[EXECUTING CREATE MVIEW]: {}", &stream);
+    let (skip_count, stream_no_of_rows) = run_query_inner(6, client, &stream).await?;
+    if skip_count > 0 {
+        return Ok(());
+    }
+    tracing::info!("[EXECUTING BATCH QUERY]: {}", &stream);
+    let (skip_count, batch_no_of_rows) = run_query_inner(6, client, &batch).await?;
+    if skip_count > 0 {
+        return Ok(());
+    }
+    if stream_no_of_rows == batch_no_of_rows {
+        Ok(())
+    } else {
+        bail!("Different number of rows for:\nbatch:\n{batch}\nstream:\n{stream}")
+    }
 }
 
 fn generate_rng(seed: Option<u64>) -> impl Rng {
@@ -479,15 +505,15 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
     }
 }
 
-/// Validate client responses, returning a count of skipped queries.
-fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
+/// Validate client responses, returning a count of skipped queries, number of result rows.
+fn validate_response<_Row>(response: PgResult<Vec<_Row>>) -> Result<(i64, usize)> {
     match response {
-        Ok(_) => Ok(0),
+        Ok(rows) => Ok((0, rows.len())),
         Err(e) => {
             // Permit runtime errors conservatively.
             if let Some(e) = e.as_db_error() && is_permissible_error(&e.to_string()) {
                 tracing::info!("[SKIPPED ERROR]: {:#?}", e);
-                return Ok(1);
+                return Ok((1, 0));
             }
             // consolidate error reason for deterministic test
             tracing::info!("[UNEXPECTED ERROR]: {:#?}", e);
@@ -496,13 +522,21 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
     }
 }
 
+async fn run_query(timeout_duration: u64, client: &Client, query: &str) -> Result<i64> {
+    let (skipped_count, _) = run_query_inner(timeout_duration, client, query).await?;
+    Ok(skipped_count)
+}
 /// Run query, handle permissible errors
 /// For recovery error, just do bounded retry.
 /// For other errors, validate them accordingly, skipping if they are permitted.
 /// Otherwise just return success.
 /// If takes too long return the query which timed out + execution time + timeout error
-/// Returns: Number of skipped queries.
-async fn run_query(timeout_duration: u64, client: &Client, query: &str) -> Result<i64> {
+/// Returns: Number of skipped queries, number of rows returned.
+async fn run_query_inner(
+    timeout_duration: u64,
+    client: &Client,
+    query: &str,
+) -> Result<(i64, usize)> {
     let query_task = client.simple_query(query);
     let result = timeout(Duration::from_secs(timeout_duration), query_task).await;
     let response = match result {
@@ -522,7 +556,7 @@ async fn run_query(timeout_duration: u64, client: &Client, query: &str) -> Resul
                 let query_task = client.simple_query(query);
                 let response = timeout(Duration::from_secs(timeout_duration), query_task).await;
                 match response {
-                    Ok(r) if r.is_ok() => { return Ok(0); }
+                    Ok(Ok(r)) => { return Ok((0, r.len())); }
                     Err(_) => bail!(
                         "[UNEXPECTED ERROR] Query timeout after {timeout_duration}s:\n{:?}",
                         query
@@ -535,5 +569,6 @@ async fn run_query(timeout_duration: u64, client: &Client, query: &str) -> Resul
             return validate_response(response);
         }
     }
-    Ok(0)
+    let rows = response?;
+    Ok((0, rows.len()))
 }
