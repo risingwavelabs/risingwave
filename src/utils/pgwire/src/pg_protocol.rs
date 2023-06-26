@@ -272,6 +272,14 @@ where
             .session_mgr
             .connect(&db_name, &user_name)
             .map_err(PsqlError::StartupError)?;
+
+        let application_name = msg.config.get("application_name");
+        if let Some(application_name) = application_name {
+            session
+                .set_config("application_name", vec![application_name.clone()])
+                .map_err(PsqlError::StartupError)?;
+        }
+
         match session.user_authenticator() {
             UserAuthenticator::None => {
                 self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
@@ -281,7 +289,10 @@ where
                 self.stream
                     .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
 
-                self.stream.write_parameter_status_msg_no_flush()?;
+                self.stream
+                    .write_parameter_status_msg_no_flush(&ParameterStatus {
+                        application_name: application_name.cloned(),
+                    })?;
                 self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
             }
             UserAuthenticator::ClearText(_) => {
@@ -292,11 +303,6 @@ where
                 self.stream
                     .write_no_flush(&BeMessage::AuthenticationMd5Password(salt))?;
             }
-        }
-        if let Some(application_name) = msg.config.get("application_name") {
-            session
-                .set_config("application_name", vec![application_name.clone()])
-                .map_err(PsqlError::StartupError)?;
         }
 
         self.session = Some(session);
@@ -313,7 +319,8 @@ where
             )));
         }
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
-        self.stream.write_parameter_status_msg_no_flush()?;
+        self.stream
+            .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
         self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
         self.state = PgProtocolState::Regular;
         Ok(())
@@ -731,6 +738,27 @@ pub struct PgStream<S> {
     write_buf: BytesMut,
 }
 
+/// At present there is a hard-wired set of parameters for which
+/// ParameterStatus will be generated: they are:
+///
+///  * `server_version`
+///  * `server_encoding`
+///  * `client_encoding`
+///  * `application_name`
+///  * `is_superuser`
+///  * `session_authorization`
+///  * `DateStyle`
+///  * `IntervalStyle`
+///  * `TimeZone`
+///  * `integer_datetimes`
+///  * `standard_conforming_string`
+///
+/// See: https://www.postgresql.org/docs/9.2/static/protocol-flow.html#PROTOCOL-ASYNC.
+#[derive(Debug, Default, Clone)]
+pub struct ParameterStatus {
+    pub application_name: Option<String>,
+}
+
 impl<S> PgStream<S>
 where
     S: AsyncWrite + AsyncRead + Unpin,
@@ -743,7 +771,7 @@ where
         FeMessage::read(self.stream()).await
     }
 
-    fn write_parameter_status_msg_no_flush(&mut self) -> io::Result<()> {
+    fn write_parameter_status_msg_no_flush(&mut self, status: &ParameterStatus) -> io::Result<()> {
         self.write_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ClientEncoding("UTF8"),
         ))?;
@@ -751,8 +779,13 @@ where
             BeParameterStatusMessage::StandardConformingString("on"),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ServerVersion("8.3.0"),
+            BeParameterStatusMessage::ServerVersion("9.0.0"),
         ))?;
+        if let Some(application_name) = &status.application_name {
+            self.write_no_flush(&BeMessage::ParameterStatus(
+                BeParameterStatusMessage::ApplicationName(application_name),
+            ))?;
+        }
         Ok(())
     }
 
@@ -831,10 +864,10 @@ where
         }
     }
 
-    fn write_parameter_status_msg_no_flush(&mut self) -> io::Result<()> {
+    fn write_parameter_status_msg_no_flush(&mut self, status: &ParameterStatus) -> io::Result<()> {
         match self {
-            Conn::Unencrypted(s) => s.write_parameter_status_msg_no_flush(),
-            Conn::Ssl(s) => s.write_parameter_status_msg_no_flush(),
+            Conn::Unencrypted(s) => s.write_parameter_status_msg_no_flush(status),
+            Conn::Ssl(s) => s.write_parameter_status_msg_no_flush(status),
         }
     }
 

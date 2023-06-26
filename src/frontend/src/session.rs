@@ -980,7 +980,7 @@ impl Session for SessionImpl {
     }
 
     fn set_config(&self, key: &str, value: Vec<String>) -> std::result::Result<(), BoxedError> {
-        Self::set_config(&self, key, value).map_err(Into::into)
+        Self::set_config(self, key, value).map_err(Into::into)
     }
 
     fn take_notices(self: Arc<Self>) -> Vec<String> {
