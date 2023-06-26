@@ -521,8 +521,9 @@ impl PlanRoot {
         sink_name: String,
         definition: String,
         properties: WithOptions,
+        emit_on_window_close: bool,
     ) -> Result<StreamSink> {
-        let stream_plan = self.gen_optimized_stream_plan(false)?;
+        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamSink::create(
             stream_plan,
