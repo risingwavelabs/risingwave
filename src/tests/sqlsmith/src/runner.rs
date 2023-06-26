@@ -21,6 +21,7 @@ use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
 use risingwave_sqlparser::ast::Statement;
+use similar::{ChangeTag, TextDiff};
 use tokio::time::{sleep, timeout, Duration};
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::{Client, SimpleQueryMessage};
@@ -604,7 +605,18 @@ async fn diff_stream_and_batch(
         "[EXECUTING DIFF - BATCH_FORMATTED_ROW id={}]: {formatted_batch_rows}",
         i,
     );
-    if formatted_batch_rows == formatted_stream_rows {
+
+    let diff = TextDiff::from_lines(&formatted_batch_rows, &formatted_stream_rows);
+
+    let diff: String = diff
+        .iter_all_changes()
+        .filter_map(|change| match change.tag() {
+            ChangeTag::Delete => Some(format!("-{}", change)),
+            ChangeTag::Insert => Some(format!("+{}", change)),
+            ChangeTag::Equal => None,
+        }).collect();
+
+    if diff.is_empty() {
         tracing::info!(
             "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
             i,
@@ -638,6 +650,9 @@ BATCH_ROWS:
 
 STREAM_ROWS:
 {formatted_stream_rows}
+
+DIFF:
+{diff}
 ",
         )
     }
@@ -649,13 +664,17 @@ fn format_rows(rows: &[SimpleQueryMessage]) -> String {
         .filter_map(|r| match r {
             SimpleQueryMessage::Row(row) => {
                 let n_cols = row.columns().len();
-                let formatted_row: String =
-                    (0..n_cols)
-                        .map(|i| format!("{:#?}", match row.get(i) {
-                            Some(s) => s,
-                            _ => "NULL",
-                        }))
-                        .join(", ");
+                let formatted_row: String = (0..n_cols)
+                    .map(|i| {
+                        format!(
+                            "{:#?}",
+                            match row.get(i) {
+                                Some(s) => s,
+                                _ => "NULL",
+                            }
+                        )
+                    })
+                    .join(", ");
                 Some(formatted_row)
             }
             SimpleQueryMessage::CommandComplete(_n_rows) => None,
