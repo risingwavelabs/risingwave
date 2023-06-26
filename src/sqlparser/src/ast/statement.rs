@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use core::fmt;
+use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use itertools::Itertools;
@@ -20,7 +21,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use super::ddl::SourceWatermark;
-use super::{Ident, ObjectType, Query};
+use super::{Ident, ObjectType, Query, Value};
 use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
@@ -158,21 +159,32 @@ impl SourceSchemaV2 {
     /// just a temporal compatibility layer will be removed soon(so the implementation is a little
     /// dirty)
     pub fn into_source_schema(self) -> Result<(SourceSchema, Vec<SqlOption>), ParserError> {
+        let options: BTreeMap<String, String> = self
+            .row_options
+            .iter()
+            .cloned()
+            .map(|x| match x.value {
+                Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
+                Value::Number(n) => Ok((x.name.real_value(), n)),
+                Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
+                _ => Err(ParserError::ParserError(
+                    "`row format options` only support single quoted string value".to_owned(),
+                )),
+            })
+            .try_collect()?;
+
         let try_consume_string_from_options =
-            |row_options: &[SqlOption], key: &str| -> Option<AstString> {
-                let option = row_options
-                    .iter()
-                    .find(|option| option.name.real_value() == key);
-                option.map(|opt| AstString(opt.value.to_string()))
+            |row_options: &BTreeMap<String, String>, key: &str| -> Option<AstString> {
+                row_options.get(key).cloned().map(AstString)
             };
         let consume_string_from_options =
-            |row_options: &[SqlOption], key: &str| -> Result<AstString, ParserError> {
+            |row_options: &BTreeMap<String, String>, key: &str| -> Result<AstString, ParserError> {
                 try_consume_string_from_options(row_options, key).ok_or(ParserError::ParserError(
                     format!("missing field {} in row format options", key),
                 ))
             };
         let get_schema_location =
-            |row_options: &[SqlOption]| -> Result<(AstString, bool), ParserError> {
+            |row_options: &BTreeMap<String, String>| -> Result<(AstString, bool), ParserError> {
                 let schema_location =
                     try_consume_string_from_options(row_options, "schema.location");
                 let schema_registry =
@@ -192,10 +204,9 @@ impl SourceSchemaV2 {
         Ok((
             match self.row_format {
                 RowFormat::Protobuf => {
-                    let (row_schema_location, use_schema_registry) =
-                        get_schema_location(&self.row_options)?;
+                    let (row_schema_location, use_schema_registry) = get_schema_location(&options)?;
                     SourceSchema::Protobuf(ProtobufSchema {
-                        message_name: consume_string_from_options(&self.row_options, "message")?,
+                        message_name: consume_string_from_options(&options, "message")?,
                         row_schema_location,
                         use_schema_registry,
                     })
@@ -205,16 +216,14 @@ impl SourceSchemaV2 {
                 RowFormat::DebeziumMongoJson => SourceSchema::DebeziumMongoJson,
                 RowFormat::UpsertJson => SourceSchema::UpsertJson,
                 RowFormat::Avro => {
-                    let (row_schema_location, use_schema_registry) =
-                        get_schema_location(&self.row_options)?;
+                    let (row_schema_location, use_schema_registry) = get_schema_location(&options)?;
                     SourceSchema::Avro(AvroSchema {
                         row_schema_location,
                         use_schema_registry,
                     })
                 }
                 RowFormat::UpsertAvro => {
-                    let (row_schema_location, use_schema_registry) =
-                        get_schema_location(&self.row_options)?;
+                    let (row_schema_location, use_schema_registry) = get_schema_location(&options)?;
                     SourceSchema::UpsertAvro(AvroSchema {
                         row_schema_location,
                         use_schema_registry,
@@ -223,10 +232,7 @@ impl SourceSchemaV2 {
                 RowFormat::Maxwell => SourceSchema::Maxwell,
                 RowFormat::CanalJson => SourceSchema::CanalJson,
                 RowFormat::Csv => {
-                    let mut chars = consume_string_from_options(&self.row_options, "delimiter")?
-                        .0
-                        .chars()
-                        .collect_vec();
+                    let mut chars = consume_string_from_options(&options, "delimiter")?.0;
                     if chars.len() != 1 {
                         return Err(ParserError::ParserError(format!(
                             "The delimiter should be a char, but got {:?}",
@@ -234,10 +240,9 @@ impl SourceSchemaV2 {
                         )));
                     }
                     let delimiter = chars.remove(0) as u8;
-                    let has_header =
-                        try_consume_string_from_options(&self.row_options, "without_header")
-                            .map(|s| s.0 == "false")
-                            .unwrap_or(true);
+                    let has_header = try_consume_string_from_options(&options, "without_header")
+                        .map(|s| s.0 == "false")
+                        .unwrap_or(true);
                     SourceSchema::Csv(CsvInfo {
                         delimiter,
                         has_header,
@@ -245,8 +250,7 @@ impl SourceSchemaV2 {
                 }
                 RowFormat::Native => todo!(),
                 RowFormat::DebeziumAvro => {
-                    let (row_schema_location, use_schema_registry) =
-                        get_schema_location(&self.row_options)?;
+                    let (row_schema_location, use_schema_registry) = get_schema_location(&options)?;
                     if use_schema_registry {
                         return Err(ParserError::ParserError(
                             "schema registry for DEBEZIUM_AVRO row format is not supported"
