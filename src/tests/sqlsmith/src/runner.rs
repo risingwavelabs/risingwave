@@ -563,7 +563,7 @@ async fn diff_stream_and_batch(
 
     let select = format!("SELECT * FROM {}", &mview_name);
     tracing::info!(
-        "[EXECUTING DIFF - SELECT * FROM MVIEW id={}], {}",
+        "[EXECUTING DIFF - SELECT * FROM MVIEW id={}]: {}",
         i,
         select
     );
