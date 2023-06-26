@@ -225,7 +225,7 @@ where
 
     pub async fn update_schedulability(
         &self,
-        worker_ids: &Vec<u32>,
+        worker_ids: &[u32],
         is_unschedulable: bool,
     ) -> MetaResult<Vec<WorkerType>> {
         let mut core = self.core.write().await;
