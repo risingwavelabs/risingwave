@@ -58,6 +58,13 @@ impl UserManager {
             .chain(database.indexes.values().map(|index| index.owner))
             .chain(database.tables.values().map(|table| table.owner))
             .chain(database.views.values().map(|view| view.owner))
+            .chain(database.functions.values().map(|function| function.owner))
+            .chain(
+                database
+                    .connections
+                    .values()
+                    .map(|connection| connection.owner),
+            )
             .for_each(|owner_id| user_manager.increase_ref(owner_id));
 
         Ok(user_manager)

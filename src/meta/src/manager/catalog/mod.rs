@@ -27,8 +27,8 @@ pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
-    DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
+    is_system_schema, valid_table_name, TableId as StreamingJobId, TableOption,
+    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, START_SCHEMA_ID,
 };
 use risingwave_common::{bail, ensure};
@@ -154,6 +154,7 @@ where
         let core = Mutex::new(CatalogManagerCore::new(env.clone()).await?);
         let catalog_manager = Self { env, core };
         catalog_manager.init().await?;
+        catalog_manager.temp_drop_builtin_schema().await?;
         catalog_manager.temp_replace_schema_id().await?;
         Ok(catalog_manager)
     }
@@ -161,6 +162,37 @@ where
     async fn init(&self) -> MetaResult<()> {
         self.init_user().await?;
         self.init_database().await?;
+        Ok(())
+    }
+
+    /// `temp_drop_builtin_schema` is only used to ensure backward compatibility in the early
+    /// version.
+    async fn temp_drop_builtin_schema(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let to_drop_schema = database_core
+            .schemas
+            .iter()
+            .filter(|(&id, schema)| {
+                is_system_schema(&schema.name) && database_core.schema_is_empty(id)
+            })
+            .map(|(id, _)| *id)
+            .collect_vec();
+
+        if to_drop_schema.is_empty() {
+            return Ok(());
+        }
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+        let owners = to_drop_schema
+            .into_iter()
+            .map(|id| schemas.remove(id).unwrap().owner)
+            .collect_vec();
+        commit_meta!(self, schemas)?;
+        owners
+            .into_iter()
+            .for_each(|owner| user_core.decrease_ref(owner));
+
         Ok(())
     }
 
