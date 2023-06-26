@@ -37,7 +37,13 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         actor_splits: _actor_splits,
         source_infos: _source_infos,
         revision,
-    } = meta_client.get_cluster_info().await?;
+    } = match meta_client.get_cluster_info().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            println!("Failed to fetch cluster info: {}", e);
+            exit(1);
+        }
+    };
 
     if worker_nodes.is_empty() {
         println!("No worker nodes found");
@@ -83,7 +89,24 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
 
             for worker_id in exclude_worker_ids.iter().chain(include_worker_ids.iter()) {
                 if !streaming_worker_map.contains_key(worker_id) {
-                    anyhow::bail!("Invalid worker id: {}", worker_id);
+                    println!("Invalid worker id: {}", worker_id);
+                    exit(1);
+                }
+            }
+
+            for include_worker_id in &include_worker_ids {
+                let worker_is_unschedulable = streaming_worker_map
+                    .get(include_worker_id)
+                    .and_then(|worker| worker.property.as_ref())
+                    .map(|property| property.is_unschedulable)
+                    .unwrap_or(false);
+
+                if worker_is_unschedulable {
+                    println!(
+                        "Worker {} is unschedulable, should not be included",
+                        include_worker_id
+                    );
+                    exit(1);
                 }
             }
 
@@ -113,12 +136,13 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
                 .iter()
                 .any(|fragment_id| !all_fragment_ids.contains(fragment_id))
             {
-                anyhow::bail!(
+                println!(
                     "Invalid fragment ids: {:?}",
                     provide_fragment_ids
                         .difference(&all_fragment_ids)
                         .collect_vec()
                 );
+                exit(1);
             }
 
             provide_fragment_ids.into_iter().collect()
@@ -132,11 +156,19 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
             .collect(),
     });
 
+    let response = meta_client.get_reschedule_plan(policy, revision).await;
+
     let GetReschedulePlanResponse {
         revision,
         reschedules,
         success,
-    } = meta_client.get_reschedule_plan(policy, revision).await?;
+    } = match response {
+        Ok(response) => response,
+        Err(e) => {
+            println!("Failed to generate plan: {:?}", e);
+            exit(1);
+        }
+    };
 
     if !success {
         println!("Failed to generate plan, current revision is {}", revision);
@@ -197,7 +229,14 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
             }
         }
 
-        let (success, next_revision) = meta_client.reschedule(reschedules, revision).await?;
+        let (success, next_revision) = match meta_client.reschedule(reschedules, revision).await {
+            Ok(response) => response,
+            Err(e) => {
+                println!("Failed to execute plan: {:?}", e);
+                exit(1);
+            }
+        };
+
         if !success {
             println!("Failed to execute plan, current revision is {}", revision);
             exit(1);
