@@ -1293,7 +1293,7 @@ where
                         compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                         warn!(
                             "The task may be expired because of group split, task:\n {:?}",
-                            compact_task_to_string(&compact_task)
+                            compact_task_to_string(compact_task)
                         );
                     }
                     input_exist
