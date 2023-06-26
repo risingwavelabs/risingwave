@@ -301,8 +301,8 @@ impl Cluster {
         Ok(response)
     }
 
-    // mark a worker node as unschedulable
-    pub async fn update_worker_node_schedulability(
+    // update node schedulability
+    async fn update_worker_node_schedulability(
         &self,
         worker_ids: Vec<u32>,
         is_unschedulable: bool,
@@ -319,6 +319,14 @@ impl Cluster {
             })
             .await?;
         Ok(())
+    }
+
+    pub async fn cordon_worker(&self, addr: HostAddress) -> Result<()> {
+        self.update_worker_node_schedulability(addr, true).await
+    }
+
+    pub async fn uncordon_worker(&self, addr: HostAddress) -> Result<()> {
+        self.update_worker_node_schedulability(addr, false).await
     }
 
     /// Reschedule with the given `plan`. Check the document of
