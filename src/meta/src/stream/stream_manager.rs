@@ -536,6 +536,7 @@ where
     }
 
     pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) {
+        let _reschedule_job_lock = self.reschedule_lock.read().await;
         self.creating_job_info.cancel_jobs(table_ids).await;
     }
 }
