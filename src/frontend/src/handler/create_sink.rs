@@ -21,8 +21,8 @@ use risingwave_common::error::Result;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    CreateSink, CreateSinkStatement, ObjectName, Query, Select, SelectItem, SetExpr, TableFactor,
-    TableWithJoins, EmitMode,
+    CreateSink, CreateSinkStatement, EmitMode, ObjectName, Query, Select, SelectItem, SetExpr,
+    TableFactor, TableWithJoins,
 };
 
 use super::create_mv::get_column_names;
@@ -112,7 +112,12 @@ pub fn gen_sink_plan(
         plan_root.set_out_names(col_names)?;
     };
 
-    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, with_options, emit_on_window_close)?;
+    let sink_plan = plan_root.gen_sink_plan(
+        sink_table_name,
+        definition,
+        with_options,
+        emit_on_window_close,
+    )?;
     let sink_desc = sink_plan.sink_desc().clone();
     let sink_plan: PlanRef = sink_plan.into();
 

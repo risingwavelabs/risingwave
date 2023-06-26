@@ -20,7 +20,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use super::ddl::SourceWatermark;
-use super::{Ident, ObjectType, Query, EmitMode};
+use super::{EmitMode, Ident, ObjectType, Query};
 use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
@@ -457,7 +457,7 @@ impl ParseTo for CreateSinkStatement {
         impl_parse_to!(sink_name: ObjectName, p);
 
         let columns = p.parse_parenthesized_column_list(IsOptional::Optional)?;
-        
+
         let emit_mode = p.parse_emit_mode()?;
 
         let sink_from = if p.parse_keyword(Keyword::FROM) {
