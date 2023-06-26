@@ -1736,12 +1736,20 @@ async fn test_split_compaction_group_trivial_expired() {
     // delete all reference of sst-10
     task2.task_status = TaskStatus::Success as i32;
     hummock_manager
-        .report_compact_task_impl(None, &mut task2, None, None)
+        .assign_compaction_task(&task, 1)
+        .await
+        .unwrap();
+    hummock_manager
+        .assign_compaction_task(&task2, 2)
+        .await
+        .unwrap();
+    hummock_manager
+        .report_compact_task(2, &mut task2, None)
         .await
         .unwrap();
     task.task_status = TaskStatus::Success as i32;
     hummock_manager
-        .report_compact_task_impl(None, &mut task, None, None)
+        .report_compact_task(1, &mut task, None)
         .await
         .unwrap();
     assert_eq!(task.task_status(), TaskStatus::InvalidGroupCanceled);

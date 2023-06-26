@@ -839,7 +839,7 @@ where
 
         if is_trivial_reclaim {
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
+            self.report_compact_task_impl(None, &mut compact_task, &mut compaction_guard, None)
                 .await?;
             tracing::debug!(
                 "TrivialReclaim for compaction group {}: remove {} sstables, cost time: {:?}",
@@ -855,7 +855,7 @@ where
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
+            self.report_compact_task_impl(None, &mut compact_task, &mut compaction_guard, None)
                 .await?;
             tracing::debug!(
                 "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
@@ -1021,10 +1021,19 @@ where
         self.cancel_compact_task_impl(compact_task).await
     }
 
+    #[named]
     pub async fn cancel_compact_task_impl(&self, compact_task: &mut CompactTask) -> Result<bool> {
         assert!(CANCEL_STATUS_SET.contains(&compact_task.task_status()));
-        self.report_compact_task_impl(None, compact_task, None, None)
-            .await
+        let mut compaction_guard = write_lock!(self, compaction).await;
+        let ret = self
+            .report_compact_task_impl(None, compact_task, &mut compaction_guard, None)
+            .await?;
+        #[cfg(test)]
+        {
+            drop(compaction_guard);
+            self.check_state_consistency().await;
+        }
+        Ok(ret)
     }
 
     // need mutex protect
@@ -1174,16 +1183,27 @@ where
         false
     }
 
+    #[named]
     pub async fn report_compact_task(
         &self,
         context_id: HummockContextId,
         compact_task: &mut CompactTask,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
+        let mut guard = write_lock!(self, compaction).await;
         let ret = self
-            .report_compact_task_impl(Some(context_id), compact_task, None, table_stats_change)
+            .report_compact_task_impl(
+                Some(context_id),
+                compact_task,
+                &mut guard,
+                table_stats_change,
+            )
             .await?;
-
+        #[cfg(test)]
+        {
+            drop(guard);
+            self.check_state_consistency().await;
+        }
         Ok(ret)
     }
 
@@ -1199,13 +1219,9 @@ where
         &self,
         context_id: Option<HummockContextId>,
         compact_task: &mut CompactTask,
-        compaction_guard: Option<RwLockWriteGuard<'_, Compaction>>,
+        compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
-        let mut compaction_guard = match compaction_guard {
-            None => write_lock!(self, compaction).await,
-            Some(compaction_guard) => compaction_guard,
-        };
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
@@ -1431,12 +1447,6 @@ where
         if task_status == TaskStatus::Success {
             self.try_update_write_limits(&[compact_task.compaction_group_id])
                 .await;
-        }
-
-        #[cfg(test)]
-        {
-            drop(compaction_guard);
-            self.check_state_consistency().await;
         }
 
         Ok(true)
