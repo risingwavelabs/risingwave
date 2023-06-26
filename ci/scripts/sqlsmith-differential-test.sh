@@ -45,7 +45,7 @@ echo "--- e2e, ci-3cn-1fe, run fuzzing"
 ./target/debug/sqlsmith test \
   --count "$SQLSMITH_COUNT" \
   --testdata ./src/tests/sqlsmith/tests/testdata \
-  --differential-testing
+  --differential-testing 1>.risingwave/log/diff.log 2>&1 && rm .risingwave/log/diff.log
 
 # Sqlsmith does not write to stdout, so we need this to ensure buildkite
 # shows the right timing.
