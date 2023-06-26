@@ -235,84 +235,6 @@ pub async fn run_differential_testing(
     Ok(())
 }
 
-/// Create the tables defined in testdata, along with some mviews.
-/// Just test number of rows for now.
-/// TODO(kwannoel): Test row contents as well. That requires us to run a batch query
-/// with select * ORDER BY <all columns>.
-async fn diff_stream_and_batch(
-    rng: &mut impl Rng,
-    mvs_and_base_tables: Vec<Table>,
-    client: &Client,
-    i: usize,
-) -> Result<()> {
-    // Generate some mviews
-    let mview_name = format!("stream_{}", i);
-    let (batch, stream, table) = differential_sql_gen(rng, mvs_and_base_tables, &mview_name)?;
-
-    tracing::info!("[EXECUTING DIFF - CREATE MVIEW id={}]: {}", i, &stream);
-    let skip_count = run_query(6, client, &stream).await?;
-    if skip_count > 0 {
-        tracing::info!("[EXECUTING DIFF - DROP MVIEW id={}]: {}", i, &format_drop_mview(&table));
-        drop_mview_table(&table, client).await;
-        return Ok(());
-    }
-
-    let select = format!("SELECT * FROM {}", &mview_name);
-    tracing::info!(
-        "[EXECUTING DIFF - SELECT * FROM MVIEW id={}], {}",
-        i,
-        select
-    );
-    let (skip_count, stream_result) = run_query_inner(6, client, &select).await?;
-    if skip_count > 0 {
-        bail!("SQL should not fail: {:?}", select)
-    }
-
-    tracing::info!("[EXECUTING DIFF - BATCH QUERY id={}]: {}", i, &batch);
-    let (skip_count, batch_result) = run_query_inner(6, client, &batch).await?;
-    if skip_count > 0 {
-        tracing::info!("[EXECUTING DIFF - DROP MVIEW id={}]: {}", i, &format_drop_mview(&table));
-        drop_mview_table(&table, client).await;
-        return Ok(());
-    }
-    let n_stream_rows = stream_result.len();
-    let n_batch_rows = batch_result.len();
-    if n_stream_rows == n_batch_rows {
-        tracing::info!("[PASSED DIFF id={}, rows_compared={n_stream_rows}]", i);
-        tracing::info!("[EXECUTING DIFF - DROP MVIEW id={}]: {}", i, &format_drop_mview(&table));
-        drop_mview_table(&table, client).await;
-        Ok(())
-    } else {
-        bail!(
-            "
-Different number of rows for:
-BATCH:
-{batch}
-
-STREAM:
-{stream}
-
-SELECT:
-{select}
-
-BATCH_ROW_LEN:
-{n_batch_rows}
-
-STREAM_ROW_LEN:
-{n_stream_rows}
-
-BATCH_ROWS:
-{:?}
-
-STREAM_ROWS:
-{:?}
-",
-            batch_result,
-            stream_result,
-        )
-    }
-}
-
 fn generate_rng(seed: Option<u64>) -> impl Rng {
     #[cfg(madsim)]
     if let Some(seed) = seed {
@@ -620,4 +542,111 @@ async fn run_query_inner(
     }
     let rows = response?;
     Ok((0, rows))
+}
+
+/// Create the tables defined in testdata, along with some mviews.
+/// Just test number of rows for now.
+/// TODO(kwannoel): Test row contents as well. That requires us to run a batch query
+/// with select * ORDER BY <all columns>.
+async fn diff_stream_and_batch(
+    rng: &mut impl Rng,
+    mvs_and_base_tables: Vec<Table>,
+    client: &Client,
+    i: usize,
+) -> Result<()> {
+    // Generate some mviews
+    let mview_name = format!("stream_{}", i);
+    let (batch, stream, table) = differential_sql_gen(rng, mvs_and_base_tables, &mview_name)?;
+
+    tracing::info!("[EXECUTING DIFF - CREATE MVIEW id={}]: {}", i, &stream);
+    let skip_count = run_query(6, client, &stream).await?;
+    if skip_count > 0 {
+        tracing::info!(
+            "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
+            i,
+            &format_drop_mview(&table)
+        );
+        drop_mview_table(&table, client).await;
+        return Ok(());
+    }
+
+    let select = format!("SELECT * FROM {}", &mview_name);
+    tracing::info!(
+        "[EXECUTING DIFF - SELECT * FROM MVIEW id={}], {}",
+        i,
+        select
+    );
+    let (skip_count, stream_result) = run_query_inner(6, client, &select).await?;
+    if skip_count > 0 {
+        bail!("SQL should not fail: {:?}", select)
+    }
+
+    tracing::info!("[EXECUTING DIFF - BATCH QUERY id={}]: {}", i, &batch);
+    let (skip_count, batch_result) = run_query_inner(6, client, &batch).await?;
+    if skip_count > 0 {
+        tracing::info!(
+            "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
+            i,
+            &format_drop_mview(&table)
+        );
+        drop_mview_table(&table, client).await;
+        return Ok(());
+    }
+    let n_stream_rows = stream_result.len();
+    let n_batch_rows = batch_result.len();
+    if n_stream_rows == n_batch_rows {
+        tracing::info!("[PASSED DIFF id={}, rows_compared={n_stream_rows}]", i);
+        tracing::info!(
+            "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
+            i,
+            &format_drop_mview(&table)
+        );
+        drop_mview_table(&table, client).await;
+        Ok(())
+    } else {
+        bail!(
+            "
+Different number of rows for:
+BATCH:
+{batch}
+
+STREAM:
+{stream}
+
+SELECT:
+{select}
+
+BATCH_ROW_LEN:
+{n_batch_rows}
+
+STREAM_ROW_LEN:
+{n_stream_rows}
+
+BATCH_ROWS:
+{:#?}
+
+STREAM_ROWS:
+{:#?}
+",
+            format_rows(&batch_result),
+            format_rows(&stream_result),
+        )
+    }
+}
+
+/// Format + sort rows so they can be diffed.
+fn format_rows(rows: &[SimpleQueryMessage]) -> String {
+    rows.iter()
+        .filter_map(|r| match r {
+            SimpleQueryMessage::Row(row) => {
+                let n_cols = row.columns().len();
+                let formatted_row: String =
+                    (0..n_cols).map(|i| format!("{:#?}", row.get(i))).collect();
+                Some(formatted_row)
+            }
+            SimpleQueryMessage::CommandComplete(_n_rows) => None,
+            _ => unreachable!(),
+        })
+        .sorted()
+        .join("\n")
 }
