@@ -431,13 +431,14 @@ where
         current_pos: Option<OwnedRow>,
         ordered: bool,
     ) {
-        // FIXME(kwannoel): `let-else` pattern does not work in generator.
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
-        if range_bounds.is_none() {
-            yield None;
-            return Ok(());
-        }
-        let range_bounds = range_bounds.unwrap();
+        let range_bounds = match range_bounds {
+            None => {
+                yield None;
+                return Ok(());
+            }
+            Some(range_bounds) => range_bounds,
+        };
 
         // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
         // together with the upstream mv.
