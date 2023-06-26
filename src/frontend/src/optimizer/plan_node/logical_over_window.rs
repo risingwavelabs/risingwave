@@ -668,6 +668,15 @@ impl ToBatch for LogicalOverWindow {
 
 impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        if self.core.has_rank_function() {
+            return Err(ErrorCode::NotImplemented(
+                "Rank function calls that don't match TopN pattern are not supported yet"
+                    .to_string(),
+                8965.into(),
+            )
+            .into());
+        }
+
         let stream_input = self.core.input.to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {
