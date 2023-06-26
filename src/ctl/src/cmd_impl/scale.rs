@@ -12,14 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cascade_materialized_view;
-mod dynamic_filter;
-mod nexmark_chaos;
-mod nexmark_q4;
-mod nexmark_source;
-mod no_shuffle;
-mod plan;
-mod schedulability;
-mod singleton_migration;
-mod streaming_parallelism;
-mod table;
+mod resize;
+
+pub use resize::*;

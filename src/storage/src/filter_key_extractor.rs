@@ -492,6 +492,7 @@ mod tests {
                 String::from("300"),
             )]),
             fragment_id: 0,
+            dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index: Some(0),
             value_indices: vec![0],
