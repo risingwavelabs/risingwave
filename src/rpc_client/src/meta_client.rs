@@ -579,6 +579,30 @@ impl MetaClient {
         Ok(())
     }
 
+    /// Unregister multiple workers from the cluster
+    pub async fn unregister_workers(&self, worker_ids: &Vec<u32>) -> Result<()> {
+        let info = self.get_cluster_info().await?;
+        let worker_nodes = info.get_worker_nodes();
+        let unregister_nodes = worker_nodes
+            .iter()
+            .filter(|wn| worker_ids.contains(&wn.id))
+            .collect_vec();
+        for unregister_node in unregister_nodes {
+            let addr = unregister_node
+                .host
+                .as_ref()
+                .ok_or_else(|| RpcError::Internal(anyhow!("Node does not have host")))?;
+
+            self.unregister(HostAddr {
+                host: addr.host.clone(),
+                port: addr.port as u16,
+            })
+            .await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn update_schedulability(
         &self,
         host: HostAddress,

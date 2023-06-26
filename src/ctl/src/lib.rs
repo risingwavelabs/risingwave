@@ -231,6 +231,12 @@ enum ScaleCommands {
     /// The resize command scales up and down the cluster by specifying the worker ids to be
     /// included and excluded.
     Resize(ScaleResizeCommands),
+    /// Unregisters workers by deleting meta data about this worker from the meta store. Does NOT
+    /// actually kill the nodes. Operation is NOT atomic.
+    DeleteWorker {
+        #[clap(long, value_delimiter = ',', value_name = "id,...")]
+        workers: Vec<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -428,6 +434,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
         Commands::Scale(ScaleCommands::Resize(resize)) => {
             cmd_impl::scale::resize(context, resize).await?
+        }
+        Commands::Scale(ScaleCommands::DeleteWorker { workers }) => {
+            cmd_impl::scale::unregister_workers(context, &workers).await?
         }
     }
     Ok(())
