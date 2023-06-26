@@ -216,16 +216,6 @@ pub async fn run_differential_testing(
     // Generate an update for some inserts, on the corresponding table.
     update_base_tables(client, &mut rng, &base_tables, &inserts).await;
     tracing::info!("Ran updates");
-    // let max_rows_inserted = rows_per_table * base_tables.len();
-    // test_sqlsmith(
-    //     client,
-    //     &mut rng,
-    //     tables.clone(),
-    //     base_tables.clone(),
-    //     max_rows_inserted,
-    // )
-    // .await;
-    // tracing::info!("Passed sqlsmith tests");
 
     for i in 0..count {
         diff_stream_and_batch(&mut rng, tables.clone(), client, i).await?
