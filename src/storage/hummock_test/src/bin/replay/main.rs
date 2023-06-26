@@ -74,7 +74,7 @@ async fn run_replay(args: Args) -> Result<()> {
     let f = BufReader::new(File::open(path)?);
     let mut reader = TraceReaderImpl::new_bincode(f)?;
     // first record is the snapshot
-    let r = reader.read().unwrap();
+    let r: Record = reader.read().unwrap();
     let replay_interface = create_replay_hummock(r, &args).await.unwrap();
     let mut replayer = HummockReplay::new(reader, replay_interface);
     replayer.run().await.unwrap();
