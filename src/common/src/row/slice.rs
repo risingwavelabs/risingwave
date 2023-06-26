@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Range;
+use std::ops::{Range, RangeBounds};
 
 use super::Row;
 use crate::types::DatumRef;
@@ -59,7 +59,19 @@ impl<R: Row> Row for Slice<R> {
 }
 
 impl<R: Row> Slice<R> {
-    pub(crate) fn new(row: R, range: Range<usize>) -> Self {
+    pub(crate) fn new(row: R, range: impl RangeBounds<usize>) -> Self {
+        use std::ops::Bound::*;
+        let start = match range.start_bound() {
+            Included(&i) => i,
+            Excluded(&i) => i + 1,
+            Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Included(&i) => i + 1,
+            Excluded(&i) => i,
+            Unbounded => row.len(),
+        };
+        let range = start..end;
         assert!(range.end <= row.len(), "range out of bounds");
         Self { row, range }
     }

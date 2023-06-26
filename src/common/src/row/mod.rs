@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 use std::fmt::Display;
 use std::hash::{BuildHasher, Hasher};
-use std::ops::Range;
+use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use itertools::Itertools;
@@ -157,7 +157,7 @@ pub trait RowExt: Row {
     ///
     /// # Panics
     /// Panics if range is out of bounds.
-    fn slice(self, range: Range<usize>) -> Slice<Self>
+    fn slice(self, range: impl RangeBounds<usize>) -> Slice<Self>
     where
         Self: Sized,
     {
