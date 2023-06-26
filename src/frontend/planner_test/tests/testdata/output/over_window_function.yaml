@@ -197,12 +197,15 @@
     └─LogicalOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
       └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), min], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t._row_id) }
+      └─StreamOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
-  stream_error: |-
-    Feature is not yet implemented: Window function with empty ORDER BY is not supported yet
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - id: aggregate with over clause, rows frame definition with between, without ORDER BY
   sql: |
     create table t(x int, y int);
@@ -212,12 +215,15 @@
     └─LogicalOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING)] }
       └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), min], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t._row_id) }
+      └─StreamOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING)] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
-  stream_error: |-
-    Feature is not yet implemented: Window function with empty ORDER BY is not supported yet
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - id: aggregate with over clause, invalid frame definition case 1
   sql: |
     create table t(x int, y int);

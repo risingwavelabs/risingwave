@@ -740,7 +740,7 @@ impl ToStream for LogicalOverWindow {
             }
 
             // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
-            // empty PARTITION BY and ORDER BY by simply removing the following check.
+            // empty PARTITION BY by simply removing the following check.
             let partition_key_indices = self.window_functions()[0]
                 .partition_by
                 .iter()
@@ -749,14 +749,6 @@ impl ToStream for LogicalOverWindow {
             if partition_key_indices.is_empty() {
                 return Err(ErrorCode::NotImplemented(
                     "Window function with empty PARTITION BY is not supported yet".to_string(),
-                    None.into(),
-                )
-                .into());
-            }
-            let order_by = &self.window_functions()[0].order_by;
-            if order_by.is_empty() {
-                return Err(ErrorCode::NotImplemented(
-                    "Window function with empty ORDER BY is not supported yet".to_string(),
                     None.into(),
                 )
                 .into());

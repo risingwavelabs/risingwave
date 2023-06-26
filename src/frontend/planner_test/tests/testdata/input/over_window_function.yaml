@@ -107,7 +107,7 @@
     select x, y, min(x) over(PARTITION BY y ROWS 10 PRECEDING) from t;
   expected_outputs:
     - logical_plan
-    - stream_error
+    - stream_plan
     - batch_error
 - id: aggregate with over clause, rows frame definition with between, without ORDER BY
   sql: |
@@ -115,7 +115,7 @@
     select x, y, min(x) over(PARTITION BY y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING) from t;
   expected_outputs:
     - logical_plan
-    - stream_error
+    - stream_plan
     - batch_error
 - id: aggregate with over clause, invalid frame definition case 1
   sql: |
