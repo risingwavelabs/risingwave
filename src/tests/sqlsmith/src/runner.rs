@@ -23,7 +23,7 @@ use rand_chacha::ChaChaRng;
 use risingwave_sqlparser::ast::Statement;
 use tokio::time::{sleep, timeout, Duration};
 use tokio_postgres::error::Error as PgError;
-use tokio_postgres::Client;
+use tokio_postgres::{Client, SimpleQueryMessage};
 
 use crate::utils::read_file_contents;
 use crate::validation::{is_permissible_error, is_recovery_in_progress_error};
@@ -247,32 +247,40 @@ async fn diff_stream_and_batch(
 ) -> Result<()> {
     // Generate some mviews
     let mview_name = format!("stream_{}", i);
-    let (batch, stream, _) = differential_sql_gen(rng, mvs_and_base_tables, &mview_name)?;
+    let (batch, stream, table) = differential_sql_gen(rng, mvs_and_base_tables, &mview_name)?;
 
     tracing::info!("[EXECUTING DIFF - CREATE MVIEW id={}]: {}", i, &stream);
     let skip_count = run_query(6, client, &stream).await?;
     if skip_count > 0 {
+        tracing::info!("[EXECUTING DIFF - DROP MVIEW id={}]: {}", i, &format_drop_mview(&table));
+        drop_mview_table(&table, client).await;
         return Ok(());
     }
 
-    let select = format!("SELECT * FROM {};", &mview_name);
+    let select = format!("SELECT * FROM {}", &mview_name);
     tracing::info!(
         "[EXECUTING DIFF - SELECT * FROM MVIEW id={}], {}",
         i,
         select
     );
-    let (skip_count, stream_no_of_rows) = run_query_inner(6, client, &select).await?;
+    let (skip_count, stream_result) = run_query_inner(6, client, &select).await?;
     if skip_count > 0 {
         bail!("SQL should not fail: {:?}", select)
     }
 
     tracing::info!("[EXECUTING DIFF - BATCH QUERY id={}]: {}", i, &batch);
-    let (skip_count, batch_no_of_rows) = run_query_inner(6, client, &batch).await?;
+    let (skip_count, batch_result) = run_query_inner(6, client, &batch).await?;
     if skip_count > 0 {
+        tracing::info!("[EXECUTING DIFF - DROP MVIEW id={}]: {}", i, &format_drop_mview(&table));
+        drop_mview_table(&table, client).await;
         return Ok(());
     }
-    if stream_no_of_rows == batch_no_of_rows {
-        tracing::info!("[PASSED DIFF id={}]", i);
+    let n_stream_rows = stream_result.len();
+    let n_batch_rows = batch_result.len();
+    if n_stream_rows == n_batch_rows {
+        tracing::info!("[PASSED DIFF id={}, rows_compared={n_stream_rows}]", i);
+        tracing::info!("[EXECUTING DIFF - DROP MVIEW id={}]: {}", i, &format_drop_mview(&table));
+        drop_mview_table(&table, client).await;
         Ok(())
     } else {
         bail!(
@@ -284,12 +292,23 @@ BATCH:
 STREAM:
 {stream}
 
+SELECT:
+{select}
+
+BATCH_ROW_LEN:
+{n_batch_rows}
+
+STREAM_ROW_LEN:
+{n_stream_rows}
+
 BATCH_ROWS:
-{batch_no_of_rows}
+{:?}
 
 STREAM_ROWS:
-{stream_no_of_rows}
-"
+{:?}
+",
+            batch_result,
+            stream_result,
         )
     }
 }
@@ -534,14 +553,16 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
 }
 
 /// Validate client responses, returning a count of skipped queries, number of result rows.
-fn validate_response<_Row>(response: PgResult<Vec<_Row>>) -> Result<(i64, usize)> {
+fn validate_response(
+    response: PgResult<Vec<SimpleQueryMessage>>,
+) -> Result<(i64, Vec<SimpleQueryMessage>)> {
     match response {
-        Ok(rows) => Ok((0, rows.len())),
+        Ok(rows) => Ok((0, rows)),
         Err(e) => {
             // Permit runtime errors conservatively.
             if let Some(e) = e.as_db_error() && is_permissible_error(&e.to_string()) {
                 tracing::info!("[SKIPPED ERROR]: {:#?}", e);
-                return Ok((1, 0));
+                return Ok((1, vec![]));
             }
             // consolidate error reason for deterministic test
             tracing::info!("[UNEXPECTED ERROR]: {:#?}", e);
@@ -564,7 +585,7 @@ async fn run_query_inner(
     timeout_duration: u64,
     client: &Client,
     query: &str,
-) -> Result<(i64, usize)> {
+) -> Result<(i64, Vec<SimpleQueryMessage>)> {
     let query_task = client.simple_query(query);
     let result = timeout(Duration::from_secs(timeout_duration), query_task).await;
     let response = match result {
@@ -584,7 +605,7 @@ async fn run_query_inner(
                 let query_task = client.simple_query(query);
                 let response = timeout(Duration::from_secs(timeout_duration), query_task).await;
                 match response {
-                    Ok(Ok(r)) => { return Ok((0, r.len())); }
+                    Ok(Ok(r)) => { return Ok((0, r)); }
                     Err(_) => bail!(
                         "[UNEXPECTED ERROR] Query timeout after {timeout_duration}s:\n{:?}",
                         query
@@ -598,5 +619,5 @@ async fn run_query_inner(
         }
     }
     let rows = response?;
-    Ok((0, rows.len()))
+    Ok((0, rows))
 }
