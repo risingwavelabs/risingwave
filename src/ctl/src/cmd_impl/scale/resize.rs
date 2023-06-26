@@ -250,3 +250,15 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
 
     Ok(())
 }
+
+pub async fn update_schedulability(
+    context: &CtlContext,
+    worker_ids: &Vec<u32>,
+    is_unschedulable: bool,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client
+        .update_schedulability(worker_ids, is_unschedulable)
+        .await?;
+    Ok(())
+}

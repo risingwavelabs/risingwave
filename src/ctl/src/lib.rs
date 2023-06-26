@@ -231,22 +231,18 @@ enum ScaleCommands {
     /// The resize command scales up and down the cluster by specifying the worker ids to be
     /// included and excluded.
     Resize(ScaleResizeCommands),
-}
-
-#[derive(Subcommand)]
-enum ScaleCommands {
     /// mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
-        /// Id of compute node to cordon e.g. 123.0.0.1:1234
-        #[clap(long)]
-        worker: u32,
+        /// IDs of the compute node to cordon. List the IDs via cluster-info
+        #[clap(long, value_delimiter = ',', value_name = "id,...")]
+        workers: Vec<u32>,
     },
     /// mark a compute node as schedulable. Nodes are schedulable unless they are cordoned
     Uncordon {
-        /// Id of compute node to uncordon e.g. 123.0.0.1:1234
-        #[clap(long)]
-        worker: u32,
+        /// IDs of the compute node to cordon. List the IDs via cluster-info
+        #[clap(long, value_delimiter = ',', value_name = "id,...")]
+        workers: Vec<u32>,
     },
 }
 
@@ -290,9 +286,6 @@ enum MetaCommands {
         #[clap(long, default_value = "false")]
         dry_run: bool,
     },
-    #[clap(subcommand)]
-    Scale(ScaleCommands),
-
     /// backup meta by taking a meta snapshot
     BackupMeta,
     /// delete meta snapshots
@@ -434,12 +427,6 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             plan,
             revision,
         }) => cmd_impl::meta::reschedule(context, plan, revision, from, dry_run).await?,
-        Commands::Meta(MetaCommands::Scale(ScaleCommands::Cordon { worker: w_id })) => {
-            cmd_impl::meta::update_schedulability(context, w_id, false).await?
-        }
-        Commands::Meta(MetaCommands::Scale(ScaleCommands::Uncordon { worker: w_id })) => {
-            cmd_impl::meta::update_schedulability(context, w_id, true).await?
-        }
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
@@ -454,6 +441,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
         Commands::Scale(ScaleCommands::Resize(resize)) => {
             cmd_impl::scale::resize(context, resize).await?
+        }
+        Commands::Scale(ScaleCommands::Cordon { workers: w_ids }) => {
+            cmd_impl::scale::update_schedulability(context, &w_ids, false).await?
+        }
+        Commands::Scale(ScaleCommands::Uncordon { workers: w_ids }) => {
+            cmd_impl::scale::update_schedulability(context, &w_ids, true).await?
         }
     }
     Ok(())
