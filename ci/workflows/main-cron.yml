@@ -177,6 +177,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
 
   - label: "S3 source check on AWS (json parser)"
@@ -192,6 +193,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
 
   - label: "S3 source check on lyvecloud.seagate.com (json parser)"
@@ -207,6 +209,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
 
   - label: "S3 source check on AWS (csv parser)"
@@ -222,6 +225,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
 
   - label: "S3 source on OpenDAL fs engine"
@@ -237,6 +241,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
 
   - label: "pulsar source check"
