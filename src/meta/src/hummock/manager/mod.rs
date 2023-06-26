@@ -32,7 +32,7 @@ use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, insert_new_sub_level,
-    try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockVersionExt,
+    try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockLevelsExt, HummockVersionExt,
     HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
@@ -1265,6 +1265,16 @@ where
                 compact_task.task_status() != TaskStatus::Pending,
                 "report pending compaction task"
             );
+            let input_sst_ids: HashSet<u64> = compact_task
+                .input_ssts
+                .iter()
+                .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
+                .collect();
+            let input_level_ids: Vec<u32> = compact_task
+                .input_ssts
+                .iter()
+                .map(|level| level.level_idx)
+                .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
                 let is_expired =
@@ -1273,10 +1283,20 @@ where
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
-                    assert!(current_version
+                    let group = current_version
                         .levels
-                        .contains_key(&compact_task.compaction_group_id));
-                    true
+                        .get(&compact_task.compaction_group_id)
+                        .unwrap();
+                    let input_exist =
+                        group.check_deleted_sst_exist(&input_level_ids, input_sst_ids);
+                    if !input_exist {
+                        compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
+                        warn!(
+                            "The task may be expired because of group split, task:\n {:?}",
+                            compact_task_to_string(&compact_task)
+                        );
+                    }
+                    input_exist
                 }
             } else {
                 false
