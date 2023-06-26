@@ -3,7 +3,8 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-export LOGDIR=.risingwave/log
+source ci/scripts/common.sh
+
 export RUST_LOG=info
 
 while getopts 'p:' opt; do
