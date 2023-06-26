@@ -443,10 +443,10 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::scale::resize(context, resize).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers: w_ids }) => {
-            cmd_impl::scale::update_schedulability(context, &w_ids, false).await?
+            cmd_impl::scale::update_schedulability(context, &w_ids, true).await?
         }
         Commands::Scale(ScaleCommands::Uncordon { workers: w_ids }) => {
-            cmd_impl::scale::update_schedulability(context, &w_ids, true).await?
+            cmd_impl::scale::update_schedulability(context, &w_ids, false).await?
         }
     }
     Ok(())
