@@ -78,7 +78,7 @@ sleep 3
 # generate data
 echo "--- starting generate streamchunk data"
 cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-buildkite-agent artifact download java-binding-integration-test.tar
+buildkite-agent artifact download java-binding-integration-test.tar ./
 tar xf java-binding-integration-test.tar bin
 ./bin/data-chunk-payload-convert-generator data/sink_input_new.json > ./data/sink_input
 ./bin/data-chunk-payload-generator 30 > ./data/stream_chunk_data

@@ -166,7 +166,9 @@ steps:
 
   - label: "e2e java-binding test"
     command: "ci/scripts/java-binding-test.sh -p ci-dev"
-    depends_on: "build"
+    depends_on:
+      - "build"
+      - "build-other"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
