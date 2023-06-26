@@ -107,6 +107,16 @@ impl AggCall {
         self.filter = Some(filter.into());
         self
     }
+
+    pub fn with_orders(mut self, orders: Vec<ColumnOrder>) -> Self {
+        self.column_orders = orders;
+        self
+    }
+
+    pub fn with_distinct(mut self) -> Self {
+        self.distinct = true;
+        self
+    }
 }
 
 struct Parser<Iter: Iterator> {
