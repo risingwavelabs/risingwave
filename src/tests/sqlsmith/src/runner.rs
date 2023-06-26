@@ -188,6 +188,58 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
     tracing::info!("[EXECUTION SUCCESS]");
 }
 
+/// Differential testing for batch and stream
+pub async fn run_differential_testing(
+    client: &Client,
+    testdata: &str,
+    count: usize,
+    seed: Option<u64>,
+) {
+    let mut rng = generate_rng(seed);
+
+    set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
+    set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
+    tracing::info!("Set session variables");
+
+    let base_tables = create_base_tables(testdata, client).await.unwrap();
+
+    let rows_per_table = 50;
+    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    tracing::info!("Populated base tables");
+
+    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
+        .await
+        .unwrap();
+    tracing::info!("Created tables");
+
+    // Generate an update for some inserts, on the corresponding table.
+    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+    tracing::info!("Ran updates");
+
+    let max_rows_inserted = rows_per_table * base_tables.len();
+    test_sqlsmith(
+        client,
+        &mut rng,
+        tables.clone(),
+        base_tables.clone(),
+        max_rows_inserted,
+    )
+    .await;
+    tracing::info!("Passed sqlsmith tests");
+
+    test_batch_queries(client, &mut rng, tables.clone(), count)
+        .await
+        .unwrap();
+    tracing::info!("Passed batch queries");
+    test_stream_queries(client, &mut rng, tables.clone(), count)
+        .await
+        .unwrap();
+    tracing::info!("Passed stream queries");
+
+    drop_tables(&mviews, testdata, client).await;
+    tracing::info!("[EXECUTION SUCCESS]");
+}
+
 fn generate_rng(seed: Option<u64>) -> impl Rng {
     #[cfg(madsim)]
     if let Some(seed) = seed {
