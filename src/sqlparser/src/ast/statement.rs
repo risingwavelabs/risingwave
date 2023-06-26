@@ -21,7 +21,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use super::ddl::SourceWatermark;
-use super::{Ident, ObjectType, Query, Value};
+use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
@@ -578,6 +578,7 @@ pub struct CreateSinkStatement {
     pub with_properties: WithProperties,
     pub sink_from: CreateSink,
     pub columns: Vec<Ident>,
+    pub emit_mode: Option<EmitMode>,
 }
 
 impl ParseTo for CreateSinkStatement {
@@ -586,6 +587,8 @@ impl ParseTo for CreateSinkStatement {
         impl_parse_to!(sink_name: ObjectName, p);
 
         let columns = p.parse_parenthesized_column_list(IsOptional::Optional)?;
+
+        let emit_mode = p.parse_emit_mode()?;
 
         let sink_from = if p.parse_keyword(Keyword::FROM) {
             impl_parse_to!(from_name: ObjectName, p);
@@ -610,6 +613,7 @@ impl ParseTo for CreateSinkStatement {
             with_properties,
             sink_from,
             columns,
+            emit_mode,
         })
     }
 }

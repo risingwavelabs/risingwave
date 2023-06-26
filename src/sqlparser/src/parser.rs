@@ -82,7 +82,8 @@ pub enum WildcardOrExpr {
     /// See also [`Expr::FieldIdentifier`] for behaviors of parentheses.
     ExprQualifiedWildcard(Expr, Vec<Ident>),
     QualifiedWildcard(ObjectName),
-    Wildcard,
+    // Either it's `*` or `* excepts (columns)`
+    WildcardOrWithExcept(Option<Vec<Expr>>),
 }
 
 impl From<WildcardOrExpr> for FunctionArgExpr {
@@ -93,7 +94,7 @@ impl From<WildcardOrExpr> for FunctionArgExpr {
                 Self::ExprQualifiedWildcard(expr, prefix)
             }
             WildcardOrExpr::QualifiedWildcard(prefix) => Self::QualifiedWildcard(prefix),
-            WildcardOrExpr::Wildcard => Self::Wildcard,
+            WildcardOrExpr::WildcardOrWithExcept(w) => Self::WildcardOrWithExcept(w),
         }
     }
 }
@@ -313,7 +314,14 @@ impl Parser {
                 return self.word_concat_wildcard_expr(w.to_ident()?, wildcard_expr);
             }
             Token::Mul => {
-                return Ok(WildcardOrExpr::Wildcard);
+                if self.parse_keyword(Keyword::EXCEPT) && self.consume_token(&Token::LParen) {
+                    let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+                    if self.consume_token(&Token::RParen) {
+                        return Ok(WildcardOrExpr::WildcardOrWithExcept(Some(exprs)));
+                    }
+                } else {
+                    return Ok(WildcardOrExpr::WildcardOrWithExcept(None));
+                }
             }
             // parses wildcard field selection expression.
             // Code is similar to `parse_struct_selection`
@@ -346,9 +354,10 @@ impl Parser {
         let mut idents = vec![ident];
         match simple_wildcard_expr {
             WildcardOrExpr::QualifiedWildcard(ids) => idents.extend(ids.0),
-            WildcardOrExpr::Wildcard => {}
+            WildcardOrExpr::WildcardOrWithExcept(None) => {}
             WildcardOrExpr::ExprQualifiedWildcard(_, _) => unreachable!(),
             WildcardOrExpr::Expr(e) => return Ok(WildcardOrExpr::Expr(e)),
+            WildcardOrExpr::WildcardOrWithExcept(Some(_)) => unreachable!(),
         }
         Ok(WildcardOrExpr::QualifiedWildcard(ObjectName(idents)))
     }
@@ -387,9 +396,10 @@ impl Parser {
 
         match simple_wildcard_expr {
             WildcardOrExpr::QualifiedWildcard(ids) => idents.extend(ids.0),
-            WildcardOrExpr::Wildcard => {}
+            WildcardOrExpr::WildcardOrWithExcept(None) => {}
             WildcardOrExpr::ExprQualifiedWildcard(_, _) => unreachable!(),
             WildcardOrExpr::Expr(_) => unreachable!(),
+            WildcardOrExpr::WildcardOrWithExcept(Some(_)) => unreachable!(),
         }
         Ok(WildcardOrExpr::ExprQualifiedWildcard(expr, idents))
     }
@@ -408,7 +418,7 @@ impl Parser {
                 Token::Word(w) => id_parts.push(w.to_ident()?),
                 Token::Mul => {
                     return if id_parts.is_empty() {
-                        Ok(WildcardOrExpr::Wildcard)
+                        Ok(WildcardOrExpr::WildcardOrWithExcept(None))
                     } else {
                         Ok(WildcardOrExpr::QualifiedWildcard(ObjectName(id_parts)))
                     }
@@ -4278,7 +4288,7 @@ impl Parser {
             WildcardOrExpr::ExprQualifiedWildcard(expr, prefix) => {
                 Ok(SelectItem::ExprQualifiedWildcard(expr, prefix))
             }
-            WildcardOrExpr::Wildcard => Ok(SelectItem::Wildcard),
+            WildcardOrExpr::WildcardOrWithExcept(w) => Ok(SelectItem::WildcardOrWithExcept(w)),
         }
     }
 
