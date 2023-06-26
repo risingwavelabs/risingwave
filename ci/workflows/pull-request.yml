@@ -399,4 +399,3 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 40
-    soft_fail: true
