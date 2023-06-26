@@ -50,7 +50,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.19.1"
+version = "0.19.2"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
