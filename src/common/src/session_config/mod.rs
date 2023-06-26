@@ -29,7 +29,7 @@ use tracing::info;
 
 use crate::error::{ErrorCode, RwError};
 use crate::session_config::transaction_isolation_level::IsolationLevel;
-use crate::session_config::visibility_mode::VisibilityMode;
+pub use crate::session_config::visibility_mode::VisibilityMode;
 use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
@@ -637,8 +637,8 @@ impl ConfigMap {
         self.search_path.clone()
     }
 
-    pub fn only_checkpoint_visible(&self) -> bool {
-        matches!(self.visibility_mode, VisibilityMode::Checkpoint)
+    pub fn get_visible_mode(&self) -> VisibilityMode {
+        self.visibility_mode
     }
 
     pub fn get_query_epoch(&self) -> Option<Epoch> {
