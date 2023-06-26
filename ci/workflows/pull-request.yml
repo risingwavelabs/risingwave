@@ -390,7 +390,7 @@ steps:
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"
     command: "ci/scripts/sqlsmith-differential-test.sh -p ci-release"
-    if: build.pull_request.labels includes ci/run-sqlsmith-differential-tests
+    if: build.pull_request.labels includes "ci/run-sqlsmith-differential-tests"
     depends_on:
       - "build"
     plugins:
