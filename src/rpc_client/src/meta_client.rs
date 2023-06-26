@@ -580,13 +580,20 @@ impl MetaClient {
     }
 
     /// Unregister multiple workers from the cluster
-    pub async fn unregister_workers(&self, worker_ids: &Vec<u32>) -> Result<()> {
+    pub async fn unregister_workers(&self, worker_ids: &[u32]) -> Result<()> {
         let info = self.get_cluster_info().await?;
         let worker_nodes = info.get_worker_nodes();
         let unregister_nodes = worker_nodes
             .iter()
             .filter(|wn| worker_ids.contains(&wn.id))
             .collect_vec();
+        if unregister_nodes.len() != worker_ids.len() {
+            return Err(RpcError::Internal(anyhow!(
+                "Did not find all requested workers. Found workers {:?}. Requested workers {:?}",
+                unregister_nodes.iter().map(|w| w.id).collect_vec(),
+                worker_ids
+            )));
+        }
         for unregister_node in unregister_nodes {
             let addr = unregister_node
                 .host

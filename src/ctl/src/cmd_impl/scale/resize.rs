@@ -251,7 +251,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
     Ok(())
 }
 
-pub async fn unregister_workers(context: &CtlContext, workers: &Vec<u32>) -> anyhow::Result<()> {
+pub async fn unregister_workers(context: &CtlContext, workers: &[u32]) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     meta_client.unregister_workers(workers).await?;
     Ok(())
