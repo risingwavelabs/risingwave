@@ -666,94 +666,88 @@ fn find_affected_ranges(
         )];
     }
 
-    let (first_frame_start, first_curr_key) = {
-        let first_key = part_with_delta.first_key().unwrap();
-        if calls
+    let first_key = part_with_delta.first_key().unwrap();
+    let last_key = part_with_delta.last_key().unwrap();
+
+    let start_is_unbounded = calls
+        .iter()
+        .any(|call| call.frame.bounds.start_is_unbounded());
+    let end_is_unbounded = calls
+        .iter()
+        .any(|call| call.frame.bounds.end_is_unbounded());
+
+    let first_curr_key = if end_is_unbounded {
+        // If the frame end is unbounded, the frame corresponding to the first key is always
+        // affected.
+        first_key.clone()
+    } else {
+        calls
             .iter()
-            .any(|call| call.frame.bounds.end_is_unbounded())
-        {
-            // If the frame end is unbounded, the frame corresponding to the first key is always
-            // affected.
-            (first_key.clone(), first_key.clone())
-        } else {
-            let (a, b) = calls
-                .iter()
-                .map(|call| match &call.frame.bounds {
-                    FrameBounds::Rows(start, end) => {
-                        let mut cursor = part_with_delta
-                            .lower_bound(Bound::Included(delta.first_key_value().unwrap().0));
-                        let n_following_rows = end.to_offset().unwrap().max(0) as usize;
-                        for _ in 0..n_following_rows {
-                            if cursor.key().is_some() {
-                                cursor.move_prev();
-                            }
-                        }
-                        let first_curr_key = cursor.key().unwrap_or(first_key);
-                        let first_frame_start = if let Some(offset) = start.to_offset() {
-                            let n_preceding_rows = offset.min(0).unsigned_abs();
-                            for _ in 0..n_preceding_rows {
-                                if cursor.key().is_some() {
-                                    cursor.move_prev();
-                                }
-                            }
-                            cursor.key().unwrap_or(first_key)
-                        } else {
-                            // The frame start is unbounded, so the first affected frame starts
-                            // from the beginning.
-                            first_key
-                        };
-                        (first_frame_start, first_curr_key)
-                    }
-                })
-                .reduce(|(x1, y1), (x2, y2)| (x1.min(x2), y1.min(y2)))
-                .expect("# of window function calls > 0");
-            (a.clone(), b.clone())
-        }
+            .map(|call| match &call.frame.bounds {
+                FrameBounds::Rows(_start, end) => {
+                    let mut cursor = part_with_delta
+                        .lower_bound(Bound::Included(delta.first_key_value().unwrap().0));
+                    cursor.saturating_move_prev_n(end.n_following_rows().unwrap());
+                    cursor.key().unwrap_or(first_key)
+                }
+            })
+            .min()
+            .expect("# of window function calls > 0")
+            .clone()
     };
 
-    let (last_curr_key, last_frame_end) = {
-        let last_key = part_with_delta.last_key().unwrap();
-        if calls
+    let first_frame_start = if start_is_unbounded {
+        // If the frame start is unbounded, the first key always need to be included in the affected
+        // range.
+        first_key.clone()
+    } else {
+        calls
             .iter()
-            .any(|call| call.frame.bounds.start_is_unbounded())
-        {
-            // If the frame start is unbounded, the frame corresponding to the last key is
-            // always affected.
-            (last_key.clone(), last_key.clone())
-        } else {
-            let (a, b) = calls
-                .iter()
-                .map(|call| match &call.frame.bounds {
-                    FrameBounds::Rows(start, end) => {
-                        let mut cursor = part_with_delta
-                            .upper_bound(Bound::Included(delta.last_key_value().unwrap().0));
-                        let n_preceding_rows = start.to_offset().unwrap().min(0).unsigned_abs();
-                        for _ in 0..n_preceding_rows {
-                            if cursor.key().is_some() {
-                                cursor.move_next();
-                            }
-                        }
-                        let last_curr_key = cursor.key().unwrap_or(last_key);
-                        let last_frame_end = if let Some(offset) = end.to_offset() {
-                            let n_following_rows = offset.max(0) as usize;
-                            for _ in 0..n_following_rows {
-                                if cursor.key().is_some() {
-                                    cursor.move_next();
-                                }
-                            }
-                            cursor.key().unwrap_or(last_key)
-                        } else {
-                            // The frame end is unbounded, so the last affected frame ends at
-                            // the end.
-                            last_key
-                        };
-                        (last_curr_key, last_frame_end)
-                    }
-                })
-                .reduce(|(x1, y1), (x2, y2)| (x1.max(x2), y1.max(y2)))
-                .expect("# of window function calls > 0");
-            (a.clone(), b.clone())
-        }
+            .map(|call| match &call.frame.bounds {
+                FrameBounds::Rows(start, _end) => {
+                    let mut cursor = part_with_delta.find(&first_curr_key).unwrap();
+                    cursor.saturating_move_prev_n(start.n_preceding_rows().unwrap());
+                    cursor.key().unwrap_or(first_key)
+                }
+            })
+            .min()
+            .expect("# of window function calls > 0")
+            .clone()
+    };
+
+    let last_curr_key = if start_is_unbounded {
+        last_key.clone()
+    } else {
+        calls
+            .iter()
+            .map(|call| match &call.frame.bounds {
+                FrameBounds::Rows(start, _end) => {
+                    let mut cursor = part_with_delta
+                        .upper_bound(Bound::Included(delta.last_key_value().unwrap().0));
+                    cursor.saturating_move_next_n(start.n_preceding_rows().unwrap());
+                    cursor.key().unwrap_or(last_key)
+                }
+            })
+            .max()
+            .expect("# of window function calls > 0")
+            .clone()
+    };
+
+    let last_frame_end = if end_is_unbounded {
+        last_key.clone()
+    } else {
+        calls
+            .iter()
+            .map(|call| match &call.frame.bounds {
+                FrameBounds::Rows(_start, end) => {
+                    let mut cursor = part_with_delta.find(&last_curr_key).unwrap();
+                    cursor.saturating_move_next_n(end.n_following_rows().unwrap());
+                    cursor.key().unwrap_or(last_key)
+                }
+            })
+            .max()
+            .expect("# of window function calls > 0")
+            .clone()
     };
 
     vec![(
@@ -918,6 +912,33 @@ mod tests {
                 assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(2.into())]));
                 assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(5.into())]));
             }
+        }
+
+        {
+            // test multiple calls
+            let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
+            let delta = create_delta!((2, Insert), (3, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+
+            let calls = vec![
+                create_call(Frame::rows(
+                    FrameBound::Preceding(1),
+                    FrameBound::Preceding(1),
+                )),
+                create_call(Frame::rows(
+                    FrameBound::Following(1),
+                    FrameBound::Following(1),
+                )),
+            ];
+            let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
+                find_affected_ranges(&calls, &part_with_delta)
+                    .into_iter()
+                    .next()
+                    .unwrap();
+            assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(1.into())]));
+            assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(1.into())]));
+            assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(4.into())]));
+            assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(5.into())]));
         }
     }
 }

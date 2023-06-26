@@ -303,9 +303,29 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
         self.curr_key_value = self.peek_next();
     }
 
+    /// Move the cursor to the next position `n` times, but stop at the ghost position.
+    pub fn saturating_move_next_n(&mut self, n: usize) {
+        for _ in 0..n {
+            if self.position().is_ghost() {
+                break;
+            }
+            self.move_next();
+        }
+    }
+
     /// Move the cursor to the previous position.
     pub fn move_prev(&mut self) {
         self.curr_key_value = self.peek_prev();
+    }
+
+    /// Move the cursor to the previous position `n` times, but stop at the ghost position.
+    pub fn saturating_move_prev_n(&mut self, n: usize) {
+        for _ in 0..n {
+            if self.position().is_ghost() {
+                break;
+            }
+            self.move_prev();
+        }
     }
 }
 
