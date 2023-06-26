@@ -235,9 +235,7 @@ where
             .filter(|w| worker_ids.contains(&w.worker_id()))
             .collect_vec();
         if workers.is_empty() {
-            return Err(MetaError::invalid_parameter(
-                "Worker nodes do not exist!"
-            ));
+            return Err(MetaError::invalid_parameter("Worker nodes do not exist!"));
         }
         let worker_types = workers.iter().map(|w| w.worker_type()).collect_vec();
 
