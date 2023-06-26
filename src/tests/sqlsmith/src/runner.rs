@@ -597,11 +597,11 @@ async fn diff_stream_and_batch(
     let n_batch_rows = batch_result.len();
     let formatted_stream_rows = format_rows(&batch_result);
     let formatted_batch_rows = format_rows(&stream_result);
-    tracing::info!(
+    tracing::debug!(
         "[EXECUTING DIFF - STREAM_FORMATTED_ROW id={}]: {formatted_stream_rows}",
         i,
     );
-    tracing::info!(
+    tracing::debug!(
         "[EXECUTING DIFF - BATCH_FORMATTED_ROW id={}]: {formatted_batch_rows}",
         i,
     );

@@ -71,10 +71,10 @@ pub fn differential_sql_gen<R: Rng>(
     let mut gen = SqlGenerator::new_for_mview(rng, tables);
     let (stream, table) = gen.gen_mview_stmt(name);
     let batch = match stream {
-        Statement::CreateView { ref query, .. } => query.to_string(),
+        Statement::CreateView { ref query, .. } => format!("{:?}", query),
         _ => bail!("Differential pair should be mview statement!"),
     };
-    Ok((batch, stream.to_string(), table))
+    Ok((batch, format!("{:?}", stream), table))
 }
 
 /// TODO(noel): Eventually all session variables should be fuzzed.
