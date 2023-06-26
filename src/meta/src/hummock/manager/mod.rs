@@ -1290,7 +1290,7 @@ where
                     let input_exist =
                         group.check_deleted_sst_exist(&input_level_ids, input_sst_ids);
                     if !input_exist {
-                        compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
+                        compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
                         warn!(
                             "The task may be expired because of group split, task:\n {:?}",
                             compact_task_to_string(compact_task)
