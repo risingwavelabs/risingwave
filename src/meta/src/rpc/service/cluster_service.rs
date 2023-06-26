@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::common::worker_node::State;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
     AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest,
-    ListAllNodesResponse,
+    ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
+    UpdateWorkerNodeSchedulabilityResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -53,13 +55,43 @@ where
         let property = req
             .property
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
-        let worker_node = self
+        let result = self
             .cluster_manager
             .add_worker_node(worker_type, host, property)
+            .await;
+        match result {
+            Ok(worker_node) => Ok(Response::new(AddWorkerNodeResponse {
+                status: None,
+                node: Some(worker_node),
+            })),
+            Err(e) => {
+                if e.is_invalid_worker() {
+                    return Ok(Response::new(AddWorkerNodeResponse {
+                        status: Some(risingwave_pb::common::Status {
+                            code: risingwave_pb::common::status::Code::UnknownWorker as i32,
+                            message: format!("{}", e),
+                        }),
+                        node: None,
+                    }));
+                }
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Update schedulability of a compute node. Will not affect actors which are already running on
+    /// that node, if marked as unschedulable
+    async fn update_worker_node_schedulability(
+        &self,
+        req: Request<UpdateWorkerNodeSchedulabilityRequest>,
+    ) -> Result<Response<UpdateWorkerNodeSchedulabilityResponse>, Status> {
+        let inner = req.into_inner();
+        let host_addr = inner.get_host()?.clone();
+        self.cluster_manager
+            .update_schedulability(host_addr, inner.set_is_unschedulable)
             .await?;
-        Ok(Response::new(AddWorkerNodeResponse {
+        Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
             status: None,
-            node: Some(worker_node),
         }))
     }
 
@@ -89,14 +121,15 @@ where
     ) -> Result<Response<ListAllNodesResponse>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
-        let worker_state = if req.include_starting_nodes {
+        let worker_states = if req.include_starting_nodes {
             None
         } else {
-            Some(risingwave_pb::common::worker_node::State::Running)
+            Some(State::Running)
         };
+
         let node_list = self
             .cluster_manager
-            .list_worker_node(worker_type, worker_state)
+            .list_worker_node(worker_type, worker_states, true)
             .await;
         Ok(Response::new(ListAllNodesResponse {
             status: None,

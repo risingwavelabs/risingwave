@@ -401,6 +401,7 @@ async fn test_release_context_resource() {
                 worker_node_parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
+                is_unschedulable: false,
             },
         )
         .await
@@ -487,6 +488,7 @@ async fn test_hummock_manager_basic() {
                 worker_node_parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
+                is_unschedulable: false,
             },
         )
         .await
@@ -994,8 +996,7 @@ async fn test_hummock_compaction_task_heartbeat() {
         let req = CompactTaskProgress {
             task_id: compact_task.task_id,
             num_ssts_sealed: i + 1,
-            num_ssts_uploaded: 0,
-            num_progress_key: 0,
+            ..Default::default()
         };
         compactor_manager.update_task_heartbeats(context_id, &vec![req]);
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -1121,7 +1122,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         task_id: compact_task.task_id,
         num_ssts_sealed: 1,
         num_ssts_uploaded: 1,
-        num_progress_key: 0,
+        ..Default::default()
     };
     compactor_manager.update_task_heartbeats(context_id, &vec![req.clone()]);
 

@@ -47,7 +47,7 @@ use risingwave_storage::store::{
 };
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use risingwave_storage::StateStore;
-use tracing::trace;
+use tracing::{trace, Instrument};
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
@@ -790,7 +790,9 @@ where
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
-        self.seal_current_epoch(new_epoch.curr).await
+        self.seal_current_epoch(new_epoch.curr)
+            .instrument(tracing::info_span!("state_table_commit"))
+            .await
     }
 
     // TODO(st1page): maybe we should extract a pub struct to do it

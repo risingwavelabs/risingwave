@@ -299,6 +299,7 @@ pub async fn setup_compute_env_with_config(
                 worker_node_parallelism: fake_parallelism as _,
                 is_streaming: true,
                 is_serving: true,
+                is_unschedulable: false,
             },
         )
         .await

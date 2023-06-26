@@ -560,7 +560,7 @@ select * from s14;
 query I
 select count(*) from s15
 ----
-0
+2
 
 query I
 select count(*) from s16

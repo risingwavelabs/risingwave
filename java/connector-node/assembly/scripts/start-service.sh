@@ -25,4 +25,4 @@ if [ -z "${port}" ]; then
     port=$PORT
 fi
 
-java -classpath "${DIR}/libs/*" $MAIN --port ${port}
+java -ea -classpath "${DIR}/libs/*" $MAIN --port ${port}

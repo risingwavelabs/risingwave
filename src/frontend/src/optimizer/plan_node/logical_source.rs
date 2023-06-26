@@ -19,7 +19,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
@@ -27,7 +27,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 
 use super::stream_watermark_filter::StreamWatermarkFilter;
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject,
     PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource, ToBatch,
@@ -249,7 +249,7 @@ impl fmt::Display for LogicalSource {
     }
 }
 impl Distill for LogicalSource {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = if let Some(catalog) = self.source_catalog() {
             let src = Pretty::from(catalog.name.clone());
             let time = Pretty::debug(&self.core.kafka_timestamp_range);
@@ -261,7 +261,7 @@ impl Distill for LogicalSource {
         } else {
             vec![]
         };
-        Pretty::childless_record("LogicalSource", fields)
+        childless_record("LogicalSource", fields)
     }
 }
 

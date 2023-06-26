@@ -21,7 +21,7 @@ fn main() {
     let opts = risingwave_compaction_test::CompactionTestOpts::parse();
 
     risingwave_rt::init_risingwave_logger(
-        risingwave_rt::LoggerSettings::new(),
+        risingwave_rt::LoggerSettings::default(),
         prometheus::Registry::new(),
     );
 

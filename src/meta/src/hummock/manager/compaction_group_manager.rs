@@ -639,16 +639,39 @@ impl<S: MetaStore> HummockManager<S> {
                 compact_task::TaskType::SpaceReclaim,
             );
         }
+
+        self.metrics
+            .move_state_table_count
+            .with_label_values(&[&parent_group_id.to_string()])
+            .inc();
+
         Ok(target_compaction_group_id)
     }
 
     #[named]
     pub async fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
-        let mut infos = {
+        let mut infos = vec![];
+        {
             let versioning_guard = read_lock!(self, versioning).await;
-            versioning_guard
-                .current_version
-                .calculate_compaction_group_statistic()
+            let version = &versioning_guard.current_version;
+            for (group_id, group) in &version.levels {
+                let mut group_info = TableGroupInfo {
+                    group_id: *group_id,
+                    ..Default::default()
+                };
+                for table_id in &group.member_table_ids {
+                    let stats_size = versioning_guard
+                        .version_stats
+                        .table_stats
+                        .get(table_id)
+                        .map(|stats| stats.total_key_size + stats.total_value_size)
+                        .unwrap_or(0);
+                    let table_size = std::cmp::max(stats_size, 0) as u64;
+                    group_info.group_size += table_size;
+                    group_info.table_statistic.insert(*table_id, table_size);
+                }
+                infos.push(group_info);
+            }
         };
         let manager = self.compaction_group_manager.read().await;
         for info in &mut infos {

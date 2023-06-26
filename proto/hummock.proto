@@ -386,6 +386,8 @@ message CompactTaskProgress {
   uint32 num_ssts_sealed = 2;
   uint32 num_ssts_uploaded = 3;
   uint64 num_progress_key = 4;
+  uint64 num_pending_read_io = 5;
+  uint64 num_pending_write_io = 6;
 }
 
 // The measurement of the workload on a compactor to determine whether it is idle.
@@ -601,6 +603,14 @@ message RiseCtlGetCheckpointVersionResponse {
   HummockVersion checkpoint_version = 1;
 }
 
+message RiseCtlListCompactionStatusRequest {}
+
+message RiseCtlListCompactionStatusResponse {
+  repeated CompactStatus compaction_statuses = 1;
+  repeated CompactTaskAssignment task_assignment = 2;
+  repeated CompactTaskProgress task_progress = 3;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -633,6 +643,7 @@ service HummockManagerService {
   rpc GetScaleCompactor(GetScaleCompactorRequest) returns (GetScaleCompactorResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
+  rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
 }
 
 message CompactionConfig {

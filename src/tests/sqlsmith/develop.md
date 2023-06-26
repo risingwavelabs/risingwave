@@ -1,5 +1,10 @@
 # Develop
 
+## Testing the new feature you added
+
+Suggest testing it with madsim, so you can reproduce the same results each time.
+See [Running with Madsim](./README.md#running-with-madsim).
+
 ## Ignoring errors
 
 Sometimes you may encounter unrelated errors, since SqlSmith frontend tests run per PR.

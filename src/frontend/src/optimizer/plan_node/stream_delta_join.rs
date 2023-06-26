@@ -15,14 +15,14 @@
 use std::fmt;
 use std::ops::BitAnd;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::generic::{self};
-use super::utils::{formatter_debug_plan_node, Distill};
+use super::utils::{childless_record, formatter_debug_plan_node, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -116,7 +116,7 @@ impl fmt::Display for StreamDeltaJoin {
     }
 }
 impl Distill for StreamDeltaJoin {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("type", Pretty::debug(&self.logical.join_type)));
@@ -136,7 +136,7 @@ impl Distill for StreamDeltaJoin {
             vec.push(("output", data));
         }
 
-        Pretty::childless_record("StreamDeltaJoin", vec)
+        childless_record("StreamDeltaJoin", vec)
     }
 }
 

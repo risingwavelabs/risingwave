@@ -14,12 +14,12 @@
 
 use std::fmt;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TableFunctionNode;
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb, ToDistributedBatch};
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::logical_table_function::LogicalTableFunction;
@@ -62,9 +62,9 @@ impl fmt::Display for BatchTableFunction {
     }
 }
 impl Distill for BatchTableFunction {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let data = Pretty::debug(&self.logical.table_function);
-        Pretty::childless_record("BatchTableFunction", vec![("table_function", data)])
+        childless_record("BatchTableFunction", vec![("table_function", data)])
     }
 }
 
