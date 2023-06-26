@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::path::Path;
 
 use itertools::Itertools;
@@ -137,6 +138,16 @@ impl ProtobufParserConfig {
     ) -> Result<ColumnDesc> {
         let field_type = protobuf_type_mapping(field_descriptor)?;
         if let Kind::Message(m) = field_descriptor.kind() {
+            // a bypass for google_well_known_types
+            if let Some(google_type) = google_type_mapping(m.full_name()) {
+                *index += 1;
+                return Ok(ColumnDesc {
+                    column_id: *index,
+                    name: field_descriptor.name().to_string(),
+                    column_type: Some(google_type.to_protobuf()),
+                    ..Default::default()
+                });
+            }
             let field_descs = if let DataType::List { .. } = field_type {
                 vec![]
             } else {
@@ -263,6 +274,13 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
             ScalarImpl::Utf8(enum_symbol.name().into())
         }
         Value::Message(dyn_msg) => {
+            match google_type_mapping(field_desc.full_name()) {
+                None => {}
+                Some(DataType::Jsonb) => {
+                    todo!()
+                }
+            }
+
             let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
             // fields is a btree map in descriptor
             // so it's order is the same as datatype
@@ -315,6 +333,9 @@ fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType>
         Kind::Uint64 => DataType::Decimal,
         Kind::String => DataType::Varchar,
         Kind::Message(m) => {
+            if let Some(google_type) = google_type_mapping(m.full_name()) {
+                return Ok(google_type);
+            }
             let fields = m
                 .fields()
                 .map(|f| protobuf_type_mapping(&f))
@@ -335,6 +356,13 @@ fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType>
         t = DataType::List(Box::new(t))
     }
     Ok(t)
+}
+
+fn google_type_mapping(type_name: &str) -> Option<DataType> {
+    match type_name {
+        "google.protobuf.Struct" => Some(DataType::Jsonb),
+        _ => None,
+    }
 }
 
 pub(crate) fn resolve_pb_header(payload: &[u8]) -> Result<&[u8]> {
@@ -455,5 +483,26 @@ mod test {
             PbTypeName::List
         );
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test() {
+        let location = "file:///Users/tabversion/Desktop/risingwave/temp/schema.pb";
+        let message_name = "DeviceReportPropertyMessage";
+
+        let conf = ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false)
+            .await
+            .unwrap();
+        for f in conf.message_descriptor.fields() {
+            println!("{:?}, {:?}", f.kind(), f.name());
+            if let Kind::Message(m) = f.kind() {
+                println!("== {:?}", m.full_name());
+            }
+        }
+        let columns = conf.map_to_columns().unwrap();
+
+        conf.message_descriptor.
+
+        println!("{:?}", columns);
     }
 }
