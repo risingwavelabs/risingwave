@@ -123,7 +123,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
             Operation::MetaMessage(resp) => {
                 get_replay_notification_client(env, worker_node.clone(), resp)
             }
-            _ => unreachable!(),
+            _ => panic!("unexpected operation, found {:?}", r.operation),
         };
 
         (
