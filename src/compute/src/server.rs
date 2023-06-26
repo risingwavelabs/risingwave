@@ -107,6 +107,7 @@ pub async fn compute_node_serve(
             worker_node_parallelism: opts.parallelism as u64,
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
+            is_unschedulable: false,
         },
         &config.meta,
     )
@@ -224,6 +225,7 @@ pub async fn compute_node_serve(
                 output_memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
+                await_tree_reg: None,
             });
 
             let (handle, shutdown_sender) =
@@ -314,8 +316,8 @@ pub async fn compute_node_serve(
     let connector_params = risingwave_connector::ConnectorParams {
         connector_rpc_endpoint: opts.connector_rpc_endpoint,
         sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
-            None | Some("json") => SinkPayloadFormat::Json,
-            Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
+            None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
+            Some("json") => SinkPayloadFormat::Json,
             _ => {
                 unreachable!(
                     "invalid sink payload format: {:?}. Should be either json or stream_chunk",

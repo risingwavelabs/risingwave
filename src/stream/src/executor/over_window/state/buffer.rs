@@ -18,17 +18,14 @@ use std::ops::Range;
 use either::Either;
 use risingwave_expr::function::window::{Frame, FrameBounds, FrameExclusion};
 
-/// Actually with `VecDeque` as internal buffer, we don't need split key and value here. Just in
-/// case we want to switch to `BTreeMap` later, so that the general version of `OverWindow` executor
-/// can reuse this.
 struct Entry<K: Ord, V> {
     key: K,
     value: V,
 }
 
 // TODO(rc): May be a good idea to extract this into a separate crate.
-/// A common sliding window buffer for streaming input.
-pub struct StreamWindowBuffer<K: Ord, V> {
+/// A common sliding window buffer.
+pub struct WindowBuffer<K: Ord, V> {
     frame: Frame,
     buffer: VecDeque<Entry<K, V>>,
     curr_idx: usize,
@@ -36,19 +33,14 @@ pub struct StreamWindowBuffer<K: Ord, V> {
     right_excl_idx: usize, // exclusive, note this can be <= `curr_idx`
 }
 
-/// Two simple properties of a window frame:
-/// 1. If the following half of the window is saturated, the current window is ready.
-/// 2. If the preceding half of the window is saturated, the first several entries can be removed
-/// when sliding.
-///
-/// Note: A window frame can be pure preceding, pure following, or across the _current row_.
+/// Note: A window frame can be pure preceding, pure following, or acrossing the _current row_.
 pub struct CurrWindow<'a, K> {
     pub key: Option<&'a K>,
     pub preceding_saturated: bool,
     pub following_saturated: bool,
 }
 
-impl<K: Ord, V> StreamWindowBuffer<K, V> {
+impl<K: Ord, V> WindowBuffer<K, V> {
     pub fn new(frame: Frame) -> Self {
         assert!(frame.bounds.is_valid());
         Self {
@@ -249,7 +241,7 @@ mod tests {
 
     #[test]
     fn test_rows_frame_unbounded_preceding_to_current_row() {
-        let mut buffer = StreamWindowBuffer::new(Frame::rows(
+        let mut buffer = WindowBuffer::new(Frame::rows(
             FrameBound::UnboundedPreceding,
             FrameBound::CurrentRow,
         ));
@@ -286,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_rows_frame_preceding_to_current_row() {
-        let mut buffer = StreamWindowBuffer::new(Frame::rows(
+        let mut buffer = WindowBuffer::new(Frame::rows(
             FrameBound::Preceding(1),
             FrameBound::CurrentRow,
         ));
@@ -329,7 +321,7 @@ mod tests {
 
     #[test]
     fn test_rows_frame_preceding_to_preceding() {
-        let mut buffer = StreamWindowBuffer::new(Frame::rows(
+        let mut buffer = WindowBuffer::new(Frame::rows(
             FrameBound::Preceding(2),
             FrameBound::Preceding(1),
         ));
@@ -376,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_rows_frame_current_row_to_unbounded_following() {
-        let mut buffer = StreamWindowBuffer::new(Frame::rows(
+        let mut buffer = WindowBuffer::new(Frame::rows(
             FrameBound::CurrentRow,
             FrameBound::UnboundedFollowing,
         ));
@@ -416,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_rows_frame_current_row_to_following() {
-        let mut buffer = StreamWindowBuffer::new(Frame::rows(
+        let mut buffer = WindowBuffer::new(Frame::rows(
             FrameBound::CurrentRow,
             FrameBound::Following(1),
         ));
@@ -465,7 +457,7 @@ mod tests {
 
     #[test]
     fn test_rows_frame_following_to_following() {
-        let mut buffer = StreamWindowBuffer::new(Frame::rows(
+        let mut buffer = WindowBuffer::new(Frame::rows(
             FrameBound::Following(1),
             FrameBound::Following(2),
         ));
@@ -511,7 +503,7 @@ mod tests {
 
     #[test]
     fn test_rows_frame_exclude_current_row() {
-        let mut buffer = StreamWindowBuffer::new(Frame::rows_with_exclusion(
+        let mut buffer = WindowBuffer::new(Frame::rows_with_exclusion(
             FrameBound::UnboundedPreceding,
             FrameBound::CurrentRow,
             FrameExclusion::CurrentRow,

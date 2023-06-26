@@ -19,6 +19,7 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{
     DataType, Date, Datum, Interval, ScalarImpl, StructType, Time, Timestamp,
 };
+use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::{memcmp_encoding, value_encoding};
 
@@ -42,7 +43,7 @@ impl Case {
     }
 }
 
-fn key_serialization(datum: &Datum) -> Vec<u8> {
+fn key_serialization(datum: &Datum) -> MemcmpEncoded {
     let result = memcmp_encoding::encode_value(
         datum.as_ref().map(ScalarImpl::as_scalar_ref_impl),
         OrderType::default(),

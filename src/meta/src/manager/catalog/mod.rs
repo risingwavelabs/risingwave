@@ -244,7 +244,12 @@ where
     pub async fn drop_database(
         &self,
         database_id: DatabaseId,
-    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>, Vec<SourceId>)> {
+    ) -> MetaResult<(
+        NotificationVersion,
+        Vec<StreamingJobId>,
+        Vec<SourceId>,
+        Vec<Connection>,
+    )> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -286,6 +291,7 @@ where
         }
 
         let database = databases.remove(database_id);
+        let connections_dropped;
         if let Some(database) = database {
             let schemas_to_drop = drop_by_database_id!(schemas, database_id);
             let sources_to_drop = drop_by_database_id!(sources, database_id);
@@ -295,6 +301,7 @@ where
             let views_to_drop = drop_by_database_id!(views, database_id);
             let functions_to_drop = drop_by_database_id!(functions, database_id);
             let connections_to_drop = drop_by_database_id!(connections, database_id);
+            connections_dropped = connections_to_drop.clone();
 
             let objects = std::iter::once(Object::DatabaseId(database_id))
                 .chain(
@@ -317,7 +324,19 @@ where
                 .collect_vec();
             let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
-            commit_meta!(self, databases, schemas, sources, sinks, tables, indexes, views, users)?;
+            commit_meta!(
+                self,
+                databases,
+                schemas,
+                sources,
+                sinks,
+                tables,
+                indexes,
+                views,
+                users,
+                connections,
+                functions
+            )?;
 
             std::iter::once(database.owner)
                 .chain(schemas_to_drop.iter().map(|schema| schema.owner))
@@ -332,6 +351,11 @@ where
                 .chain(indexes_to_drop.iter().map(|index| index.owner))
                 .chain(views_to_drop.iter().map(|view| view.owner))
                 .chain(functions_to_drop.iter().map(|function| function.owner))
+                .chain(
+                    connections_to_drop
+                        .iter()
+                        .map(|connection| connection.owner),
+                )
                 .for_each(|owner_id| user_core.decrease_ref(owner_id));
 
             // Update relation ref count.
@@ -348,7 +372,6 @@ where
             for connection in &connections_to_drop {
                 database_core.relation_ref_count.remove(&connection.id);
             }
-            // FIXME: resolve function refer count.
             for user in users_need_update {
                 self.notify_frontend(Operation::Update, Info::User(user))
                     .await;
@@ -374,7 +397,12 @@ where
                 .map(|source| source.id)
                 .collect_vec();
 
-            Ok((version, catalog_deleted_ids, source_deleted_ids))
+            Ok((
+                version,
+                catalog_deleted_ids,
+                source_deleted_ids,
+                connections_dropped,
+            ))
         } else {
             Err(MetaError::catalog_id_not_found("database", database_id))
         }
@@ -412,7 +440,10 @@ where
         Ok(version)
     }
 
-    pub async fn drop_connection(&self, conn_id: ConnectionId) -> MetaResult<NotificationVersion> {
+    pub async fn drop_connection(
+        &self,
+        conn_id: ConnectionId,
+    ) -> MetaResult<(NotificationVersion, Connection)> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         database_core.ensure_connection_id(conn_id)?;
@@ -442,9 +473,9 @@ where
                 user_core.decrease_ref(connection.owner);
 
                 let version = self
-                    .notify_frontend(Operation::Delete, Info::Connection(connection))
+                    .notify_frontend(Operation::Delete, Info::Connection(connection.clone()))
                     .await;
-                Ok(version)
+                Ok((version, connection))
             }
         }
     }

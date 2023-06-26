@@ -70,6 +70,7 @@ impl MonitorService for MonitorServiceImpl {
         Ok(Response::new(StackTraceResponse {
             actor_traces,
             rpc_traces,
+            compaction_task_traces: Default::default(),
         }))
     }
 

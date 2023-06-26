@@ -230,6 +230,7 @@ impl HummockStorage {
             .send(HummockEvent::RegisterReadVersion {
                 table_id: option.table_id,
                 new_read_version_sender: tx,
+                is_replicated: option.is_replicated,
             })
             .unwrap();
 
@@ -281,7 +282,6 @@ impl HummockStorage {
                 version_update_payload::Payload::PinnedVersion(version),
             ))
             .unwrap();
-
         loop {
             if self.pinned_version.load().id() >= version_id {
                 break;
@@ -338,6 +338,18 @@ impl HummockStorage {
 
     pub fn version_reader(&self) -> &HummockVersionReader {
         &self.hummock_version_reader
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn wait_version_update(&self, old_id: u64) -> u64 {
+        use tokio::task::yield_now;
+        loop {
+            let cur_id = self.pinned_version.load().id();
+            if cur_id > old_id {
+                return cur_id;
+            }
+            yield_now().await;
+        }
     }
 }
 

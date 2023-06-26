@@ -1,4 +1,4 @@
-CREATE TABLE orders (order_id INT PRIMARY KEY) with (
+CREATE TABLE orders (PRIMARY KEY(order_id)) with (
     connector = 'kafka',
     kafka.topic = 'postgres.public.orders',
     kafka.brokers = 'message_queue:29092',

@@ -38,6 +38,11 @@ impl ColumnId {
     pub const fn new(column_id: i32) -> Self {
         Self(column_id)
     }
+
+    /// Sometimes the id field is filled later, we use this value for better debugging.
+    pub const fn placeholder() -> Self {
+        Self(i32::MAX - 1)
+    }
 }
 
 impl ColumnId {

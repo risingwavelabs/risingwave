@@ -5,6 +5,12 @@
   <artifactId>risingwave-udf</artifactId>
   <packaging>jar</packaging>
   <version>0.0.1</version>
+  <parent>
+    <artifactId>java-parent</artifactId>
+    <groupId>com.risingwave.java</groupId>
+    <version>1.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
   <name>risingwave-udf</name>
   <url>http://maven.apache.org</url>
 
@@ -54,15 +60,5 @@
         <version>1.7.0</version>
       </extension>
     </extensions>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.0.0-M7</version>
-        <configuration>
-          <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED</argLine>
-        </configuration>
-      </plugin>
-    </plugins>
   </build>
 </project>

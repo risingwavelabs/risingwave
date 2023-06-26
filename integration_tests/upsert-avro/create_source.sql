@@ -1,6 +1,6 @@
 CREATE TABLE items
 (
-   id text PRIMARY KEY
+  PRIMARY KEY(id)
 )
 WITH (
   connector='kafka',

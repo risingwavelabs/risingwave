@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalProject,
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
@@ -187,13 +186,6 @@ impl LogicalProjectSet {
     pub fn select_list(&self) -> &Vec<ExprImpl> {
         &self.core.select_list
     }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let _verbose = self.base.ctx.is_explain_verbose();
-        // TODO: add verbose display like Project
-
-        self.core.fmt_with_name(f, name)
-    }
 }
 
 impl PlanTreeNodeUnary for LogicalProjectSet {
@@ -225,12 +217,8 @@ impl PlanTreeNodeUnary for LogicalProjectSet {
 }
 
 impl_plan_tree_node_for_unary! {LogicalProjectSet}
-
-impl fmt::Display for LogicalProjectSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalProjectSet")
-    }
-}
+impl_distill_by_unit!(LogicalProjectSet, core, "LogicalProjectSet");
+// TODO: add verbose display like Project
 
 impl ColPrunable for LogicalProjectSet {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

@@ -136,6 +136,12 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>elasticsearch</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>
@@ -161,6 +167,11 @@
         <dependency>
             <groupId>com.risingwave.java</groupId>
             <artifactId>risingwave-sink-jdbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>risingwave-sink-es</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

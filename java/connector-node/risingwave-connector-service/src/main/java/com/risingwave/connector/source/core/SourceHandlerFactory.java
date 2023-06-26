@@ -30,11 +30,14 @@ public abstract class SourceHandlerFactory {
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
-            Map<Long, String> replicationSlotMap) {
+            Map<Long, String> replicationSlotMap,
+            boolean snapshotDone) {
         // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
-        Map<String, String> modifiableUserProps = new HashMap<>(userProps);
-        modifiableUserProps.put("source.id", Long.toString(sourceId));
-        var config = new DbzConnectorConfig(source, sourceId, startOffset, modifiableUserProps);
+        Map<String, String> mutableUserProps = new HashMap<>(userProps);
+        mutableUserProps.put("source.id", Long.toString(sourceId));
+        var config =
+                new DbzConnectorConfig(
+                        source, sourceId, startOffset, mutableUserProps, snapshotDone);
         LOG.info("resolved config for source#{}: {}", sourceId, config.getResolvedDebeziumProps());
         return new DbzSourceHandler(replicationSlotMap, config);
     }

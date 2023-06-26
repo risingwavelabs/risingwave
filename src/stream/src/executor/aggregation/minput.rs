@@ -204,7 +204,7 @@ impl<S: StateStore> MaterializedInputState<S> {
                             .project(&self.state_table_order_col_indices),
                         &mut cache_key,
                     );
-                    cache_key
+                    cache_key.into()
                 };
                 let cache_value = self
                     .state_table_arg_col_indices

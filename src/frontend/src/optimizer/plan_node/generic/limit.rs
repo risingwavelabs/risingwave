@@ -11,13 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::fmt;
 use std::hash::Hash;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
 
@@ -64,8 +66,8 @@ impl<PlanRef> Limit<PlanRef> {
 }
 
 impl<PlanRef> DistillUnit for Limit<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
-        Pretty::childless_record(
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
+        childless_record(
             name,
             vec![
                 ("limit", Pretty::debug(&self.limit)),

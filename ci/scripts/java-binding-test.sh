@@ -23,13 +23,11 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
 
-download_java_binding "$profile"
-
 echo "--- starting risingwave cluster"
 cargo make ci-start java-binding-demo
 
 echo "--- Build java binding demo"
-cargo make build-java-binding-java
+cargo make build-java-binding
 
 echo "--- ingest data and run java binding"
 cargo make ingest-data-and-run-java-binding

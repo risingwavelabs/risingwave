@@ -134,6 +134,7 @@ message GetEventStreamRequest {
   SourceType source_type = 2;
   string start_offset = 3;
   map<string, string> properties = 4;
+  bool snapshot_done = 5;
 }
 
 message GetEventStreamResponse {

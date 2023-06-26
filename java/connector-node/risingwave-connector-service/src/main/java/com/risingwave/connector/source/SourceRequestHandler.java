@@ -39,7 +39,8 @@ public class SourceRequestHandler {
                         request.getSourceId(),
                         request.getStartOffset(),
                         request.getPropertiesMap(),
-                        replicationSlotMap);
+                        replicationSlotMap,
+                        request.getSnapshotDone());
         handler.startSource(
                 (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>)
                         responseObserver);

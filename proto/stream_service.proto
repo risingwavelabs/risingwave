@@ -68,6 +68,7 @@ message InjectBarrierResponse {
 message BarrierCompleteRequest {
   string request_id = 1;
   uint64 prev_epoch = 2;
+  map<string, string> tracing_context = 3;
 }
 message BarrierCompleteResponse {
   message CreateMviewProgress {
