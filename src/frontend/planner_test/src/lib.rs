@@ -300,7 +300,7 @@ impl TestCase {
         format!(
             r#"CREATE {} {}
     WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
+    ROW FORMAT {} (message = '.test.TestRecord', schema.location = 'file://)"#,
             object_to_create, connector_name, connector_row_format
         )
     }
