@@ -124,28 +124,32 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
     }
 
     pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        self.fmt_with_name_and_force(f, name, false).finish()
+    }
+
+    pub(crate) fn fmt_with_name_and_force<'a, 'b>(
+        &self,
+        f: &'b mut fmt::Formatter<'a>,
+        name: &str,
+        force_group_keys: bool,
+    ) -> fmt::DebugStruct<'b, 'a> {
         let mut builder = f.debug_struct(name);
         let input_schema = self.input.schema();
-        builder.field(
-            "order",
-            &format!(
-                "{}",
-                OrderDisplay {
-                    order: &self.order,
-                    input_schema
-                }
-            ),
-        );
+        let ord = OrderDisplay {
+            order: &self.order,
+            input_schema,
+        };
+        builder.field("order", &format!("{}", ord));
         builder
             .field("limit", &self.limit_attr.limit())
             .field("offset", &self.offset);
         if self.limit_attr.with_ties() {
             builder.field("with_ties", &true);
         }
-        if !self.group_key.is_empty() {
+        if force_group_keys || !self.group_key.is_empty() {
             builder.field("group_key", &self.group_key);
         }
-        builder.finish()
+        builder
     }
 }
 

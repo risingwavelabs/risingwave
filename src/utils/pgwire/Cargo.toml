@@ -16,16 +16,11 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
-async-trait = "0.1"
 byteorder = "1.4"
 bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 openssl = "0.10.48"
-pg_interval = "0.4"
-postgres-types = { version = "0.2.5", features = ["derive","with-chrono-0_4"] }
-regex = "1.5"
 risingwave_common = { path = "../../common" }
 risingwave_sqlparser = { path = "../../sqlparser" }
 thiserror = "1"

@@ -74,7 +74,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 with: None,
                 body: query,
                 order_by: vec![],
-                limit: None,
+                limit: self.gen_limit(false),
                 offset: None,
                 fetch: None,
             },
@@ -118,7 +118,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_with(&mut self) -> (Option<With>, Vec<Table>) {
-        match self.rng.gen_bool(0.4) {
+        match self.can_recurse() {
             true => (None, vec![]),
             false => {
                 let (with, tables) = self.gen_with_inner();
@@ -163,7 +163,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_limit(&mut self, has_order_by: bool) -> Option<String> {
-        if (!self.is_mview || has_order_by) && self.rng.gen_bool(0.2) {
+        if (!self.is_mview || has_order_by) && self.flip_coin() {
             Some(self.rng.gen_range(0..=100).to_string())
         } else {
             None
@@ -238,7 +238,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         // Generate one cross join at most.
         let mut lateral_contexts = vec![];
-        if self.flip_coin() {
+        if self.rng.gen_bool(0.1) {
             let (table_with_join, mut table) = self.gen_from_relation();
             from.push(table_with_join);
             lateral_contexts.append(&mut table);

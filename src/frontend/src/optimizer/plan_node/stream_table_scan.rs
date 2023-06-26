@@ -177,20 +177,16 @@ impl Distill for StreamTableScan {
         vec.push(("columns", self.logical.columns_pretty(verbose)));
 
         if verbose {
-            vec.push((
-                "pk",
-                Pretty::display(&IndicesDisplay {
-                    indices: self.logical_pk(),
-                    input_schema: &self.base.schema,
-                }),
-            ));
-            vec.push((
-                "dist",
-                Pretty::display(&DistributionDisplay {
-                    distribution: self.distribution(),
-                    input_schema: &self.base.schema,
-                }),
-            ));
+            let pk = Pretty::display(&IndicesDisplay {
+                indices: self.logical_pk(),
+                input_schema: &self.base.schema,
+            });
+            vec.push(("pk", pk));
+            let dist = Pretty::display(&DistributionDisplay {
+                distribution: self.distribution(),
+                input_schema: &self.base.schema,
+            });
+            vec.push(("dist", dist));
         }
 
         childless_record("StreamTableScan", vec)
