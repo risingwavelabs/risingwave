@@ -101,7 +101,7 @@ const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 16;
 //   succeeds, the in-mem state will be updated by the way.
 pub struct HummockManager<S: MetaStore> {
     pub env: MetaSrvEnv<S>,
-    cluster_manager: ClusterManagerRef<S>,
+    pub cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     // `CompactionGroupManager` manages `CompactionGroup`'s members.
     // Note that all hummock state store user should register to `CompactionGroupManager`. It
@@ -837,7 +837,6 @@ where
             .clone();
         let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
         let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
-        println!("{} {}", is_trivial_move, can_trivial_move);
 
         if is_trivial_reclaim {
             compact_task.set_task_status(TaskStatus::Success);
