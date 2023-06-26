@@ -44,7 +44,7 @@ cargo make ci-start ci-3cn-1fe
 echo "--- e2e, ci-3cn-1fe, run fuzzing"
 ./target/debug/sqlsmith test \
   --count "$SQLSMITH_COUNT" \
-  --testdata ./src/tests/sqlsmith/tests/testdata
+  --testdata ./src/tests/sqlsmith/tests/testdata \
   --differential-testing
 
 # Sqlsmith does not write to stdout, so we need this to ensure buildkite
