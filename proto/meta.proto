@@ -211,7 +211,7 @@ message DeleteWorkerNodeResponse {
 
 // Mark CN as schedulable or as unschedulable
 message UpdateWorkerNodeSchedulabilityRequest {
-  uint32 worker_id = 1;
+  repeated uint32 worker_ids = 1;
   bool set_is_unschedulable = 2;
 }
 
