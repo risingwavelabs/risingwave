@@ -320,6 +320,9 @@ impl HummockVersionUpdateExt for HummockVersion {
                         l0.total_file_size -= sst_info.file_size;
                         l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
                     });
+                if insert_table_infos.is_empty() {
+                    continue;
+                }
                 match insert_hint {
                     Ok(idx) => {
                         add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
@@ -454,13 +457,15 @@ impl HummockVersionUpdateExt for HummockVersion {
                     delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
                     "no sst should be deleted when committing an epoch"
                 );
-                insert_new_sub_level(
-                    levels.l0.as_mut().unwrap(),
-                    insert_sub_level_id,
-                    LevelType::Overlapping,
-                    insert_table_infos,
-                    None,
-                );
+                if !insert_table_infos.is_empty() {
+                    insert_new_sub_level(
+                        levels.l0.as_mut().unwrap(),
+                        insert_sub_level_id,
+                        LevelType::Overlapping,
+                        insert_table_infos,
+                        None,
+                    );
+                }
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
                 levels.apply_compact_ssts(summary);
