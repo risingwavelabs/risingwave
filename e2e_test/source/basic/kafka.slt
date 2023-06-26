@@ -401,7 +401,7 @@ CREATE TABLE dbz_ignore_case_json (
 ) WITH (
     connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
-    topic = 'dbz_ignore_case_json'
+    topic = 'debezium_ignore_case_json'
 ) row format debezium_json
 
 
