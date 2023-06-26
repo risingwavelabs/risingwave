@@ -53,7 +53,7 @@ impl<S> MonitoredStateStore<S> {
 }
 
 /// A util function to break the type connection between two opaque return types defined by `impl`.
-fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
+pub(crate) fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
     input
 }
 

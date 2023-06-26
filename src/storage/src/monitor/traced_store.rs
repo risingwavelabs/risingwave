@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::identity;
+use std::ops::Bound;
+
 use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -54,9 +57,8 @@ impl<S> TracedStateStore<S> {
 
     pub fn new_local(inner: S, options: NewLocalOptions) -> Self {
         let id = get_concurrent_id();
-        let storage_type: StorageType = StorageType::Local(id, options.clone().into());
-        // use a random number as id for local storage
         let local_storage_id = rand::random::<u64>();
+        let storage_type: StorageType = StorageType::Local(id, local_storage_id);
         let _span: MayTraceSpan =
             TraceSpan::new_local_storage_span(options.into(), storage_type, local_storage_id);
 
@@ -167,7 +169,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         res
     }
 
-    fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+    fn flush(&mut self, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) -> Self::FlushFuture<'_> {
         async move {
             let span = TraceSpan::new_flush_span(delete_ranges.clone(), self.storage_type);
             let res = self.inner.flush(delete_ranges).await;
