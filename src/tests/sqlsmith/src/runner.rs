@@ -620,14 +620,15 @@ async fn diff_stream_and_batch(
     } else {
         bail!(
             "
-Different number of rows for:
-BATCH:
+Different results for batch and stream:
+
+BATCH SQL:
 {batch}
 
-STREAM:
+STREAM SQL:
 {stream}
 
-SELECT:
+SELECT FROM STREAM SQL:
 {select}
 
 BATCH_ROW_LEN:
@@ -642,7 +643,7 @@ BATCH_ROWS:
 STREAM_ROWS:
 {formatted_stream_rows}
 
-DIFF:
+ROW DIFF (+/-):
 {diff}
 ",
         )
