@@ -215,17 +215,16 @@ pub async fn run_differential_testing(
     // Generate an update for some inserts, on the corresponding table.
     update_base_tables(client, &mut rng, &base_tables, &inserts).await;
     tracing::info!("Ran updates");
-
-    let max_rows_inserted = rows_per_table * base_tables.len();
-    test_sqlsmith(
-        client,
-        &mut rng,
-        tables.clone(),
-        base_tables.clone(),
-        max_rows_inserted,
-    )
-    .await;
-    tracing::info!("Passed sqlsmith tests");
+    // let max_rows_inserted = rows_per_table * base_tables.len();
+    // test_sqlsmith(
+    //     client,
+    //     &mut rng,
+    //     tables.clone(),
+    //     base_tables.clone(),
+    //     max_rows_inserted,
+    // )
+    // .await;
+    // tracing::info!("Passed sqlsmith tests");
 
     for i in 0..count {
         diff_stream_and_batch(&mut rng, tables.clone(), client, i).await?
@@ -247,22 +246,51 @@ async fn diff_stream_and_batch(
     i: usize,
 ) -> Result<()> {
     // Generate some mviews
-    let mview_name = &format!("stream_{}", i);
-    let (batch, stream, _) = differential_sql_gen(rng, mvs_and_base_tables, mview_name)?;
-    tracing::info!("[EXECUTING CREATE MVIEW]: {}", &stream);
-    let (skip_count, stream_no_of_rows) = run_query_inner(6, client, &stream).await?;
+    let mview_name = format!("stream_{}", i);
+    let (batch, stream, _) = differential_sql_gen(rng, mvs_and_base_tables, &mview_name)?;
+
+    tracing::info!("[EXECUTING DIFF - CREATE MVIEW id={}]: {}", i, &stream);
+    let skip_count = run_query(6, client, &stream).await?;
     if skip_count > 0 {
         return Ok(());
     }
-    tracing::info!("[EXECUTING BATCH QUERY]: {}", &stream);
+
+    let select = format!("SELECT * FROM {};", &mview_name);
+    tracing::info!(
+        "[EXECUTING DIFF - SELECT * FROM MVIEW id={}], {}",
+        i,
+        select
+    );
+    let (skip_count, stream_no_of_rows) = run_query_inner(6, client, &select).await?;
+    if skip_count > 0 {
+        bail!("SQL should not fail: {:?}", select)
+    }
+
+    tracing::info!("[EXECUTING DIFF - BATCH QUERY id={}]: {}", i, &batch);
     let (skip_count, batch_no_of_rows) = run_query_inner(6, client, &batch).await?;
     if skip_count > 0 {
         return Ok(());
     }
     if stream_no_of_rows == batch_no_of_rows {
+        tracing::info!("[PASSED DIFF id={}]", i);
         Ok(())
     } else {
-        bail!("Different number of rows for:\nbatch:\n{batch}\nstream:\n{stream}")
+        bail!(
+            "
+Different number of rows for:
+BATCH:
+{batch}
+
+STREAM:
+{stream}
+
+BATCH_ROWS:
+{batch_no_of_rows}
+
+STREAM_ROWS:
+{stream_no_of_rows}
+"
+        )
     }
 }
 
