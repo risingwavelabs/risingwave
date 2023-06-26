@@ -30,7 +30,6 @@ mod local_metrics;
 pub use local_metrics::*;
 pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 
-#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
 mod traced_store;
 
 pub trait HummockTraceFutureExt: Sized + Future {

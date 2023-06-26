@@ -39,6 +39,8 @@ rustflags = [
     # "enable_task_local_alloc",
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
+    "--cfg",
+    "hm_trace",
     "-Funused_must_use",
     "-Aclippy::uninlined_format_args",
     "-Wclippy::dbg_macro",
