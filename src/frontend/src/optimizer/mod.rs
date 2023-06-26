@@ -186,7 +186,7 @@ impl PlanRoot {
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Session Timezone:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         // Const eval of exprs at the last minute
@@ -194,7 +194,7 @@ impl PlanRoot {
 
         if ctx.is_explain_trace() {
             ctx.trace("Const eval exprs:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         #[cfg(debug_assertions)]
@@ -205,7 +205,7 @@ impl PlanRoot {
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Physical Plan:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         Ok(plan)
@@ -228,7 +228,7 @@ impl PlanRoot {
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Distributed Plan:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
         if require_additional_exchange_on_root_in_distributed_mode(plan.clone()) {
             plan =
@@ -265,7 +265,7 @@ impl PlanRoot {
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Local Plan:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         Ok(plan)
@@ -299,7 +299,7 @@ impl PlanRoot {
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline session timezone:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         // Const eval of exprs at the last minute
@@ -307,7 +307,7 @@ impl PlanRoot {
 
         if ctx.is_explain_trace() {
             ctx.trace("Const eval exprs:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         #[cfg(debug_assertions)]
@@ -364,7 +364,7 @@ impl PlanRoot {
 
                 if explain_trace {
                     ctx.trace("Logical Rewrite For Stream:");
-                    ctx.trace(plan.explain_to_string().unwrap());
+                    ctx.trace(plan.explain_to_string());
                 }
 
                 self.required_dist =
@@ -384,7 +384,7 @@ impl PlanRoot {
 
         if explain_trace {
             ctx.trace("To Stream Plan:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
         Ok(plan)
     }
@@ -521,8 +521,9 @@ impl PlanRoot {
         sink_name: String,
         definition: String,
         properties: WithOptions,
+        emit_on_window_close: bool,
     ) -> Result<StreamSink> {
-        let stream_plan = self.gen_optimized_stream_plan(false)?;
+        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamSink::create(
             stream_plan,

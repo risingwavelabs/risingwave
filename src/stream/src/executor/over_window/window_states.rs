@@ -37,7 +37,6 @@ impl WindowStates {
     }
 
     /// Get the key of current windows.
-    #[expect(dead_code)]
     pub fn curr_key(&self) -> Option<&StateKey> {
         debug_assert!(self.are_aligned());
         self.0.first().and_then(|state| state.curr_window().key)

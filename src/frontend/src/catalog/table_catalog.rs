@@ -103,6 +103,9 @@ pub struct TableCatalog {
     /// The fragment id of the `Materialize` operator for this table.
     pub fragment_id: FragmentId,
 
+    /// The fragment id of the `DML` operator for this table.
+    pub dml_fragment_id: Option<FragmentId>,
+
     /// An optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution.
     pub vnode_col_index: Option<usize>,
@@ -367,6 +370,7 @@ impl TableCatalog {
             owner: self.owner,
             properties: self.properties.inner().clone().into_iter().collect(),
             fragment_id: self.fragment_id,
+            dml_fragment_id: self.dml_fragment_id,
             vnode_col_index: self.vnode_col_index.map(|i| i as _),
             row_id_index: self.row_id_index.map(|i| i as _),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
@@ -465,6 +469,7 @@ impl From<PbTable> for TableCatalog {
             owner: tb.owner,
             properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
+            dml_fragment_id: tb.dml_fragment_id,
             vnode_col_index: tb.vnode_col_index.map(|x| x as usize),
             row_id_index: tb.row_id_index.map(|x| x as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
@@ -547,6 +552,7 @@ mod tests {
                 String::from("300"),
             )]),
             fragment_id: 0,
+            dml_fragment_id: None,
             value_indices: vec![0],
             definition: "".into(),
             read_prefix_len_hint: 0,
@@ -599,6 +605,7 @@ mod tests {
                     String::from("300")
                 )])),
                 fragment_id: 0,
+                dml_fragment_id: None,
                 vnode_col_index: None,
                 row_id_index: None,
                 value_indices: vec![0],

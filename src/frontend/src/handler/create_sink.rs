@@ -21,8 +21,8 @@ use risingwave_common::error::Result;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    CreateSink, CreateSinkStatement, ObjectName, Query, Select, SelectItem, SetExpr, TableFactor,
-    TableWithJoins,
+    CreateSink, CreateSinkStatement, EmitMode, ObjectName, Query, Select, SelectItem, SetExpr,
+    TableFactor, TableWithJoins,
 };
 
 use super::create_mv::get_column_names;
@@ -50,7 +50,7 @@ pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     }];
     let select = Select {
         from,
-        projection: vec![SelectItem::Wildcard],
+        projection: vec![SelectItem::WildcardOrWithExcept(None)],
         ..Default::default()
     };
     let body = SetExpr::Select(Box::new(select));
@@ -102,12 +102,22 @@ pub fn gen_sink_plan(
         conn_id.map(ConnectionId)
     };
 
+    let emit_on_window_close = stmt.emit_mode == Some(EmitMode::OnWindowClose);
+    if emit_on_window_close {
+        context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
+    }
+
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
         plan_root.set_out_names(col_names)?;
     };
 
-    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, with_options)?;
+    let sink_plan = plan_root.gen_sink_plan(
+        sink_table_name,
+        definition,
+        with_options,
+        emit_on_window_close,
+    )?;
     let sink_desc = sink_plan.sink_desc().clone();
     let sink_plan: PlanRef = sink_plan.into();
 
@@ -115,7 +125,7 @@ pub fn gen_sink_plan(
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Sink:");
-        ctx.trace(sink_plan.explain_to_string().unwrap());
+        ctx.trace(sink_plan.explain_to_string());
     }
 
     let dependent_relations =
