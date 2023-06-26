@@ -56,8 +56,8 @@
     select x, y, lag(x) over(PARTITION BY y ORDER BY x) from t;
   expected_outputs:
   - logical_plan
+  - stream_plan
   - batch_error
-  - stream_error
 - sql: |
     create table t(x int, y int);
     select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE 100 PRECEDING) from t;
@@ -141,9 +141,9 @@
     where rank<=3 AND rank > 1;
     -- OFFSET for RANK() is not yet supported
   expected_outputs:
+  - logical_plan
   - batch_error
   - stream_error
-  - logical_plan
 - sql: |
     create table t(x int, y int);
     select x, y from
@@ -224,8 +224,6 @@
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
-  - batch_error
-  - stream_error
 - id: over window to agg and join
   sql: |
     create table t(x int, y int, z int, w int);

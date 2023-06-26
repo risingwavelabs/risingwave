@@ -11,8 +11,8 @@
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: General version of streaming over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
+    Feature is not yet implemented: Window function with empty PARTITION BY is not supported yet
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t(x int);
     select lag(x) from t;
@@ -33,8 +33,8 @@
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: General version of streaming over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
+    Feature is not yet implemented: Window function with empty PARTITION BY is not supported yet
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t(x int);
     select lead(x, x + 1) over() from t;
@@ -90,8 +90,8 @@
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: General version of streaming over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
+    Feature is not yet implemented: Window function with empty ORDER BY is not supported yet
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS UNBOUNDED FOLLOWING) from t;
@@ -108,11 +108,14 @@
     └─LogicalOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
       └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), lag], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t._row_id) }
+      └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
-  stream_error: |-
-    Feature is not yet implemented: General version of streaming over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t(x int, y int);
@@ -135,8 +138,8 @@
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: General version of streaming over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
+    Feature is not yet implemented: Rank function calls that don't match TopN pattern are not supported yet
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
 - sql: |
     create table t(x int);
     select row_number() over() from t;
@@ -265,8 +268,8 @@
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: General version of streaming over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
+    Feature is not yet implemented: Rank function calls that don't match TopN pattern are not supported yet
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
 - sql: |
     create table t(x int, y int);
     select x, y from
@@ -356,8 +359,8 @@
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: General version of streaming over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
+    Feature is not yet implemented: Rank function calls that don't match TopN pattern are not supported yet
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
 - id: split diff order_by and partition_by in window
   sql: |
     create table t(x int, y int, z int);
@@ -373,12 +376,6 @@
       └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
-  batch_error: |-
-    Feature is not yet implemented: Batch over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
-  stream_error: |-
-    Feature is not yet implemented: General version of streaming over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - id: over window to agg and join
   sql: |
     create table t(x int, y int, z int, w int);
