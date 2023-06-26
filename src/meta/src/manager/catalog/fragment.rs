@@ -164,22 +164,21 @@ where
     }
 
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
+        // Notify all fragment mapping to frontend nodes
         for fragment in table_fragment.fragments.values() {
-            if !fragment.state_table_ids.is_empty() {
-                let mapping = fragment
-                    .vnode_mapping
-                    .clone()
-                    .expect("no data distribution found");
-                let fragment_mapping = FragmentParallelUnitMapping {
-                    fragment_id: fragment.fragment_id,
-                    mapping: Some(mapping),
-                };
+            let mapping = fragment
+                .vnode_mapping
+                .clone()
+                .expect("no data distribution found");
+            let fragment_mapping = FragmentParallelUnitMapping {
+                fragment_id: fragment.fragment_id,
+                mapping: Some(mapping),
+            };
 
-                self.env
-                    .notification_manager()
-                    .notify_frontend(operation, Info::ParallelUnitMapping(fragment_mapping))
-                    .await;
-            }
+            self.env
+                .notification_manager()
+                .notify_frontend(operation, Info::ParallelUnitMapping(fragment_mapping))
+                .await;
         }
 
         // Update serving vnode mappings.
@@ -846,13 +845,12 @@ where
 
                 *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
 
-                if !fragment.state_table_ids.is_empty() {
-                    let fragment_mapping = FragmentParallelUnitMapping {
-                        fragment_id: fragment_id as FragmentId,
-                        mapping: Some(vnode_mapping),
-                    };
-                    fragment_mapping_to_notify.push(fragment_mapping);
-                }
+                // Notify fragment mapping to frontend nodes.
+                let fragment_mapping = FragmentParallelUnitMapping {
+                    fragment_id: fragment_id as FragmentId,
+                    mapping: Some(vnode_mapping),
+                };
+                fragment_mapping_to_notify.push(fragment_mapping);
 
                 // Second step, update upstream fragments
                 // Update the dispatcher of the upstream fragments.
