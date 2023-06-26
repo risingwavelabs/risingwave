@@ -71,6 +71,50 @@ CREATE TABLE debezium_compact (PRIMARY KEY(order_id)) with (
 statement ok
 flush;
 
+statement ok
+CREATE TABLE debezium_add_column_after_create_table (PRIMARY KEY(order_id)) with (
+    connector = 'kafka',
+    kafka.topic = 'debezium_add_column_after_create_table_avro_json',
+    kafka.brokers = 'message_queue:29092',
+    kafka.scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_AVRO (schema.registry = 'http://message_queue:8081');
+
+statement ok
+flush;
+
+statement ok
+CREATE TABLE debezium_add_column_before_create_table (PRIMARY KEY(order_id)) with (
+    connector = 'kafka',
+    kafka.topic = 'debezium_add_column_before_create_table_avro_json',
+    kafka.brokers = 'message_queue:29092',
+    kafka.scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_AVRO (schema.registry = 'http://message_queue:8081');
+
+statement ok
+flush;
+
+statement ok
+CREATE TABLE debezium_drop_column_after_create_table (PRIMARY KEY(order_id)) with (
+    connector = 'kafka',
+    kafka.topic = 'debezium_drop_column_after_create_table_avro_json',
+    kafka.brokers = 'message_queue:29092',
+    kafka.scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_AVRO (schema.registry = 'http://message_queue:8081');
+
+statement ok
+flush;
+
+statement ok
+CREATE TABLE debezium_drop_column_before_create_table (PRIMARY KEY(order_id)) with (
+    connector = 'kafka',
+    kafka.topic = 'debezium_drop_column_before_create_table_avro_json',
+    kafka.brokers = 'message_queue:29092',
+    kafka.scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_AVRO (schema.registry = 'http://message_queue:8081');
+
+statement ok
+flush;
+
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
 sleep 5s
 
@@ -129,6 +173,38 @@ select count(*) from debezium_compact;
 ----
 2
 
+# customer_name is absent in RW table schema but present in new rows
+query II
+SELECT * FROM debezium_add_column_after_create_table
+ORDER BY order_id;
+----
+2 1558430840001 2 1
+3 1558430840002 2 1
+
+# customer_name is present in RW table schema and present in new rows
+query II
+SELECT * FROM debezium_add_column_before_create_table
+ORDER BY order_id;
+----
+2 1558430840001 NULL 2 1
+3 1558430840002 Alice 2 1
+
+# customer_name is present in RW table schema but absent in new rows
+query II
+SELECT * FROM debezium_drop_column_after_create_table
+ORDER BY order_id;
+----
+2 1558430840001 Alice 2 1
+3 1558430840002 NULL 2 1
+
+# customer_name is absent in RW table schema and absent in new rows
+query II
+SELECT * FROM debezium_drop_column_before_create_table
+ORDER BY order_id;
+----
+2 1558430840001 2 1
+3 1558430840002 2 1
+
 statement ok
 DROP TABLE upsert_avro_json;
 
@@ -144,3 +220,15 @@ DROP TABLE debezium_non_compact;
 
 statement ok
 DROP TABLE debezium_compact;
+
+statement ok
+DROP TABLE debezium_add_column_after_create_table;
+
+statement ok
+DROP TABLE debezium_add_column_before_create_table;
+
+statement ok
+DROP TABLE debezium_drop_column_after_create_table;
+
+statement ok
+DROP TABLE debezium_drop_column_before_create_table;
