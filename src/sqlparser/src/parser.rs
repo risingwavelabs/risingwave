@@ -2116,7 +2116,7 @@ impl Parser {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
     }
 
-    fn parse_with_properties(&mut self) -> Result<Vec<SqlOption>, ParserError> {
+    pub fn parse_with_properties(&mut self) -> Result<Vec<SqlOption>, ParserError> {
         Ok(self
             .parse_options_with_preceding_keyword(Keyword::WITH)?
             .to_vec())
@@ -2221,7 +2221,7 @@ impl Parser {
         };
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
-        let with_options = self.parse_with_properties()?;
+        let mut with_options = self.parse_with_properties()?;
 
         let option = with_options
             .iter()
@@ -2250,14 +2250,20 @@ impl Parser {
                     && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
                 {
                     self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
-                    Some(SourceSchema::parse_to(self)?)
+                    let schema = SourceSchemaV2::parse_to(self)?;
+                    let (schema, mut row_format_options) = schema.into_source_schema()?;
+                    with_options.append(&mut row_format_options);
+                    Some(schema)
                 } else {
                     Some(SourceSchema::Native)
                 }
             } else {
                 // other connectors
                 self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
-                Some(SourceSchema::parse_to(self)?)
+                let schema = SourceSchemaV2::parse_to(self)?;
+                let (schema, mut row_format_options) = schema.into_source_schema()?;
+                with_options.append(&mut row_format_options);
+                Some(schema)
             }
         } else {
             // Table is NOT created with an external connector.

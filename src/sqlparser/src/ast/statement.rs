@@ -102,46 +102,6 @@ pub enum SourceSchema {
     DebeziumAvro(DebeziumAvroSchema), // Keyword::DEBEZIUM_AVRO
 }
 
-impl ParseTo for SourceSchema {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        let id = p.parse_identifier()?;
-        let value = id.value.to_ascii_uppercase();
-        let schema = match &value[..] {
-            "JSON" => SourceSchema::Json,
-            "UPSERT_JSON" => SourceSchema::UpsertJson,
-            "PROTOBUF" => {
-                impl_parse_to!(protobuf_schema: ProtobufSchema, p);
-                SourceSchema::Protobuf(protobuf_schema)
-            }
-            "DEBEZIUM_JSON" => SourceSchema::DebeziumJson,
-            "DEBEZIUM_MONGO_JSON" => SourceSchema::DebeziumMongoJson,
-            "AVRO" => {
-                impl_parse_to!(avro_schema: AvroSchema, p);
-                SourceSchema::Avro(avro_schema)
-            }
-            "UPSERT_AVRO" => {
-                impl_parse_to!(avro_schema: AvroSchema, p);
-                SourceSchema::UpsertAvro(avro_schema)
-            }
-            "MAXWELL" => SourceSchema::Maxwell,
-            "CANAL_JSON" => SourceSchema::CanalJson,
-            "CSV" => {
-                impl_parse_to!(csv_info: CsvInfo, p);
-                SourceSchema::Csv(csv_info)
-            }
-            "DEBEZIUM_AVRO" => {
-                impl_parse_to!(avro_schema: DebeziumAvroSchema, p);
-                SourceSchema::DebeziumAvro(avro_schema)
-            }
-             _ => return Err(ParserError::ParserError(
-                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
-            ))
-        };
-
-        Ok(schema)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum RowFormat {
@@ -166,10 +126,38 @@ pub struct SourceSchemaV2 {
     row_options: Vec<SqlOption>,
 }
 
+impl ParseTo for SourceSchemaV2 {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        let id = p.parse_identifier()?;
+        let value = id.value.to_ascii_uppercase();
+        let row_format = match &value[..] {
+            "JSON" => RowFormat::Json,
+            "UPSERT_JSON" => RowFormat::UpsertJson,
+            "PROTOBUF" => RowFormat::Protobuf,
+            "DEBEZIUM_JSON" => RowFormat::DebeziumJson,
+            "DEBEZIUM_MONGO_JSON" => RowFormat::DebeziumMongoJson,
+            "AVRO" => RowFormat::Avro,
+            "UPSERT_AVRO" => RowFormat::UpsertAvro,
+            "MAXWELL" => RowFormat::Maxwell,
+            "CANAL_JSON" => RowFormat::CanalJson,
+            "CSV" => RowFormat::Csv,
+            "DEBEZIUM_AVRO" => RowFormat::DebeziumAvro,
+             _ => return Err(ParserError::ParserError(
+                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
+            ))
+        };
+        let row_options = p.parse_options()?;
+        Ok(SourceSchemaV2 {
+            row_format,
+            row_options,
+        })
+    }
+}
+
 impl SourceSchemaV2 {
     /// just a temporal compatibility layer will be removed soon(so the implementation is a little
     /// dirty)
-    pub fn into_source_shema(self) -> Result<(SourceSchema, WithProperties), ParserError> {
+    pub fn into_source_schema(self) -> Result<(SourceSchema, Vec<SqlOption>), ParserError> {
         let try_consume_string_from_options =
             |row_options: &[SqlOption], key: &str| -> Option<AstString> {
                 let option = row_options
@@ -270,7 +258,7 @@ impl SourceSchemaV2 {
                     })
                 }
             },
-            WithProperties(self.row_options),
+            self.row_options,
         ))
     }
 }
@@ -462,9 +450,8 @@ impl ParseTo for CreateSourceStatement {
         // parse columns
         let (columns, constraints, source_watermarks) = p.parse_columns_with_watermark()?;
 
-        impl_parse_to!(with_properties: WithProperties, p);
-        let option = with_properties
-            .0
+        let mut with_options = p.parse_with_properties()?;
+        let option = with_options
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
@@ -490,13 +477,19 @@ impl ParseTo for CreateSourceStatement {
                 && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
             {
                 impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
-                SourceSchema::parse_to(p)?
+                let schema = SourceSchemaV2::parse_to(p)?;
+                let (schema, mut row_format_options) = schema.into_source_schema()?;
+                with_options.append(&mut row_format_options);
+                schema
             } else {
                 SourceSchema::Native
             }
         } else {
             impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
-            SourceSchema::parse_to(p)?
+            let schema = SourceSchemaV2::parse_to(p)?;
+            let (schema, mut row_format_options) = schema.into_source_schema()?;
+            with_options.append(&mut row_format_options);
+            schema
         };
 
         Ok(Self {
@@ -504,7 +497,7 @@ impl ParseTo for CreateSourceStatement {
             columns,
             constraints,
             source_name,
-            with_properties,
+            with_properties: WithProperties(with_options),
             source_schema,
             source_watermarks,
         })
