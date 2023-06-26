@@ -24,8 +24,8 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" source
 
 echo "--- download java binding integration test"
-buildkite-agent artifact download java-binding-integration-test.tar ./
-tar xf java-binding-integration-test.tar
+buildkite-agent artifact download java-binding-integration-test.tar.zst ./
+tar xf java-binding-integration-test.tar.zst
 
 echo "--- starting risingwave cluster"
 cargo make ci-start java-binding-demo
