@@ -25,7 +25,7 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
 use tokio::sync::mpsc::Sender;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 use super::Locations;
@@ -172,7 +172,7 @@ pub struct GlobalStreamManager<S: MetaStore> {
 
     hummock_manager: HummockManagerRef<S>,
 
-    pub(crate) streaming_job_lock: Mutex<()>,
+    pub(crate) reschedule_lock: RwLock<()>,
 }
 
 impl<S> GlobalStreamManager<S>
@@ -195,7 +195,7 @@ where
             source_manager,
             hummock_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
-            streaming_job_lock: Mutex::new(()),
+            reschedule_lock: RwLock::new(()),
         })
     }
 
