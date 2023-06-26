@@ -758,6 +758,7 @@ impl TestCase {
                     sink_name.to_string(),
                     format!("CREATE SINK {sink_name} AS {}", stmt),
                     options,
+                    false,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
