@@ -126,3 +126,7 @@ harness = false
 [[bench]]
 name = "bench_multi_builder"
 harness = false
+
+[[bench]]
+name = "bench_shared_buffer_block"
+harness = false
