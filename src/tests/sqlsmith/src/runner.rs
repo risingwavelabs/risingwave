@@ -559,7 +559,7 @@ async fn diff_stream_and_batch(
     let (batch, stream, table) = differential_sql_gen(rng, mvs_and_base_tables, &mview_name)?;
 
     tracing::info!("[EXECUTING DIFF - CREATE MVIEW id={}]: {}", i, &stream);
-    let skip_count = run_query(6, client, &stream).await?;
+    let skip_count = run_query(12, client, &stream).await?;
     if skip_count > 0 {
         tracing::info!(
             "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
@@ -576,13 +576,13 @@ async fn diff_stream_and_batch(
         i,
         select
     );
-    let (skip_count, stream_result) = run_query_inner(6, client, &select).await?;
+    let (skip_count, stream_result) = run_query_inner(12, client, &select).await?;
     if skip_count > 0 {
         bail!("SQL should not fail: {:?}", select)
     }
 
     tracing::info!("[EXECUTING DIFF - BATCH QUERY id={}]: {}", i, &batch);
-    let (skip_count, batch_result) = run_query_inner(6, client, &batch).await?;
+    let (skip_count, batch_result) = run_query_inner(12, client, &batch).await?;
     if skip_count > 0 {
         tracing::info!(
             "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
@@ -594,13 +594,26 @@ async fn diff_stream_and_batch(
     }
     let n_stream_rows = stream_result.len();
     let n_batch_rows = batch_result.len();
-    if n_stream_rows == n_batch_rows {
-        tracing::info!("[PASSED DIFF id={}, rows_compared={n_stream_rows}]", i);
+    let formatted_stream_rows = format_rows(&batch_result);
+    let formatted_batch_rows = format_rows(&stream_result);
+    tracing::trace!(
+        "[EXECUTING DIFF - STREAM_FORMATTED_ROW id={}]: {:#?}",
+        i,
+        formatted_stream_rows
+    );
+    tracing::trace!(
+        "[EXECUTING DIFF - BATCH_FORMATTED_ROW id={}]: {:#?}",
+        i,
+        formatted_batch_rows
+    );
+    if formatted_batch_rows == formatted_stream_rows {
         tracing::info!(
             "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
             i,
             &format_drop_mview(&table)
         );
+        tracing::info!("[PASSED DIFF id={}, rows_compared={n_stream_rows}]", i);
+
         drop_mview_table(&table, client).await;
         Ok(())
     } else {
@@ -628,8 +641,8 @@ BATCH_ROWS:
 STREAM_ROWS:
 {:#?}
 ",
-            format_rows(&batch_result),
-            format_rows(&stream_result),
+            &formatted_batch_rows,
+            &formatted_stream_rows,
         )
     }
 }
