@@ -34,10 +34,6 @@ impl<D: PartialEq> PartialEq for RepeatN<D> {
 impl<D: Eq> Eq for RepeatN<D> {}
 
 impl<D: ToDatumRef> Row for RepeatN<D> {
-    type Iter<'a> = std::iter::Take<std::iter::Repeat<DatumRef<'a>>>
-    where
-        Self: 'a;
-
     #[inline]
     fn datum_at(&self, index: usize) -> crate::types::DatumRef<'_> {
         if index < self.n {
@@ -62,7 +58,7 @@ impl<D: ToDatumRef> Row for RepeatN<D> {
     }
 
     #[inline]
-    fn iter(&self) -> Self::Iter<'_> {
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
         std::iter::repeat(self.datum.to_datum_ref()).take(self.n)
     }
 }
