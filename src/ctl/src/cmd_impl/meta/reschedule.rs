@@ -26,19 +26,19 @@ use crate::CtlContext;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ReschedulePayload {
     #[serde(rename = "reschedule_revision")]
-    reschedule_revision: u64,
+    pub reschedule_revision: u64,
 
     #[serde(rename = "reschedule_plan")]
-    reschedule_plan: HashMap<u32, FragmentReschedulePlan>,
+    pub reschedule_plan: HashMap<u32, FragmentReschedulePlan>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FragmentReschedulePlan {
     #[serde(rename = "added_parallel_units")]
-    added_parallel_units: Vec<u32>,
+    pub added_parallel_units: Vec<u32>,
 
     #[serde(rename = "removed_parallel_units")]
-    removed_parallel_units: Vec<u32>,
+    pub removed_parallel_units: Vec<u32>,
 }
 
 #[derive(Debug)]
@@ -55,6 +55,20 @@ impl From<FragmentReschedulePlan> for Reschedule {
         } = value;
 
         Reschedule {
+            added_parallel_units,
+            removed_parallel_units,
+        }
+    }
+}
+
+impl From<Reschedule> for FragmentReschedulePlan {
+    fn from(value: Reschedule) -> Self {
+        let Reschedule {
+            added_parallel_units,
+            removed_parallel_units,
+        } = value;
+
+        FragmentReschedulePlan {
             added_parallel_units,
             removed_parallel_units,
         }
