@@ -59,7 +59,8 @@ public class JDBCSink extends SinkBase {
         try {
             this.conn = DriverManager.getConnection(config.getJdbcUrl());
             this.conn.setAutoCommit(false);
-            this.pkColumnNames = getPkColumnNames(conn, config.getTableName());
+            this.pkColumnNames =
+                    getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -70,7 +71,7 @@ public class JDBCSink extends SinkBase {
         try {
             var upsertSql =
                     jdbcDialect.getUpsertStatement(
-                            config.getTableName(),
+                            config.getNormalizedTableName(),
                             List.of(tableSchema.getColumnNames()),
                             pkColumnNames);
             // MySQL and Postgres have upsert SQL
@@ -80,7 +81,7 @@ public class JDBCSink extends SinkBase {
             // upsert sink will handle DELETE events
             if (config.isUpsertSink()) {
                 var deleteSql =
-                        jdbcDialect.getDeleteStatement(config.getTableName(), pkColumnNames);
+                        jdbcDialect.getDeleteStatement(config.getNormalizedTableName(), pkColumnNames);
                 this.deletePreparedStmt =
                         conn.prepareStatement(deleteSql, Statement.RETURN_GENERATED_KEYS);
             }
@@ -92,10 +93,11 @@ public class JDBCSink extends SinkBase {
         }
     }
 
-    private static List<String> getPkColumnNames(Connection conn, String tableName) {
+    private static List<String> getPkColumnNames(
+            Connection conn, String tableName, String schemaName) {
         List<String> pkColumnNames = new ArrayList<>();
         try {
-            var pks = conn.getMetaData().getPrimaryKeys(null, null, tableName);
+            var pks = conn.getMetaData().getPrimaryKeys(null, schemaName, tableName);
             while (pks.next()) {
                 pkColumnNames.add(pks.getString(JDBC_COLUMN_NAME_KEY));
             }

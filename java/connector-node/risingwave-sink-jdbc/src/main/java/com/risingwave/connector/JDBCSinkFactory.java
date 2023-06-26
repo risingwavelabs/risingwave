@@ -14,7 +14,6 @@
 
 package com.risingwave.connector;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
@@ -46,22 +45,23 @@ public class JDBCSinkFactory implements SinkFactory {
     public void validate(
             TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
         ObjectMapper mapper = new ObjectMapper();
-        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
+        // mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
         JDBCSinkConfig config = mapper.convertValue(tableProperties, JDBCSinkConfig.class);
 
         String jdbcUrl = config.getJdbcUrl();
         String tableName = config.getTableName();
+        String schemaName = config.getSchemaName();
         Set<String> jdbcColumns = new HashSet<>();
         Set<String> jdbcPk = new HashSet<>();
         Set<String> jdbcTableNames = new HashSet<>();
 
         try (Connection conn = DriverManager.getConnection(jdbcUrl);
                 ResultSet tableNamesResultSet =
-                        conn.getMetaData().getTables(null, null, "%", null);
+                        conn.getMetaData().getTables(null, schemaName, "%", null);
                 ResultSet columnResultSet =
-                        conn.getMetaData().getColumns(null, null, tableName, null);
+                        conn.getMetaData().getColumns(null, schemaName, tableName, null);
                 ResultSet pkResultSet =
-                        conn.getMetaData().getPrimaryKeys(null, null, tableName); ) {
+                        conn.getMetaData().getPrimaryKeys(null, schemaName, tableName); ) {
             while (tableNamesResultSet.next()) {
                 jdbcTableNames.add(tableNamesResultSet.getString("TABLE_NAME"));
             }

@@ -25,6 +25,8 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     private String tableName;
 
+    private String schemaName;
+
     private String sinkType;
 
     private final boolean isUpsertSink;
@@ -34,13 +36,34 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     @JsonCreator
     public JDBCSinkConfig(
-            @JsonProperty(value = "jdbc.url") String jdbcUrl,
-            @JsonProperty(value = "table.name") String tableName,
-            @JsonProperty(value = "type") String sinkType) {
+            @JsonProperty(value = "jdbc.url", required = true) String jdbcUrl,
+            @JsonProperty(value = "table.name", required = true) String tableName,
+            @JsonProperty(value = "schema.name") String schemaName,
+            @JsonProperty(value = "type", required = true) String sinkType) {
         this.jdbcUrl = jdbcUrl;
+        if (schemaName != null && !schemaName.isBlank()) {
+            this.schemaName = schemaName;
+        } else {
+            this.schemaName = jdbcUrl.startsWith("jdbc:postgresql") ? "public" : null;
+        }
         this.tableName = tableName;
         this.sinkType = sinkType;
         this.isUpsertSink = "upsert".equalsIgnoreCase(sinkType);
+    }
+
+    /**
+     * Used in SQL statements to refer to the table.
+     */
+    public String getNormalizedTableName() {
+        if (schemaName != null && !schemaName.isBlank()) {
+            return schemaName + '.' + tableName;
+        } else {
+            return tableName;
+        }
+    }
+
+    public String getSchemaName() {
+        return schemaName;
     }
 
     public String getJdbcUrl() {
