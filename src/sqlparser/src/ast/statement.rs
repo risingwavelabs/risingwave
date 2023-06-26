@@ -100,6 +100,7 @@ pub enum SourceSchema {
     Csv(CsvInfo),           // Keyword::CSV
     Native,
     DebeziumAvro(DebeziumAvroSchema), // Keyword::DEBEZIUM_AVRO
+    Bytes,
 }
 
 impl ParseTo for SourceSchema {
@@ -133,8 +134,9 @@ impl ParseTo for SourceSchema {
                 impl_parse_to!(avro_schema: DebeziumAvroSchema, p);
                 SourceSchema::DebeziumAvro(avro_schema)
             }
+            "BYTES" => SourceSchema::Bytes,
              _ => return Err(ParserError::ParserError(
-                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
+                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON | BYTES after ROW FORMAT".to_string(),
             ))
         };
 
@@ -157,6 +159,7 @@ impl fmt::Display for SourceSchema {
             SourceSchema::Csv(csv_info) => write!(f, "CSV {}", csv_info),
             SourceSchema::Native => write!(f, "NATIVE"),
             SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM AVRO {}", avro_schema),
+            SourceSchema::Bytes => write!(f, "BYTES"),
         }
     }
 }

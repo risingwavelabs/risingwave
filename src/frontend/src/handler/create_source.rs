@@ -53,6 +53,7 @@ use crate::handler::create_table::{
 use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
+use crate::optimizer::plan_node::generic::Source;
 use crate::session::SessionImpl;
 use crate::utils::resolve_connection_in_with_option;
 use crate::{bind_data_type, WithOptions};
@@ -419,6 +420,15 @@ pub(crate) async fn try_bind_columns_from_source(
                 ..Default::default()
             },
         ),
+        // TODO: only accepts one column
+        SourceSchema::Bytes => (
+            None,
+            sql_defined_pk_names,
+            StreamSourceInfo {
+                row_format: RowFormatType::Bytes as i32,
+                ..Default::default()
+            },
+        ),
         SourceSchema::DebeziumMongoJson => {
             let mut columns = vec![
                 ColumnCatalog {
@@ -579,6 +589,7 @@ fn source_shema_to_row_format(source_schema: &SourceSchema) -> RowFormatType {
         SourceSchema::CanalJson => RowFormatType::CanalJson,
         SourceSchema::Csv(_) => RowFormatType::Csv,
         SourceSchema::Native => RowFormatType::Native,
+        SourceSchema::Bytes => RowFormatType::Bytes,
     }
 }
 

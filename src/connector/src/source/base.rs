@@ -185,6 +185,7 @@ pub enum SourceFormat {
     Native,
     DebeziumAvro,
     DebeziumMongoJson,
+    Bytes,
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;

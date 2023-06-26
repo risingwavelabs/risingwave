@@ -40,6 +40,7 @@ use crate::source::{
 };
 
 mod avro;
+mod bytes_parser;
 mod canal;
 mod common;
 mod csv_parser;
@@ -483,6 +484,7 @@ pub enum SpecificParserConfig {
     #[default]
     Native,
     DebeziumAvro(DebeziumAvroParserConfig),
+    Bytes,
 }
 
 impl SpecificParserConfig {
@@ -500,6 +502,7 @@ impl SpecificParserConfig {
             SpecificParserConfig::Native => SourceFormat::Native,
             SpecificParserConfig::DebeziumAvro(_) => SourceFormat::DebeziumAvro,
             SpecificParserConfig::DebeziumMongoJson => SourceFormat::DebeziumMongoJson,
+            SpecificParserConfig::Bytes => SourceFormat::Bytes,
         }
     }
 
@@ -562,6 +565,7 @@ impl SpecificParserConfig {
             SourceFormat::Maxwell => SpecificParserConfig::Maxwell,
             SourceFormat::CanalJson => SpecificParserConfig::CanalJson,
             SourceFormat::Native => SpecificParserConfig::Native,
+            SourceFormat::Bytes => SpecificParserConfig::Bytes,
             SourceFormat::DebeziumAvro => SpecificParserConfig::DebeziumAvro(
                 DebeziumAvroParserConfig::new(props, &info.row_schema_location).await?,
             ),
