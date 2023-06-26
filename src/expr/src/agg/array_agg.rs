@@ -59,15 +59,7 @@ mod tests {
              789",
         );
         let return_type = DataType::List(Box::new(DataType::Int32));
-        let mut agg = crate::agg::build(AggCall {
-            kind: AggKind::ArrayAgg,
-            args: AggArgs::Unary(DataType::Int32, 0),
-            return_type: return_type.clone(),
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-            direct_args: vec![],
-        })?;
+        let mut agg = crate::agg::build(AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -91,15 +83,7 @@ mod tests {
     #[tokio::test]
     async fn test_array_agg_empty() -> Result<()> {
         let return_type = DataType::List(Box::new(DataType::Int32));
-        let mut agg = crate::agg::build(AggCall {
-            kind: AggKind::ArrayAgg,
-            args: AggArgs::Unary(DataType::Int32, 0),
-            return_type: return_type.clone(),
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-            direct_args: vec![],
-        })?;
+        let mut agg = crate::agg::build(AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
         let mut builder = return_type.create_array_builder(0);
         agg.output(&mut builder)?;
 
