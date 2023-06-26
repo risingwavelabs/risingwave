@@ -614,7 +614,8 @@ async fn diff_stream_and_batch(
             ChangeTag::Delete => Some(format!("-{}", change)),
             ChangeTag::Insert => Some(format!("+{}", change)),
             ChangeTag::Equal => None,
-        }).collect();
+        })
+        .collect();
 
     if diff.is_empty() {
         tracing::info!(
