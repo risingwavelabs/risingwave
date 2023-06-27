@@ -98,6 +98,12 @@ impl AggCall {
     }
 
     /// Build an `AggCall` from a string.
+    ///
+    /// # Syntax
+    ///
+    /// ```text
+    /// (<name>:<type> [<index>:<type>]* [distinct] [orderby [<index>:<asc|desc>]*])
+    /// ```
     pub fn from_pretty(s: impl AsRef<str>) -> Self {
         let tokens = crate::expr::lexer(s.as_ref());
         Parser::new(tokens.into_iter()).parse_aggregation()
@@ -105,11 +111,6 @@ impl AggCall {
 
     pub fn with_filter(mut self, filter: BoxedExpression) -> Self {
         self.filter = Some(filter.into());
-        self
-    }
-
-    pub fn with_orders(mut self, orders: Vec<ColumnOrder>) -> Self {
-        self.column_orders = orders;
         self
     }
 }
@@ -133,12 +134,19 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
 
         let mut distinct = false;
         let mut children = Vec::new();
+        let mut column_orders = Vec::new();
         while matches!(self.tokens.peek(), Some(Token::Index(_))) {
             children.push(self.parse_arg());
         }
         if matches!(self.tokens.peek(), Some(Token::Literal(s)) if s == "distinct") {
             distinct = true;
             self.tokens.next(); // Consume
+        }
+        if matches!(self.tokens.peek(), Some(Token::Literal(s)) if s == "orderby") {
+            self.tokens.next(); // Consume
+            while matches!(self.tokens.peek(), Some(Token::Index(_))) {
+                column_orders.push(self.parse_orderkey());
+            }
         }
         self.tokens.next(); // Consume the RParen
 
@@ -151,7 +159,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
                 _ => panic!("too many arguments for agg call"),
             },
             return_type: ty,
-            column_orders: Vec::new(),
+            column_orders,
             filter: None,
             distinct,
             direct_args: Vec::new(),
@@ -168,7 +176,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
     fn parse_arg(&mut self) -> (usize, DataType) {
         let idx = match self.tokens.next().expect("Unexpected end of input") {
             Token::Index(idx) => idx,
-            t => panic!("Expected a Literal, got {t:?}"),
+            t => panic!("Expected an Index, got {t:?}"),
         };
         assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");
         let ty = self.parse_type();
@@ -182,6 +190,20 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
             }
             t => panic!("Expected a Literal, got {t:?}"),
         }
+    }
+
+    fn parse_orderkey(&mut self) -> ColumnOrder {
+        let idx = match self.tokens.next().expect("Unexpected end of input") {
+            Token::Index(idx) => idx,
+            t => panic!("Expected an Index, got {t:?}"),
+        };
+        assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");
+        let order = match self.tokens.next().expect("Unexpected end of input") {
+            Token::Literal(s) if s == "asc" => OrderType::ascending(),
+            Token::Literal(s) if s == "desc" => OrderType::descending(),
+            t => panic!("Expected asc or desc, got {t:?}"),
+        };
+        ColumnOrder::new(idx, order)
     }
 }
 

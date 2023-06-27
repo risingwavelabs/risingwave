@@ -45,7 +45,6 @@ mod tests {
     use risingwave_common::array::{Array, DataChunk, ListValue};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{DataType, ScalarRef};
-    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     use crate::agg::AggCall;
     use crate::Result;
@@ -123,12 +122,9 @@ mod tests {
              321  9",
         );
         let return_type = DataType::List(Box::new(DataType::Int32));
-        let mut agg = crate::agg::build(
-            AggCall::from_pretty("(array_agg:int4[] $0:int4)").with_orders(vec![
-                ColumnOrder::new(1, OrderType::ascending()),
-                ColumnOrder::new(0, OrderType::descending()),
-            ]),
-        )?;
+        let mut agg = crate::agg::build(AggCall::from_pretty(
+            "(array_agg:int4[] $0:int4 orderby $1:asc $0:desc)",
+        ))?;
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;

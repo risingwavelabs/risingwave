@@ -234,7 +234,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::iter_util::ZipEqFast;
-    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+    use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::agg::AggCall;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
@@ -965,18 +965,17 @@ mod tests {
         // where `a` is the column to aggregate
 
         let input_pk_indices = vec![4];
-        let field1 = Field::unnamed(DataType::Varchar);
-        let field2 = Field::unnamed(DataType::Varchar);
-        let field3 = Field::unnamed(DataType::Int32);
-        let field4 = Field::unnamed(DataType::Int32);
-        let field5 = Field::unnamed(DataType::Int64);
-        let input_schema = Schema::new(vec![field1, field2, field3, field4, field5]);
+        let input_schema = Schema::new(vec![
+            Field::unnamed(DataType::Varchar),
+            Field::unnamed(DataType::Varchar),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int64),
+        ]);
 
-        let agg_call = AggCall::from_pretty("(string_agg:varchar $0:varchar $1:varchar)")
-            .with_orders(vec![
-                ColumnOrder::new(2, OrderType::ascending()),  // b ASC
-                ColumnOrder::new(0, OrderType::descending()), // a DESC
-            ]);
+        let agg_call = AggCall::from_pretty(
+            "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $0:desc)",
+        );
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -1067,10 +1066,7 @@ mod tests {
         let field4 = Field::unnamed(DataType::Int64);
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
-        let agg_call = AggCall::from_pretty("(array_agg:int4 $1:int4)").with_orders(vec![
-            ColumnOrder::new(2, OrderType::ascending()),  // c ASC
-            ColumnOrder::new(0, OrderType::descending()), // a DESC
-        ]);
+        let agg_call = AggCall::from_pretty("(array_agg:int4 $1:int4 orderby $2:asc $0:desc)");
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
