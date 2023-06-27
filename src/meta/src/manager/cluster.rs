@@ -234,8 +234,12 @@ where
             .values_mut()
             .filter(|w| worker_ids.contains(&w.worker_id()))
             .collect_vec();
-        if workers.is_empty() {
-            return Err(MetaError::invalid_parameter("Worker nodes do not exist!"));
+        if workers.len() != worker_ids.len() {
+            return Err(MetaError::invalid_parameter(format!(
+                "Tried to update schedulability of workers {:?}. Only found workers {:?}",
+                worker_ids,
+                workers.iter().map(|w| w.worker_id()).collect_vec()
+            )));
         }
 
         // return early if any worker has none property OR all already have required schedulability
