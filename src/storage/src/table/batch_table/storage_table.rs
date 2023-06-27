@@ -46,7 +46,8 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{PrefetchOptions, ReadOptions};
-use crate::table::{compute_vnode, merge_sort, Distribution, TableIter, DEFAULT_VNODE};
+use crate::table::merge_sort::merge_sort;
+use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
 use crate::StateStore;
 
 /// [`StorageTableInner`] is the interface accessing relational data in KV(`StateStore`) with

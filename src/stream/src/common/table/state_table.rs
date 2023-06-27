@@ -45,9 +45,8 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
-use risingwave_storage::table::{
-    compute_chunk_vnode, compute_vnode, get_second, merge_sort, Distribution,
-};
+use risingwave_storage::table::merge_sort::merge_sort;
+use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, get_second, Distribution};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
 
