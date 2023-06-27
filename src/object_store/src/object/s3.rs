@@ -16,7 +16,7 @@ use std::cmp;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aws_sdk_s3::config::{AsyncSleep, Credentials, Region};
+use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::upload_part::UploadPartOutput;
@@ -561,13 +561,14 @@ impl ObjectStore for S3ObjectStore {
 }
 
 /// The connector is exactly the same as the default one except `set_keepalive`.
+#[cfg(not(madsim))]
 pub fn customized_connector(
     settings: &aws_smithy_client::http_connector::ConnectorSettings,
-    sleep: Option<Arc<dyn AsyncSleep>>,
+    sleep: Option<Arc<dyn aws_sdk_s3::config::AsyncSleep>>,
 ) -> Option<aws_smithy_client::erase::DynConnector> {
     let default_hyper_builder = || -> hyper::client::Builder { hyper::client::Builder::default() };
     let base = |settings: &aws_smithy_client::http_connector::ConnectorSettings,
-                sleep: Option<Arc<dyn AsyncSleep>>|
+                sleep: Option<Arc<dyn aws_sdk_s3::config::AsyncSleep>>|
      -> aws_smithy_client::hyper_ext::Builder {
         let mut hyper = aws_smithy_client::hyper_ext::Adapter::builder()
             .hyper_builder(default_hyper_builder())
@@ -579,8 +580,6 @@ pub fn customized_connector(
     };
 
     let native_tls = || -> NativeTls {
-        // `TlsConnector` actually comes for here: https://docs.rs/native-tls/latest/native_tls/
-        // hyper_tls just re-exports the crate for convenience.
         let mut tls = hyper_tls::native_tls::TlsConnector::builder();
         let tls = tls
             .min_protocol_version(Some(hyper_tls::native_tls::Protocol::Tlsv12))
@@ -628,13 +627,16 @@ impl S3ObjectStore {
         }
 
         // Retry 3 times if we get server-side errors or throttling errors
-        let sdk_config_loader =
+        let mut sdk_config_loader =
             aws_config::from_env().retry_config(RetryConfig::standard().with_max_attempts(4));
-        // Customize connector
-        let http_connector = aws_smithy_client::http_connector::HttpConnector::ConnectorFn(
-            Arc::new(customized_connector),
-        );
-        let sdk_config_loader = sdk_config_loader.http_connector(http_connector);
+        #[cfg(not(madsim))]
+        {
+            // Customize connector
+            let http_connector = aws_smithy_client::http_connector::HttpConnector::ConnectorFn(
+                Arc::new(customized_connector),
+            );
+            sdk_config_loader = sdk_config_loader.http_connector(http_connector);
+        }
 
         let sdk_config = match std::env::var("RW_S3_ENDPOINT") {
             Ok(endpoint) => sdk_config_loader.endpoint_url(endpoint).load().await,
