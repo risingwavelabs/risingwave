@@ -312,7 +312,7 @@ impl Cluster {
             .spawn(async move {
                 risingwave_ctl::cmd_impl::scale::update_schedulability(
                     &risingwave_ctl::common::CtlContext::default(),
-                    &worker_ids,
+                    worker_ids.iter().map(|id| id.to_string()).collect_vec(),
                     is_unschedulable,
                 )
                 .await
