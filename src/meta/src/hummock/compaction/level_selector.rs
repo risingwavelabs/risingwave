@@ -245,7 +245,7 @@ impl DynamicLevelSelectorCore {
 
                 let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
                     / std::cmp::max(
-                        base_level_sst_count,
+                        base_level_sst_count / 4,
                         self.config.level0_sub_level_compact_level_count as u64,
                     );
 
