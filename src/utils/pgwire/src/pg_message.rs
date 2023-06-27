@@ -376,6 +376,7 @@ pub enum BeParameterStatusMessage<'a> {
     ClientEncoding(&'a str),
     StandardConformingString(&'a str),
     ServerVersion(&'a str),
+    ApplicationName(&'a str),
 }
 
 #[derive(Debug)]
@@ -426,22 +427,6 @@ impl<'a> BeMessage<'a> {
             // +-----+-----------+----------+------+-----------+------+
             // | 'S' | int32 len | str name | '\0' | str value | '\0' |
             // +-----+-----------+----------+------+-----------+------+
-            //
-            // At present there is a hard-wired set of parameters for which
-            // ParameterStatus will be generated: they are:
-            //  server_version,
-            //  server_encoding,
-            //  client_encoding,
-            //  application_name,
-            //  is_superuser,
-            //  session_authorization,
-            //  DateStyle,
-            //  IntervalStyle,
-            //  TimeZone,
-            //  integer_datetimes,
-            //  standard_conforming_string
-            //
-            // See: https://www.postgresql.org/docs/9.2/static/protocol-flow.html#PROTOCOL-ASYNC.
             BeMessage::ParameterStatus(param) => {
                 use BeParameterStatusMessage::*;
                 let [name, value] = match param {
@@ -450,6 +435,7 @@ impl<'a> BeMessage<'a> {
                         [b"standard_conforming_strings", val.as_bytes()]
                     }
                     ServerVersion(val) => [b"server_version", val.as_bytes()],
+                    ApplicationName(val) => [b"application_name", val.as_bytes()],
                 };
 
                 // Parameter names and values are passed as null-terminated strings
