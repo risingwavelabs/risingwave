@@ -45,8 +45,11 @@ select * except (v1), * except (v2) from t3;
 ----
 2 NULL 1 NULL
 
-statement error
+statement error Item not found: Invalid column: v5
 select * except (v5) from t3;
+
+statement error
+select * except (v1, v2, v3) from t3;
 
 statement error Division by zero
 select v1/0 from t3;

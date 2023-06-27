@@ -52,6 +52,8 @@
   error_msg: |-
     sql parser error: Expected an expression:, found: * at line:1, column:9
     Near "SELECT *"
+- input: SELECT * EXCEPT (1) FROM foo
+  error_msg: |-
 - input: SELECT * FROM t LIMIT 1 FETCH FIRST ROWS ONLY
   error_msg: 'sql parser error: Cannot specify both LIMIT and FETCH'
 - input: SELECT * FROM t FETCH FIRST ROWS WITH TIES

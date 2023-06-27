@@ -281,7 +281,10 @@ impl Binder {
                             if let ExprImpl::InputRef(inner) = bound {
                                 except_indices.insert(inner.index);
                             } else {
-                                unreachable!();
+                                return Err(ErrorCode::BindError(
+                                    "SELECT * EXCEPT (column name)".into(),
+                                )
+                                .into());
                             }
                         }
                     }
@@ -297,6 +300,13 @@ impl Binder {
                                     .contains_key(&c.index)
                                 && !except_indices.contains(&c.index)
                         }));
+
+                    if exprs.is_empty() {
+                        return Err(ErrorCode::BindError(
+                            "SELECT * EXCEPT with no column left".into(),
+                        )
+                        .into());
+                    }
 
                     select_list.extend(exprs);
                     aliases.extend(names);
