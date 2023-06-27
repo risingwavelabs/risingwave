@@ -16,7 +16,8 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Error, Result};
 use regex::{Match, Regex};
-use risingwave_pb::meta::reschedule_request::Reschedule;
+use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
+use risingwave_pb::meta::{GetReschedulePlanResponse, Reschedule};
 use serde::{Deserialize, Serialize};
 use serde_yaml;
 
@@ -25,19 +26,19 @@ use crate::CtlContext;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ReschedulePayload {
     #[serde(rename = "reschedule_revision")]
-    reschedule_revision: u64,
+    pub reschedule_revision: u64,
 
     #[serde(rename = "reschedule_plan")]
-    reschedule_plan: HashMap<u32, FragmentReschedulePlan>,
+    pub reschedule_plan: HashMap<u32, FragmentReschedulePlan>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FragmentReschedulePlan {
     #[serde(rename = "added_parallel_units")]
-    added_parallel_units: Vec<u32>,
+    pub added_parallel_units: Vec<u32>,
 
     #[serde(rename = "removed_parallel_units")]
-    removed_parallel_units: Vec<u32>,
+    pub removed_parallel_units: Vec<u32>,
 }
 
 #[derive(Debug)]
@@ -54,6 +55,20 @@ impl From<FragmentReschedulePlan> for Reschedule {
         } = value;
 
         Reschedule {
+            added_parallel_units,
+            removed_parallel_units,
+        }
+    }
+}
+
+impl From<Reschedule> for FragmentReschedulePlan {
+    fn from(value: Reschedule) -> Self {
+        let Reschedule {
+            added_parallel_units,
+            removed_parallel_units,
+        } = value;
+
+        FragmentReschedulePlan {
             added_parallel_units,
             removed_parallel_units,
         }
@@ -200,4 +215,14 @@ fn parse_plan(mut plan: String) -> Result<HashMap<u32, Reschedule>, Error> {
         }
     }
     Ok(reschedules)
+}
+
+pub async fn get_reschedule_plan(
+    context: &CtlContext,
+    policy: PbPolicy,
+    revision: u64,
+) -> Result<GetReschedulePlanResponse> {
+    let meta_client = context.meta_client().await?;
+    let response = meta_client.get_reschedule_plan(policy, revision).await?;
+    Ok(response)
 }

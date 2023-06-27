@@ -190,8 +190,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
     ) -> Result<()> {
         // FIXME: support struct and array in stream sink
         let columns = sink_catalog
-            .columns
-            .iter()
+            .visible_columns()
             .map(|column| {
                 if matches!(
                 column.column_desc.data_type,
