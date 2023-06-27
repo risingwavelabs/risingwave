@@ -41,10 +41,11 @@ public class JDBCSinkConfig extends CommonSinkConfig {
             @JsonProperty(value = "schema.name") String schemaName,
             @JsonProperty(value = "type", required = true) String sinkType) {
         this.jdbcUrl = jdbcUrl;
+        boolean isPostgres = jdbcUrl.startsWith("jdbc:postgresql");
         if (schemaName != null && !schemaName.isBlank()) {
-            this.schemaName = schemaName;
+            this.schemaName = isPostgres ? schemaName : null;
         } else {
-            this.schemaName = jdbcUrl.startsWith("jdbc:postgresql") ? "public" : null;
+            this.schemaName = isPostgres ? "public" : null;
         }
         this.tableName = tableName;
         this.sinkType = sinkType;
