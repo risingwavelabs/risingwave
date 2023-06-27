@@ -280,7 +280,9 @@ steps:
 
   - label: "e2e java-binding test (at release)"
     command: "ci/scripts/java-binding-test.sh -p ci-release"
-    depends_on: "build-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
