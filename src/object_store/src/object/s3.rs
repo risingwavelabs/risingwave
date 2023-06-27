@@ -560,7 +560,7 @@ impl ObjectStore for S3ObjectStore {
     }
 }
 
-/// Customizes `pool_max_idle_per_host`
+/// The connector is exactly the same as the default one except `set_keepalive`.
 pub fn customized_connector(
     settings: &aws_smithy_client::http_connector::ConnectorSettings,
     sleep: Option<Arc<dyn AsyncSleep>>,
