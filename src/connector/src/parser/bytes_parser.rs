@@ -74,3 +74,52 @@ impl ByteStreamSourceParser for BytesParser {
         self.parse_inner(payload, writer).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::Op;
+    use risingwave_common::row::Row;
+    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
+
+    use crate::parser::{BytesParser, SourceColumnDesc, SourceStreamChunkBuilder};
+
+    fn get_payload() -> Vec<Vec<u8>> {
+        vec![
+            br#"t"#.to_vec(),
+            br#"random"#.to_vec(),
+        ]
+    }
+
+    async fn test_bytes_parser(get_payload: fn() -> Vec<Vec<u8>>) {
+        let descs = vec![
+            SourceColumnDesc::simple("id", DataType::Bytea, 0.into())
+        ];
+        let parser = BytesParser::new(descs.clone(), Default::default()).unwrap();
+
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
+
+        for payload in get_payload() {
+            let writer = builder.row_writer();
+            parser.parse_inner(payload, writer).await.unwrap();
+        }
+
+        let chunk = builder.finish();
+        let mut rows = chunk.rows();
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Bytea("t".as_bytes().into())));
+        }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Bytea("random".as_bytes().into())));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bytes_parse_object_top_level() {
+        test_bytes_parser(get_payload).await;
+    }
+}
