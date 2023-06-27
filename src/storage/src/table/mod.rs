@@ -14,13 +14,10 @@
 
 pub mod batch_table;
 pub mod merge_sort;
-use std::collections::binary_heap::PeekMut;
-use std::collections::BinaryHeap;
-use std::error::Error;
+
 use std::sync::{Arc, LazyLock};
 
 use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};

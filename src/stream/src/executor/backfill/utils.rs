@@ -26,8 +26,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::{cmp_datum, cmp_datum_iter, OrderType};
+use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
@@ -56,12 +55,7 @@ pub(crate) fn mark_chunk_ref(
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
 ) -> StreamChunk {
-    // FIXME(kwannoel): Temporary workaround, we can optimize it later when benchmarking.
-    // We can do so with a `chunk.compact_ref()` instead of `chunk.compact()`.
     let chunk = chunk.clone();
-    // TODO(kwannoel): Do we even need `compact` here?
-    // Probably need some benchmark to know for sure.
-    let chunk = chunk.compact();
     mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
 }
 
