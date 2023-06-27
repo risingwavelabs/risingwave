@@ -911,12 +911,10 @@ where
             let (compact_task_size, compact_task_file_count, _) =
                 estimate_state_for_compaction(&compact_task);
 
-            let level_type_label =
-                format!(
-                    "L{}->L{}",
-                    compact_task.input_ssts[0].level_idx,
-                    compact_task.input_ssts[1].level_idx,
-                );
+            let level_type_label = format!(
+                "L{}->L{}",
+                compact_task.input_ssts[0].level_idx, compact_task.input_ssts[1].level_idx,
+            );
 
             let level_count = compact_task.input_ssts.len();
             if compact_task.input_ssts[0].level_idx == 0 {
