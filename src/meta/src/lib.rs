@@ -114,7 +114,8 @@ pub struct MetaNodeOpts {
     pub connector_rpc_endpoint: Option<String>,
 
     /// Default tag for the endpoint created when creating a privatelink connection.
-    /// Can be overridden by specifying `tags` in the with clause of `create connection`
+    /// Will be appended to the tags specified in the `tags` field in with clause in `create
+    /// connection`.
     #[clap(long, env = "RW_PRIVATELINK_ENDPOINT_DEFAULT_TAGS")]
     pub privatelink_endpoint_default_tags: Option<String>,
 
