@@ -57,7 +57,7 @@ CREATE TABLE debezium_non_compact (PRIMARY KEY(order_id)) with (
     kafka.topic = 'debezium_non_compact_avro_json',
     kafka.brokers = 'message_queue:29092',
     kafka.scan.startup.mode = 'earliest'
-) ROW FORMAT UPSERT_AVRO (schema.registry = 'http://message_queue:8081');
+) ROW FORMAT DEBEZIUM_AVRO (schema.registry = 'http://message_queue:8081');
 
 
 statement ok
