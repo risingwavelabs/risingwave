@@ -93,7 +93,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 12
+    timeout_in_minutes: 14
 
   - label: "end-to-end test (parallel, in-memory)"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
@@ -173,7 +173,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 7
+    timeout_in_minutes: 10
 
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"

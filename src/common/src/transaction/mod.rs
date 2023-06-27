@@ -12,17 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// tests
-mod eowc_over_window;
-mod hash_agg;
-mod over_window;
-mod project_set;
-
-// utils
-mod prelude {
-    pub use expect_test::{expect, expect_file};
-    pub use risingwave_stream::executor::test_utils::prelude::*;
-
-    pub use crate::snapshot::*;
-}
-mod snapshot;
+pub mod transaction_id;
+pub mod transaction_message;
