@@ -221,6 +221,15 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = config.streaming.in_flight_barrier_nums;
+        let privatelink_endpoint_default_tags =
+            opts.privatelink_endpoint_default_tags.map(|tags| {
+                tags.split(',')
+                    .map(|s| {
+                        let key_val = s.split_once('=').unwrap();
+                        (key_val.0.to_string(), key_val.1.to_string())
+                    })
+                    .collect()
+            });
 
         info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -259,7 +268,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
-                privatelink_endpoint_default_tags: opts.privatelink_endpoint_default_tags,
+                privatelink_endpoint_default_tags,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,

@@ -115,8 +115,9 @@ pub struct MetaOpts {
     pub connector_rpc_endpoint: Option<String>,
 
     /// Default tag for the endpoint created when creating a privatelink connection.
-    /// Can be overridden by specifying `tags` in the with clause of `create connection`
-    pub privatelink_endpoint_default_tags: Option<String>,
+    /// Will be appended to the tags specified in the `tags` field in with clause in `create
+    /// connection`.
+    pub privatelink_endpoint_default_tags: Option<Vec<(String, String)>>,
 
     /// Schedule space_reclaim_compaction for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,

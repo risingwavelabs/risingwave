@@ -75,10 +75,13 @@ impl AwsEc2Client {
     }
 
     /// `service_name`: The name of the endpoint service we want to access
+    /// `tags_user_str`: The tags specified in with clause of `create connection`
+    /// `tags_env`: The default tags specified in env var `RW_PRIVATELINK_ENDPOINT_DEFAULT_TAGS`
     pub async fn create_aws_private_link(
         &self,
         service_name: &str,
-        tags: Option<&str>,
+        tags_user_str: Option<&str>,
+        tags_env: Option<Vec<(&str, &str)>>,
     ) -> MetaResult<PrivateLinkService> {
         // fetch the AZs of the endpoint service
         let service_azs = self.get_endpoint_service_az_names(service_name).await?;
@@ -90,17 +93,22 @@ impl AwsEc2Client {
             .map(|(_, az, az_id)| (az, az_id))
             .collect();
 
-        let tags_vec = match tags {
-            Some(tags) => Some(
-                tags.split(',')
+        let tags_vec = match tags_user_str {
+            Some(tags_user_str) => {
+                let tags_user = tags_user_str
+                    .split(',')
                     .map(|s| {
                         s.split_once('=').ok_or_else(|| {
                             MetaError::invalid_parameter("Failed to parse `tags` parameter")
                         })
                     })
-                    .collect::<MetaResult<Vec<(&str, &str)>>>()?,
-            ),
-            None => None,
+                    .collect::<MetaResult<Vec<(&str, &str)>>>()?;
+                match tags_env {
+                    Some(tags_env) => Some([tags_user.as_slice(), tags_env.as_slice()].concat()),
+                    None => Some(tags_user),
+                }
+            }
+            None => tags_env,
         };
 
         let (endpoint_id, endpoint_dns_names) = self
