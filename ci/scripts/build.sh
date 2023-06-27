@@ -56,13 +56,8 @@ cargo build \
     $RISINGWAVE_FEATURE_FLAGS \
     --profile "$profile"
 
- cargo build \
-    --bin data-chunk-payload-generator\
-    --bin data-chunk-payload-convert-generator\
-    $RISINGWAVE_FEATURE_FLAGS \
-    --profile "$profile"
 
-artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test data-chunk-payload-generator data-chunk-payload-convert-generator)
+artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test)
 
 echo "--- Show link info"
 ldd target/"$profile"/risingwave

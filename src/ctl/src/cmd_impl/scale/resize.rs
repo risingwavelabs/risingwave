@@ -58,7 +58,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
     println!("Cluster info fetched, revision: {}", revision);
     println!("Worker nodes: {}", worker_nodes.len());
 
-    let streaming_worker_map = worker_nodes
+    let streaming_workers_index_by_id = worker_nodes
         .into_iter()
         .filter(|worker| {
             worker
@@ -70,7 +70,41 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         .map(|worker| (worker.id, worker))
         .collect::<HashMap<_, _>>();
 
-    println!("Streaming workers found: {}", streaming_worker_map.len());
+    let streaming_workers_index_by_host = streaming_workers_index_by_id
+        .values()
+        .map(|worker| {
+            let host = worker.get_host().expect("worker host must be set");
+            (format!("{}:{}", host.host, host.port), worker.clone())
+        })
+        .collect::<HashMap<_, _>>();
+
+    let worker_input_to_worker_id = |inputs: Vec<String>| -> Vec<u32> {
+        let mut result: HashSet<_> = HashSet::new();
+
+        for input in inputs {
+            let worker_id = input.parse::<u32>().ok().or_else(|| {
+                streaming_workers_index_by_host
+                    .get(&input)
+                    .map(|worker| worker.id)
+            });
+
+            if let Some(worker_id) = worker_id {
+                if !result.insert(worker_id) {
+                    println!("warn: {} and {} are the same worker", input, worker_id);
+                }
+            } else {
+                println!("Invalid worker input: {}", input);
+                exit(1);
+            }
+        }
+
+        result.into_iter().collect()
+    };
+
+    println!(
+        "Streaming workers found: {}",
+        streaming_workers_index_by_id.len()
+    );
 
     let ScaleResizeCommands {
         exclude_workers,
@@ -84,18 +118,18 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
     let worker_changes = match (exclude_workers, include_workers) {
         (None, None) => unreachable!(),
         (exclude, include) => {
-            let exclude_worker_ids = exclude.unwrap_or_default();
-            let include_worker_ids = include.unwrap_or_default();
+            let excludes = worker_input_to_worker_id(exclude.unwrap_or_default());
+            let includes = worker_input_to_worker_id(include.unwrap_or_default());
 
-            for worker_id in exclude_worker_ids.iter().chain(include_worker_ids.iter()) {
-                if !streaming_worker_map.contains_key(worker_id) {
-                    println!("Invalid worker id: {}", worker_id);
+            for worker_input in excludes.iter().chain(includes.iter()) {
+                if !streaming_workers_index_by_id.contains_key(worker_input) {
+                    println!("Invalid worker id: {}", worker_input);
                     exit(1);
                 }
             }
 
-            for include_worker_id in &include_worker_ids {
-                let worker_is_unschedulable = streaming_worker_map
+            for include_worker_id in &includes {
+                let worker_is_unschedulable = streaming_workers_index_by_id
                     .get(include_worker_id)
                     .and_then(|worker| worker.property.as_ref())
                     .map(|property| property.is_unschedulable)
@@ -111,8 +145,8 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
             }
 
             WorkerChanges {
-                include_worker_ids,
-                exclude_worker_ids,
+                include_worker_ids: includes,
+                exclude_worker_ids: excludes,
             }
         }
     };
