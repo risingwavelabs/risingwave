@@ -30,7 +30,7 @@ pub const RW_SOURCES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "primary_keys"),
     (DataType::Varchar, "row_format"),
     (DataType::Boolean, "append_only"),
-    (DataType::Int32, "connector_id"),
+    (DataType::Int32, "connection_id"),
     (DataType::Varchar, "definition"),
     (DataType::Varchar, "acl"),
 ];

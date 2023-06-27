@@ -25,7 +25,7 @@ pub const RW_SINKS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "owner"),
     (DataType::Varchar, "connector"),
     (DataType::Varchar, "sink_type"),
-    (DataType::Int32, "connector_id"),
+    (DataType::Int32, "connection_id"),
     (DataType::Varchar, "definition"),
     (DataType::Varchar, "acl"),
 ];
