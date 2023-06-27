@@ -113,6 +113,11 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
+    /// Default tag for the endpoint created when creating a privatelink connection.
+    /// Can be overridden by specifying `tags` in the with clause of `create connection`
+    #[clap(long, env = "RW_PRIVATELINK_ENDPOINT_DEFAULT_TAGS")]
+    pub privatelink_endpoint_default_tags: Option<String>,
+
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
@@ -254,6 +259,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
+                privatelink_endpoint_default_tags: opts.privatelink_endpoint_default_tags,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,

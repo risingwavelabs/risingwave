@@ -114,6 +114,10 @@ pub struct MetaOpts {
     /// colocated with Meta node in the cloud environment
     pub connector_rpc_endpoint: Option<String>,
 
+    /// Default tag for the endpoint created when creating a privatelink connection.
+    /// Can be overridden by specifying `tags` in the with clause of `create connection`
+    pub privatelink_endpoint_default_tags: Option<String>,
+
     /// Schedule space_reclaim_compaction for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
 
@@ -162,6 +166,7 @@ impl MetaOpts {
             vpc_id: None,
             security_group_id: None,
             connector_rpc_endpoint: None,
+            privatelink_endpoint_default_tags: None,
             periodic_space_reclaim_compaction_interval_sec: 60,
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,

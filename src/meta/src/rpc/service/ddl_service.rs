@@ -604,8 +604,12 @@ where
                     },
                     PbPrivateLinkProvider::Aws => {
                         if let Some(aws_cli) = self.aws_client.as_ref() {
+                            let tags_str = match link.tags {
+                                Some(_) => link.tags.as_deref(),
+                                None => self.env.opts.privatelink_endpoint_default_tags.as_deref(),
+                            };
                             aws_cli
-                                .create_aws_private_link(&link.service_name, link.tags.as_deref())
+                                .create_aws_private_link(&link.service_name, tags_str)
                                 .await?
                         } else {
                             return Err(Status::from(MetaError::unavailable(
