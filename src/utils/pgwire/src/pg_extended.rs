@@ -49,7 +49,7 @@ where
         row_limit: usize,
         msg_stream: &mut Conn<S>,
     ) -> PsqlResult<bool> {
-        for notice in self.result.get_notices() {
+        for notice in self.result.notices() {
             msg_stream.write_no_flush(&BeMessage::NoticeResponse(notice))?;
         }
         if self.result.is_empty() {
@@ -103,7 +103,7 @@ where
 
                 msg_stream.write_no_flush(&BeMessage::CommandComplete(
                     BeCommandCompleteMessage {
-                        stmt_type: self.result.get_stmt_type(),
+                        stmt_type: self.result.stmt_type(),
                         rows_cnt: query_row_count as i32,
                     },
                 ))?;
@@ -115,10 +115,10 @@ where
             self.result.run_callback().await?;
 
             msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
-                stmt_type: self.result.get_stmt_type(),
+                stmt_type: self.result.stmt_type(),
                 rows_cnt: self
                     .result
-                    .get_effected_rows_cnt()
+                    .affected_rows_cnt()
                     .expect("row count should be set"),
             }))?;
 

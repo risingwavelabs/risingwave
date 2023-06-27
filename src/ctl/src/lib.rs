@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
+#![feature(hash_drain_filter)]
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -56,6 +57,9 @@ enum Commands {
     /// Commands for Meta
     #[clap(subcommand)]
     Meta(MetaCommands),
+    /// Commands for Scaling
+    #[clap(subcommand)]
+    Scale(ScaleCommands),
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
@@ -193,6 +197,53 @@ enum TableCommands {
     List,
 }
 
+#[derive(clap::Args, Debug)]
+#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers"])))]
+pub struct ScaleResizeCommands {
+    /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
+    /// supported
+    #[clap(
+        long,
+        value_delimiter = ',',
+        value_name = "worker_id or worker_host, ..."
+    )]
+    exclude_workers: Option<Vec<String>>,
+
+    /// The worker that needs to be included during scheduling, worker_id and worker_host are both
+    /// supported
+    #[clap(
+        long,
+        value_delimiter = ',',
+        value_name = "worker_id or worker_host, ..."
+    )]
+    include_workers: Option<Vec<String>>,
+
+    /// Will generate a plan supported by the `reschedule` command and save it to the provided path
+    /// by the `--output`.
+    #[clap(long, default_value_t = false)]
+    generate: bool,
+
+    /// The output file to write the generated plan to, standard output by default
+    #[clap(long)]
+    output: Option<String>,
+
+    /// Automatic yes to prompts
+    #[clap(short = 'y', long, default_value_t = false)]
+    yes: bool,
+
+    /// Specify the fragment ids that need to be scheduled.
+    /// empty by default, which means all fragments will be scheduled
+    #[clap(long)]
+    fragments: Option<Vec<u32>>,
+}
+
+#[derive(Subcommand, Debug)]
+enum ScaleCommands {
+    /// The resize command scales the cluster by specifying the workers to be included and
+    /// excluded.
+    Resize(ScaleResizeCommands),
+}
+
 #[derive(Subcommand)]
 enum MetaCommands {
     /// pause the stream graph
@@ -243,6 +294,26 @@ enum MetaCommands {
 
     /// List fragment to parallel units mapping for serving
     ListServingFragmentMapping,
+
+    /// Unregister workers from the cluster
+    UnregisterWorkers {
+        /// The workers that needs to be unregistered, worker_id and worker_host are both supported
+        #[clap(
+            long,
+            required = true,
+            value_delimiter = ',',
+            value_name = "worker_id or worker_host, ..."
+        )]
+        workers: Vec<String>,
+
+        /// Automatic yes to prompts
+        #[clap(short = 'y', long, default_value_t = false)]
+        yes: bool,
+
+        /// The worker not found will be ignored
+        #[clap(long, default_value_t = false)]
+        ignore_not_found: bool,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -384,8 +455,16 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ListServingFragmentMapping) => {
             cmd_impl::meta::list_serving_fragment_mappings(context).await?
         }
+        Commands::Meta(MetaCommands::UnregisterWorkers {
+            workers,
+            yes,
+            ignore_not_found,
+        }) => cmd_impl::meta::unregister_workers(context, workers, yes, ignore_not_found).await?,
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
+        Commands::Scale(ScaleCommands::Resize(resize)) => {
+            cmd_impl::scale::resize(context, resize).await?
+        }
     }
     Ok(())
 }
