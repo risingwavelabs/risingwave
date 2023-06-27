@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::process::exit;
 
 use anyhow::{anyhow, Error, Result};
+use inquire::Confirm;
+use itertools::Itertools;
 use regex::{Match, Regex};
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
-use risingwave_pb::meta::{GetReschedulePlanResponse, Reschedule};
+use risingwave_pb::meta::table_fragments::ActorStatus;
+use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse, Reschedule};
 use serde::{Deserialize, Serialize};
 use serde_yaml;
 
@@ -225,4 +230,95 @@ pub async fn get_reschedule_plan(
     let meta_client = context.meta_client().await?;
     let response = meta_client.get_reschedule_plan(policy, revision).await?;
     Ok(response)
+}
+
+pub async fn delete_workers(context: &CtlContext, worker_ids: Vec<u32>, yes: bool) -> Result<()> {
+    let meta_client = context.meta_client().await?;
+
+    let GetClusterInfoResponse {
+        worker_nodes,
+        table_fragments: all_table_fragments,
+        ..
+    } = meta_client.get_cluster_info().await?;
+
+    let target_worker_ids: HashSet<_> = worker_ids.into_iter().collect();
+
+    let worker_ids: HashSet<_> = worker_nodes.iter().map(|worker| worker.id).collect();
+
+    let missed_worker_ids: HashSet<_> = target_worker_ids.difference(&worker_ids).collect();
+
+    if !missed_worker_ids.is_empty() {
+        println!("Worker ids {:?} not found", missed_worker_ids);
+        return Err(anyhow!("worker ids not found"));
+    }
+
+    let target_workers = worker_nodes
+        .into_iter()
+        .filter(|worker| target_worker_ids.contains(&worker.id))
+        .collect_vec();
+
+    for table_fragments in &all_table_fragments {
+        for (fragment_id, fragment) in &table_fragments.fragments {
+            let occupied_worker_ids: HashSet<_> = fragment
+                .actors
+                .iter()
+                .map(|actor| {
+                    table_fragments
+                        .actor_status
+                        .get(&actor.actor_id)
+                        .and_then(|ActorStatus { parallel_unit, .. }| parallel_unit.clone())
+                        .unwrap()
+                        .worker_node_id
+                })
+                .collect();
+
+            let intersection_worker_ids: HashSet<_> = occupied_worker_ids
+                .intersection(&target_worker_ids)
+                .collect();
+
+            if !intersection_worker_ids.is_empty() {
+                println!(
+                    "worker ids {:?} are still occupied by fragment #{}",
+                    intersection_worker_ids, fragment_id
+                );
+                exit(1);
+            }
+        }
+    }
+
+    if !yes {
+        match Confirm::new("Will perform actions on the cluster, are you sure?")
+            .with_default(false)
+            .with_help_message("Use the --yes or -y option to skip this prompt")
+            .with_placeholder("no")
+            .prompt()
+        {
+            Ok(true) => println!("Processing..."),
+            Ok(false) => {
+                println!("Abort.");
+                exit(1);
+            }
+            Err(_) => {
+                println!("Error with questionnaire, try again later");
+                exit(-1);
+            }
+        }
+    }
+
+    for WorkerNode { id, host, .. } in target_workers {
+        let host = match host {
+            None => {
+                println!("Worker #{} does not have a host, skipping", id);
+                continue;
+            }
+            Some(host) => host,
+        };
+
+        println!("Deleting worker #{}, address: {:?}", id, host);
+        meta_client.delete_worker_node(host).await?;
+    }
+
+    println!("Done");
+
+    Ok(())
 }

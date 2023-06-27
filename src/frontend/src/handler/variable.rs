@@ -84,16 +84,16 @@ pub(super) async fn handle_show(
     }
     let row = Row::new(vec![Some(config_reader.get(&name)?.into())]);
 
-    Ok(PgResponse::new_for_stream(
-        StatementType::SHOW_VARIABLE,
-        None,
-        vec![row].into(),
-        vec![PgFieldDescriptor::new(
-            name.to_ascii_lowercase(),
-            DataType::Varchar.to_oid(),
-            DataType::Varchar.type_len(),
-        )],
-    ))
+    Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
+        .values(
+            vec![row].into(),
+            vec![PgFieldDescriptor::new(
+                name.to_ascii_lowercase(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            )],
+        )
+        .into())
 }
 
 fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
@@ -112,28 +112,28 @@ fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
         })
         .collect_vec();
 
-    Ok(RwPgResponse::new_for_stream(
-        StatementType::SHOW_VARIABLE,
-        None,
-        rows.into(),
-        vec![
-            PgFieldDescriptor::new(
-                "Name".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Setting".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Description".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ],
-    ))
+    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
+        .values(
+            rows.into(),
+            vec![
+                PgFieldDescriptor::new(
+                    "Name".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Setting".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Description".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+            ],
+        )
+        .into())
 }
 
 async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResponse> {
@@ -154,26 +154,26 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
         })
         .collect_vec();
 
-    Ok(RwPgResponse::new_for_stream(
-        StatementType::SHOW_VARIABLE,
-        None,
-        rows.into(),
-        vec![
-            PgFieldDescriptor::new(
-                "Name".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Value".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Mutable".to_string(),
-                DataType::Boolean.to_oid(),
-                DataType::Boolean.type_len(),
-            ),
-        ],
-    ))
+    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
+        .values(
+            rows.into(),
+            vec![
+                PgFieldDescriptor::new(
+                    "Name".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Value".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Mutable".to_string(),
+                    DataType::Boolean.to_oid(),
+                    DataType::Boolean.type_len(),
+                ),
+            ],
+        )
+        .into())
 }

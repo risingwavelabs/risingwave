@@ -197,15 +197,25 @@ enum TableCommands {
 }
 
 #[derive(clap::Args, Debug)]
-#[clap(group(clap::ArgGroup::new("workers_group").required(true).args(&["include_workers", "exclude_workers"])))]
+#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers"])))]
 pub struct ScaleResizeCommands {
-    /// The worker ids that needs to be excluded during scheduling
-    #[clap(long, value_delimiter = ',', value_name = "id,...")]
-    exclude_workers: Option<Vec<u32>>,
+    /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
+    /// supported
+    #[clap(
+        long,
+        value_delimiter = ',',
+        value_name = "worker_id or worker_host, ..."
+    )]
+    exclude_workers: Option<Vec<String>>,
 
-    /// The worker ids that needs to be included during scheduling
-    #[clap(long, value_delimiter = ',', value_name = "id,...")]
-    include_workers: Option<Vec<u32>>,
+    /// The worker that needs to be included during scheduling, worker_id and worker_host are both
+    /// supported
+    #[clap(
+        long,
+        value_delimiter = ',',
+        value_name = "worker_id or worker_host, ..."
+    )]
+    include_workers: Option<Vec<String>>,
 
     /// Will generate a plan supported by the `reschedule` command and save it to the provided path
     /// by the `--output`.
@@ -283,6 +293,17 @@ enum MetaCommands {
 
     /// List fragment to parallel units mapping for serving
     ListServingFragmentMapping,
+
+    /// Delete workers from the cluster
+    DeleteWorkers {
+        /// The worker ids that needs to be deleted
+        #[clap(long, required = true, value_delimiter = ',', value_name = "id,...")]
+        worker_ids: Vec<u32>,
+
+        /// Automatic yes to prompts
+        #[clap(short = 'y', long, default_value_t = false)]
+        yes: bool,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -423,6 +444,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Meta(MetaCommands::ListServingFragmentMapping) => {
             cmd_impl::meta::list_serving_fragment_mappings(context).await?
+        }
+        Commands::Meta(MetaCommands::DeleteWorkers { worker_ids, yes }) => {
+            cmd_impl::meta::delete_workers(context, worker_ids, yes).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,

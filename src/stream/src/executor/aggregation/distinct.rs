@@ -319,25 +319,11 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::agg::{AggArgs, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::ActorContext;
-
-    fn count_agg_call(kind: AggKind, col_idx: usize, distinct: bool) -> AggCall {
-        AggCall {
-            kind,
-            args: AggArgs::Unary(DataType::Int64, col_idx),
-            return_type: DataType::Int64,
-            distinct,
-
-            column_orders: vec![],
-            filter: None,
-            direct_args: vec![],
-        }
-    }
 
     async fn infer_dedup_tables<S: StateStore>(
         agg_calls: &[AggCall],
@@ -413,14 +399,10 @@ mod tests {
         // empty
 
         let agg_calls = [
-            // count(a)
-            count_agg_call(AggKind::Count, 0, false),
-            // count(distinct a)
-            count_agg_call(AggKind::Count, 0, true),
-            // sum(distinct a)
-            count_agg_call(AggKind::Sum, 0, true),
-            // count(distinct b)
-            count_agg_call(AggKind::Count, 1, true),
+            AggCall::from_pretty("(count:int8 $0:int8)"), // count(a)
+            AggCall::from_pretty("(count:int8 $0:int8 distinct)"), // count(distinct a)
+            AggCall::from_pretty("(  sum:int8 $0:int8 distinct)"), // sum(distinct a)
+            AggCall::from_pretty("(count:int8 $1:int8 distinct)"), // count(distinct b)
         ];
 
         let store = MemoryStateStore::new();
@@ -622,12 +604,9 @@ mod tests {
         // c
 
         let agg_calls = [
-            // count(a)
-            count_agg_call(AggKind::Count, 0, false),
-            // count(distinct a)
-            count_agg_call(AggKind::Count, 0, true),
-            // count(distinct b)
-            count_agg_call(AggKind::Count, 1, true),
+            AggCall::from_pretty("(count:int8 $0:int8)"), // count(a)
+            AggCall::from_pretty("(count:int8 $0:int8 distinct)"), // count(distinct a)
+            AggCall::from_pretty("(count:int8 $1:int8 distinct)"), // count(distinct b)
         ];
 
         let group_key_types = [DataType::Int64];

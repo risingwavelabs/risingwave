@@ -111,10 +111,12 @@ pub async fn handle_create_connection(
 
     if let Err(e) = session.check_connection_name_duplicated(stmt.connection_name) {
         return if stmt.if_not_exists {
-            Ok(PgResponse::empty_result_with_notice(
-                StatementType::CREATE_CONNECTION,
-                format!("connection \"{}\" exists, skipping", connection_name),
-            ))
+            Ok(PgResponse::builder(StatementType::CREATE_CONNECTION)
+                .notice(format!(
+                    "connection \"{}\" exists, skipping",
+                    connection_name
+                ))
+                .into())
         } else {
             Err(e)
         };
