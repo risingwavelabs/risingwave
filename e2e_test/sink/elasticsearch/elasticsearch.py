@@ -7,6 +7,9 @@ test_output_file = sys.argv[2]
 expected_shard = []
 test_shard = []
 
+# The result of a es request is of the form
+# {took:, timeout:, _shards:, hits:}, and we only care about the result
+# in hits. We also need to sort the hits since its order is random.
 with open(expected_output_file) as file:
     line = file.readline()
     file = json.loads(line)
