@@ -1634,6 +1634,9 @@ async fn test_split_compaction_group_trivial_expired() {
         .sorted()
         .collect_vec();
     assert_eq!(original_groups, vec![2, 3]);
+    hummock_manager
+        .compactor_manager
+        .add_compactor(context_id, 2, 1);
 
     hummock_manager
         .register_table_ids(&[(100, 2)])
@@ -1689,7 +1692,10 @@ async fn test_split_compaction_group_trivial_expired() {
         .await
         .unwrap()
         .unwrap();
-
+    hummock_manager
+        .assign_compaction_task(&task, context_id)
+        .await
+        .unwrap();
     hummock_manager
         .split_compaction_group(2, &[100])
         .await
@@ -1736,23 +1742,21 @@ async fn test_split_compaction_group_trivial_expired() {
     // delete all reference of sst-10
     task2.task_status = TaskStatus::Success as i32;
     hummock_manager
-        .assign_compaction_task(&task, 1)
+        .assign_compaction_task(&task2, context_id)
         .await
         .unwrap();
-    hummock_manager
-        .assign_compaction_task(&task2, 2)
+    let ret = hummock_manager
+        .report_compact_task(context_id, &mut task2, None)
         .await
         .unwrap();
-    hummock_manager
-        .report_compact_task(2, &mut task2, None)
-        .await
-        .unwrap();
+    assert!(ret);
     task.task_status = TaskStatus::Success as i32;
-    hummock_manager
-        .report_compact_task(1, &mut task, None)
+    let ret = hummock_manager
+        .report_compact_task(context_id, &mut task, None)
         .await
         .unwrap();
-    assert_eq!(task.task_status(), TaskStatus::InvalidGroupCanceled);
+    // the task has been canceld
+    assert!(!ret);
 }
 
 async fn get_manual_compact_task<S: MetaStore>(
@@ -1986,7 +1990,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
 
     let version_1 = hummock_manager.get_current_version().await;
     compaction_task.task_status = TaskStatus::Success.into();
-    assert!(hummock_manager
+    assert!(!hummock_manager
         .report_compact_task(context_id, &mut compaction_task, None)
         .await
         .unwrap());
@@ -1999,10 +2003,11 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let mut compaction_task = get_manual_compact_task(&hummock_manager, context_id).await;
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
     compaction_task.task_status = TaskStatus::Success.into();
-    assert!(hummock_manager
+    hummock_manager
         .report_compact_task(context_id, &mut compaction_task, None)
         .await
-        .unwrap());
+        .unwrap();
+
     let version_3 = hummock_manager.get_current_version().await;
     assert_ne!(
         version_2, version_3,
