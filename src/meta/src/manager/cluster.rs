@@ -229,7 +229,7 @@ where
         is_unschedulable: bool,
     ) -> MetaResult<()> {
         let mut core = self.core.write().await;
-        let workers = core
+        let mut workers = core
             .workers
             .values_mut()
             .filter(|w| worker_ids.contains(&w.worker_id()))
@@ -241,29 +241,27 @@ where
                 workers.iter().map(|w| w.worker_id()).collect_vec()
             )));
         }
-
-        // return early if any worker has none property OR all already have required schedulability
-        let mut all_correct = true;
-        for worker in &workers {
-            match worker.worker_node.property.as_ref() {
-                None => {
-                    return Err(MetaError::invalid_parameter(
-                        "Worker node does not have property",
-                    ));
-                }
-                Some(prop) => {
-                    if prop.is_unschedulable != is_unschedulable {
-                        all_correct = false;
-                        break;
-                    }
-                }
-            }
-        }
-        if all_correct {
+        let workers_need_change = workers
+            .iter_mut()
+            .filter(|w| match w.worker_node.property.as_ref() {
+                None => true,
+                Some(p) => p.is_unschedulable != is_unschedulable,
+            })
+            .collect_vec();
+        if workers_need_change.is_empty() {
             return Ok(());
         }
 
-        for worker in workers {
+        if workers_need_change
+            .iter()
+            .any(|w| w.worker_node.property.is_none())
+        {
+            return Err(MetaError::invalid_parameter(
+                "Worker node does not have property",
+            ));
+        }
+
+        for worker in workers_need_change {
             let property = &mut worker.worker_node.property.as_mut().unwrap();
             property.is_unschedulable = is_unschedulable;
             Worker::insert(worker, self.env.meta_store()).await?;
