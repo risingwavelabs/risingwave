@@ -251,9 +251,9 @@ impl SourceSchemaV2 {
                 RowFormat::Native => todo!(),
                 RowFormat::DebeziumAvro => {
                     let (row_schema_location, use_schema_registry) = get_schema_location(&options)?;
-                    if use_schema_registry {
+                    if !use_schema_registry {
                         return Err(ParserError::ParserError(
-                            "schema registry for DEBEZIUM_AVRO row format is not supported"
+                            "schema location for DEBEZIUM_AVRO row format is not supported"
                                 .to_string(),
                         ));
                     }
