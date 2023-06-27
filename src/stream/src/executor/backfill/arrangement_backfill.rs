@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::pin::pin;
 use std::sync::Arc;
 
@@ -141,20 +142,24 @@ where
             }
         };
 
-        // | backfill_is_finished | snapshot_empty | need_to_backfill |
-        // | t                    | t/f            | f                |
-        // | f                    | t              | f                |
-        // | f                    | f              | t                |
+        // | backfill_is_finished | snapshot_empty | -> | need_to_backfill |
+        // | -------------------- | -------------- | -- | ---------------- |
+        // | t                    | t/f            | -> | f                |
+        // | f                    | t              | -> | f                |
+        // | f                    | f              | -> | t                |
         let to_backfill = !is_finished && !is_snapshot_empty;
 
-        // Current position of the upstream_table storage primary key.
+        // Current position of upstream_table primary key.
+        // Current position is computed **per vnode**.
+        let mut current_pos_map: HashMap<Vec<Datum>, OwnedRow> = HashMap::new();
+
+        // Current position of the upstream_table primary key.
         // `None` means it starts from the beginning.
         let mut current_pos: Option<OwnedRow> = None;
 
         // Use these to persist state.
-        // They contain the backfill position,
-        // as well as the progress.
-        // However, they do not contain the vnode key at index 0.
+        // They contain the backfill position, and the progress.
+        // However, they do not contain the vnode key (index 0).
         // That is filled in when we flush the state table.
         let mut current_state: Vec<Datum> = vec![None; state_len];
         let mut old_state: Option<Vec<Datum>> = None;
@@ -178,7 +183,7 @@ where
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
 
-        // Backfill Algorithm:
+        // Arrangement Backfill Algorithm:
         //
         //   backfill_stream
         //  /               \
@@ -188,10 +193,13 @@ where
         // stream as its right input. When a chunk comes from upstream, we will buffer it.
         //
         // When a barrier comes from upstream:
-        //  - Update the `snapshot_read_epoch`.
-        //  - For each row of the upstream chunk buffer, forward it to downstream if its pk <=
+        //  Immediately break out of backfill loop.
+        //  - For each row of the upstream chunk buffer, compute vnode.
+        //  - Get the current_pos corresponding to the vnode. forward it to downstream if its pk <=
         //    `current_pos`, otherwise ignore it.
-        //  - reconstruct the whole backfill stream with upstream and new mv snapshot read stream
+        //  - Flush all buffered upstream_chunks to replicated state table.
+        //  - Update the `snapshot_read_epoch`.
+        //  - Reconstruct the whole backfill stream with upstream and new mv snapshot read stream
         //    with the `snapshot_read_epoch`.
         //
         // When a chunk comes from snapshot, we forward it to the downstream and raise
