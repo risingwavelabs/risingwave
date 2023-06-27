@@ -39,7 +39,6 @@ members = [
   "src/tests/simulation",
   "src/tests/sqlsmith",
   "src/tests/state_cleaning_test",
-  "src/tracing",
   "src/udf",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
@@ -73,6 +72,7 @@ futures-async-stream = "0.2"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
 hashbrown = { version = "0.13.2", features = ["ahash", "inline-more", "nightly"] }
+criterion = "0.5"
 
 [profile.dev]
 lto = 'off'

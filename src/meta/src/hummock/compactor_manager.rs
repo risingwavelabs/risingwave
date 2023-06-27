@@ -471,6 +471,22 @@ impl CompactorManager {
     pub fn total_running_cpu_core_num(&self) -> u32 {
         self.policy.read().total_running_cpu_core_num()
     }
+
+    pub fn get_progress(&self) -> Vec<CompactTaskProgress> {
+        self.task_heartbeats
+            .read()
+            .values()
+            .flat_map(|m| m.values())
+            .map(|hb| CompactTaskProgress {
+                task_id: hb.task.task_id,
+                num_ssts_sealed: hb.num_ssts_sealed,
+                num_ssts_uploaded: hb.num_ssts_uploaded,
+                num_progress_key: hb.num_progress_key,
+                num_pending_read_io: hb.num_pending_read_io,
+                num_pending_write_io: hb.num_pending_write_io,
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

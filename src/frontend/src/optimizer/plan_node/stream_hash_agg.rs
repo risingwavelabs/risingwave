@@ -16,12 +16,15 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
-use super::utils::formatter_debug_plan_node;
+use super::utils::{
+    childless_record, formatter_debug_plan_node, plan_node_name, watermark_pretty, Distill,
+};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
 use crate::optimizer::property::Distribution;
@@ -145,6 +148,22 @@ impl StreamHashAgg {
     }
 }
 
+impl Distill for StreamHashAgg {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let mut vec = self.logical.fields_pretty();
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+            vec.push(("output_watermarks", ow));
+        }
+        childless_record(
+            plan_node_name!(
+                "StreamHashAgg",
+                { "append_only", self.input().append_only() },
+                { "eowc", self.emit_on_window_close },
+            ),
+            vec,
+        )
+    }
+}
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = formatter_debug_plan_node!(
@@ -155,7 +174,7 @@ impl fmt::Display for StreamHashAgg {
         self.logical.fmt_fields_with_builder(&mut builder);
 
         let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
+        if watermark_columns.count_ones(..) > 0 {
             let schema = self.schema();
             builder.field(
                 "output_watermarks",

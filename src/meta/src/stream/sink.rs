@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_connector::sink::kafka::KAFKA_SINK;
@@ -36,7 +37,7 @@ pub async fn validate_sink(
 
     let sink = build_sink(
         sink_config,
-        &sink_catalog.columns,
+        &sink_catalog.visible_columns().cloned().collect_vec(),
         sink_catalog.downstream_pk_indices(),
         sink_catalog.sink_type,
         sink_catalog.id,
