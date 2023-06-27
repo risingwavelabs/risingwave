@@ -25,6 +25,7 @@ risingwave_common = { path = "../../common" }
 risingwave_expr = { path = "../../expr" }
 risingwave_frontend = { path = "../../frontend" }
 risingwave_sqlparser = { path = "../../sqlparser" }
+similar = "2.2.1"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7"
 tracing = "0.1"

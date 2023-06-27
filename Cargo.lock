@@ -6575,6 +6575,7 @@ dependencies = [
  "risingwave_expr",
  "risingwave_frontend",
  "risingwave_sqlparser",
+ "similar",
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
