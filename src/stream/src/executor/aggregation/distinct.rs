@@ -400,9 +400,9 @@ mod tests {
 
         let agg_calls = [
             AggCall::from_pretty("(count:int8 $0:int8)"), // count(a)
-            AggCall::from_pretty("(count:int8 $0:int8)").with_distinct(), // count(distinct a)
-            AggCall::from_pretty("(  sum:int8 $0:int8)").with_distinct(), // sum(distinct a)
-            AggCall::from_pretty("(count:int8 $1:int8)").with_distinct(), // count(distinct b)
+            AggCall::from_pretty("(count:int8 $0:int8 distinct)"), // count(distinct a)
+            AggCall::from_pretty("(  sum:int8 $0:int8 distinct)"), // sum(distinct a)
+            AggCall::from_pretty("(count:int8 $1:int8 distinct)"), // count(distinct b)
         ];
 
         let store = MemoryStateStore::new();
@@ -605,8 +605,8 @@ mod tests {
 
         let agg_calls = [
             AggCall::from_pretty("(count:int8 $0:int8)"), // count(a)
-            AggCall::from_pretty("(count:int8 $0:int8)").with_distinct(), // count(distinct a)
-            AggCall::from_pretty("(count:int8 $1:int8)").with_distinct(), // count(distinct b)
+            AggCall::from_pretty("(count:int8 $0:int8 distinct)"), // count(distinct a)
+            AggCall::from_pretty("(count:int8 $1:int8 distinct)"), // count(distinct b)
         ];
 
         let group_key_types = [DataType::Int64];

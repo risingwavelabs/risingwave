@@ -344,26 +344,11 @@ mod tests {
         test_case(input.into(), expected).await
     }
 
-    async fn eval_agg_distinct(
-        pretty: &str,
-        input: ArrayRef,
-        mut builder: ArrayBuilderImpl,
-    ) -> Result<ArrayImpl> {
-        let len = input.len();
-        let input_chunk = DataChunk::new(vec![input], len);
-        let mut agg_state = crate::agg::build(AggCall::from_pretty(pretty).with_distinct())?;
-        agg_state
-            .update_multi(&input_chunk, 0, input_chunk.cardinality())
-            .await?;
-        agg_state.output(&mut builder)?;
-        Ok(builder.finish())
-    }
-
     #[tokio::test]
     async fn vec_distinct_sum_int32() -> Result<()> {
         let input = I32Array::from_iter([1, 1, 3]);
-        let actual = eval_agg_distinct(
-            "(sum:int8 $0:int4)",
+        let actual = eval_agg(
+            "(sum:int8 $0:int4 distinct)",
             Arc::new(input.into()),
             ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
         )
@@ -377,8 +362,8 @@ mod tests {
     #[tokio::test]
     async fn vec_distinct_sum_int64() -> Result<()> {
         let input = I64Array::from_iter([1, 1, 3]);
-        let actual = eval_agg_distinct(
-            "(sum:decimal $0:int8)",
+        let actual = eval_agg(
+            "(sum:decimal $0:int8 distinct)",
             Arc::new(input.into()),
             DecimalArrayBuilder::new(0).into(),
         )
@@ -392,8 +377,8 @@ mod tests {
     #[tokio::test]
     async fn vec_distinct_min_float32() -> Result<()> {
         let input = F32Array::from_iter([1.0, 2.0, 3.0]);
-        let actual = eval_agg_distinct(
-            "(min:float4 $0:float4)",
+        let actual = eval_agg(
+            "(min:float4 $0:float4 distinct)",
             Arc::new(input.into()),
             ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)),
         )
@@ -407,8 +392,8 @@ mod tests {
     #[tokio::test]
     async fn vec_distinct_min_char() -> Result<()> {
         let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg_distinct(
-            "(min:varchar $0:varchar)",
+        let actual = eval_agg(
+            "(min:varchar $0:varchar distinct)",
             Arc::new(input.into()),
             ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
         )
@@ -422,8 +407,8 @@ mod tests {
     #[tokio::test]
     async fn vec_distinct_max_char() -> Result<()> {
         let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg_distinct(
-            "(max:varchar $0:varchar)",
+        let actual = eval_agg(
+            "(max:varchar $0:varchar distinct)",
             Arc::new(input.into()),
             ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
         )
@@ -437,8 +422,8 @@ mod tests {
     #[tokio::test]
     async fn vec_distinct_count_int32() -> Result<()> {
         async fn test_case(input: ArrayImpl, expected: &[Option<i64>]) -> Result<()> {
-            let actual = eval_agg_distinct(
-                "(count:int8 $0:int4)",
+            let actual = eval_agg(
+                "(count:int8 $0:int4 distinct)",
                 Arc::new(input),
                 ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
             )

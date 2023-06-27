@@ -112,11 +112,6 @@ impl AggCall {
         self.column_orders = orders;
         self
     }
-
-    pub fn with_distinct(mut self) -> Self {
-        self.distinct = true;
-        self
-    }
 }
 
 struct Parser<Iter: Iterator> {
@@ -136,9 +131,14 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
         assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");
         let ty = self.parse_type();
 
+        let mut distinct = false;
         let mut children = Vec::new();
-        while self.tokens.peek() != Some(&Token::RParen) {
+        while matches!(self.tokens.peek(), Some(Token::Index(_))) {
             children.push(self.parse_arg());
+        }
+        if matches!(self.tokens.peek(), Some(Token::Literal(s)) if s == "distinct") {
+            distinct = true;
+            self.tokens.next(); // Consume
         }
         self.tokens.next(); // Consume the RParen
 
@@ -153,7 +153,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
             return_type: ty,
             column_orders: Vec::new(),
             filter: None,
-            distinct: false,
+            distinct,
             direct_args: Vec::new(),
         }
     }
