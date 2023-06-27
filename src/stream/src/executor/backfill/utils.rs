@@ -27,7 +27,7 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::{cmp_datum, OrderType};
+use risingwave_common::util::sort_util::{cmp_datum, cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_storage::table::collect_data_chunk;
 use risingwave_storage::StateStore;
@@ -78,12 +78,10 @@ fn mark_chunk_inner(
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
     // Use project to avoid allocation.
     for v in data.rows().map(|row| {
-        match row
-            .project(pk_in_output_indices)
-            .iter()
-            .zip_eq_fast(pk_order.iter().copied())
-            .cmp_by(current_pos.iter(), |(x, order), y| cmp_datum(x, y, order))
-        {
+        let lhs = row.project(pk_in_output_indices);
+        let rhs = current_pos.project(pk_in_output_indices);
+        let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+        match order {
             Ordering::Less | Ordering::Equal => true,
             Ordering::Greater => false,
         }
