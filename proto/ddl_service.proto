@@ -257,6 +257,8 @@ message CreateConnectionRequest {
   message PrivateLink {
     catalog.Connection.PrivateLinkService.PrivateLinkProvider provider = 1;
     string service_name = 2;
+    optional string tag_key = 3;
+    optional string tag_value = 4;
   }
   string name = 1;
   uint32 database_id = 2;
