@@ -239,8 +239,8 @@ pub struct ScaleResizeCommands {
 
 #[derive(Subcommand, Debug)]
 enum ScaleCommands {
-    /// The resize command scales up and down the cluster by specifying the worker ids to be
-    /// included and excluded.
+    /// The resize command scales the cluster by specifying the workers to be included and
+    /// excluded.
     Resize(ScaleResizeCommands),
 }
 
@@ -295,7 +295,7 @@ enum MetaCommands {
     /// List fragment to parallel units mapping for serving
     ListServingFragmentMapping,
 
-    /// Delete workers from the cluster
+    /// Unregister workers from the cluster
     UnregisterWorkers {
         /// The workers that needs to be unregistered, worker_id and worker_host are both supported
         #[clap(
