@@ -206,11 +206,23 @@ impl DynamicLevelSelectorCore {
                 .filter(|level| level.level_type() == LevelType::Overlapping)
                 .map(|level| level.table_infos.len())
                 .sum::<usize>();
+            // level count limit
+            let non_overlapping_level_count = levels
+                .l0
+                .as_ref()
+                .unwrap()
+                .sub_levels
+                .iter()
+                .filter(|level| level.level_type() == LevelType::Nonoverlapping)
+                .count() as u64;
             if overlapping_file_count > 0 {
                 // FIXME: use overlapping idle file count
                 let l0_overlapping_score =
                     std::cmp::min(idle_file_count, overlapping_file_count) as u64 * SCORE_BASE
-                        / self.config.level0_tier_compact_file_number;
+                        / std::cmp::max(
+                            non_overlapping_level_count,
+                            self.config.level0_tier_compact_file_number,
+                        );
                 // Reduce the level num of l0 overlapping sub_level
                 ctx.score_levels
                     .push((std::cmp::max(l0_overlapping_score, SCORE_BASE + 1), 0, 0));
@@ -224,23 +236,18 @@ impl DynamicLevelSelectorCore {
                 let total_size = levels.l0.as_ref().unwrap().total_file_size
                     - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
                 let base_level_size = levels.get_level(ctx.base_level).total_file_size;
+                let base_level_sst_count =
+                    levels.get_level(ctx.base_level).table_infos.len() as u64;
 
                 // size limit
                 let non_overlapping_size_score = total_size * SCORE_BASE
                     / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
 
-                // level count limit
-                let non_overlapping_level_count = levels
-                    .l0
-                    .as_ref()
-                    .unwrap()
-                    .sub_levels
-                    .iter()
-                    .filter(|level| level.level_type() == LevelType::Nonoverlapping)
-                    .count();
-
-                let non_overlapping_level_score = non_overlapping_level_count as u64 * SCORE_BASE
-                    / self.config.level0_sub_level_compact_level_count as u64;
+                let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
+                    / std::cmp::max(
+                        base_level_sst_count,
+                        self.config.level0_sub_level_compact_level_count as u64,
+                    );
 
                 std::cmp::max(non_overlapping_size_score, non_overlapping_level_score)
             };
