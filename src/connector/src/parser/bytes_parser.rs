@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 
 use super::unified::bytes::{BytesAccess, BytesChangeEvent};
-use super::unified::util::apply_row_operation_on_stream_chunk_writer;
 use super::unified::ChangeEvent;
 use super::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
@@ -38,7 +37,7 @@ impl BytesParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        mut payload: Vec<u8>,
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let accessor = BytesChangeEvent::with_value(BytesAccess::new(payload));
