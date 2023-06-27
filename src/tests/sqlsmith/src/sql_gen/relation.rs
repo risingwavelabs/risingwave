@@ -84,7 +84,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generated column names should be qualified by table name.
     fn gen_table_factor_inner(&mut self) -> (TableFactor, Table) {
         // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
-        match self.rng.gen_range(0..=0) {
+        match self.rng.gen_range(0..=2) {
             0 => self.gen_time_window_func(),
             1 => {
                 if self.can_recurse() {
