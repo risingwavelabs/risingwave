@@ -55,7 +55,7 @@ use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
-use self::task_progress::TaskProgress;
+pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
@@ -254,6 +254,7 @@ impl Compactor {
         assert_ne!(parallelism, 0, "splits cannot be empty");
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
+        let mut abort_handles = vec![];
         let task_progress_guard =
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
@@ -335,6 +336,7 @@ impl Compactor {
                     .left_future(),
             };
             let handle = tokio::spawn(traced);
+            abort_handles.push(handle.abort_handle());
             compaction_futures.push(handle);
         }
 
@@ -376,6 +378,9 @@ impl Compactor {
         }
 
         if task_status != TaskStatus::Success {
+            for abort_handle in abort_handles {
+                abort_handle.abort();
+            }
             output_ssts.clear();
         }
         // Sort by split/key range index.
@@ -520,6 +525,8 @@ impl Compactor {
                                     num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
                                     num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
                                     num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
+                                    num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
+                                    num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
                                 });
                             }
 
@@ -786,6 +793,9 @@ impl Compactor {
                     .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
                     .verbose_instrument_await("add_full_key_delete")
                     .await?;
+                last_table_stats.total_key_count += 1;
+                last_table_stats.total_key_size += iter_key.encoded_len() as i64;
+                last_table_stats.total_value_size += 1;
                 iter_key.epoch = epoch;
                 is_new_user_key = false;
             }
@@ -933,6 +943,9 @@ impl Compactor {
                     .map_err(HummockError::sstable_upload_error)??;
                 if let Some(tracker) = tracker_cloned {
                     tracker.inc_ssts_uploaded();
+                    tracker
+                        .num_pending_write_io
+                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 }
                 if context_cloned.is_share_buffer_compact {
                     context_cloned

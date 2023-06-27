@@ -16,18 +16,17 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use apache_avro::types::Value;
-use apache_avro::Schema;
+use apache_avro::{Decimal as AvroDecimal, Schema};
+use chrono::Datelike;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
+use risingwave_common::error::Result as RwResult;
 use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{Access, AccessError, AccessResult};
-use crate::parser::avro::util::{
-    avro_decimal_to_rust_decimal, extract_decimal, extract_inner_field_schema, unix_epoch_days,
-};
 #[derive(Clone)]
 /// Options for parsing an `AvroValue` into Datum, with an optional avro schema.
 pub struct AvroParseOptions<'a> {
@@ -54,7 +53,7 @@ impl<'a> AvroParseOptions<'a> {
 
     fn extract_inner_schema(&self, key: Option<&'a str>) -> Option<&'a Schema> {
         self.schema
-            .map(|schema| extract_inner_field_schema(schema, key))
+            .map(|schema| avro_extract_field_schema(schema, key))
             .transpose()
             .map_err(|_err| tracing::error!("extract sub-schema"))
             .ok()
@@ -318,5 +317,219 @@ where
         }
 
         options.parse(value, type_expected)
+    }
+}
+
+const RW_DECIMAL_MAX_PRECISION: usize = 28;
+pub(crate) fn avro_decimal_to_rust_decimal(
+    avro_decimal: AvroDecimal,
+    _precision: usize,
+    scale: usize,
+) -> RwResult<rust_decimal::Decimal> {
+    let negative = !avro_decimal.is_positive();
+    let bytes = avro_decimal.to_vec_unsigned();
+
+    let (lo, mid, hi) = extract_decimal(bytes);
+    Ok(rust_decimal::Decimal::from_parts(
+        lo,
+        mid,
+        hi,
+        negative,
+        scale as u32,
+    ))
+}
+
+pub(crate) fn extract_decimal(bytes: Vec<u8>) -> (u32, u32, u32) {
+    match bytes.len() {
+        len @ 0..=4 => {
+            let mut pad = vec![0; 4 - len];
+            pad.extend_from_slice(&bytes);
+            let lo = u32::from_be_bytes(pad.try_into().unwrap());
+            (lo, 0, 0)
+        }
+        len @ 5..=8 => {
+            let mid = u32::from_be_bytes(bytes[..4].to_owned().try_into().unwrap());
+            let mut pad = vec![0; 8 - len];
+            pad.extend_from_slice(&bytes[4..]);
+            let lo = u32::from_be_bytes(pad.try_into().unwrap());
+            (lo, mid, 0)
+        }
+        len @ 9..=12 => {
+            let hi = u32::from_be_bytes(bytes[..4].to_owned().try_into().unwrap());
+            let mid = u32::from_be_bytes(bytes[4..8].to_owned().try_into().unwrap());
+            let mut pad = vec![0; 12 - len];
+            pad.extend_from_slice(&bytes[8..]);
+            let lo = u32::from_be_bytes(pad.try_into().unwrap());
+            (lo, mid, hi)
+        }
+        _ => unreachable!(),
+    }
+}
+
+pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
+    match schema {
+        Schema::Union(union_schema) => {
+            let inner_schema = union_schema
+                .variants()
+                .iter()
+                .find(|s| **s != Schema::Null)
+                .ok_or_else(|| {
+                    anyhow::format_err!("illegal avro record schema {:?}", union_schema)
+                })?;
+            Ok(inner_schema)
+        }
+        other => Ok(other),
+    }
+}
+// extract inner filed/item schema of record/array/union
+pub fn avro_extract_field_schema<'a>(
+    schema: &'a Schema,
+    name: Option<&'a str>,
+) -> anyhow::Result<&'a Schema> {
+    match schema {
+        Schema::Record { fields, lookup, .. } => {
+            let name =
+                name.ok_or_else(|| anyhow::format_err!("no name provided for a field in record"))?;
+            let index = lookup.get(name).ok_or_else(|| {
+                anyhow::format_err!("No filed named {} in record {:?}", name, schema)
+            })?;
+            let field = fields
+                .get(*index)
+                .ok_or_else(|| anyhow::format_err!("illegal avro record schema {:?}", schema))?;
+            Ok(&field.schema)
+        }
+        Schema::Array(schema) => Ok(schema),
+        Schema::Union(_) => avro_schema_skip_union(schema),
+        _ => Err(anyhow::format_err!("avro schema is not a record or array")),
+    }
+}
+
+pub(crate) fn unix_epoch_days() -> i32 {
+    Date::from_ymd_uncheck(1970, 1, 1).0.num_days_from_ce()
+}
+
+#[cfg(test)]
+mod tests {
+    use apache_avro::Decimal as AvroDecimal;
+    use risingwave_common::error::{ErrorCode, RwError};
+    use risingwave_common::types::{Decimal, Timestamp};
+
+    use super::*;
+
+    #[test]
+    fn test_convert_decimal() {
+        // 280
+        let v = vec![1, 24];
+        let avro_decimal = AvroDecimal::from(v);
+        let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 0).unwrap();
+        assert_eq!(rust_decimal, rust_decimal::Decimal::from(280));
+
+        // 28.1
+        let v = vec![1, 25];
+        let avro_decimal = AvroDecimal::from(v);
+        let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 1).unwrap();
+        assert_eq!(rust_decimal, rust_decimal::Decimal::try_from(28.1).unwrap());
+    }
+
+    /// Convert Avro value to datum.For now, support the following [Avro type](https://avro.apache.org/docs/current/spec.html).
+    ///  - boolean
+    ///  - int : i32
+    ///  - long: i64
+    ///  - float: f32
+    ///  - double: f64
+    ///  - string: String
+    ///  - Date (the number of days from the unix epoch, 1970-1-1 UTC)
+    ///  - Timestamp (the number of milliseconds from the unix epoch,  1970-1-1 00:00:00.000 UTC)
+
+    pub(crate) fn from_avro_value(
+        value: Value,
+        value_schema: &Schema,
+        shape: &DataType,
+    ) -> RwResult<Datum> {
+        AvroParseOptions {
+            schema: Some(value_schema),
+            relax_numeric: true,
+        }
+        .parse(&value, Some(shape))
+        .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{:?}", err))))
+    }
+
+    #[test]
+    fn test_avro_timestamp_micros() {
+        let v1 = Value::TimestampMicros(1620000000000);
+        let v2 = Value::TimestampMillis(1620000000);
+        let value_schema1 = Schema::TimestampMicros;
+        let value_schema2 = Schema::TimestampMillis;
+        let datum1 = from_avro_value(v1, &value_schema1, &DataType::Timestamp).unwrap();
+        let datum2 = from_avro_value(v2, &value_schema2, &DataType::Timestamp).unwrap();
+        assert_eq!(
+            datum1,
+            Some(ScalarImpl::Timestamp(Timestamp::new(
+                "2021-05-03T00:00:00".parse().unwrap()
+            )))
+        );
+        assert_eq!(
+            datum2,
+            Some(ScalarImpl::Timestamp(Timestamp::new(
+                "2021-05-03T00:00:00".parse().unwrap()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_decimal_truncate() {
+        let schema = Schema::parse_str(
+            r#"
+            {
+                "type": "bytes",
+                "logicalType": "decimal",
+                "precision": 38,
+                "scale": 18
+            }
+            "#,
+        )
+        .unwrap();
+        let bytes = vec![0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f];
+        let value = Value::Decimal(AvroDecimal::from(bytes));
+        let options = AvroParseOptions::default().with_schema(&schema);
+        let resp = options.parse(&value, Some(&DataType::Decimal)).unwrap();
+        assert_eq!(
+            resp,
+            Some(ScalarImpl::Decimal(Decimal::Normalized(
+                rust_decimal::Decimal::from_str("4.557430887741865791").unwrap()
+            )))
+        );
+    }
+
+    #[test]
+    fn test_variable_scale_decimal() {
+        let schema = Schema::parse_str(
+            r#"
+            {
+                "type": "record",
+                "name": "VariableScaleDecimal",
+                "namespace": "io.debezium.data",
+                "fields": [
+                    {
+                        "name": "scale",
+                        "type": "int"
+                    },
+                    {
+                        "name": "value",
+                        "type": "bytes"
+                    }
+                ]
+            }
+            "#,
+        )
+        .unwrap();
+        let value = Value::Record(vec![
+            ("scale".to_string(), Value::Int(0)),
+            ("value".to_string(), Value::Bytes(vec![0x01, 0x02, 0x03])),
+        ]);
+
+        let options = AvroParseOptions::default().with_schema(&schema);
+        let resp = options.parse(&value, Some(&DataType::Decimal)).unwrap();
+        assert_eq!(resp, Some(ScalarImpl::Decimal(Decimal::from(66051))));
     }
 }

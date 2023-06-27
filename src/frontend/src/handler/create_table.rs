@@ -33,20 +33,20 @@ use risingwave_sqlparser::ast::{
     TableConstraint,
 };
 
-use super::create_source::resolve_source_schema;
 use super::RwPgResponse;
-use crate::binder::{bind_data_type, bind_struct_field};
+use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::table_catalog::TableVersion;
-use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
 use crate::expr::{Expr, ExprImpl};
 use crate::handler::create_source::{
-    bind_source_watermark, check_source_schema, UPSTREAM_SOURCE_KEY,
+    bind_source_watermark, check_source_schema, try_bind_columns_from_source,
+    validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::session::SessionImpl;
+use crate::session::{CheckRelationError, SessionImpl};
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_connection_in_with_option;
 use crate::{Binder, TableCatalog, WithOptions};
@@ -256,6 +256,7 @@ pub fn bind_sql_column_constraints(
         for option_def in column.options {
             match option_def.option {
                 ColumnOption::GeneratedColumns(expr) => {
+                    binder.set_clause(Some(Clause::GeneratedColumn));
                     let idx = binder
                         .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
                     let expr_impl = binder.bind_expr(expr)?;
@@ -272,6 +273,7 @@ pub fn bind_sql_column_constraints(
                             expr: Some(expr_impl.to_expr_proto()),
                         }),
                     );
+                    binder.set_clause(None);
                 }
                 ColumnOption::DefaultColumns(expr) => {
                     let idx = binder
@@ -410,17 +412,23 @@ pub(crate) async fn gen_create_table_plan_with_source(
     append_only: bool,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let session = context.session_ctx();
-    let mut columns = bind_sql_columns(&column_defs)?;
+    let mut properties = context.with_options().inner().clone().into_iter().collect();
+    validate_compatibility(&source_schema, &mut properties)?;
+
+    ensure_table_constraints_supported(&constraints)?;
+    let pk_names = bind_pk_names(&column_defs, &constraints)?;
+
+    let (columns_from_resolve_source, pk_names, source_info) =
+        try_bind_columns_from_source(&source_schema, pk_names, &column_defs, &properties).await?;
+    let columns_from_sql = bind_sql_columns(&column_defs)?;
+
+    let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);
+
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
-    let mut properties = context.with_options().inner().clone().into_iter().collect();
 
-    ensure_table_constraints_supported(&constraints)?;
-    let pk_names: Vec<String> = bind_pk_names(&column_defs, &constraints)?;
-
-    let (mut columns, mut pk_column_ids, mut row_id_index) =
-        bind_pk_on_relation(columns, pk_names)?;
+    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names)?;
 
     let watermark_descs = bind_source_watermark(
         session,
@@ -432,16 +440,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
     assert!(watermark_descs.len() <= 1);
 
     let definition = context.normalized_sql().to_owned();
-
-    let source_info = resolve_source_schema(
-        source_schema,
-        &mut columns,
-        &mut properties,
-        &mut row_id_index,
-        &mut pk_column_ids,
-        true,
-    )
-    .await?;
 
     bind_sql_column_constraints(session, table_name.real_value(), &mut columns, column_defs)?;
 
@@ -661,16 +659,16 @@ pub async fn handle_create_table(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
-        if if_not_exists {
+    match session.check_relation_name_duplicated(table_name.clone()) {
+        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
             return Ok(PgResponse::empty_result_with_notice(
                 StatementType::CREATE_TABLE,
-                format!("relation \"{}\" already exists, skipping", table_name),
+                format!("relation \"{}\" already exists, skipping", name),
             ));
-        } else {
-            return Err(e);
         }
-    }
+        Err(e) => return Err(e.into()),
+        Ok(_) => {}
+    };
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);

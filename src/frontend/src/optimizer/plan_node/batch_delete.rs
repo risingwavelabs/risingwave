@@ -42,8 +42,6 @@ impl BatchDelete {
     }
 }
 
-impl_distill_by_unit!(BatchDelete, logical, "BatchDelete");
-
 impl PlanTreeNodeUnary for BatchDelete {
     fn input(&self) -> PlanRef {
         self.logical.input.clone()
@@ -57,6 +55,7 @@ impl PlanTreeNodeUnary for BatchDelete {
 }
 
 impl_plan_tree_node_for_unary! { BatchDelete }
+impl_distill_by_unit!(BatchDelete, logical, "BatchDelete");
 
 impl ToDistributedBatch for BatchDelete {
     fn to_distributed(&self) -> Result<PlanRef> {

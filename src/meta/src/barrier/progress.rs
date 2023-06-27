@@ -210,7 +210,7 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
             return Some(command);
         }
 
-        let ddl_epoch = command.context.curr_epoch;
+        let ddl_epoch = command.context.curr_epoch.value();
         for &actor in &actors {
             self.actor_map.insert(actor, ddl_epoch);
         }
