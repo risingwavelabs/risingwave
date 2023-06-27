@@ -72,7 +72,7 @@ def load_binary_input(input_file):
     return sink_input
 
 
-def test_upsert_sink(type, prop, input_file):
+def test_sink_json(type, prop, input_file, op_overlap=False):
     sink_input = load_input(input_file)
     with grpc.insecure_channel('localhost:50051') as channel:
         stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
@@ -93,7 +93,7 @@ def test_upsert_sink(type, prop, input_file):
             row_ops = []
             for row in batch:
                 row_ops.append(connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload.RowOp(
-                    op_type=row['op_type'], line=str(row['line'])))
+                    op_type=op_overlap if op_overlap != False else row['op_type'], line=str(row['line'])))
             request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
                 json_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload(
                     row_ops=row_ops),
@@ -115,50 +115,7 @@ def test_upsert_sink(type, prop, input_file):
                 exit(1)
 
 
-def test_sink(type, prop, input_file):
-    sink_input = load_input(input_file)
-    with grpc.insecure_channel('localhost:50051') as channel:
-        stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
-        request_list = [
-            connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
-                format=connector_service_pb2.SinkPayloadFormat.JSON,
-                sink_config=connector_service_pb2.SinkConfig(
-                    connector_type=type,
-                    properties=prop,
-                    table_schema=make_mock_schema()
-                )
-            ))]
-        epoch = 0
-        batch_id = 1
-        for batch in sink_input:
-            request_list.append(connector_service_pb2.SinkStreamRequest(
-                start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
-            row_ops = []
-            for row in batch:
-                row_ops.append(connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload.RowOp(
-                    op_type=1, line=str(row)))
-            request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
-                json_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload(
-                    row_ops=row_ops),
-                batch_id=batch_id,
-                epoch=epoch
-            )))
-            request_list.append(connector_service_pb2.SinkStreamRequest(
-                sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
-            epoch += 1
-            batch_id += 1
-
-        response_iter = stub.SinkStream(iter(request_list))
-        for req in request_list:
-            try:
-                print("REQUEST", req)
-                print("RESPONSE OK:", next(response_iter))
-            except Exception as e:
-                print("Integration test failed: ", e)
-                exit(1)
-
-
-def test_sink_stream_chunk(type, prop, input_file, table_schema):
+def test_sink_stream_chunk(type, prop, input_file, table_schema=make_mock_schema()):
     sink_input = load_binary_input(input_file)
     with grpc.insecure_channel('localhost:50051') as channel:
         stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
@@ -196,20 +153,6 @@ def test_sink_stream_chunk(type, prop, input_file, table_schema):
                 exit(1)
 
 
-def test_file_sink(input_binary_file):
-    test_sink_stream_chunk(
-        "file", {"output.path": "/tmp/connector", }, input_binary_file, make_mock_schema())
-
-
-def test_jdbc_sink(input_binary_file, input_file="./data/sink_input_new.json"):
-    test_sink_stream_chunk("jdbc",
-                           {"jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
-                            "table.name": "test"},
-                           input_binary_file, make_mock_schema())
-    # validate results
-    validate_jdbc_sink(input_file)
-
-
 def validate_jdbc_sink(input_file):
     conn = psycopg2.connect(
         "dbname=test user=test password=connector host=localhost port=5432")
@@ -240,51 +183,87 @@ def validate_jdbc_sink(input_file):
                 exit(1)
 
 
-def test_elasticsearch_sink(input_file):
-    test_sink("elasticsearch",
-              {"url": "http://127.0.0.1:9200",
-               "index": "test"},
-              input_file)
+def test_file_sink(file_name, use_json):
+    type = "file"
+    prop = {"output.path": "/tmp/connector", }
+    if use_json:
+        test_sink_json(type, prop, file_name, op_overlap=1)
+    else:
+        test_sink_stream_chunk(type, prop, file_name)
 
 
-def test_iceberg_sink(input_file):
-    test_sink("iceberg",
-              {"type": "append-only",
-               "warehouse.path": "s3a://bucket",
-               "s3.endpoint": "http://127.0.0.1:9000",
-               "s3.access.key": "minioadmin",
-               "s3.secret.key": "minioadmin",
-               "database.name": "demo_db",
-               "table.name": "demo_table"},
-              input_file)
+def test_jdbc_sink(input_file, input_binary_file, use_json):
+    type = "jdbc"
+    prop = {"jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
+            "table.name": "test"}
+    if use_json:
+        test_sink_json(type, prop, input_file, op_overlap=1)
+    else:
+        test_sink_stream_chunk(type, prop, input_binary_file)
+    # validate results
+    validate_jdbc_sink(input_file)
 
 
-def test_upsert_iceberg_sink(input_file):
-    test_upsert_sink("iceberg",
-                     {"type": "upsert",
-                      "warehouse.path": "s3a://bucket",
-                      "s3.endpoint": "http://127.0.0.1:9000",
-                      "s3.access.key": "minioadmin",
-                      "s3.secret.key": "minioadmin",
-                      "database.name": "demo_db",
-                      "table.name": "demo_table"},
-                     input_file)
+def test_elasticsearch_sink(file_name, use_json):
+    prop = {"url": "http://127.0.0.1:9200",
+            "index": "test"}
+    type = "elasticsearch"
+    if use_json:
+        test_sink_json(type, prop, file_name, op_overlap=1)
+    else:
+        test_sink_stream_chunk(type, prop, file_name)
 
 
-def test_deltalake_sink(input_file):
-    test_sink("deltalake",
-              {
-                  "location": "s3a://bucket/delta",
-                  "s3.access.key": "minioadmin",
-                  "s3.secret.key": "minioadmin",
-                  "s3.endpoint": "127.0.0.1:9000",
-              },
-              input_file)
+def test_iceberg_sink(file_name, use_json):
+    prop = {"type": "append-only",
+            "warehouse.path": "s3a://bucket",
+            "s3.endpoint": "http://127.0.0.1:9000",
+            "s3.access.key": "minioadmin",
+            "s3.secret.key": "minioadmin",
+            "database.name": "demo_db",
+            "table.name": "demo_table"}
+    type = "iceberg"
+    if use_json:
+        test_sink_json(type, prop, file_name, op_overlap=1)
+    else:
+        test_sink_stream_chunk(type, prop, file_name)
 
 
-def test_stream_chunk_sink(input_binary_file):
-    test_sink_stream_chunk("file", {"output.path": "/tmp/connector", },
-                           input_binary_file, make_mock_schema_stream_chunk())
+def test_upsert_iceberg_sink(file_name, use_json):
+    prop = {"type": "upsert",
+            "warehouse.path": "s3a://bucket",
+            "s3.endpoint": "http://127.0.0.1:9000",
+            "s3.access.key": "minioadmin",
+            "s3.secret.key": "minioadmin",
+            "database.name": "demo_db",
+            "table.name": "demo_table"}
+    type = "iceberg"
+    if use_json:
+        test_sink_json(type, prop, file_name)
+    else:
+        # need to make sure all ops as Insert
+        test_sink_stream_chunk(type, prop, file_name)
+
+
+def test_deltalake_sink(file_name, use_json):
+    prop = {
+        "location": "s3a://bucket/delta",
+        "s3.access.key": "minioadmin",
+        "s3.secret.key": "minioadmin",
+        "s3.endpoint": "127.0.0.1:9000",
+    }
+    type = "deltalake"
+    if use_json:
+        test_sink_json(type, prop, file_name, op_overlap=1)
+    else:
+        test_sink_stream_chunk(type, prop, file_name)
+
+
+def test_stream_chunk_data_format(input_binary_file):
+    type = "file"
+    prop = {"output.path": "/tmp/connector", }
+    test_sink_stream_chunk(type, prop, input_binary_file,
+                           make_mock_schema_stream_chunk())
 
 
 if __name__ == "__main__":
@@ -294,7 +273,7 @@ if __name__ == "__main__":
                         help="run file sink test")
     parser.add_argument('--jdbc_sink', action='store_true',
                         help="run jdbc sink test")
-    parser.add_argument('--stream_chunk_sink', action='store_true',
+    parser.add_argument('--stream_chunk_format_test', action='store_true',
                         help="run print stream chunk sink test")
     parser.add_argument('--iceberg_sink', action='store_true',
                         help="run iceberg sink test")
@@ -308,18 +287,30 @@ if __name__ == "__main__":
                         help="input stream chunk data to run tests")
     parser.add_argument('--es_sink', action='store_true',
                         help='run elasticsearch sink test')
+    parser.add_argument(
+        '--data_format_use_json', default=True, help="choose json or streamchunk")
     args = parser.parse_args()
+    use_json = args.data_format_use_json == True or args.data_format_use_json == 'True'
+    if use_json:
+        file_name = args.input_file
+    else:
+        file_name = args.input_binary_file
+
+    # stream chunk format
+    if args.stream_chunk_format_test:
+        test_stream_chunk_data_format(file_name)
+
     if args.file_sink:
-        test_file_sink(args.input_binary_file)
+        test_file_sink(file_name, use_json)
     if args.jdbc_sink:
-        test_jdbc_sink(args.input_binary_file)
-    if args.stream_chunk_sink:
-        test_stream_chunk_sink(args.input_binary_file)
+        test_jdbc_sink(args.input_file, args.input_binary_file, use_json)
     if args.iceberg_sink:
-        test_iceberg_sink(args.input_file)
-    if args.upsert_iceberg_sink:
-        test_upsert_iceberg_sink(args.input_file)
+        test_iceberg_sink(file_name, use_json)
     if args.deltalake_sink:
-        test_deltalake_sink(args.input_file)
+        test_deltalake_sink(file_name, use_json)
     if args.es_sink:
-        test_elasticsearch_sink(args.input_file)
+        test_elasticsearch_sink(file_name, use_json)
+
+    # json format
+    if args.upsert_iceberg_sink:
+        test_upsert_iceberg_sink(file_name, use_json)

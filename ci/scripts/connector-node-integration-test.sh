@@ -81,6 +81,7 @@ cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
 buildkite-agent artifact download java-binding-integration-test.tar.zst ./
 tar xf java-binding-integration-test.tar.zst bin
 ./bin/data-chunk-payload-convert-generator data/sink_input_new.json > ./data/sink_input
+./bin/data-chunk-payload-convert-generator data/upsert_sink_input.json > ./data/upsert_sink_input
 ./bin/data-chunk-payload-generator 30 > ./data/stream_chunk_data
 
 echo "--- prepare integration tests"
@@ -88,70 +89,88 @@ cd ${RISINGWAVE_ROOT}/java/connector-node
 pip3 install grpcio grpcio-tools psycopg2 psycopg2-binary pyspark==3.3
 cd python-client && bash gen-stub.sh
 
-echo "--- running jdbc integration tests"
+echo "--- running streamchunk data format integration tests"
 cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-if python3 integration_tests.py --file_sink; then
-  echo "File sink test passed"
+if python3 integration_tests.py --stream_chunk_format_test --input_binary_file="./data/stream_chunk_data" --data_format_use_json=False; then
+  echo "StreamChunk data format test passed"
 else
-  echo "File sink test failed"
+  echo "StreamChunk data format test failed"
   exit 1
 fi
 
-cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-if python3 integration_tests.py --jdbc_sink; then
-  echo "Jdbc sink test passed"
-else
-  echo "Jdbc sink test failed"
-  exit 1
-fi
-echo "all jdbc tests passed"
+sink_input_feature=("" "--input_binary_file=./data/sink_input --data_format_use_json=False")
+upsert_sink_input_feature=("--input_file=./data/upsert_sink_input.json" 
+                           "--input_binary_file=./data/upsert_sink_input --data_format_use_json=False")
+type=("Json format" "StreamChunk format")
 
-echo "running iceberg integration tests"
-${MC_PATH} mb minio/bucket
+for ((i=0; i<${#type[@]}; i++)); do
+    echo "--- running file ${type[i]} integration tests"
+    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
+    if python3 integration_tests.py --file_sink ${sink_input_feature[i]}; then
+      echo "File sink ${type[i]} test passed"
+    else
+      echo "File sink ${type[i]} test failed"
+      exit 1
+    fi
 
-# test append-only mode
-cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-python3 pyspark-util.py create_iceberg
-if python3 integration_tests.py --iceberg_sink; then
-  python3 pyspark-util.py test_iceberg
-  echo "Iceberg sink test passed"
-else
-  echo "Iceberg sink test failed"
-  exit 1
-fi
-python3 pyspark-util.py drop_iceberg
+    echo "--- running jdbc ${type[i]} integration tests"
+    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
+    if python3 integration_tests.py --jdbc_sink ${sink_input_feature[i]}; then
+      echo "Jdbc sink ${type[i]} test passed"
+    else
+      echo "Jdbc sink ${type[i]} test failed"
+      exit 1
+    fi
 
-# test upsert mode
-python3 pyspark-util.py create_iceberg
-if python3 integration_tests.py --upsert_iceberg_sink --input_file="./data/upsert_sink_input.json"; then
-  python3 pyspark-util.py test_upsert_iceberg --input_file="./data/upsert_sink_input.json"
-  echo "Upsert iceberg sink test passed"
-else
-  echo "Upsert iceberg sink test failed"
-  exit 1
-fi
-python3 pyspark-util.py drop_iceberg
+    # test upsert mode
+    ${MC_PATH} mb minio/bucket
+    echo "--- running iceberg upsert mode ${type[i]} integration tests"
+    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
+    python3 pyspark-util.py create_iceberg
+    if python3 integration_tests.py --upsert_iceberg_sink ${upsert_sink_input_feature[i]}; then
+      python3 pyspark-util.py test_upsert_iceberg --input_file="./data/upsert_sink_input.json"
+      echo "Upsert iceberg sink ${type[i]} test passed"
+    else
+      echo "Upsert iceberg sink ${type[i]} test failed"
+      exit 1
+    fi
+    python3 pyspark-util.py drop_iceberg
+    ${MC_PATH} rm -r -force minio/bucket
+    ${MC_PATH} rb minio/bucket
 
-# clean up minio
-${MC_PATH} rm -r -force minio/bucket
-${MC_PATH} rb minio/bucket
-echo "all iceberg tests passed"
+    # test append-only mode
+    ${MC_PATH} mb minio/bucket
+    echo "--- running iceberg append-only mode ${type[i]} integration tests"
+    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
+    python3 pyspark-util.py create_iceberg
+    if python3 integration_tests.py --iceberg_sink ${sink_input_feature[i]}; then
+      python3 pyspark-util.py test_iceberg
+      echo "Iceberg sink ${type[i]} test passed"
+    else
+      echo "Iceberg sink ${type[i]} test failed"
+      exit 1
+    fi
+    python3 pyspark-util.py drop_iceberg
 
-echo "running deltalake integration tests"
-${MC_PATH} mb minio/bucket
+    # clean up minio
+    ${MC_PATH} rm -r -force minio/bucket
+    ${MC_PATH} rb minio/bucket
 
-cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-# test append-only mode
-python3 pyspark-util.py create_deltalake
-if python3 integration_tests.py --deltalake_sink; then
-  python3 pyspark-util.py test_deltalake
-  echo "Deltalake sink test passed"
-else
-  echo "Deltalake sink test failed"
-  exit 1
-fi
+    # test append-only mode
+    ${MC_PATH} mb minio/bucket
+    echo "--- running deltalake append-only mod ${type[i]} integration tests"
+    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
+    python3 pyspark-util.py create_deltalake
+    if python3 integration_tests.py --deltalake_sink ${sink_input_feature[i]}; then
+      python3 pyspark-util.py test_deltalake
+      echo "Deltalake sink ${type[i]} test passed"
+    else
+      echo "Deltalake sink ${type[i]} test failed"
+      exit 1
+    fi
+    python3 pyspark-util.py clean_deltalake
+    ${MC_PATH} rm -r -force minio/bucket
+    ${MC_PATH} rb minio/bucket
+done
 
-# clean up minio
-${MC_PATH} rm -r -force minio/bucket
-${MC_PATH} rb minio/bucket
 echo "all deltalake tests passed"

@@ -39,8 +39,8 @@ fn convert_to_op(value: u32) -> Option<Op> {
     match value {
         1 => Some(Op::Insert),
         2 => Some(Op::Delete),
-        3 => Some(Op::UpdateDelete),
-        4 => Some(Op::UpdateInsert),
+        3 => Some(Op::UpdateInsert),
+        4 => Some(Op::UpdateDelete),
         _ => None,
     }
 }
