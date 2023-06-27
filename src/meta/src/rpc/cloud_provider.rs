@@ -78,8 +78,7 @@ impl AwsEc2Client {
     pub async fn create_aws_private_link(
         &self,
         service_name: &str,
-        tag_key: Option<String>,
-        tag_value: Option<String>,
+        tags: Option<&str>,
     ) -> MetaResult<PrivateLinkService> {
         // fetch the AZs of the endpoint service
         let service_azs = self.get_endpoint_service_az_names(service_name).await?;
@@ -91,14 +90,26 @@ impl AwsEc2Client {
             .map(|(_, az, az_id)| (az, az_id))
             .collect();
 
+        let tags_vec = match tags {
+            Some(tags) => Some(
+                tags.split(',')
+                    .map(|s| {
+                        s.split_once('=').ok_or_else(|| {
+                            MetaError::invalid_parameter("Failed to parse `tags` parameter")
+                        })
+                    })
+                    .collect::<MetaResult<Vec<(&str, &str)>>>()?,
+            ),
+            None => None,
+        };
+
         let (endpoint_id, endpoint_dns_names) = self
             .create_vpc_endpoint(
                 &self.vpc_id,
                 service_name,
                 &self.security_group_id,
                 &subnet_ids,
-                tag_key,
-                tag_value,
+                tags_vec,
             )
             .await?;
 
@@ -260,20 +271,27 @@ impl AwsEc2Client {
         service_name: &str,
         security_group_id: &str,
         subnet_ids: &[String],
-        tag_key: Option<String>,
-        tag_value: Option<String>,
+        tags_vec: Option<Vec<(&str, &str)>>,
     ) -> MetaResult<(String, Vec<String>)> {
-        #[allow(clippy::manual_map)]
-        let tag_spec = match tag_key {
-            Some(_) => Some(vec![TagSpecification::builder()
-                .set_resource_type(Some(ResourceType::VpcEndpoint))
-                .set_tags(Some(vec![Tag::builder()
-                    .set_key(tag_key)
-                    .set_value(tag_value)
-                    .build()]))
-                .build()]),
+        let tag_spec = match tags_vec {
+            Some(tags_vec) => {
+                let tags = tags_vec
+                    .into_iter()
+                    .map(|(tag_key, tag_val)| {
+                        Tag::builder()
+                            .set_key(Some(tag_key.to_string()))
+                            .set_value(Some(tag_val.to_string()))
+                            .build()
+                    })
+                    .collect();
+                Some(vec![TagSpecification::builder()
+                    .set_resource_type(Some(ResourceType::VpcEndpoint))
+                    .set_tags(Some(tags))
+                    .build()])
+            }
             None => None,
         };
+
         let output = self
             .client
             .create_vpc_endpoint()

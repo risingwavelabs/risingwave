@@ -605,11 +605,7 @@ where
                     PbPrivateLinkProvider::Aws => {
                         if let Some(aws_cli) = self.aws_client.as_ref() {
                             aws_cli
-                                .create_aws_private_link(
-                                    &link.service_name,
-                                    link.tag_key,
-                                    link.tag_value,
-                                )
+                                .create_aws_private_link(&link.service_name, link.tags.as_deref())
                                 .await?
                         } else {
                             return Err(Status::from(MetaError::unavailable(
