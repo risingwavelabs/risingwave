@@ -234,15 +234,25 @@ enum ScaleCommands {
     /// mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
-        /// IDs of the compute node to cordon. List the IDs via cluster-info
-        #[clap(long, value_delimiter = ',', value_name = "id,...")]
-        workers: Vec<u32>,
+        /// Workers that need to be cordoned, both id and host are supported.
+        #[clap(
+            long,
+            required = true,
+            value_delimiter = ',',
+            value_name = "id or host,..."
+        )]
+        workers: Vec<String>,
     },
     /// mark a compute node as schedulable. Nodes are schedulable unless they are cordoned
     Uncordon {
-        /// IDs of the compute node to cordon. List the IDs via cluster-info
-        #[clap(long, value_delimiter = ',', value_name = "id,...")]
-        workers: Vec<u32>,
+        /// Workers that need to be uncordoned, both id and host are supported.
+        #[clap(
+            long,
+            required = true,
+            value_delimiter = ',',
+            value_name = "id or host,..."
+        )]
+        workers: Vec<String>,
     },
 }
 
@@ -442,11 +452,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Scale(ScaleCommands::Resize(resize)) => {
             cmd_impl::scale::resize(context, resize).await?
         }
-        Commands::Scale(ScaleCommands::Cordon { workers: w_ids }) => {
-            cmd_impl::scale::update_schedulability(context, &w_ids, true).await?
+        Commands::Scale(ScaleCommands::Cordon { workers }) => {
+            cmd_impl::scale::update_schedulability(context, workers, true).await?
         }
-        Commands::Scale(ScaleCommands::Uncordon { workers: w_ids }) => {
-            cmd_impl::scale::update_schedulability(context, &w_ids, false).await?
+        Commands::Scale(ScaleCommands::Uncordon { workers }) => {
+            cmd_impl::scale::update_schedulability(context, workers, false).await?
         }
     }
     Ok(())
