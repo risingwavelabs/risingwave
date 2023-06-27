@@ -326,6 +326,7 @@ create source s23 (bytea_example bytea) with (
   scan.startup.mode = 'earliest'
 ) row format json
 
+statement ok
 create source s24 (id bytea) with (
   connector = 'kafka',
   topic = 'kafka_source_format_bytes',
