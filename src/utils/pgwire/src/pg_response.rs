@@ -20,6 +20,7 @@ use risingwave_sqlparser::ast::Statement;
 
 use crate::error::PsqlError;
 use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_protocol::ParameterStatus;
 use crate::pg_server::BoxedError;
 use crate::types::Row;
 
@@ -110,6 +111,7 @@ pub struct PgResponse<VS> {
     values_stream: Option<VS>,
     callback: Option<BoxedCallback>,
     row_desc: Vec<PgFieldDescriptor>,
+    status: ParameterStatus,
 }
 
 pub struct PgResponseBuilder<VS> {
@@ -121,6 +123,7 @@ pub struct PgResponseBuilder<VS> {
     values_stream: Option<VS>,
     callback: Option<BoxedCallback>,
     row_desc: Vec<PgFieldDescriptor>,
+    status: ParameterStatus,
 }
 
 impl<VS> From<PgResponseBuilder<VS>> for PgResponse<VS> {
@@ -132,6 +135,7 @@ impl<VS> From<PgResponseBuilder<VS>> for PgResponse<VS> {
             values_stream: builder.values_stream,
             callback: builder.callback,
             row_desc: builder.row_desc,
+            status: builder.status,
         }
     }
 }
@@ -146,6 +150,7 @@ impl<VS> PgResponseBuilder<VS> {
             values_stream: None,
             callback: None,
             row_desc: vec![],
+            status: Default::default(),
         }
     }
 
@@ -179,6 +184,10 @@ impl<VS> PgResponseBuilder<VS> {
         let mut notices = self.notices;
         notices.push(notice.to_string());
         Self { notices, ..self }
+    }
+
+    pub fn status(self, status: ParameterStatus) -> Self {
+        Self { status, ..self }
     }
 }
 
@@ -342,6 +351,10 @@ where
 
     pub fn notices(&self) -> &[String] {
         &self.notices
+    }
+
+    pub fn status(&self) -> &ParameterStatus {
+        &self.status
     }
 
     pub fn affected_rows_cnt(&self) -> Option<i32> {

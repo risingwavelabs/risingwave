@@ -52,6 +52,14 @@ where
         for notice in self.result.notices() {
             msg_stream.write_no_flush(&BeMessage::NoticeResponse(notice))?;
         }
+
+        let status = self.result.status();
+        if let Some(ref application_name) = status.application_name {
+            msg_stream.write_no_flush(&BeMessage::ParameterStatus(
+                crate::pg_message::BeParameterStatusMessage::ApplicationName(application_name),
+            ))?;
+        }
+
         if self.result.is_empty() {
             // Run the callback before sending the response.
             self.result.run_callback().await?;
