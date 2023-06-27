@@ -150,42 +150,19 @@ for ((i=0; i<${#type[@]}; i++)); do
     python3 pyspark-util.py drop_iceberg
 
     # test append-only mode
-    # echo "--- running deltalake append-only mod ${type[i]} integration tests"
-    # cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-    # python3 pyspark-util.py create_deltalake
-    # if python3 integration_tests.py --deltalake_sink ${sink_input_feature[i]}; then
-    #   python3 pyspark-util.py test_deltalake
-    #   echo "Deltalake sink ${type[i]} test passed"
-    # else
-    #   echo "Deltalake sink ${type[i]} test failed"
-    #   exit 1
-    # fi
-    # python3 pyspark-util.py clean_deltalake
+    echo "--- running deltalake append-only mod ${type[i]} integration tests"
+    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
+    python3 pyspark-util.py create_deltalake
+    if python3 integration_tests.py --deltalake_sink ${sink_input_feature[i]}; then
+      python3 pyspark-util.py test_deltalake
+      echo "Deltalake sink ${type[i]} test passed"
+    else
+      echo "Deltalake sink ${type[i]} test failed"
+      exit 1
+    fi
+    python3 pyspark-util.py clean_deltalake
 done
 
-echo "--- running deltalake append-only mod integration tests"
-cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-python3 pyspark-util.py create_deltalake
-if python3 integration_tests.py --deltalake_sink --input_binary_file=./data/sink_input --data_format_use_json=False; then
-  python3 pyspark-util.py test_deltalake
-  echo "Deltalake sink streamchunk test passed"
-else
-  echo "Deltalake sink streamchunk test failed"
-  exit 1
-fi
-python3 pyspark-util.py clean_deltalake
-
-
-cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-python3 pyspark-util.py create_deltalake
-if python3 integration_tests.py --deltalake_sink; then
-  python3 pyspark-util.py test_deltalake
-  echo "Deltalake sink json test passed"
-else
-  echo "Deltalake sink json test failed"
-  exit 1
-fi
-python3 pyspark-util.py clean_deltalake
 
 ${MC_PATH} rm -r -force minio/bucket
 ${MC_PATH} rb minio/bucket
