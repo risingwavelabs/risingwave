@@ -44,7 +44,7 @@ use super::catalog::SinkCatalog;
 use crate::sink::{record_to_json, Result, Sink, SinkError, TimestampHandlingMode};
 use crate::ConnectorParams;
 
-pub const VALID_REMOTE_SINKS: [&str; 3] = ["jdbc", "file", "iceberg"];
+pub const VALID_REMOTE_SINKS: [&str; 3] = ["jdbc", "iceberg", "deltalake"];
 
 pub fn is_valid_remote_sink(connector_type: &str) -> bool {
     VALID_REMOTE_SINKS.contains(&connector_type)
