@@ -22,6 +22,7 @@ use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_storage::StateStore;
@@ -151,7 +152,7 @@ where
 
         // Current position of upstream_table primary key.
         // Current position is computed **per vnode**.
-        let mut current_pos_map = vec![None; self.upstream_table.vnodes().count_ones()];
+        let mut current_pos_map: HashMap<VirtualNode, OwnedRow> = HashMap::new();
 
         // Current position of the upstream_table primary key.
         // `None` means it starts from the beginning.
@@ -195,8 +196,8 @@ where
         // When a barrier comes from upstream:
         //  Immediately break out of backfill loop.
         //  - For each row of the upstream chunk buffer, compute vnode.
-        //  - Get the current_pos corresponding to the vnode. forward it to downstream if its pk <=
-        //    `current_pos`, otherwise ignore it.
+        //  - Get the `current_pos` corresponding to the vnode. Forward it to downstream if its pk
+        //    <= `current_pos`, otherwise ignore it.
         //  - Flush all buffered upstream_chunks to replicated state table.
         //  - Update the `snapshot_read_epoch`.
         //  - Reconstruct the whole backfill stream with upstream and new mv snapshot read stream

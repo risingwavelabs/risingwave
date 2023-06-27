@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::ops::Bound;
 
 use await_tree::InstrumentAwait;
@@ -22,7 +24,7 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
@@ -44,6 +46,36 @@ pub(crate) fn mark_chunk(
 ) -> StreamChunk {
     let chunk = chunk.compact();
     mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
+}
+
+/// Mark chunk:
+/// For each row of the chunk, forward it to downstream if its pk <= `current_pos` for the
+/// corresponding vnode, otherwise ignore it. We implement it by changing the visibility bitmap.
+pub(crate) fn mark_chunk_ref_by_vnode(
+    chunk: &StreamChunk,
+    current_pos_map: &HashMap<VirtualNode, OwnedRow>,
+    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_order: &[OrderType],
+) -> StreamChunk {
+    let chunk = chunk.clone();
+    let (data, ops) = chunk.into_parts();
+    let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
+    // Use project to avoid allocation.
+    for v in data.rows().map(|row| {
+        let vnode = VirtualNode::ZERO; // FIXME: compute vnode from row + state table.
+        let current_pos = current_pos_map.get(&vnode).unwrap();
+        let lhs = row.project(pk_in_output_indices);
+        let rhs = current_pos.project(pk_in_output_indices);
+        let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+        match order {
+            Ordering::Less | Ordering::Equal => true,
+            Ordering::Greater => false,
+        }
+    }) {
+        new_visibility.append(v);
+    }
+    let (columns, _) = data.into_parts();
+    StreamChunk::new(ops, columns, Some(new_visibility.finish()))
 }
 
 /// Mark chunk:
