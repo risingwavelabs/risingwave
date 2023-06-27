@@ -234,10 +234,6 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .await
                     .unwrap()
                 {
-                    // hummock_manager_compact
-                    //     .assign_compaction_task(&task, context_id)
-                    //     .await
-                    //     .unwrap();
                     let resp = SubscribeCompactTasksResponse {
                         task: Some(Task::CompactTask(task)),
                     };

@@ -254,10 +254,6 @@ pub(crate) mod tests {
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-            .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
 
         // assert compact_task
@@ -381,10 +377,6 @@ pub(crate) mod tests {
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-            .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
 
         // assert compact_task
@@ -557,12 +549,11 @@ pub(crate) mod tests {
         unregister_table_ids_from_compaction_group(&hummock_manager_ref, &[existing_table_id])
             .await;
 
-        // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
             ..Default::default()
         };
-        // 2. get compact task
+        // 2. get compact task and there should be none
         let compact_task = hummock_manager_ref
             .manual_get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
@@ -572,7 +563,7 @@ pub(crate) mod tests {
             .unwrap();
         assert!(compact_task.is_none());
 
-        // 4. get the latest version and check
+        // 3. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
         let output_level_info = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
@@ -581,7 +572,7 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(0, output_level_info.total_file_size);
 
-        // 5. get compact task and there should be none
+        // 5. get compact task
         let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
@@ -704,10 +695,6 @@ pub(crate) mod tests {
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-            .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
         // assert compact_task
         assert_eq!(
@@ -883,10 +870,6 @@ pub(crate) mod tests {
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-            .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
 
         // assert compact_task
@@ -1067,10 +1050,6 @@ pub(crate) mod tests {
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
         compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-            .unwrap();
         assert_eq!(compactor.context_id(), worker_node.id);
 
         // 3. compact
@@ -1205,11 +1184,6 @@ pub(crate) mod tests {
             )
             .await
             .unwrap()
-            .unwrap();
-        let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
-        hummock_manager_ref
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
             .unwrap();
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;

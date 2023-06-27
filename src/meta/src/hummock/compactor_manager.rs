@@ -314,19 +314,16 @@ impl CompactorManager {
         let mut cancellable_tasks = vec![];
         const MAX_TASK_DURATION_SEC: u64 = 2700;
 
-        for (
-            _task_id,
-            TaskHeartbeat {
-                expire_at,
-                task,
-                create_time,
-                num_ssts_sealed,
-                num_ssts_uploaded,
-                num_progress_key,
-                num_pending_read_io,
-                num_pending_write_io,
-            },
-        ) in task_heartbeats
+        for TaskHeartbeat {
+            expire_at,
+            task,
+            create_time,
+            num_ssts_sealed,
+            num_ssts_uploaded,
+            num_progress_key,
+            num_pending_read_io,
+            num_pending_write_io,
+        } in task_heartbeats.values()
         {
             let task_duration_too_long = create_time.elapsed().as_secs() > MAX_TASK_DURATION_SEC;
             if *expire_at < now || task_duration_too_long {
@@ -491,17 +488,13 @@ mod tests {
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
             let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
             let _compactor = hummock_manager.get_idle_compactor().await.unwrap();
-            let task = hummock_manager
+            hummock_manager
                 .get_compact_task(
                     StaticCompactionGroupId::StateDefault.into(),
                     &mut default_level_selector(),
                 )
                 .await
                 .unwrap()
-                .unwrap();
-            hummock_manager
-                .assign_compaction_task(&task, context_id)
-                .await
                 .unwrap();
             (env, context_id)
         };
@@ -518,42 +511,32 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(2)).await;
         let expired = compactor_manager.get_expired_tasks();
         assert_eq!(expired.len(), 1);
-        assert_eq!(expired[0].0, context_id);
 
         // Mimic no-op compaction heartbeat
-        compactor_manager.update_task_heartbeats(
-            context_id,
-            &vec![CompactTaskProgress {
-                task_id: expired[0].1.task_id,
-                ..Default::default()
-            }],
-        );
+        compactor_manager.update_task_heartbeats(&vec![CompactTaskProgress {
+            task_id: expired[0].task_id,
+            ..Default::default()
+        }]);
         assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
 
         // Mimic compaction heartbeat with invalid task id
-        compactor_manager.update_task_heartbeats(
-            context_id,
-            &vec![CompactTaskProgress {
-                task_id: expired[0].1.task_id + 1,
-                num_ssts_sealed: 1,
-                num_ssts_uploaded: 1,
-                num_progress_key: 100,
-                ..Default::default()
-            }],
-        );
+        compactor_manager.update_task_heartbeats(&vec![CompactTaskProgress {
+            task_id: expired[0].task_id + 1,
+            num_ssts_sealed: 1,
+            num_ssts_uploaded: 1,
+            num_progress_key: 100,
+            ..Default::default()
+        }]);
         assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
 
         // Mimic effective compaction heartbeat
-        compactor_manager.update_task_heartbeats(
-            context_id,
-            &vec![CompactTaskProgress {
-                task_id: expired[0].1.task_id,
-                num_ssts_sealed: 1,
-                num_ssts_uploaded: 1,
-                num_progress_key: 100,
-                ..Default::default()
-            }],
-        );
+        compactor_manager.update_task_heartbeats(&vec![CompactTaskProgress {
+            task_id: expired[0].task_id,
+            num_ssts_sealed: 1,
+            num_ssts_uploaded: 1,
+            num_progress_key: 100,
+            ..Default::default()
+        }]);
         assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
 
         // Test add

@@ -56,8 +56,7 @@ pub enum ScheduleStatus {
     Ok,
     NoTask,
     PickFailure,
-    AssignFailure(CompactTask),
-    SendFailure(CompactTask),
+    SendFailure(Box<CompactTask>),
 }
 
 impl CompactionRequestChannel {
@@ -180,10 +179,9 @@ where
         let cancel_state = match &schedule_status {
             ScheduleStatus::Ok => None,
             ScheduleStatus::NoTask | ScheduleStatus::PickFailure => None,
-            ScheduleStatus::AssignFailure(task) => {
-                Some((task.clone(), TaskStatus::AssignFailCanceled))
+            ScheduleStatus::SendFailure(task) => {
+                Some((*task.clone(), TaskStatus::SendFailCanceled))
             }
-            ScheduleStatus::SendFailure(task) => Some((task.clone(), TaskStatus::SendFailCanceled)),
         };
 
         if let Some((mut compact_task, task_state)) = cancel_state {
@@ -252,7 +250,7 @@ where
             );
             self.compactor_manager
                 .pause_compactor(compactor.context_id());
-            return ScheduleStatus::SendFailure(compact_task);
+            return ScheduleStatus::SendFailure(Box::new(compact_task));
         }
 
         // Bypass reschedule if we want compaction scheduling in a deterministic way
@@ -478,116 +476,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert_matches::assert_matches;
-    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-
-    use crate::hummock::compaction::default_level_selector;
-    use crate::hummock::compaction_scheduler::{
-        CompactionRequestChannel, CompactionRequestChannelItem, ScheduleStatus,
-    };
-    use crate::hummock::test_utils::{add_ssts, setup_compute_env};
-    use crate::hummock::CompactionScheduler;
-
-    #[tokio::test]
-    async fn test_pick_and_assign() {
-        let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-        let context_id = worker_node.id;
-        let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
-        let compaction_scheduler =
-            CompactionScheduler::new(env, hummock_manager.clone(), compactor_manager.clone());
-
-        let (request_tx, _request_rx) =
-            tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
-        let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
-
-        // Add a compactor with invalid context_id.
-        let _receiver = compactor_manager.add_compactor(1234, 1, 1);
-        assert_eq!(compactor_manager.compactor_num(), 1);
-
-        // No task
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
-        assert_eq!(
-            ScheduleStatus::NoTask,
-            compaction_scheduler
-                .pick_and_assign(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    compactor,
-                    request_channel.clone(),
-                    &mut default_level_selector(),
-                )
-                .await
-        );
-
-        let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
-        // Cannot assign because of invalid compactor
-        assert_matches!(
-            compaction_scheduler
-                .pick_and_assign(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    compactor,
-                    request_channel.clone(),
-                    &mut default_level_selector(),
-                )
-                .await,
-            ScheduleStatus::AssignFailure(_)
-        );
-        assert_eq!(compactor_manager.compactor_num(), 0);
-
-        // Add a valid compactor and succeed
-        let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
-        assert_eq!(compactor_manager.compactor_num(), 1);
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
-        assert_eq!(
-            ScheduleStatus::Ok,
-            compaction_scheduler
-                .pick_and_assign(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    compactor,
-                    request_channel.clone(),
-                    &mut default_level_selector(),
-                )
-                .await
-        );
-
-        // Add more SSTs for compaction.
-        let _sst_infos = add_ssts(2, hummock_manager.as_ref(), context_id).await;
-
-        // No idle compactor
-        assert_eq!(
-            hummock_manager.get_assigned_tasks_number(context_id).await,
-            1
-        );
-        assert_eq!(compactor_manager.compactor_num(), 1);
-        assert_matches!(hummock_manager.get_idle_compactor().await, None);
-
-        // Increase compactor concurrency and succeed
-        let _receiver = compactor_manager.add_compactor(context_id, 10, 10);
-        assert_eq!(
-            hummock_manager.get_assigned_tasks_number(context_id).await,
-            1
-        );
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
-        assert_eq!(
-            ScheduleStatus::Ok,
-            compaction_scheduler
-                .pick_and_assign(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    compactor,
-                    request_channel.clone(),
-                    &mut default_level_selector(),
-                )
-                .await
-        );
-        assert_eq!(
-            hummock_manager.get_assigned_tasks_number(context_id).await,
-            2
-        );
-    }
-
     #[tokio::test]
     #[cfg(all(test, feature = "failpoints"))]
     async fn test_failpoints() {
@@ -633,17 +521,6 @@ mod tests {
         let fp_assign_compaction_task_fail = "assign_compaction_task_fail";
         fail::cfg(fp_assign_compaction_task_fail, "return").unwrap();
         let compactor = hummock_manager.get_idle_compactor().await.unwrap();
-        assert_matches!(
-            compaction_scheduler
-                .pick_and_assign(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    compactor,
-                    request_channel.clone(),
-                    &mut default_level_selector(),
-                )
-                .await,
-            ScheduleStatus::AssignFailure(_)
-        );
         fail::remove(fp_assign_compaction_task_fail);
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
 
@@ -676,18 +553,6 @@ mod tests {
         let fp_cancel_compact_task = "fp_cancel_compact_task";
         fail::cfg(fp_assign_compaction_task_fail, "return").unwrap();
         fail::cfg(fp_cancel_compact_task, "return").unwrap();
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
-        assert_matches!(
-            compaction_scheduler
-                .pick_and_assign(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    compactor,
-                    request_channel.clone(),
-                    &mut default_level_selector(),
-                )
-                .await,
-            ScheduleStatus::AssignFailure(_)
-        );
         fail::remove(fp_assign_compaction_task_fail);
         fail::remove(fp_cancel_compact_task);
         assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 1);
