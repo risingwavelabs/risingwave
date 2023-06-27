@@ -14,7 +14,7 @@
 
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -31,8 +31,8 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    build_version_delta_after_version, get_compaction_group_ids, insert_new_sub_level,
-    try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockVersionExt,
+    build_version_delta_after_version, get_compaction_group_ids,
+    try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockLevelsExt, HummockVersionExt,
     HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
@@ -92,6 +92,7 @@ mod worker;
 use compaction::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
+const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 16;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -124,6 +125,7 @@ pub struct HummockManager<S: MetaStore> {
     object_store: ObjectStoreRef,
     version_checkpoint_path: String,
     pause_version_checkpoint: AtomicBool,
+    history_table_throughput: parking_lot::RwLock<HashMap<u32, VecDeque<u64>>>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -347,6 +349,7 @@ where
             object_store,
             version_checkpoint_path: checkpoint_path,
             pause_version_checkpoint: AtomicBool::new(false),
+            history_table_throughput: parking_lot::RwLock::new(HashMap::default()),
         };
         let instance = Arc::new(instance);
         instance.start_worker(rx).await;
@@ -836,7 +839,7 @@ where
 
         if is_trivial_reclaim {
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
+            self.report_compact_task_impl(None, &mut compact_task, &mut compaction_guard, None)
                 .await?;
             tracing::debug!(
                 "TrivialReclaim for compaction group {}: remove {} sstables, cost time: {:?}",
@@ -852,7 +855,7 @@ where
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
+            self.report_compact_task_impl(None, &mut compact_task, &mut compaction_guard, None)
                 .await?;
             tracing::debug!(
                 "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
@@ -887,8 +890,6 @@ where
                 &current_version,
                 compaction_group_id,
             );
-
-            drop(compaction_guard);
 
             let (file_count, file_size) = {
                 let mut count = 0;
@@ -999,6 +1000,7 @@ where
         }
         #[cfg(test)]
         {
+            drop(compaction_guard);
             self.check_state_consistency().await;
         }
 
@@ -1018,10 +1020,19 @@ where
         self.cancel_compact_task_impl(compact_task).await
     }
 
+    #[named]
     pub async fn cancel_compact_task_impl(&self, compact_task: &mut CompactTask) -> Result<bool> {
         assert!(CANCEL_STATUS_SET.contains(&compact_task.task_status()));
-        self.report_compact_task_impl(None, compact_task, None, None)
-            .await
+        let mut compaction_guard = write_lock!(self, compaction).await;
+        let ret = self
+            .report_compact_task_impl(None, compact_task, &mut compaction_guard, None)
+            .await?;
+        #[cfg(test)]
+        {
+            drop(compaction_guard);
+            self.check_state_consistency().await;
+        }
+        Ok(ret)
     }
 
     // need mutex protect
@@ -1171,16 +1182,27 @@ where
         false
     }
 
+    #[named]
     pub async fn report_compact_task(
         &self,
         context_id: HummockContextId,
         compact_task: &mut CompactTask,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
+        let mut guard = write_lock!(self, compaction).await;
         let ret = self
-            .report_compact_task_impl(Some(context_id), compact_task, None, table_stats_change)
+            .report_compact_task_impl(
+                Some(context_id),
+                compact_task,
+                &mut guard,
+                table_stats_change,
+            )
             .await?;
-
+        #[cfg(test)]
+        {
+            drop(guard);
+            self.check_state_consistency().await;
+        }
         Ok(ret)
     }
 
@@ -1196,13 +1218,9 @@ where
         &self,
         context_id: Option<HummockContextId>,
         compact_task: &mut CompactTask,
-        compaction_guard: Option<RwLockWriteGuard<'_, Compaction>>,
+        compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
-        let mut compaction_guard = match compaction_guard {
-            None => write_lock!(self, compaction).await,
-            Some(compaction_guard) => compaction_guard,
-        };
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
@@ -1262,6 +1280,16 @@ where
                 compact_task.task_status() != TaskStatus::Pending,
                 "report pending compaction task"
             );
+            let input_sst_ids: HashSet<u64> = compact_task
+                .input_ssts
+                .iter()
+                .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
+                .collect();
+            let input_level_ids: Vec<u32> = compact_task
+                .input_ssts
+                .iter()
+                .map(|level| level.level_idx)
+                .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
                 let is_expired =
@@ -1270,10 +1298,20 @@ where
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
-                    assert!(current_version
+                    let group = current_version
                         .levels
-                        .contains_key(&compact_task.compaction_group_id));
-                    true
+                        .get(&compact_task.compaction_group_id)
+                        .unwrap();
+                    let input_exist =
+                        group.check_deleted_sst_exist(&input_level_ids, input_sst_ids);
+                    if !input_exist {
+                        compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                        warn!(
+                            "The task may be expired because of group split, task:\n {:?}",
+                            compact_task_to_string(compact_task)
+                        );
+                    }
+                    input_exist
                 }
             } else {
                 false
@@ -1408,12 +1446,6 @@ where
         if task_status == TaskStatus::Success {
             self.try_update_write_limits(&[compact_task.compaction_group_id])
                 .await;
-        }
-
-        #[cfg(test)]
-        {
-            drop(compaction_guard);
-            self.check_state_consistency().await;
         }
 
         Ok(true)
@@ -1572,11 +1604,6 @@ where
                 .entry(compaction_group_id)
                 .or_default()
                 .group_deltas;
-            let version_l0 = new_hummock_version
-                .get_compaction_group_levels_mut(compaction_group_id)
-                .l0
-                .as_mut()
-                .expect("Expect level 0 is not empty");
             let l0_sub_level_id = epoch;
             let group_delta = GroupDelta {
                 delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
@@ -1587,23 +1614,24 @@ where
                 })),
             };
             group_deltas.push(group_delta);
-
-            insert_new_sub_level(
-                version_l0,
-                l0_sub_level_id,
-                LevelType::Overlapping,
-                group_sstables,
-                None,
-            );
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
-        new_hummock_version.max_committed_epoch = epoch;
+        new_hummock_version.apply_version_delta(new_version_delta.deref());
 
         // Apply stats changes.
         let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
         purge_prost_table_stats(&mut version_stats.table_stats, &new_hummock_version);
+        for (table_id, stats) in &table_stats_change {
+            let table_id_str = table_id.to_string();
+            let stats_value =
+                std::cmp::max(0, stats.total_key_size + stats.total_value_size) / 1024 / 1024;
+            self.metrics
+                .table_write_throughput
+                .with_label_values(&[table_id_str.as_str()])
+                .inc_by(stats_value as u64);
+        }
 
         commit_multi_var!(
             self,
@@ -1641,13 +1669,29 @@ where
 
         self.notify_last_version_delta(versioning);
         trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
-
+        let mut table_groups = HashMap::<u32, usize>::default();
+        for group in versioning.current_version.levels.values() {
+            for table_id in &group.member_table_ids {
+                table_groups.insert(*table_id, group.member_table_ids.len());
+            }
+        }
         drop(versioning_guard);
         // Don't trigger compactions if we enable deterministic compaction
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group
             for id in &modified_compaction_groups {
                 self.try_send_compaction_request(*id, compact_task::TaskType::Dynamic);
+            }
+            if !table_stats_change.is_empty() {
+                table_stats_change.retain(|table_id, _| {
+                    table_groups
+                        .get(table_id)
+                        .map(|table_count| *table_count > 1)
+                        .unwrap_or(false)
+                });
+            }
+            if !table_stats_change.is_empty() {
+                self.collect_table_write_throughput(table_stats_change);
             }
         }
         if !modified_compaction_groups.is_empty() {
@@ -2176,7 +2220,6 @@ where
             pin_mut!(event_stream);
 
             let shutdown_rx_shared = shutdown_rx.shared();
-            let mut group_infos = HashMap::default();
 
             tracing::info!(
                 "Hummock timer task tracing [GroupSplit interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
@@ -2204,9 +2247,7 @@ where
                                         continue;
                                     }
 
-                                    hummock_manager
-                                        .on_handle_check_split_multi_group(&mut group_infos)
-                                        .await;
+                                    hummock_manager.on_handle_check_split_multi_group().await;
                                 }
 
                                 HummockTimerEvent::Report => {
@@ -2370,121 +2411,113 @@ where
         }
     }
 
-    async fn on_handle_check_split_multi_group(
-        &self,
-        history_table_infos: &mut HashMap<StateTableId, VecDeque<u64>>,
-    ) {
-        const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 4;
+    fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
+        let mut table_infos = self.history_table_throughput.write();
+        for (table_id, stat) in table_stats {
+            let throughput = (stat.total_value_size + stat.total_key_size) as u64;
+            let entry = table_infos.entry(table_id).or_default();
+            entry.push_back(throughput);
+            if entry.len() > HISTORY_TABLE_INFO_WINDOW_SIZE {
+                entry.pop_front();
+            }
+        }
+    }
+
+    async fn on_handle_check_split_multi_group(&self) {
+        let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
         let group_size_limit = self.env.opts.split_group_size_limit;
-        let table_split_limit = self.env.opts.move_table_size_limit;
-        let mut table_infos = vec![];
-        // TODO: support move small state-table back to default-group to reduce IOPS.
-        for group in &group_infos {
-            if group.table_statistic.len() == 1 || group.group_size < group_size_limit {
-                continue;
-            }
-            for (table_id, table_size) in &group.table_statistic {
-                let last_table_infos = history_table_infos
-                    .entry(*table_id)
-                    .or_insert_with(VecDeque::new);
-                last_table_infos.push_back(*table_size);
-                if last_table_infos.len() > HISTORY_TABLE_INFO_WINDOW_SIZE {
-                    last_table_infos.pop_front();
-                }
-                table_infos.push((*table_id, group.group_id, group.group_size));
-            }
-        }
-        table_infos.sort_by(|a, b| b.2.cmp(&a.2));
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let mut partition_vnode_count = self.env.opts.partition_vnode_count;
-        for (table_id, parent_group_id, parent_group_size) in table_infos {
-            let table_info = history_table_infos.get(&table_id).unwrap();
-            let table_size = *table_info.back().unwrap();
-            if table_size < table_split_limit
-                || (table_size < group_size_limit
-                    && table_info.len() < HISTORY_TABLE_INFO_WINDOW_SIZE)
-            {
+        for group in &group_infos {
+            if group.table_statistic.len() == 1 {
                 continue;
             }
 
-            let mut target_compact_group_id = None;
-            let mut allow_split_by_table = false;
-            if table_size < group_size_limit {
-                let mut increase = true;
-                for idx in 1..table_info.len() {
-                    if table_info[idx] < table_info[idx - 1] {
-                        increase = false;
-                        break;
+            for (table_id, table_size) in &group.table_statistic {
+                let mut is_high_write_throughput = false;
+                let mut is_low_write_throughput = true;
+                if let Some(history) = table_write_throughput.get(table_id) {
+                    if history.len() >= HISTORY_TABLE_INFO_WINDOW_SIZE {
+                        let window_total_size = history.iter().sum::<u64>();
+                        is_high_write_throughput = history.iter().all(|throughput| {
+                            *throughput > self.env.opts.table_write_throughput_threshold
+                        });
+                        is_low_write_throughput = window_total_size
+                            < (HISTORY_TABLE_INFO_WINDOW_SIZE as u64)
+                                * self.env.opts.min_table_split_write_throughput;
                     }
                 }
+                let state_table_size = *table_size;
 
-                if !increase {
+                if state_table_size < self.env.opts.min_table_split_size
+                    && !is_high_write_throughput
+                {
                     continue;
                 }
 
-                // do not split a large table and a small table because it would increase IOPS of
-                // small table.
-                if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-                    let rest_group_size = parent_group_size - table_size;
-                    if rest_group_size < table_size && rest_group_size < table_split_limit {
-                        continue;
-                    }
-                }
-
-                let increase_data_size = table_size.saturating_sub(*table_info.front().unwrap());
-                let increase_slow = increase_data_size < table_split_limit;
-
-                // if the size of this table increases too fast, we shall create one group for it.
-                if increase_slow
-                    && (parent_group_id == mv_group_id || parent_group_id == default_group_id)
+                let parent_group_id = group.group_id;
+                let mut target_compact_group_id = None;
+                let mut allow_split_by_table = false;
+                if state_table_size < self.env.opts.split_group_size_limit
+                    && is_low_write_throughput
                 {
-                    for group in &group_infos {
-                        // do not move to mv group or state group
-                        if !group.split_by_table || group.group_id == mv_group_id
-                            || group.group_id == default_group_id
-                            || group.group_id == parent_group_id
-                            // do not move state-table to a large group.
-                            || group.group_size + table_size > group_size_limit
-                            // do not move state-table from group A to group B if this operation would make group B becomes larger than A.
-                            || group.group_size + table_size > parent_group_size - table_size
+                    // do not split a large table and a small table because it would increase IOPS
+                    // of small table.
+                    if parent_group_id != default_group_id && parent_group_id != mv_group_id {
+                        let rest_group_size = group.group_size - state_table_size;
+                        if rest_group_size < state_table_size
+                            && rest_group_size < self.env.opts.min_table_split_size
                         {
                             continue;
                         }
-                        target_compact_group_id = Some(group.group_id);
+                    } else {
+                        for group in &group_infos {
+                            // do not move to mv group or state group
+                            if !group.split_by_table || group.group_id == mv_group_id
+                                || group.group_id == default_group_id
+                                || group.group_id == parent_group_id
+                                // do not move state-table to a large group.
+                                || group.group_size + state_table_size > group_size_limit
+                                // do not move state-table from group A to group B if this operation would make group B becomes larger than A.
+                                || group.group_size + state_table_size > group.group_size - state_table_size
+                            {
+                                continue;
+                            }
+                            target_compact_group_id = Some(group.group_id);
+                        }
+                        allow_split_by_table = true;
+                        partition_vnode_count = 1;
                     }
-                    allow_split_by_table = true;
-                    partition_vnode_count = 1;
                 }
-            }
 
-            let ret = self
-                .move_state_table_to_compaction_group(
-                    parent_group_id,
-                    &[table_id],
-                    target_compact_group_id,
-                    allow_split_by_table,
-                    partition_vnode_count,
-                )
-                .await;
-            match ret {
-                Ok(_) => {
-                    tracing::info!(
+                let ret = self
+                    .move_state_table_to_compaction_group(
+                        parent_group_id,
+                        &[*table_id],
+                        target_compact_group_id,
+                        allow_split_by_table,
+                        partition_vnode_count,
+                    )
+                    .await;
+                match ret {
+                    Ok(_) => {
+                        tracing::info!(
                         "move state table [{}] from group-{} to group-{:?} success, Allow split by table: {}",
                         table_id, parent_group_id, target_compact_group_id, allow_split_by_table
                     );
-                    return;
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::info!(
+                        "failed to move state table [{}] from group-{} to group-{:?} because {:?}",
+                        table_id, parent_group_id, target_compact_group_id, e
+                    )
+                    }
                 }
-                Err(e) => tracing::info!(
-                    "failed to move state table [{}] from group-{} to group-{:?} because {:?}",
-                    table_id,
-                    parent_group_id,
-                    target_compact_group_id,
-                    e
-                ),
             }
         }
     }

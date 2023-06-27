@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::config::BatchConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::dml_manager::DmlManagerRef;
@@ -23,8 +24,6 @@ use risingwave_storage::StateStoreImpl;
 
 use crate::monitor::{BatchExecutorMetrics, BatchTaskMetrics};
 use crate::task::BatchManager;
-
-pub(crate) type WorkerNodeId = u32;
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
@@ -111,7 +110,7 @@ impl BatchEnvironment {
             )),
             task_metrics: Arc::new(BatchTaskMetrics::for_test()),
             client_pool: Arc::new(ComputeClientPool::default()),
-            dml_manager: Arc::new(DmlManager::default()),
+            dml_manager: Arc::new(DmlManager::new(WorkerNodeId::default())),
             source_metrics: Arc::new(SourceMetrics::default()),
             executor_metrics: Arc::new(BatchExecutorMetrics::for_test()),
         }

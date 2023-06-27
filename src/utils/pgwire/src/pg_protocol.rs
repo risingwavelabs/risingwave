@@ -23,7 +23,6 @@ use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
-use futures::Stream;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
@@ -39,18 +38,14 @@ use crate::pg_message::{
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
     FePasswordMessage, FeStartupMessage,
 };
-use crate::pg_response::RowSetResult;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
-pub struct PgProtocol<S, SM, VS, PS, PO>
+pub struct PgProtocol<S, SM>
 where
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
-    SM: SessionManager<VS, PS, PO>,
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    SM: SessionManager,
 {
     /// Used for write/read pg messages.
     stream: Conn<S>,
@@ -62,11 +57,11 @@ where
     session_mgr: Arc<SM>,
     session: Option<Arc<SM::Session>>,
 
-    result_cache: HashMap<String, ResultCache<VS>>,
-    unnamed_prepare_statement: Option<PS>,
-    prepare_statement_store: HashMap<String, PS>,
-    unnamed_portal: Option<PO>,
-    portal_store: HashMap<String, PO>,
+    result_cache: HashMap<String, ResultCache<<SM::Session as Session>::ValuesStream>>,
+    unnamed_prepare_statement: Option<<SM::Session as Session>::PreparedStatement>,
+    prepare_statement_store: HashMap<String, <SM::Session as Session>::PreparedStatement>,
+    unnamed_portal: Option<<SM::Session as Session>::Portal>,
+    portal_store: HashMap<String, <SM::Session as Session>::Portal>,
     // Used to store the dependency of portal and prepare statement.
     // When we close a prepare statement, we need to close all the portals that depend on it.
     statement_portal_dependency: HashMap<String, Vec<String>>,
@@ -103,12 +98,9 @@ impl TlsConfig {
     }
 }
 
-impl<S, SM, VS, PS, PO> Drop for PgProtocol<S, SM, VS, PS, PO>
+impl<S, SM> Drop for PgProtocol<S, SM>
 where
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
-    SM: SessionManager<VS, PS, PO>,
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    SM: SessionManager,
 {
     fn drop(&mut self) {
         if let Some(session) = &self.session {
@@ -136,13 +128,10 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
     std::str::from_utf8(without_null)
 }
 
-impl<S, SM, VS, PS, PO> PgProtocol<S, SM, VS, PS, PO>
+impl<S, SM> PgProtocol<S, SM>
 where
-    PS: Send + Clone + 'static,
-    PO: Send + Clone + std::fmt::Display + 'static,
     S: AsyncWrite + AsyncRead + Unpin,
-    SM: SessionManager<VS, PS, PO>,
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    SM: SessionManager,
 {
     pub fn new(stream: S, session_mgr: Arc<SM>, tls_config: Option<TlsConfig>) -> Self {
         Self {
@@ -283,6 +272,14 @@ where
             .session_mgr
             .connect(&db_name, &user_name)
             .map_err(PsqlError::StartupError)?;
+
+        let application_name = msg.config.get("application_name");
+        if let Some(application_name) = application_name {
+            session
+                .set_config("application_name", vec![application_name.clone()])
+                .map_err(PsqlError::StartupError)?;
+        }
+
         match session.user_authenticator() {
             UserAuthenticator::None => {
                 self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
@@ -292,7 +289,10 @@ where
                 self.stream
                     .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
 
-                self.stream.write_parameter_status_msg_no_flush()?;
+                self.stream
+                    .write_parameter_status_msg_no_flush(&ParameterStatus {
+                        application_name: application_name.cloned(),
+                    })?;
                 self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
             }
             UserAuthenticator::ClearText(_) => {
@@ -304,6 +304,7 @@ where
                     .write_no_flush(&BeMessage::AuthenticationMd5Password(salt))?;
             }
         }
+
         self.session = Some(session);
         self.state = PgProtocolState::Regular;
         Ok(())
@@ -318,7 +319,8 @@ where
             )));
         }
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
-        self.stream.write_parameter_status_msg_no_flush()?;
+        self.stream
+            .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
         self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
         self.state = PgProtocolState::Regular;
         Ok(())
@@ -639,7 +641,7 @@ where
             let portal = self.get_portal(&name)?;
 
             let row_descriptions = session
-                .describe_portral(portal)
+                .describe_portal(portal)
                 .map_err(PsqlError::Internal)?;
 
             if row_descriptions.is_empty() {
@@ -686,7 +688,7 @@ where
         self.result_cache.remove(portal_name);
     }
 
-    fn get_portal(&self, portal_name: &str) -> PsqlResult<PO> {
+    fn get_portal(&self, portal_name: &str) -> PsqlResult<<SM::Session as Session>::Portal> {
         if portal_name.is_empty() {
             Ok(self
                 .unnamed_portal
@@ -704,7 +706,10 @@ where
         }
     }
 
-    fn get_statement(&self, statement_name: &str) -> PsqlResult<PS> {
+    fn get_statement(
+        &self,
+        statement_name: &str,
+    ) -> PsqlResult<<SM::Session as Session>::PreparedStatement> {
         if statement_name.is_empty() {
             Ok(self
                 .unnamed_prepare_statement
@@ -733,6 +738,27 @@ pub struct PgStream<S> {
     write_buf: BytesMut,
 }
 
+/// At present there is a hard-wired set of parameters for which
+/// ParameterStatus will be generated: they are:
+///
+///  * `server_version`
+///  * `server_encoding`
+///  * `client_encoding`
+///  * `application_name`
+///  * `is_superuser`
+///  * `session_authorization`
+///  * `DateStyle`
+///  * `IntervalStyle`
+///  * `TimeZone`
+///  * `integer_datetimes`
+///  * `standard_conforming_string`
+///
+/// See: https://www.postgresql.org/docs/9.2/static/protocol-flow.html#PROTOCOL-ASYNC.
+#[derive(Debug, Default, Clone)]
+pub struct ParameterStatus {
+    pub application_name: Option<String>,
+}
+
 impl<S> PgStream<S>
 where
     S: AsyncWrite + AsyncRead + Unpin,
@@ -745,7 +771,7 @@ where
         FeMessage::read(self.stream()).await
     }
 
-    fn write_parameter_status_msg_no_flush(&mut self) -> io::Result<()> {
+    fn write_parameter_status_msg_no_flush(&mut self, status: &ParameterStatus) -> io::Result<()> {
         self.write_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ClientEncoding("UTF8"),
         ))?;
@@ -753,8 +779,13 @@ where
             BeParameterStatusMessage::StandardConformingString("on"),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ServerVersion("8.3.0"),
+            BeParameterStatusMessage::ServerVersion("9.0.0"),
         ))?;
+        if let Some(application_name) = &status.application_name {
+            self.write_no_flush(&BeMessage::ParameterStatus(
+                BeParameterStatusMessage::ApplicationName(application_name),
+            ))?;
+        }
         Ok(())
     }
 
@@ -833,10 +864,10 @@ where
         }
     }
 
-    fn write_parameter_status_msg_no_flush(&mut self) -> io::Result<()> {
+    fn write_parameter_status_msg_no_flush(&mut self, status: &ParameterStatus) -> io::Result<()> {
         match self {
-            Conn::Unencrypted(s) => s.write_parameter_status_msg_no_flush(),
-            Conn::Ssl(s) => s.write_parameter_status_msg_no_flush(),
+            Conn::Unencrypted(s) => s.write_parameter_status_msg_no_flush(status),
+            Conn::Ssl(s) => s.write_parameter_status_msg_no_flush(status),
         }
     }
 

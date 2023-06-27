@@ -25,6 +25,7 @@ use risingwave_pb::hummock::{
     GroupTableChange, HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel,
     SstableInfo,
 };
+use tracing::warn;
 
 use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
@@ -84,6 +85,9 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
         }
     }
 
+    delete_sst_levels.sort();
+    delete_sst_levels.dedup();
+
     GroupDeltasSummary {
         delete_sst_levels,
         delete_sst_ids_set,
@@ -125,7 +129,6 @@ pub trait HummockVersionExt {
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
 
     fn get_object_ids(&self) -> Vec<u64>;
-    fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo>;
 }
 
 pub type BranchedSstInfo = HashMap<CompactionGroupId, /* SST Id */ HummockSstableId>;
@@ -218,62 +221,6 @@ impl HummockVersionExt for HummockVersion {
             .get(&compaction_group_id)
             .map(|group| group.levels.len() + 1)
             .unwrap_or(0)
-    }
-
-    fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
-        let mut infos = vec![];
-        for (group_id, group) in &self.levels {
-            if group.member_table_ids.len() == 1 {
-                continue;
-            }
-            let group_size = group
-                .levels
-                .iter()
-                .map(|level| level.total_file_size)
-                .sum::<u64>()
-                + group.l0.as_ref().unwrap().total_file_size;
-            let mut table_statistic: HashMap<StateTableId, u64> = HashMap::new();
-            let member_table_id: HashSet<u32> = HashSet::from_iter(group.member_table_ids.clone());
-            for level in &group.l0.as_ref().unwrap().sub_levels {
-                if level.level_type() == LevelType::Overlapping {
-                    continue;
-                }
-                for sst in &level.table_infos {
-                    if sst.table_ids.len() > 1 {
-                        // do not calculate size for small state-table.
-                        continue;
-                    }
-                    if !member_table_id.contains(&sst.table_ids[0]) {
-                        continue;
-                    }
-                    let entry = table_statistic.entry(sst.table_ids[0]).or_default();
-                    *entry += sst.file_size;
-                }
-            }
-
-            for level in &group.levels {
-                for sst in &level.table_infos {
-                    if sst.table_ids.len() > 1 {
-                        // do not calculate size for small state-table.
-                        continue;
-                    }
-                    for table_id in &sst.table_ids {
-                        if !member_table_id.contains(table_id) {
-                            continue;
-                        }
-                        let entry = table_statistic.entry(*table_id).or_default();
-                        *entry += sst.file_size;
-                    }
-                }
-            }
-            infos.push(TableGroupInfo {
-                group_id: *group_id,
-                group_size,
-                table_statistic,
-                split_by_table: false,
-            });
-        }
-        infos
     }
 }
 
@@ -373,6 +320,9 @@ impl HummockVersionUpdateExt for HummockVersion {
                         l0.total_file_size -= sst_info.file_size;
                         l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
                     });
+                if insert_table_infos.is_empty() {
+                    continue;
+                }
                 match insert_hint {
                     Ok(idx) => {
                         add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
@@ -507,13 +457,15 @@ impl HummockVersionUpdateExt for HummockVersion {
                     delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
                     "no sst should be deleted when committing an epoch"
                 );
-                insert_new_sub_level(
-                    levels.l0.as_mut().unwrap(),
-                    insert_sub_level_id,
-                    LevelType::Overlapping,
-                    insert_table_infos,
-                    None,
-                );
+                if !insert_table_infos.is_empty() {
+                    insert_new_sub_level(
+                        levels.l0.as_mut().unwrap(),
+                        insert_sub_level_id,
+                        LevelType::Overlapping,
+                        insert_table_infos,
+                        None,
+                    );
+                }
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
                 levels.apply_compact_ssts(summary);
@@ -568,6 +520,11 @@ pub trait HummockLevelsExt {
     fn get_level_mut(&mut self, idx: usize) -> &mut Level;
     fn count_ssts(&self) -> usize;
     fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary);
+    fn check_deleted_sst_exist(
+        &self,
+        delete_sst_levels: &[u32],
+        delete_sst_ids_set: HashSet<u64>,
+    ) -> bool;
 }
 
 impl HummockLevelsExt for Levels {
@@ -601,17 +558,37 @@ impl HummockLevelsExt for Levels {
             insert_table_infos,
             ..
         } = summary;
-        let mut deleted = false;
+
+        if !self.check_deleted_sst_exist(&delete_sst_levels, delete_sst_ids_set.clone()) {
+            warn!(
+                "This VersionDelta may be committed by an expired compact task. Please check it. \n
+                    delete_sst_levels: {:?}\n,
+                    delete_sst_ids_set: {:?}\n,
+                    insert_sst_level_id: {}\n,
+                    insert_sub_level_id: {}\n,
+                    insert_table_infos: {:?}\n",
+                delete_sst_levels,
+                delete_sst_ids_set,
+                insert_sst_level_id,
+                insert_sub_level_id,
+                insert_table_infos
+                    .iter()
+                    .map(|sst| (sst.sst_id, sst.object_id))
+                    .collect_vec()
+            );
+            return;
+        }
         for level_idx in &delete_sst_levels {
             if *level_idx == 0 {
                 for level in &mut self.l0.as_mut().unwrap().sub_levels {
-                    deleted = level_delete_ssts(level, &delete_sst_ids_set) || deleted;
+                    level_delete_ssts(level, &delete_sst_ids_set);
                 }
             } else {
                 let idx = *level_idx as usize - 1;
-                deleted = level_delete_ssts(&mut self.levels[idx], &delete_sst_ids_set) || deleted;
+                level_delete_ssts(&mut self.levels[idx], &delete_sst_ids_set);
             }
         }
+
         if !insert_table_infos.is_empty() {
             if insert_sst_level_id == 0 {
                 let l0 = self.l0.as_mut().unwrap();
@@ -620,8 +597,8 @@ impl HummockLevelsExt for Levels {
                     .partition_point(|level| level.sub_level_id < insert_sub_level_id);
                 assert!(
                     index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id == insert_sub_level_id,
-                    "should find the level to insert into when applying compaction generated delta. sub level idx: {}, sub level count: {}",
-                    insert_sub_level_id, l0.sub_levels.len()
+                    "should find the level to insert into when applying compaction generated delta. sub level idx: {},  removed sst ids: {:?}, sub levels: {:?},",
+                    insert_sub_level_id, delete_sst_ids_set, l0.sub_levels.iter().map(|level| level.sub_level_id).collect_vec()
                 );
                 level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
             } else {
@@ -652,6 +629,28 @@ impl HummockLevelsExt for Levels {
                 .map(|level| level.uncompressed_file_size)
                 .sum::<u64>();
         }
+    }
+
+    fn check_deleted_sst_exist(
+        &self,
+        delete_sst_levels: &[u32],
+        mut delete_sst_ids_set: HashSet<u64>,
+    ) -> bool {
+        for level_idx in delete_sst_levels {
+            if *level_idx == 0 {
+                for level in &self.l0.as_ref().unwrap().sub_levels {
+                    level.table_infos.iter().for_each(|table| {
+                        delete_sst_ids_set.remove(&table.sst_id);
+                    });
+                }
+            } else {
+                let idx = *level_idx as usize - 1;
+                self.levels[idx].table_infos.iter().for_each(|table| {
+                    delete_sst_ids_set.remove(&table.sst_id);
+                });
+            }
+        }
+        delete_sst_ids_set.is_empty()
     }
 }
 
