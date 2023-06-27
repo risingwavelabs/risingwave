@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::layers::RetryLayer;
+use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Oss;
 use opendal::Operator;
 
@@ -41,6 +41,7 @@ impl OpendalObjectStore {
         builder.access_key_secret(&access_key_secret);
         let op: Operator = Operator::new(builder)?
             .layer(RetryLayer::default())
+            .layer(LoggingLayer::default())
             .finish();
         Ok(Self {
             op,
