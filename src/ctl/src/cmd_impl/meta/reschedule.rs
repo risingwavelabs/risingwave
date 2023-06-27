@@ -262,13 +262,15 @@ pub async fn unregister_workers(
 
     let mut target_worker_ids: HashSet<_> = HashSet::new();
 
+    let worker_ids: HashSet<_> = worker_nodes.iter().map(|worker| worker.id).collect();
+
     for worker in workers {
         let worker_id = worker
             .parse::<u32>()
             .ok()
             .or_else(|| worker_index_by_host.get(&worker).cloned());
 
-        if let Some(worker_id) = worker_id {
+        if let Some(worker_id) = worker_id && worker_ids.contains(&worker_id) {
             if !target_worker_ids.insert(worker_id) {
                 println!("Warn: {} and {} are the same worker", worker, worker_id);
             }
@@ -278,33 +280,14 @@ pub async fn unregister_workers(
                 continue;
             }
 
-            println!("Invalid worker input: {}", worker);
+            println!("Could not find worker {}", worker);
             exit(1);
         }
     }
 
-    let worker_ids: HashSet<_> = worker_nodes.iter().map(|worker| worker.id).collect();
-
-    let missed_worker_ids: HashSet<_> =
-        target_worker_ids.difference(&worker_ids).cloned().collect();
-
-    if !missed_worker_ids.is_empty() {
-        if ignore_not_found {
-            println!(
-                "Warn: worker ids {:?} not found, ignored",
-                missed_worker_ids
-            );
-
-            if missed_worker_ids.len() == target_worker_ids.len() {
-                println!("No valid worker ids found, exit");
-                exit(1);
-            }
-
-            target_worker_ids.drain_filter(|worker_id| missed_worker_ids.contains(worker_id));
-        } else {
-            println!("Worker ids {:?} not found", missed_worker_ids);
-            exit(1);
-        }
+    if target_worker_ids.is_empty() {
+        println!("No worker provided");
+        exit(1);
     }
 
     let target_workers = worker_nodes
