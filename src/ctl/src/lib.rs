@@ -197,15 +197,25 @@ enum TableCommands {
 }
 
 #[derive(clap::Args, Debug)]
-#[clap(group(clap::ArgGroup::new("workers_group").required(true).args(&["include_workers", "exclude_workers"])))]
+#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers"])))]
 pub struct ScaleResizeCommands {
-    /// The worker ids that needs to be excluded during scheduling
-    #[clap(long, value_delimiter = ',', value_name = "id,...")]
-    exclude_workers: Option<Vec<u32>>,
+    /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
+    /// supported
+    #[clap(
+        long,
+        value_delimiter = ',',
+        value_name = "worker_id or worker_host, ..."
+    )]
+    exclude_workers: Option<Vec<String>>,
 
-    /// The worker ids that needs to be included during scheduling
-    #[clap(long, value_delimiter = ',', value_name = "id,...")]
-    include_workers: Option<Vec<u32>>,
+    /// The worker that needs to be included during scheduling, worker_id and worker_host are both
+    /// supported
+    #[clap(
+        long,
+        value_delimiter = ',',
+        value_name = "worker_id or worker_host, ..."
+    )]
+    include_workers: Option<Vec<String>>,
 
     /// Will generate a plan supported by the `reschedule` command and save it to the provided path
     /// by the `--output`.
