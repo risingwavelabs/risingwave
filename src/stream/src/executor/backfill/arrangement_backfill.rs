@@ -151,7 +151,7 @@ where
 
         // Current position of upstream_table primary key.
         // Current position is computed **per vnode**.
-        let mut current_pos_map: HashMap<Vec<Datum>, OwnedRow> = HashMap::new();
+        let mut current_pos_map = vec![None; self.upstream_table.vnodes().count_ones()];
 
         // Current position of the upstream_table primary key.
         // `None` means it starts from the beginning.
