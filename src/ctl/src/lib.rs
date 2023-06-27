@@ -293,6 +293,17 @@ enum MetaCommands {
 
     /// List fragment to parallel units mapping for serving
     ListServingFragmentMapping,
+
+    /// Delete workers from the cluster
+    DeleteWorkers {
+        /// The worker ids that needs to be deleted
+        #[clap(long, required = true, value_delimiter = ',', value_name = "id,...")]
+        worker_ids: Vec<u32>,
+
+        /// Automatic yes to prompts
+        #[clap(short = 'y', long, default_value_t = false)]
+        yes: bool,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -433,6 +444,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Meta(MetaCommands::ListServingFragmentMapping) => {
             cmd_impl::meta::list_serving_fragment_mappings(context).await?
+        }
+        Commands::Meta(MetaCommands::DeleteWorkers { worker_ids, yes }) => {
+            cmd_impl::meta::delete_workers(context, worker_ids, yes).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
