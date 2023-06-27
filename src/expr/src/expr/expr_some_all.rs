@@ -17,7 +17,7 @@ use std::sync::Arc;
 use itertools::{multizip, Itertools};
 use risingwave_common::array::{Array, ArrayRef, BoolArray, DataChunk};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl, ScalarRefImpl};
+use risingwave_common::types::{DataType, Datum, ListRef, Scalar, ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -92,7 +92,7 @@ impl Expression for SomeAllExpression {
         let capacity = arr_right_inner
             .iter()
             .flatten()
-            .map(|list_ref| list_ref.flatten().len())
+            .map(ListRef::flatten_len)
             .sum();
 
         let mut unfolded_arr_left_builder = arr_left.create_builder(capacity);
@@ -110,10 +110,11 @@ impl Expression for SomeAllExpression {
                 let datum_right = right.unwrap();
                 match datum_right {
                     ScalarRefImpl::List(array) => {
-                        let len = array.iter().len();
+                        let flattened = array.flatten();
+                        let len = flattened.len();
                         num_array.push(Some(len));
                         unfolded_arr_left_builder.append_n(len, left);
-                        for item in array.iter() {
+                        for item in flattened {
                             unfolded_arr_right_builder.append(item);
                         }
                     }
@@ -142,12 +143,19 @@ impl Expression for SomeAllExpression {
             }
         }
 
+        assert_eq!(num_array.len(), data_chunk.capacity());
+
+        let unfolded_arr_left = unfolded_arr_left_builder.finish();
+        let unfolded_arr_right = unfolded_arr_right_builder.finish();
+
+        // Unfolded array are actually compacted, and the visibility of the output array will be
+        // further restored by `num_array`.
+        assert_eq!(unfolded_arr_left.len(), unfolded_arr_right.len());
+        let unfolded_compact_len = unfolded_arr_left.len();
+
         let data_chunk = DataChunk::new(
-            vec![
-                unfolded_arr_left_builder.finish().into(),
-                unfolded_arr_right_builder.finish().into(),
-            ],
-            capacity,
+            vec![unfolded_arr_left.into(), unfolded_arr_right.into()],
+            unfolded_compact_len,
         );
 
         let func_results = self.func.eval(&data_chunk).await?;

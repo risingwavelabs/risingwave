@@ -95,6 +95,10 @@ impl SinkType {
     }
 }
 
+/// the catalog of the sink. There are two kind of schema here. The full schema is all columns
+/// stored in the `column` which is the sink executor/fragment's output schema. The visible
+/// schema contains the columns whose `is_hidden` is false, which is the columns sink out to the
+/// external system. The distribution key and all other keys are indexed in the full schema.
 #[derive(Clone, Debug)]
 pub struct SinkCatalog {
     /// Id of the sink.
@@ -113,7 +117,7 @@ pub struct SinkCatalog {
     pub definition: String,
 
     /// All columns of the sink. Note that this is NOT sorted by columnId in the vector.
-    pub columns: Vec<ColumnCatalog>,
+    columns: Vec<ColumnCatalog>,
 
     /// Primary keys of the sink. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
@@ -180,10 +184,26 @@ impl SinkCatalog {
         self.definition.clone()
     }
 
-    pub fn schema(&self) -> Schema {
+    pub fn visible_columns(&self) -> impl Iterator<Item = &ColumnCatalog> {
+        self.columns.iter().filter(|c| !c.is_hidden)
+    }
+
+    pub fn full_columns(&self) -> &[ColumnCatalog] {
+        &self.columns
+    }
+
+    pub fn full_schema(&self) -> Schema {
         let fields = self
-            .columns
+            .full_columns()
             .iter()
+            .map(|column| Field::from(column.column_desc.clone()))
+            .collect_vec();
+        Schema { fields }
+    }
+
+    pub fn visible_schema(&self) -> Schema {
+        let fields = self
+            .visible_columns()
             .map(|column| Field::from(column.column_desc.clone()))
             .collect_vec();
         Schema { fields }

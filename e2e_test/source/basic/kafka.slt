@@ -387,6 +387,31 @@ WITH (
 	topic = 'upsert_json')
 ROW FORMAT UPSERT_JSON
 
+statement ok
+CREATE TABLE dbz_ignore_case_json (
+   L_ORDERKEY BIGINT,
+   L_PARTKEY BIGINT,
+   L_SUPPKEY BIGINT,
+   L_LINENUMBER BIGINT,
+   L_QUANTITY DECIMAL,
+   L_EXTENDEDPRICE DECIMAL,
+   L_DISCOUNT DECIMAL,
+   L_TAX DECIMAL,
+   L_RETURNFLAG VARCHAR,
+   L_LINESTATUS VARCHAR,
+   L_SHIPDATE DATE,
+   L_COMMITDATE DATE,
+   L_RECEIPTDATE DATE,
+   L_SHIPINSTRUCT VARCHAR,
+   L_SHIPMODE VARCHAR,
+   L_COMMENT VARCHAR,
+   PRIMARY KEY(L_ORDERKEY, L_LINENUMBER)
+) WITH (
+    connector = 'kafka',
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'debezium_ignore_case_json'
+) row format debezium_json
+
 
 statement ok
 flush;
@@ -641,20 +666,18 @@ ORDER BY
 6	Leah	Davis	18	5.7	140
 9	Jacob	Anderson	20	5.8	155
 
-query I 
-SELECT * FROM s24;
+query II
+select
+    L_ORDERKEY,
+    L_LINENUMBER
+from dbz_ignore_case_json
+order by
+    L_ORDERKEY,
+    L_LINENUMBER;
 ----
-\x6b6b
-\x776561776566776566
-
-query I 
-SELECT * FROM source_mv3;
-----
-\x6b6b
-\x776561776566776566
-
-statement ok
-CREATE MATERIALIZED VIEW test1 AS select * from test;
+56165    1
+56166    1
+56166    2
 
 statement ok
 drop materialized view source_mv1
@@ -725,3 +748,5 @@ DROP TABLE mongo_customers_no_schema_field;
 statement ok
 DROP TABLE upsert_students;
 
+statement ok
+drop table dbz_ignore_case_json;

@@ -348,7 +348,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
-    use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
+    use risingwave_expr::agg::AggCall;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
@@ -390,42 +390,10 @@ mod tests {
         tx.push_barrier(4, false);
 
         let agg_calls = vec![
-            AggCall {
-                kind: AggKind::Count, // as row count, index: 0
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-                direct_args: vec![],
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-                direct_args: vec![],
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 1),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-                direct_args: vec![],
-            },
-            AggCall {
-                kind: AggKind::Min,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-                direct_args: vec![],
-            },
+            AggCall::from_pretty("(count:int8)"),
+            AggCall::from_pretty("(sum:int8 $0:int8)"),
+            AggCall::from_pretty("(sum:int8 $1:int8)"),
+            AggCall::from_pretty("(min:int8 $0:int8)"),
         ];
 
         let simple_agg = new_boxed_simple_agg_executor(
