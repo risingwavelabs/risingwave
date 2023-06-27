@@ -103,6 +103,7 @@ where
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
+        // Table scan scans a subset of the columns of the upstream table.
         let pk_in_output_indices = self
             .upstream_table
             .pk_indices()
@@ -110,6 +111,7 @@ where
             .map(|&i| self.output_indices.iter().position(|&j| i == j))
             .collect::<Option<Vec<_>>>()
             .unwrap();
+        // FIXME: This is wrong, it should use pk.
         let state_len = pk_in_output_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
