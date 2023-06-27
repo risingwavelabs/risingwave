@@ -84,16 +84,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generated column names should be qualified by table name.
     fn gen_table_factor_inner(&mut self) -> (TableFactor, Table) {
         // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
-        match self.rng.gen_range(0..=2) {
+        match self.rng.gen_range(0..=4) {
             0 => self.gen_time_window_func(),
-            1 => {
+            1..=2 => {
                 if self.can_recurse() {
                     self.gen_table_subquery()
                 } else {
                     self.gen_simple_table_factor()
                 }
             }
-            2 => self.gen_simple_table_factor(),
+            3..=4 => self.gen_simple_table_factor(),
             _ => unreachable!(),
         }
     }
