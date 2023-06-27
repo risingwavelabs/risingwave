@@ -87,18 +87,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                     self.seq_id += 1;
                 }
                 let end_seq_id = self.seq_id - 1;
-
-                let mut delete_range = Vec::with_capacity(self.serde.vnodes().count_ones());
-                if let Some(truncation_offset) = self.tx.pop_truncation() {
-                    for vnode in self.serde.vnodes().iter_vnodes() {
-                        let range_begin = Bytes::from(vnode.to_be_bytes().to_vec());
-                        let range_end = self
-                            .serde
-                            .serialize_truncation_offset_watermark(vnode, truncation_offset);
-                        delete_range.push((Included(range_begin), Included(range_end)));
-                    }
-                }
-                self.state_store.flush(delete_range).await?;
+                self.state_store.flush(Vec::new()).await?;
 
                 let vnode_bitmap = vnode_bitmap_builder.finish();
                 self.tx.add_flushed(start_seq_id, end_seq_id, vnode_bitmap);
@@ -118,7 +107,17 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
                 self.state_store.insert(key, value, None)?;
             }
-            self.state_store.flush(Vec::new()).await?;
+            let mut delete_range = Vec::with_capacity(self.serde.vnodes().count_ones());
+            if let Some(truncation_offset) = self.tx.pop_truncation() {
+                for vnode in self.serde.vnodes().iter_vnodes() {
+                    let range_begin = Bytes::from(vnode.to_be_bytes().to_vec());
+                    let range_end = self
+                        .serde
+                        .serialize_truncation_offset_watermark(vnode, truncation_offset);
+                    delete_range.push((Included(range_begin), Included(range_end)));
+                }
+            }
+            self.state_store.flush(delete_range).await?;
             self.state_store.seal_current_epoch(next_epoch);
             self.tx.barrier(is_checkpoint, next_epoch);
             self.seq_id = FIRST_SEQ_ID;

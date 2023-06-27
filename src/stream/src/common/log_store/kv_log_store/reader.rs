@@ -19,6 +19,7 @@ use std::pin::Pin;
 use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::stream::select_all;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_storage::hummock::CachePolicy;
@@ -110,7 +111,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                 prefix_hint: None,
                                 ignore_range_tombstone: false,
                                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
-                                cache_policy: CachePolicy::NotFill,
+                                cache_policy: CachePolicy::Fill(CachePriority::Low),
                                 retention_seconds: None,
                                 table_id,
                                 read_version_from_backup: false,
@@ -189,7 +190,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                                 ignore_range_tombstone: false,
                                                 prefetch_options:
                                                     PrefetchOptions::new_for_exhaust_iter(),
-                                                cache_policy: CachePolicy::NotFill,
+                                                cache_policy: CachePolicy::Fill(CachePriority::Low),
                                                 retention_seconds: None,
                                                 table_id,
                                                 read_version_from_backup: false,
