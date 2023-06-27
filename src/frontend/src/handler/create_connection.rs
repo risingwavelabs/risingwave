@@ -29,6 +29,7 @@ use crate::handler::HandlerArgs;
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
 pub(crate) const CONNECTION_PROVIDER_PROP: &str = "provider";
 pub(crate) const CONNECTION_SERVICE_NAME_PROP: &str = "service.name";
+pub(crate) const CONNECTION_TAGS_PROP: &str = "tags";
 
 pub(crate) const CLOUD_PROVIDER_MOCK: &str = "mock"; // fake privatelink provider for testing
 pub(crate) const CLOUD_PROVIDER_AWS: &str = "aws";
@@ -65,6 +66,7 @@ fn resolve_private_link_properties(
         PrivateLinkProvider::Mock => Ok(create_connection_request::PrivateLink {
             provider: provider.into(),
             service_name: String::new(),
+            tags: None,
         }),
         PrivateLinkProvider::Aws => {
             let service_name =
@@ -72,6 +74,7 @@ fn resolve_private_link_properties(
             Ok(create_connection_request::PrivateLink {
                 provider: provider.into(),
                 service_name,
+                tags: with_properties.get(CONNECTION_TAGS_PROP).cloned(),
             })
         }
         PrivateLinkProvider::Unspecified => Err(RwError::from(ProtocolError(
