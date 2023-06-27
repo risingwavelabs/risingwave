@@ -40,10 +40,9 @@ pub async fn handle_drop_sink(
                 Ok((sink, schema)) => (sink.clone(), schema),
                 Err(e) => {
                     return if if_exists {
-                        Ok(RwPgResponse::empty_result_with_notice(
-                            StatementType::DROP_SINK,
-                            format!("sink \"{}\" does not exist, skipping", sink_name),
-                        ))
+                        Ok(RwPgResponse::builder(StatementType::DROP_SINK)
+                            .notice(format!("sink \"{}\" does not exist, skipping", sink_name))
+                            .into())
                     } else {
                         Err(e.into())
                     }
