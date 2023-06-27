@@ -574,15 +574,15 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType
     || {
         convert_args!(hashmap!(
                 KAFKA_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro, RowFormatType::Bytes],
-                PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
-                KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
-                GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
-                NEXMARK_CONNECTOR => vec![RowFormatType::Native],
-                DATAGEN_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Json],
+                PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
+                KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
+                GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
+                NEXMARK_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Bytes],
+                DATAGEN_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Json, RowFormatType::Bytes],
                 S3_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json],
-                MYSQL_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
-                POSTGRES_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
-                CITUS_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
+                MYSQL_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson, RowFormatType::Bytes],
+                POSTGRES_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson, RowFormatType::Bytes],
+                CITUS_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson, RowFormatType::Bytes],
         ))
     },
 );
