@@ -90,7 +90,7 @@ pub trait Session: Send + Sync {
         prepare_statement: Self::PreparedStatement,
     ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError>;
 
-    fn describe_portral(
+    fn describe_portal(
         self: Arc<Self>,
         portal: Self::Portal,
     ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
@@ -98,6 +98,8 @@ pub trait Session: Send + Sync {
     fn user_authenticator(&self) -> &UserAuthenticator;
 
     fn id(&self) -> SessionId;
+
+    fn set_config(&self, key: &str, value: Vec<String>) -> Result<(), BoxedError>;
 }
 
 #[derive(Debug, Clone)]
@@ -291,7 +293,7 @@ mod tests {
             ))
         }
 
-        fn describe_portral(
+        fn describe_portal(
             self: Arc<Self>,
             _portal: String,
         ) -> Result<Vec<PgFieldDescriptor>, BoxedError> {
@@ -304,6 +306,10 @@ mod tests {
 
         fn id(&self) -> SessionId {
             (0, 0)
+        }
+
+        fn set_config(&self, _key: &str, _value: Vec<String>) -> Result<(), BoxedError> {
+            Ok(())
         }
 
         fn take_notices(self: Arc<Self>) -> Vec<String> {

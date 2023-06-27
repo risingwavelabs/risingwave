@@ -445,6 +445,8 @@ impl ConfigMap {
             self.interval_style = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
             self.batch_parallelism = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
+            self.application_name = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -503,6 +505,8 @@ impl ConfigMap {
             Ok(self.server_version.clone())
         } else if key.eq_ignore_ascii_case(ServerVersionNum::entry_name()) {
             Ok(self.server_version_num.to_string())
+        } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
+            Ok(self.application_name.clone())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
