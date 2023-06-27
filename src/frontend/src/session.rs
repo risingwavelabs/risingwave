@@ -675,10 +675,11 @@ impl SessionImpl {
             ));
         }
         if stmts.len() > 1 {
-            return Ok(PgResponse::empty_result_with_notice(
-                pgwire::pg_response::StatementType::EMPTY,
-                "cannot insert multiple commands into statement".to_string(),
-            ));
+            return Ok(
+                PgResponse::builder(pgwire::pg_response::StatementType::EMPTY)
+                    .notice("cannot insert multiple commands into statement")
+                    .into(),
+            );
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {

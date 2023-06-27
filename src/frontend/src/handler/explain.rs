@@ -262,14 +262,14 @@ pub async fn handle_explain(
         .map(|l| Row::new(vec![Some(l.into())]))
         .collect_vec();
 
-    Ok(PgResponse::new_for_stream(
-        StatementType::EXPLAIN,
-        None,
-        rows.into(),
-        vec![PgFieldDescriptor::new(
-            "QUERY PLAN".to_owned(),
-            DataType::Varchar.to_oid(),
-            DataType::Varchar.type_len(),
-        )],
-    ))
+    Ok(PgResponse::builder(StatementType::EXPLAIN)
+        .values(
+            rows.into(),
+            vec![PgFieldDescriptor::new(
+                "QUERY PLAN".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            )],
+        )
+        .into())
 }
