@@ -103,6 +103,7 @@ upsert_sink_input_feature=("--input_file=./data/upsert_sink_input.json"
                            "--input_binary_file=./data/upsert_sink_input --data_format_use_json=False")
 type=("Json format" "StreamChunk format")
 
+${MC_PATH} mb minio/bucket
 for ((i=0; i<${#type[@]}; i++)); do
     echo "--- running file ${type[i]} integration tests"
     cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
@@ -123,7 +124,6 @@ for ((i=0; i<${#type[@]}; i++)); do
     fi
 
     # test upsert mode
-    ${MC_PATH} mb minio/bucket
     echo "--- running iceberg upsert mode ${type[i]} integration tests"
     cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
     python3 pyspark-util.py create_iceberg
@@ -135,11 +135,8 @@ for ((i=0; i<${#type[@]}; i++)); do
       exit 1
     fi
     python3 pyspark-util.py drop_iceberg
-    ${MC_PATH} rm -r -force minio/bucket
-    ${MC_PATH} rb minio/bucket
 
     # test append-only mode
-    ${MC_PATH} mb minio/bucket
     echo "--- running iceberg append-only mode ${type[i]} integration tests"
     cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
     python3 pyspark-util.py create_iceberg
@@ -152,25 +149,45 @@ for ((i=0; i<${#type[@]}; i++)); do
     fi
     python3 pyspark-util.py drop_iceberg
 
-    # clean up minio
-    ${MC_PATH} rm -r -force minio/bucket
-    ${MC_PATH} rb minio/bucket
-
     # test append-only mode
-    ${MC_PATH} mb minio/bucket
-    echo "--- running deltalake append-only mod ${type[i]} integration tests"
-    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-    python3 pyspark-util.py create_deltalake
-    if python3 integration_tests.py --deltalake_sink ${sink_input_feature[i]}; then
-      python3 pyspark-util.py test_deltalake
-      echo "Deltalake sink ${type[i]} test passed"
-    else
-      echo "Deltalake sink ${type[i]} test failed"
-      exit 1
-    fi
-    python3 pyspark-util.py clean_deltalake
-    ${MC_PATH} rm -r -force minio/bucket
-    ${MC_PATH} rb minio/bucket
+    # echo "--- running deltalake append-only mod ${type[i]} integration tests"
+    # cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
+    # python3 pyspark-util.py create_deltalake
+    # if python3 integration_tests.py --deltalake_sink ${sink_input_feature[i]}; then
+    #   python3 pyspark-util.py test_deltalake
+    #   echo "Deltalake sink ${type[i]} test passed"
+    # else
+    #   echo "Deltalake sink ${type[i]} test failed"
+    #   exit 1
+    # fi
+    # python3 pyspark-util.py clean_deltalake
 done
+
+echo "--- running deltalake append-only mod integration tests"
+cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
+python3 pyspark-util.py create_deltalake
+if python3 integration_tests.py --deltalake_sink --input_binary_file=./data/sink_input --data_format_use_json=False; then
+  python3 pyspark-util.py test_deltalake
+  echo "Deltalake sink streamchunk test passed"
+else
+  echo "Deltalake sink streamchunk test failed"
+  exit 1
+fi
+python3 pyspark-util.py clean_deltalake
+
+
+cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
+python3 pyspark-util.py create_deltalake
+if python3 integration_tests.py --deltalake_sink; then
+  python3 pyspark-util.py test_deltalake
+  echo "Deltalake sink json test passed"
+else
+  echo "Deltalake sink json test failed"
+  exit 1
+fi
+python3 pyspark-util.py clean_deltalake
+
+${MC_PATH} rm -r -force minio/bucket
+${MC_PATH} rb minio/bucket
 
 echo "all deltalake tests passed"
