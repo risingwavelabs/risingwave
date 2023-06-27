@@ -250,11 +250,10 @@ pub(crate) async fn iter_chunks<'a, S, E>(
             .instrument_await("backfill_snapshot_read")
             .await?
     {
-        if data_chunk.cardinality() != 0 {
-            let ops = vec![Op::Insert; data_chunk.capacity()];
-            let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-            yield Some(stream_chunk);
-        }
+        debug_assert!(data_chunk.cardinality() > 0);
+        let ops = vec![Op::Insert; data_chunk.capacity()];
+        let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+        yield Some(stream_chunk);
     }
 
     yield None;
