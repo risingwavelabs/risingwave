@@ -72,53 +72,20 @@ def load_binary_input(input_file):
     return sink_input
 
 
-def test_sink_json(type, prop, input_file, op_overlap=False):
-    sink_input = load_input(input_file)
-    with grpc.insecure_channel('localhost:50051') as channel:
-        stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
-        request_list = [
-            connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
-                format=connector_service_pb2.SinkPayloadFormat.JSON,
-                sink_config=connector_service_pb2.SinkConfig(
-                    connector_type=type,
-                    properties=prop,
-                    table_schema=make_mock_schema()
-                )
-            ))]
-        epoch = 0
-        batch_id = 1
-        for batch in sink_input:
-            request_list.append(connector_service_pb2.SinkStreamRequest(
-                start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
-            row_ops = []
-            for row in batch:
-                row_ops.append(connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload.RowOp(
-                    op_type=op_overlap if op_overlap != False else row['op_type'], line=str(row['line'])))
-            request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
-                json_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload(
-                    row_ops=row_ops),
-                batch_id=batch_id,
-                epoch=epoch
-            )))
-            request_list.append(connector_service_pb2.SinkStreamRequest(
-                sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
-            epoch += 1
-            batch_id += 1
-
-        response_iter = stub.SinkStream(iter(request_list))
-        for req in request_list:
-            try:
-                print("REQUEST", req)
-                print("RESPONSE OK:", next(response_iter))
-            except Exception as e:
-                print("Integration test failed: ", e)
-                exit(1)
-
-
-def test_sink_stream_chunk(type, prop, input_file, table_schema=make_mock_schema()):
-    sink_input = load_binary_input(input_file)
-    with grpc.insecure_channel('localhost:50051') as channel:
-        stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
+def test_sink(type, prop, input_file, use_json, table_schema=make_mock_schema()):
+    # read input, Add StartSink request
+    if use_json:
+        sink_input = load_input(input_file)
+        request_list = [connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
+            format=connector_service_pb2.SinkPayloadFormat.JSON,
+            sink_config=connector_service_pb2.SinkConfig(
+                connector_type=type,
+                properties=prop,
+                table_schema=table_schema
+            )
+        ))]
+    else:
+        sink_input = load_binary_input(input_file)
         request_list = [
             connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
                 format=connector_service_pb2.SinkPayloadFormat.STREAM_CHUNK,
@@ -128,21 +95,42 @@ def test_sink_stream_chunk(type, prop, input_file, table_schema=make_mock_schema
                     table_schema=table_schema
                 )
             ))]
+    with grpc.insecure_channel('localhost:50051') as channel:
+        stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
         epoch = 0
         batch_id = 1
-        request_list.append(connector_service_pb2.SinkStreamRequest(
-            start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
-        request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
-            stream_chunk_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.StreamChunkPayload(
-                binary_data=sink_input),
-            batch_id=batch_id,
-            epoch=epoch
-        )))
-        request_list.append(connector_service_pb2.SinkStreamRequest(
-            sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
-        epoch += 1
-        batch_id += 1
+        # construct request
+        if use_json:
+            for batch in sink_input:
+                request_list.append(connector_service_pb2.SinkStreamRequest(
+                    start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
+                row_ops = []
+                for row in batch:
+                    row_ops.append(connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload.RowOp(
+                        op_type=row['op_type'], line=str(row['line'])))
+                request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
+                    json_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload(
+                        row_ops=row_ops),
+                    batch_id=batch_id,
+                    epoch=epoch
+                )))
+                request_list.append(connector_service_pb2.SinkStreamRequest(
+                    sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
+                epoch += 1
+                batch_id += 1
+        else:
+            request_list.append(connector_service_pb2.SinkStreamRequest(
+                start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
+            request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
+                stream_chunk_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.StreamChunkPayload(
+                    binary_data=sink_input),
+                batch_id=batch_id,
+                epoch=epoch
+            )))
+            request_list.append(connector_service_pb2.SinkStreamRequest(
+                sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
 
+        # send request
         response_iter = stub.SinkStream(iter(request_list))
         for req in request_list:
             try:
@@ -151,7 +139,6 @@ def test_sink_stream_chunk(type, prop, input_file, table_schema=make_mock_schema
             except Exception as e:
                 print("Integration test failed: ", e)
                 exit(1)
-
 
 def validate_jdbc_sink(input_file):
     conn = psycopg2.connect(
@@ -186,20 +173,15 @@ def validate_jdbc_sink(input_file):
 def test_file_sink(file_name, use_json):
     type = "file"
     prop = {"output.path": "/tmp/connector", }
-    if use_json:
-        test_sink_json(type, prop, file_name, op_overlap=1)
-    else:
-        test_sink_stream_chunk(type, prop, file_name)
-
+    test_sink(type, prop, file_name, use_json)
+    
 
 def test_jdbc_sink(input_file, input_binary_file, use_json):
     type = "jdbc"
     prop = {"jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
             "table.name": "test"}
-    if use_json:
-        test_sink_json(type, prop, input_file, op_overlap=1)
-    else:
-        test_sink_stream_chunk(type, prop, input_binary_file)
+    file_name = input_file if use_json else input_binary_file
+    test_sink(type, prop, file_name, use_json)
     # validate results
     validate_jdbc_sink(input_file)
 
@@ -208,10 +190,7 @@ def test_elasticsearch_sink(file_name, use_json):
     prop = {"url": "http://127.0.0.1:9200",
             "index": "test"}
     type = "elasticsearch"
-    if use_json:
-        test_sink_json(type, prop, file_name, op_overlap=1)
-    else:
-        test_sink_stream_chunk(type, prop, file_name)
+    test_sink(type, prop, file_name, use_json)
 
 
 def test_iceberg_sink(file_name, use_json):
@@ -223,10 +202,7 @@ def test_iceberg_sink(file_name, use_json):
             "database.name": "demo_db",
             "table.name": "demo_table"}
     type = "iceberg"
-    if use_json:
-        test_sink_json(type, prop, file_name, op_overlap=1)
-    else:
-        test_sink_stream_chunk(type, prop, file_name)
+    test_sink(type, prop, file_name, use_json)
 
 
 def test_upsert_iceberg_sink(file_name, use_json):
@@ -238,11 +214,8 @@ def test_upsert_iceberg_sink(file_name, use_json):
             "database.name": "demo_db",
             "table.name": "demo_table"}
     type = "iceberg"
-    if use_json:
-        test_sink_json(type, prop, file_name)
-    else:
-        # need to make sure all ops as Insert
-        test_sink_stream_chunk(type, prop, file_name)
+    # need to make sure all ops as Insert
+    test_sink(type, prop, file_name, use_json)
 
 
 def test_deltalake_sink(file_name, use_json):
@@ -253,17 +226,13 @@ def test_deltalake_sink(file_name, use_json):
         "s3.endpoint": "127.0.0.1:9000",
     }
     type = "deltalake"
-    if use_json:
-        test_sink_json(type, prop, file_name, op_overlap=1)
-    else:
-        test_sink_stream_chunk(type, prop, file_name)
+    test_sink(type, prop, file_name, use_json)
 
 
-def test_stream_chunk_data_format(input_binary_file):
+def test_stream_chunk_data_format(file_name):
     type = "file"
     prop = {"output.path": "/tmp/connector", }
-    test_sink_stream_chunk(type, prop, input_binary_file,
-                           make_mock_schema_stream_chunk())
+    test_sink(type, prop, file_name, use_json, make_mock_schema_stream_chunk())
 
 
 if __name__ == "__main__":
