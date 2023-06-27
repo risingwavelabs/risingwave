@@ -30,8 +30,8 @@ impl OpendalObjectStore {
         builder.root(&root);
 
         let op: Operator = Operator::new(builder)?
-            .layer(RetryLayer::default())
             .layer(LoggingLayer::default())
+            .layer(RetryLayer::default())
             .finish();
         Ok(Self {
             op,

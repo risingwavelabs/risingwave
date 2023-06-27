@@ -37,8 +37,8 @@ impl OpendalObjectStore {
         builder.account_name(&account_name);
         builder.account_key(&account_key);
         let op: Operator = Operator::new(builder)?
-            .layer(RetryLayer::default())
             .layer(LoggingLayer::default())
+            .layer(RetryLayer::default())
             .finish();
         Ok(Self {
             op,
