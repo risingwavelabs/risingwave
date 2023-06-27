@@ -2,7 +2,7 @@
 #!/usr/bin/env bash
 
 # Exits as soon as any line fails.
-set -euo pipefailp
+set -euo pipefail
 
 echo "--- check elasticsearch"
 curl http://elasticsearch:9200
