@@ -107,17 +107,17 @@ where
         3
     );
     compact_task.target_level = 6;
-    hummock_manager
-        .assign_compaction_task(&compact_task, compactor.context_id())
-        .await
-        .unwrap();
+    // hummock_manager
+    //     .assign_compaction_task(&compact_task, compactor.context_id())
+    //     .await
+    //     .unwrap();
     if temp_compactor {
         assert_eq!(compactor.context_id(), context_id);
     }
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.set_task_status(TaskStatus::Success);
     let ret = hummock_manager
-        .report_compact_task(context_id, &mut compact_task, None)
+        .report_compact_task(&mut compact_task, None)
         .await
         .unwrap();
     assert!(ret);

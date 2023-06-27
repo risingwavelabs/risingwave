@@ -159,7 +159,6 @@ impl HummockMetaClient for MockHummockMetaClient {
     ) -> Result<()> {
         self.hummock_manager
             .report_compact_task(
-                self.compact_context_id.load(Ordering::Acquire),
                 &mut compact_task,
                 Some(to_prost_table_stats_map(table_stats_change)),
             )
@@ -235,10 +234,10 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .await
                     .unwrap()
                 {
-                    hummock_manager_compact
-                        .assign_compaction_task(&task, context_id)
-                        .await
-                        .unwrap();
+                    // hummock_manager_compact
+                    //     .assign_compaction_task(&task, context_id)
+                    //     .await
+                    //     .unwrap();
                     let resp = SubscribeCompactTasksResponse {
                         task: Some(Task::CompactTask(task)),
                     };

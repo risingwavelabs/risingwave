@@ -839,7 +839,7 @@ where
 
         if is_trivial_reclaim {
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
+            self.report_compact_task_impl(&mut compact_task, Some(compaction_guard), None)
                 .await?;
             tracing::debug!(
                 "TrivialReclaim for compaction group {}: remove {} sstables, cost time: {:?}",
@@ -855,7 +855,7 @@ where
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
+            self.report_compact_task_impl(&mut compact_task, Some(compaction_guard), None)
                 .await?;
             tracing::debug!(
                 "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
@@ -879,7 +879,36 @@ where
             compact_task.current_epoch_time = Epoch::now().0;
             compact_task.compaction_filter_mask =
                 group_config.compaction_config.compaction_filter_mask;
-            commit_multi_var!(self, None, Transaction::default(), compact_status)?;
+
+            let mut compact_task_assignment =
+                BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+            if let Some(assignment) = compact_task_assignment.get(&compact_task.task_id) {
+                return Err(Error::CompactionTaskAlreadyAssigned(
+                    compact_task.task_id,
+                    assignment.context_id,
+                ));
+            }
+            compact_task_assignment.insert(
+                compact_task.task_id,
+                CompactTaskAssignment {
+                    compact_task: Some(compact_task.clone()),
+                    context_id: 0, // deprecated
+                },
+            );
+
+            // We are using a single transaction to ensure that each task has progress when it is
+            // created.
+            commit_multi_var!(
+                self,
+                None,
+                Transaction::default(),
+                compact_status,
+                compact_task_assignment
+            )?;
+
+            // Initiate heartbeat for the task to track its progress.
+            self.compactor_manager
+                .initiate_task_heartbeat(compact_task.clone());
 
             // this task has been finished.
             compact_task.set_task_status(TaskStatus::Pending);
@@ -1023,7 +1052,7 @@ where
 
     pub async fn cancel_compact_task_impl(&self, compact_task: &mut CompactTask) -> Result<bool> {
         assert!(CANCEL_STATUS_SET.contains(&compact_task.task_status()));
-        self.report_compact_task_impl(None, compact_task, None, None)
+        self.report_compact_task_impl(compact_task, None, None)
             .await
     }
 
@@ -1102,58 +1131,58 @@ where
     }
 
     /// Assign a compaction task to the compactor identified by `assignee_context_id`.
-    #[named]
-    pub async fn assign_compaction_task(
-        &self,
-        compact_task: &CompactTask,
-        assignee_context_id: HummockContextId,
-    ) -> Result<()> {
-        fail_point!("assign_compaction_task_fail", |_| Err(anyhow::anyhow!(
-            "assign_compaction_task_fail"
-        )
-        .into()));
-        let mut compaction_guard = write_lock!(self, compaction).await;
-        let _timer = start_measure_real_process_timer!(self);
+    // #[named]
+    // pub async fn assign_compaction_task(
+    //     &self,
+    //     compact_task: &CompactTask,
+    //     assignee_context_id: HummockContextId,
+    // ) -> Result<()> {
+    //     fail_point!("assign_compaction_task_fail", |_| Err(anyhow::anyhow!(
+    //         "assign_compaction_task_fail"
+    //     )
+    //     .into()));
+    //     let mut compaction_guard = write_lock!(self, compaction).await;
+    //     let _timer = start_measure_real_process_timer!(self);
 
-        // Assign the task.
-        let compaction = compaction_guard.deref_mut();
-        let mut compact_task_assignment =
-            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
-        if let Some(assignment) = compact_task_assignment.get(&compact_task.task_id) {
-            return Err(Error::CompactionTaskAlreadyAssigned(
-                compact_task.task_id,
-                assignment.context_id,
-            ));
-        }
-        compact_task_assignment.insert(
-            compact_task.task_id,
-            CompactTaskAssignment {
-                compact_task: Some(compact_task.clone()),
-                context_id: assignee_context_id,
-            },
-        );
-        commit_multi_var!(
-            self,
-            Some(assignee_context_id),
-            Transaction::default(),
-            compact_task_assignment
-        )?;
-        // Update compaction schedule policy.
-        self.compactor_manager
-            .assign_compact_task(assignee_context_id, compact_task)?;
+    //     // Assign the task.
+    //     let compaction = compaction_guard.deref_mut();
+    //     let mut compact_task_assignment =
+    //         BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+    //     if let Some(assignment) = compact_task_assignment.get(&compact_task.task_id) {
+    //         return Err(Error::CompactionTaskAlreadyAssigned(
+    //             compact_task.task_id,
+    //             assignment.context_id,
+    //         ));
+    //     }
+    //     compact_task_assignment.insert(
+    //         compact_task.task_id,
+    //         CompactTaskAssignment {
+    //             compact_task: Some(compact_task.clone()),
+    //             context_id: assignee_context_id,
+    //         },
+    //     );
+    //     commit_multi_var!(
+    //         self,
+    //         Some(assignee_context_id),
+    //         Transaction::default(),
+    //         compact_task_assignment
+    //     )?;
+    //     // Update compaction schedule policy.
+    //     self.compactor_manager
+    //         .assign_compact_task(assignee_context_id, compact_task)?;
 
-        // Initiate heartbeat for the task to track its progress.
-        self.compactor_manager
-            .initiate_task_heartbeat(assignee_context_id, compact_task.clone());
+    //     // Initiate heartbeat for the task to track its progress.
+    //     self.compactor_manager
+    //         .initiate_task_heartbeat(assignee_context_id, compact_task.clone());
 
-        #[cfg(test)]
-        {
-            drop(compaction_guard);
-            self.check_state_consistency().await;
-        }
+    //     #[cfg(test)]
+    //     {
+    //         drop(compaction_guard);
+    //         self.check_state_consistency().await;
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
     fn is_compact_task_expired(
         compact_task: &CompactTask,
@@ -1176,12 +1205,11 @@ where
 
     pub async fn report_compact_task(
         &self,
-        context_id: HummockContextId,
         compact_task: &mut CompactTask,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
         let ret = self
-            .report_compact_task_impl(Some(context_id), compact_task, None, table_stats_change)
+            .report_compact_task_impl(compact_task, None, table_stats_change)
             .await?;
 
         Ok(ret)
@@ -1197,7 +1225,6 @@ where
     #[named]
     pub async fn report_compact_task_impl(
         &self,
-        context_id: Option<HummockContextId>,
         compact_task: &mut CompactTask,
         compaction_guard: Option<RwLockWriteGuard<'_, Compaction>>,
         table_stats_change: Option<PbTableStatsMap>,
@@ -1213,32 +1240,8 @@ where
         let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
-        let assignee_context_id = compact_task_assignment
-            .remove(compact_task.task_id)
-            .map(|assignment| assignment.context_id);
-
-        // For context_id is None, there is no need to check the task assignment.
-        if let Some(context_id) = context_id {
-            match assignee_context_id {
-                Some(id) => {
-                    // Assignee id mismatch.
-                    if id != context_id {
-                        tracing::warn!(
-                            "Wrong reporter {}. Compaction task {} is assigned to {}",
-                            context_id,
-                            compact_task.task_id,
-                            *assignee_context_id.as_ref().unwrap(),
-                        );
-                        return Ok(false);
-                    }
-                }
-                None => {
-                    // The task is not found.
-                    tracing::warn!("Compaction task {} not found", compact_task.task_id);
-                    return Ok(false);
-                }
-            }
-        }
+        // remove task_assignment
+        compact_task_assignment.remove(compact_task.task_id);
 
         {
             // The compaction task is finished.
@@ -1300,7 +1303,7 @@ where
 
                 commit_multi_var!(
                     self,
-                    context_id,
+                    Some(0),
                     Transaction::default(),
                     compact_statuses,
                     compact_task_assignment,
@@ -1320,7 +1323,7 @@ where
                 // The compaction task is cancelled or failed.
                 commit_multi_var!(
                     self,
-                    context_id,
+                    Some(0),
                     Transaction::default(),
                     compact_statuses,
                     compact_task_assignment
@@ -1331,57 +1334,28 @@ where
         let task_status = compact_task.task_status();
         let task_status_label = task_status.as_str_name();
         let task_type_label = compact_task.task_type().as_str_name();
-        if let Some(context_id) = assignee_context_id {
-            // A task heartbeat is removed IFF we report the task status of a task and it still has
-            // a valid assignment, OR we remove the node context from our list of nodes,
-            // in which case the associated heartbeats are forcefully purged.
-            self.compactor_manager
-                .remove_task_heartbeat(context_id, compact_task.task_id);
-            // Also, if the task is already assigned, we need to update the compaction schedule
-            // policy.
-            self.compactor_manager
-                .report_compact_task(context_id, compact_task);
-            // Update compaction task count.
-            //
-            // A corner case is that the compactor is deleted
-            // immediately after it reports the task and before the meta node handles
-            // it. In that case, its host address will not be obtainable.
-            if let Some(worker) = self.cluster_manager.get_worker_by_id(context_id).await {
-                let host = worker.worker_node.host.unwrap();
-                self.metrics
-                    .compact_frequency
-                    .with_label_values(&[
-                        &format!("{}:{}", host.host, host.port),
-                        &compact_task.compaction_group_id.to_string(),
-                        task_type_label,
-                        task_status_label,
-                    ])
-                    .inc();
-            }
-        } else {
-            // There are two cases where assignee_context_id is not available
-            // 1. compactor does not exist
-            // 2. trivial_move
-            let label = if CompactStatus::is_trivial_reclaim(compact_task) {
-                "trivial-space-reclaim"
-            } else if CompactStatus::is_trivial_move_task(compact_task) {
-                // TODO: only support can_trivial_move in DynamicLevelCompcation, will check
-                // task_type next PR
-                "trivial-move"
-            } else {
-                "unassigned"
-            };
+        self.compactor_manager
+            .remove_task_heartbeat(compact_task.task_id);
 
-            self.metrics
-                .compact_frequency
-                .with_label_values(&[
-                    label,
-                    &compact_task.compaction_group_id.to_string(),
-                    task_type_label,
-                    task_status_label,
-                ])
-                .inc();
-        }
+        let label = if CompactStatus::is_trivial_reclaim(compact_task) {
+            "trivial-space-reclaim"
+        } else if CompactStatus::is_trivial_move_task(compact_task) {
+            // TODO: only support can_trivial_move in DynamicLevelCompcation, will check
+            // task_type next PR
+            "trivial-move"
+        } else {
+            "normal"
+        };
+
+        self.metrics
+            .compact_frequency
+            .with_label_values(&[
+                label,
+                &compact_task.compaction_group_id.to_string(),
+                task_type_label,
+                task_status_label,
+            ])
+            .inc();
 
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",
@@ -2027,13 +2001,13 @@ where
         };
 
         // 2. Assign the task to the previously picked compactor.
-        if let Err(err) = self
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-        {
-            tracing::warn!("Failed to assign compaction task to compactor: {:#?}", err);
-            return locally_cancel_task(compact_task, TaskStatus::AssignFailCanceled).await;
-        };
+        // if let Err(err) = self
+        //     .assign_compaction_task(&compact_task, compactor.context_id())
+        //     .await
+        // {
+        //     tracing::warn!("Failed to assign compaction task to compactor: {:#?}", err);
+        //     return locally_cancel_task(compact_task, TaskStatus::AssignFailCanceled).await;
+        // };
 
         // 3. Send the task.
         if let Err(e) = compactor
@@ -2280,20 +2254,7 @@ where
                                         hummock_manager.compactor_manager.clone();
 
                                     // TODO: add metrics to track expired tasks
-                                    for (context_id, mut task) in
-                                        compactor_manager.get_expired_tasks()
-                                    {
-                                        tracing::info!("Task with task_id {} with context_id {context_id} has expired due to lack of visible progress", task.task_id);
-                                        if let Some(compactor) =
-                                            compactor_manager.get_compactor(context_id)
-                                        {
-                                            // Forcefully cancel the task so that it terminates
-                                            // early on the compactor
-                                            // node.
-                                            let _ = compactor.cancel_task(task.task_id).await;
-                                            tracing::info!("CancelTask operation for task_id {} has been sent to node with context_id {context_id}", task.task_id);
-                                        }
-
+                                    for mut task in compactor_manager.get_expired_tasks() {
                                         if let Err(e) = hummock_manager
                                             .cancel_compact_task(
                                                 &mut task,
@@ -2302,7 +2263,7 @@ where
                                             .await
                                         {
                                             tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                                                until we can successfully report its status. {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
+                                                until we can successfully report its status. task_id: {}, ERR: {e:?}", task.task_id);
                                         }
                                     }
                                 }

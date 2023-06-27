@@ -145,11 +145,7 @@ where
             })),
             Some(mut compact_task) => {
                 self.hummock_manager
-                    .report_compact_task(
-                        req.context_id,
-                        &mut compact_task,
-                        Some(req.table_stats_change),
-                    )
+                    .report_compact_task(&mut compact_task, Some(req.table_stats_change))
                     .await?;
 
                 Ok(Response::new(ReportCompactionTasksResponse {
@@ -263,8 +259,27 @@ where
         let req = request.into_inner();
         let compactor_manager = self.hummock_manager.compactor_manager.clone();
 
-        compactor_manager.update_task_heartbeats(req.context_id, &req.progress);
+        let cancel_tasks = compactor_manager.update_task_heartbeats(&req.progress);
         compactor_manager.update_compactor_state(req.context_id, req.workload.unwrap());
+
+        for task in cancel_tasks {
+            tracing::info!(
+                "Task with task_id {} with context_id {} has expired due to lack of visible progress",
+                req.context_id,
+                task.task_id
+            );
+            if let Some(compactor) = compactor_manager.get_compactor(req.context_id) {
+                // Forcefully cancel the task so that it terminates
+                // early on the compactor
+                // node.
+                let _ = compactor.cancel_task(task.task_id).await;
+                tracing::info!(
+                    "CancelTask operation for task_id {} has been sent to node with context_id {}",
+                    req.context_id,
+                    task.task_id
+                );
+            }
+        }
 
         Ok(Response::new(CompactorHeartbeatResponse { status: None }))
     }

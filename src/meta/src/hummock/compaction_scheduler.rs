@@ -35,7 +35,6 @@ use super::Compactor;
 use crate::hummock::compaction::{
     DynamicLevelSelector, LevelSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
-use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::manager::{LocalNotification, MetaSrvEnv};
 use crate::storage::MetaStore;
@@ -240,41 +239,7 @@ where
             compact_task_to_string(&compact_task)
         );
 
-        // 2. Assign the compaction task to a compactor.
-        match self
-            .hummock_manager
-            .assign_compaction_task(&compact_task, compactor.context_id())
-            .await
-        {
-            Ok(_) => {
-                tracing::trace!(
-                    "Assigned compaction task. {}",
-                    compact_task_to_string(&compact_task)
-                );
-            }
-            Err(err) => {
-                tracing::warn!(
-                    "Failed to assign {:?} compaction task to compactor {} : {:#?}",
-                    compact_task.task_type().as_str_name(),
-                    compactor.context_id(),
-                    err
-                );
-                match err {
-                    Error::CompactionTaskAlreadyAssigned(_, _) => {
-                        panic!("Compaction scheduler is the only tokio task that can assign task.");
-                    }
-                    Error::InvalidContext(context_id) => {
-                        self.compactor_manager.remove_compactor(context_id);
-                        return ScheduleStatus::AssignFailure(compact_task);
-                    }
-                    _ => {
-                        return ScheduleStatus::AssignFailure(compact_task);
-                    }
-                }
-            }
-        };
-
-        // 3. Send the compaction task.
+        // 2. Send the compaction task.
         if let Err(e) = compactor
             .send_task(Task::CompactTask(compact_task.clone()))
             .await
