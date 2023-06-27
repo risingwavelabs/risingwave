@@ -34,7 +34,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{load_config, BatchConfig, MetaConfig};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::session_config::{ConfigMap, VisibilityMode};
+use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -519,7 +519,22 @@ impl SessionImpl {
     }
 
     pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
-        self.config_map.write().set(key, value)
+        struct Nop;
+
+        impl ConfigReporter for Nop {
+            fn report_status(&mut self, _key: &str, _new_val: String) {}
+        }
+
+        self.config_map.write().set(key, value, Nop)
+    }
+
+    pub fn set_config_report(
+        &self,
+        key: &str,
+        value: Vec<String>,
+        reporter: impl ConfigReporter,
+    ) -> Result<()> {
+        self.config_map.write().set(key, value, reporter)
     }
 
     pub fn session_id(&self) -> SessionId {
