@@ -81,7 +81,8 @@ public class JDBCSink extends SinkBase {
             // upsert sink will handle DELETE events
             if (config.isUpsertSink()) {
                 var deleteSql =
-                        jdbcDialect.getDeleteStatement(config.getNormalizedTableName(), pkColumnNames);
+                        jdbcDialect.getDeleteStatement(
+                                config.getNormalizedTableName(), pkColumnNames);
                 this.deletePreparedStmt =
                         conn.prepareStatement(deleteSql, Statement.RETURN_GENERATED_KEYS);
             }

@@ -51,9 +51,7 @@ public class JDBCSinkConfig extends CommonSinkConfig {
         this.isUpsertSink = "upsert".equalsIgnoreCase(sinkType);
     }
 
-    /**
-     * Used in SQL statements to refer to the table.
-     */
+    /** Used in SQL statements to refer to the table. */
     public String getNormalizedTableName() {
         if (schemaName != null && !schemaName.isBlank()) {
             return schemaName + '.' + tableName;

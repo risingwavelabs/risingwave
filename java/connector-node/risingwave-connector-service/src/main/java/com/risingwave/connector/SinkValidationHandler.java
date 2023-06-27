@@ -40,7 +40,8 @@ public class SinkValidationHandler {
             SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getConnectorType());
             sinkFactory.validate(tableSchema, sinkConfig.getPropertiesMap(), request.getSinkType());
 
-            responseObserver.onNext(ConnectorServiceProto.ValidateSinkResponse.newBuilder().build());
+            responseObserver.onNext(
+                    ConnectorServiceProto.ValidateSinkResponse.newBuilder().build());
             responseObserver.onCompleted();
 
         } catch (IllegalArgumentException e) {
