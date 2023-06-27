@@ -14,6 +14,7 @@
 
 use risingwave_common::error::{Result, RwError};
 
+use super::unified::ChangeEvent;
 use super::unified::bytes::{BytesAccess, BytesChangeEvent};
 use super::unified::util::apply_row_operation_on_stream_chunk_writer;
 use super::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
@@ -27,6 +28,13 @@ pub struct BytesParser {
 }
 
 impl BytesParser {
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
+        Ok(Self {
+            rw_columns,
+            source_ctx,            
+        })
+    }
+
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
@@ -34,6 +42,35 @@ impl BytesParser {
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let accessor = BytesChangeEvent::with_value(BytesAccess::new(payload));
-        apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
+        writer.insert(|column| {
+            let res = accessor.access_field(&column.name, &column.data_type)?;
+            tracing::trace!(
+                "inserted {:?} {:?} is_pk:{:?} {:?} ",
+                &column.name,
+                &column.data_type,
+                &column.is_pk,
+                res
+            );
+            Ok(res)
+        })
+        // apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
+    }
+}
+
+impl ByteStreamSourceParser for BytesParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }

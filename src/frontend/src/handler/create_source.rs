@@ -52,8 +52,8 @@ use crate::handler::create_table::{
 };
 use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::optimizer::plan_node::generic::Source;
+use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
 use crate::utils::resolve_connection_in_with_option;
 use crate::{bind_data_type, WithOptions};
@@ -420,15 +420,27 @@ pub(crate) async fn try_bind_columns_from_source(
                 ..Default::default()
             },
         ),
-        // TODO: only accepts one column
-        SourceSchema::Bytes => (
-            None,
-            sql_defined_pk_names,
-            StreamSourceInfo {
-                row_format: RowFormatType::Bytes as i32,
-                ..Default::default()
-            },
-        ),
+        // TODO: check type
+        SourceSchema::Bytes => {
+            // TODO: reject non bytea type
+            if !sql_defined_schema
+                || sql_defined_columns.len() != 1
+                || sql_defined_columns[0].data_type.is_none()
+            {
+                return Err(RwError::from(ProtocolError(
+                    "need to specify one column".to_string(),
+                )));
+            }
+            
+            (
+                None,
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::Bytes as i32,
+                    ..Default::default()
+                },
+            )
+        }
         SourceSchema::DebeziumMongoJson => {
             let mut columns = vec![
                 ColumnCatalog {
@@ -561,7 +573,7 @@ pub(super) fn bind_source_watermark(
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType>>> = LazyLock::new(
     || {
         convert_args!(hashmap!(
-                KAFKA_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
+                KAFKA_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro, RowFormatType::Bytes],
                 PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
                 KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
                 GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
