@@ -95,7 +95,7 @@ impl AwsEc2Client {
 
         let tags_vec = match tags_user_str {
             Some(tags_user_str) => {
-                let tags_user = tags_user_str
+                let mut tags_user = tags_user_str
                     .split(',')
                     .map(|s| {
                         s.split_once('=').ok_or_else(|| {
@@ -104,7 +104,10 @@ impl AwsEc2Client {
                     })
                     .collect::<MetaResult<Vec<(&str, &str)>>>()?;
                 match tags_env {
-                    Some(tags_env) => Some([tags_user.as_slice(), tags_env.as_slice()].concat()),
+                    Some(tags_env) => {
+                        tags_user.extend(tags_env);
+                        Some(tags_user)
+                    }
                     None => Some(tags_user),
                 }
             }
