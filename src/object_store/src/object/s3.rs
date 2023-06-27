@@ -565,11 +565,7 @@ pub fn customized_connector(
     settings: &aws_smithy_client::http_connector::ConnectorSettings,
     sleep: Option<Arc<dyn AsyncSleep>>,
 ) -> Option<aws_smithy_client::erase::DynConnector> {
-    let default_hyper_builder = || -> hyper::client::Builder {
-        let builder = hyper::client::Builder::default();
-        // builder.pool_max_idle_per_host(0);
-        builder
-    };
+    let default_hyper_builder = || -> hyper::client::Builder { hyper::client::Builder::default() };
     let base = |settings: &aws_smithy_client::http_connector::ConnectorSettings,
                 sleep: Option<Arc<dyn AsyncSleep>>|
      -> aws_smithy_client::hyper_ext::Builder {
