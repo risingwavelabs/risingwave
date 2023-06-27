@@ -1,4 +1,3 @@
-#!/usr/bin/env sh
 #!/usr/bin/env bash
 
 # Exits as soon as any line fails.
