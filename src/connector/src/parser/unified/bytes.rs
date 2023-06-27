@@ -3,7 +3,7 @@ use std::fmt::format;
 use risingwave_common::cast::str_to_bytea;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use super::{Access, AccessError, AccessResult, ChangeEventOperation, ChangeEvent};
+use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
 
 // where do we put data
 
@@ -53,8 +53,8 @@ impl Access for BytesAccess {
         }
         return Err(AccessError::TypeError {
             expected: "Bytea".to_string(),
-            got: format!("{:?}", type_expected),    
-            value: "()".to_string(),
+            got: format!("{:?}", type_expected),
+            value: "".to_string(),
         });
     }
 }

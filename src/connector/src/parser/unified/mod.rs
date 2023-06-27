@@ -18,12 +18,12 @@ use risingwave_common::types::{DataType, Datum};
 use thiserror::Error;
 
 pub mod avro;
+pub mod bytes;
 pub mod debezium;
 pub mod json;
 pub mod maxwell;
 pub mod upsert;
 pub mod util;
-pub mod bytes;
 
 pub type AccessResult = std::result::Result<Datum, AccessError>;
 

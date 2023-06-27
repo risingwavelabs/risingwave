@@ -52,7 +52,6 @@ use crate::handler::create_table::{
 };
 use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::Source;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
 use crate::utils::resolve_connection_in_with_option;
@@ -431,7 +430,7 @@ pub(crate) async fn try_bind_columns_from_source(
                     "need to specify one column".to_string(),
                 )));
             }
-            
+
             (
                 None,
                 sql_defined_pk_names,

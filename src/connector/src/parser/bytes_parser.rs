@@ -14,9 +14,9 @@
 
 use risingwave_common::error::{Result, RwError};
 
-use super::unified::ChangeEvent;
 use super::unified::bytes::{BytesAccess, BytesChangeEvent};
 use super::unified::util::apply_row_operation_on_stream_chunk_writer;
+use super::unified::ChangeEvent;
 use super::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -31,7 +31,7 @@ impl BytesParser {
     pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
         Ok(Self {
             rw_columns,
-            source_ctx,            
+            source_ctx,
         })
     }
 
@@ -84,16 +84,11 @@ mod tests {
     use crate::parser::{BytesParser, SourceColumnDesc, SourceStreamChunkBuilder};
 
     fn get_payload() -> Vec<Vec<u8>> {
-        vec![
-            br#"t"#.to_vec(),
-            br#"random"#.to_vec(),
-        ]
+        vec![br#"t"#.to_vec(), br#"random"#.to_vec()]
     }
 
     async fn test_bytes_parser(get_payload: fn() -> Vec<Vec<u8>>) {
-        let descs = vec![
-            SourceColumnDesc::simple("id", DataType::Bytea, 0.into())
-        ];
+        let descs = vec![SourceColumnDesc::simple("id", DataType::Bytea, 0.into())];
         let parser = BytesParser::new(descs.clone(), Default::default()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
@@ -108,13 +103,19 @@ mod tests {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
-            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Bytea("t".as_bytes().into())));
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                Some(ScalarImpl::Bytea("t".as_bytes().into()))
+            );
         }
 
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
-            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Bytea("random".as_bytes().into())));
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                Some(ScalarImpl::Bytea("random".as_bytes().into()))
+            );
         }
     }
 
