@@ -204,7 +204,8 @@ def test_file_sink(input_binary_file):
 def test_jdbc_sink(input_binary_file, input_file="./data/sink_input_new.json"):
     test_sink_stream_chunk("jdbc",
                            {"jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
-                            "table.name": "test"},
+                            "table.name": "test",
+                            "type": "upsert"},
                            input_binary_file, make_mock_schema())
     # validate results
     validate_jdbc_sink(input_file)
