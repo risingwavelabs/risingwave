@@ -6461,6 +6461,7 @@ dependencies = [
  "risingwave_common",
  "time 0.3.21",
  "tracing",
+ "tracing-log",
  "tracing-opentelemetry 0.19.0",
  "tracing-subscriber",
  "workspace-hack",
