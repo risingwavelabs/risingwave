@@ -238,7 +238,9 @@ impl SinkImpl {
         connector_rpc_endpoint: Option<String>,
     ) -> Result<()> {
         match cfg {
-            SinkConfig::Redis(cfg) => RedisSink::new(cfg, sink_catalog.schema()).map(|_| ()),
+            SinkConfig::Redis(cfg) => {
+                RedisSink::new(cfg, sink_catalog.visible_schema()).map(|_| ())
+            }
             SinkConfig::Kafka(cfg) => {
                 if sink_catalog.sink_type.is_append_only() {
                     KafkaSink::<true>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
