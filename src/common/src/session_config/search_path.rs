@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{ConfigEntry, CONFIG_KEYS, SEARCH_PATH};
-use crate::catalog::{DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
+use crate::catalog::{DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
 use crate::error::RwError;
 
 pub const USER_NAME_WILD_CARD: &str = "\"$user\"";
@@ -34,12 +34,14 @@ pub struct SearchPath {
     origin_str: String,
     path: Vec<String>,
     insert_pg_catalog: bool,
+    insert_rw_catalog: bool,
 }
 
 impl SearchPath {
     pub fn real_path(&self) -> &[String] {
-        if self.insert_pg_catalog {
-            &self.path[1..]
+        let skip = self.insert_pg_catalog as usize + self.insert_rw_catalog as usize;
+        if skip > 0 {
+            &self.path[skip..]
         } else {
             &self.path
         }
@@ -76,6 +78,13 @@ impl TryFrom<&[&str]> for SearchPath {
 
         let string = path.join(", ");
 
+        let rw_catalog = RW_CATALOG_SCHEMA_NAME.to_string();
+        let mut insert_rw_catalog = false;
+        if !path.contains(&rw_catalog) {
+            path.insert(0, rw_catalog);
+            insert_rw_catalog = true;
+        }
+
         let pg_catalog = PG_CATALOG_SCHEMA_NAME.to_string();
         let mut insert_pg_catalog = false;
         if !path.contains(&pg_catalog) {
@@ -87,6 +96,7 @@ impl TryFrom<&[&str]> for SearchPath {
             origin_str: string,
             path,
             insert_pg_catalog,
+            insert_rw_catalog,
         })
     }
 }
