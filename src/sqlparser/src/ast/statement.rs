@@ -300,21 +300,6 @@ pub struct ProtobufSchema {
     pub use_schema_registry: bool,
 }
 
-impl ParseTo for ProtobufSchema {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        impl_parse_to!([Keyword::MESSAGE], p);
-        impl_parse_to!(message_name: AstString, p);
-        impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
-        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
-        impl_parse_to!(row_schema_location: AstString, p);
-        Ok(Self {
-            message_name,
-            row_schema_location,
-            use_schema_registry,
-        })
-    }
-}
-
 impl fmt::Display for ProtobufSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
@@ -338,18 +323,6 @@ pub struct AvroSchema {
     pub use_schema_registry: bool,
 }
 
-impl ParseTo for AvroSchema {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
-        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
-        impl_parse_to!(row_schema_location: AstString, p);
-        Ok(Self {
-            row_schema_location,
-            use_schema_registry,
-        })
-    }
-}
-
 impl fmt::Display for AvroSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
@@ -364,26 +337,6 @@ impl fmt::Display for AvroSchema {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebeziumAvroSchema {
     pub row_schema_location: AstString,
-}
-
-impl ParseTo for DebeziumAvroSchema {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        impl_parse_to!(
-            [
-                Keyword::ROW,
-                Keyword::SCHEMA,
-                Keyword::LOCATION,
-                Keyword::CONFLUENT,
-                Keyword::SCHEMA,
-                Keyword::REGISTRY
-            ],
-            p
-        );
-        impl_parse_to!(row_schema_location: AstString, p);
-        Ok(Self {
-            row_schema_location,
-        })
-    }
 }
 
 impl fmt::Display for DebeziumAvroSchema {
@@ -410,26 +363,6 @@ impl fmt::Display for DebeziumAvroSchema {
 pub struct CsvInfo {
     pub delimiter: u8,
     pub has_header: bool,
-}
-
-impl ParseTo for CsvInfo {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        impl_parse_to!(without_header => [Keyword::WITHOUT, Keyword::HEADER], p);
-        impl_parse_to!([Keyword::DELIMITED, Keyword::BY], p);
-        impl_parse_to!(delimiter: AstString, p);
-        let mut chars = delimiter.0.chars().collect_vec();
-        if chars.len() != 1 {
-            return Err(ParserError::ParserError(format!(
-                "The delimiter should be a char, but got {:?}",
-                chars
-            )));
-        }
-        let delimiter = chars.remove(0) as u8;
-        Ok(Self {
-            delimiter,
-            has_header: !without_header,
-        })
-    }
 }
 
 impl fmt::Display for CsvInfo {
