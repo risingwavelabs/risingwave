@@ -679,6 +679,18 @@ order by
 56166    1
 56166    2
 
+query I 
+SELECT * FROM s24;
+----
+\x6b6b
+\x776561776566776566
+
+query I 
+SELECT * FROM source_mv3;
+----
+\x6b6b
+\x776561776566776566
+
 statement ok
 drop materialized view source_mv1
 
