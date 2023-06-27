@@ -263,6 +263,11 @@ pub struct MetaConfig {
     /// If the size of one table is smaller than `min_table_split_write_throughput`, we would not
     /// split it to an single group.
     pub min_table_split_write_throughput: u64,
+
+    #[serde(default = "default::meta::compaction_task_heartbeat_interval_sec")]
+    // If the compaction task does not change in progress beyond the
+    // `compaction_task_heartbeat_interval_sec` interval, we will cancel the task
+    pub compaction_task_heartbeat_interval_sec: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -719,6 +724,10 @@ mod default {
 
         pub fn min_table_split_write_throughput() -> u64 {
             32 * 1024 * 1024 // 32MB
+        }
+
+        pub fn compaction_task_heartbeat_interval_sec() -> u64 {
+            60 // 1min
         }
     }
 
