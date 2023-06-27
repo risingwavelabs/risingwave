@@ -9003,6 +9003,7 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-futures",
+ "tracing-log",
  "tracing-subscriber",
  "url",
  "uuid",
