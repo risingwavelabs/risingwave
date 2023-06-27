@@ -24,7 +24,6 @@ use std::sync::{Arc, LazyLock};
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
 
 use crate::hummock::event_handler::LocalInstanceId;
@@ -578,42 +577,6 @@ impl SharedBufferBatch {
 
     pub fn get_delete_range_tombstones(&self) -> Vec<MonotonicDeleteEvent> {
         self.inner.monotonic_tombstone_events.clone()
-    }
-
-    pub fn collect_vnodes(&self) -> Vec<usize> {
-        let mut vnodes = Vec::with_capacity(VirtualNode::COUNT);
-        let mut next_vnode_id = 0;
-        while next_vnode_id < VirtualNode::COUNT {
-            let seek_key = TableKey(
-                VirtualNode::from_index(next_vnode_id)
-                    .to_be_bytes()
-                    .to_vec(),
-            );
-            let idx = match self
-                .inner
-                .payload
-                .binary_search_by(|m| (m.0[..]).cmp(seek_key.as_slice()))
-            {
-                Ok(idx) => idx,
-                Err(idx) => idx,
-            };
-            if idx >= self.inner.payload.len() {
-                break;
-            }
-            let item = &self.inner.payload[idx];
-            if item.0.len() <= VirtualNode::SIZE {
-                break;
-            }
-            let current_vnode_id = VirtualNode::from_be_bytes(
-                item.0.as_ref()[..VirtualNode::SIZE]
-                    .try_into()
-                    .expect("slice with incorrect length"),
-            )
-            .to_index();
-            vnodes.push(current_vnode_id);
-            next_vnode_id = current_vnode_id + 1;
-        }
-        vnodes
     }
 }
 

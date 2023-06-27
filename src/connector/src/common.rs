@@ -16,7 +16,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use aws_sdk_kinesis::Client as KinesisClient;
-use http::Uri;
 use rdkafka::ClientConfig;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
@@ -208,9 +207,7 @@ impl KinesisCommon {
         let aws_config = config.load().await?;
         let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
         if let Some(endpoint) = &config.endpoint {
-            let uri = endpoint.clone().parse::<Uri>().unwrap();
-            builder =
-                builder.endpoint_resolver(aws_smithy_http::endpoint::Endpoint::immutable(uri));
+            builder = builder.endpoint_url(endpoint);
         }
         Ok(KinesisClient::from_conf(builder.build()))
     }

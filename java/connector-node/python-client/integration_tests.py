@@ -19,6 +19,7 @@ import json
 import grpc
 import connector_service_pb2_grpc
 import connector_service_pb2
+import data_pb2
 import psycopg2
 
 
@@ -26,8 +27,8 @@ def make_mock_schema():
     # todo
     schema = connector_service_pb2.TableSchema(
         columns=[
-            connector_service_pb2.TableSchema.Column(name="id", data_type=2),
-            connector_service_pb2.TableSchema.Column(name="name", data_type=7)
+            connector_service_pb2.TableSchema.Column(name="id", data_type=data_pb2.DataType(type_name=2)),
+            connector_service_pb2.TableSchema.Column(name="name", data_type=data_pb2.DataType(type_name=7))
         ],
         pk_indices=[0]
     )

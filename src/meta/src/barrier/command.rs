@@ -477,6 +477,24 @@ where
         }
     }
 
+    /// For `CancelStreamingJob`, returns the table id of the target table.
+    pub fn table_to_cancel(&self) -> Option<TableId> {
+        match &self.command {
+            Command::CancelStreamingJob(table_fragments) => Some(table_fragments.table_id()),
+            _ => None,
+        }
+    }
+
+    /// For `CreateStreamingJob`, returns the table id of the target table.
+    pub fn table_to_create(&self) -> Option<TableId> {
+        match &self.command {
+            Command::CreateStreamingJob {
+                table_fragments, ..
+            } => Some(table_fragments.table_id()),
+            _ => None,
+        }
+    }
+
     /// Clean up actors in CNs if needed, used by drop, cancel and reschedule commands.
     async fn clean_up(
         &self,

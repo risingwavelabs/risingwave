@@ -132,8 +132,8 @@ impl StatelessSimpleAggExecutor {
                             .zip_eq_fast(builders.iter_mut())
                             .try_for_each(|(state, builder)| {
                                 let data = state.get_output()?;
-                                trace!("append_datum: {:?}", data);
-                                builder.append_datum(&data);
+                                trace!("append: {:?}", data);
+                                builder.append(&data);
                                 state.reset();
                                 Ok::<_, StreamExecutorError>(())
                             })?;

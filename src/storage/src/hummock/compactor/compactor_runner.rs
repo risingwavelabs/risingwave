@@ -93,7 +93,7 @@ impl CompactorRunner {
         del_agg: Arc<CompactionDeleteRanges>,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
-        let iter = self.build_sst_iter()?;
+        let iter = self.build_sst_iter(task_progress.clone())?;
         let (ssts, compaction_stat) = self
             .compactor
             .compact_key_range(
@@ -102,6 +102,8 @@ impl CompactorRunner {
                 del_agg,
                 filter_key_extractor,
                 Some(task_progress),
+                Some(self.compact_task.task_id),
+                Some(self.split_index),
             )
             .await?;
         Ok((self.split_index, ssts, compaction_stat))
@@ -135,7 +137,10 @@ impl CompactorRunner {
     }
 
     /// Build the merge iterator based on the given input ssts.
-    fn build_sst_iter(&self) -> HummockResult<impl HummockIterator<Direction = Forward>> {
+    fn build_sst_iter(
+        &self,
+        task_progress: Arc<TaskProgress>,
+    ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let mut table_iters = Vec::new();
 
         for level in &self.compact_task.input_ssts {
@@ -165,6 +170,7 @@ impl CompactorRunner {
                     tables,
                     self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
+                    task_progress.clone(),
                 ));
             } else {
                 for table_info in &level.table_infos {
@@ -182,6 +188,7 @@ impl CompactorRunner {
                         vec![table_info.clone()],
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
+                        task_progress.clone(),
                     ));
                 }
             }

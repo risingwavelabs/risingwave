@@ -39,6 +39,14 @@ const TYPE_MATRIX: &str = "
 
 /// Maps a data type to its corresponding data type name.
 pub fn data_type(ty: &str) -> &str {
+    // XXX:
+    // For functions that contain `any` type, there are special handlings in the frontend,
+    // and the signature won't be accessed. So we simply return a placeholder here.
+    if ty == "any" {
+        return "Int32";
+    } else if ty.ends_with("[]") {
+        return "List";
+    }
     lookup_matrix(ty, 1)
 }
 
@@ -49,6 +57,11 @@ pub fn variant(ty: &str) -> &str {
 
 /// Maps a data type to its corresponding array type name.
 pub fn array_type(ty: &str) -> &str {
+    if ty == "any" {
+        return "ArrayImpl";
+    } else if ty.ends_with("[]") {
+        return "ListArray";
+    }
     lookup_matrix(ty, 3)
 }
 

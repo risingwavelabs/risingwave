@@ -90,7 +90,7 @@ impl Expression for CaseExpression {
         let mut builder = self.return_type().create_array_builder(input.capacity());
         for (i, sel) in selection.into_iter().enumerate() {
             if let Some(when_idx) = sel {
-                builder.append_datum(result_array[when_idx].value_at(i));
+                builder.append(result_array[when_idx].value_at(i));
             } else {
                 builder.append_null();
             }

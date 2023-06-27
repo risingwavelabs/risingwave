@@ -150,7 +150,7 @@ fn convert_datum_refs_to_chunk(
         .collect();
     for _i in 0..num_tuples {
         for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq_fast(datum_refs) {
-            builder.append_datum(*datum_ref);
+            builder.append(*datum_ref);
         }
     }
 

@@ -73,7 +73,7 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
                     redo_state.apply_version_delta(version_delta);
                 }
             }
-            if let Some(log) = hummock_version_deltas.iter().rev().next() {
+            if let Some(log) = hummock_version_deltas.iter().next_back() {
                 if log.id != redo_state.id {
                     return Err(BackupError::Other(anyhow::anyhow!(format!(
                         "inconsistent hummock version: expected {}, actual {}",

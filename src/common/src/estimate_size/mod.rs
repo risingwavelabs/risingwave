@@ -42,7 +42,7 @@ pub trait EstimateSize {
 
 impl EstimateSize for FixedBitSet {
     fn estimated_heap_size(&self) -> usize {
-        self.as_slice().len() * std::mem::size_of::<u32>()
+        std::mem::size_of_val(self.as_slice())
     }
 }
 

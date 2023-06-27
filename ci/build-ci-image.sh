@@ -13,7 +13,7 @@ cat ../rust-toolchain
 # !!! CHANGE THIS WHEN YOU WANT TO BUMP CI IMAGE !!! #
 #          AND ALSO docker-compose.yml               #
 ######################################################
-export BUILD_ENV_VERSION=v20230518
+export BUILD_ENV_VERSION=v20230526_2
 
 export BUILD_TAG="public.ecr.aws/x5u3w5h6/rw-build-env:${BUILD_ENV_VERSION}"
 

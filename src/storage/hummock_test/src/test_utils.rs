@@ -169,9 +169,7 @@ pub fn update_filter_key_extractor_for_table_ids(
     for table_id in table_ids {
         filter_key_extractor_manager_ref.update(
             *table_id,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         )
     }
 }

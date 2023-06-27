@@ -29,8 +29,8 @@ use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
-    compact_task, CompactionConfig, CompactionGroupInfo, GroupConstruct, GroupDelta, GroupDestroy,
-    GroupMetaChange, GroupTableChange,
+    compact_task, CompactionConfig, CompactionGroupInfo, CompatibilityVersion, GroupConstruct,
+    GroupDelta, GroupDestroy, GroupMetaChange, GroupTableChange,
 };
 use tokio::sync::{OnceCell, RwLock};
 
@@ -528,6 +528,7 @@ impl<S: MetaStore> HummockManager<S> {
                         origin_group_id: parent_group_id,
                         target_group_id: compaction_group_id,
                         new_sst_start_id,
+                        version: CompatibilityVersion::NoTrivialSplit as i32,
                     })),
                 });
                 compaction_group_id
@@ -557,6 +558,7 @@ impl<S: MetaStore> HummockManager<S> {
                                 parent_group_id,
                                 new_sst_start_id,
                                 table_ids: table_ids.to_vec(),
+                                version: CompatibilityVersion::NoTrivialSplit as i32,
                             })),
                         }],
                     },
@@ -603,18 +605,12 @@ impl<S: MetaStore> HummockManager<S> {
         for (object_id, sst_id, _parent_old_sst_id, parent_new_sst_id) in sst_split_info {
             match branched_ssts.get_mut(object_id) {
                 Some(mut entry) => {
-                    if let Some(parent_new_sst_id) = parent_new_sst_id {
-                        entry.insert(parent_group_id, parent_new_sst_id);
-                    } else {
-                        entry.remove(&parent_group_id);
-                    }
+                    entry.insert(parent_group_id, parent_new_sst_id);
                     entry.insert(target_compaction_group_id, sst_id);
                 }
                 None => {
                     let mut groups = HashMap::from_iter([(target_compaction_group_id, sst_id)]);
-                    if let Some(parent_new_sst_id) = parent_new_sst_id {
-                        groups.insert(parent_group_id, parent_new_sst_id);
-                    }
+                    groups.insert(parent_group_id, parent_new_sst_id);
                     branched_ssts.insert(object_id, groups);
                 }
             }

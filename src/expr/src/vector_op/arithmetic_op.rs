@@ -109,11 +109,8 @@ where
     })
 }
 
-#[function("neg(int16) -> int16")]
-#[function("neg(int32) -> int32")]
-#[function("neg(int64) -> int64")]
-#[function("neg(float32) -> float32")]
-#[function("neg(float64) -> float64")]
+#[function("neg(*int) -> auto")]
+#[function("neg(*float) -> auto")]
 #[function("neg(decimal) -> decimal")]
 pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
     expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
@@ -130,11 +127,8 @@ where
         .ok_or(ExprError::NumericOutOfRange)
 }
 
-#[function("abs(int16) -> int16")]
-#[function("abs(int32) -> int32")]
-#[function("abs(int64) -> int64")]
-#[function("abs(float32) -> float32")]
-#[function("abs(float64) -> float64")]
+#[function("abs(*int) -> auto")]
+#[function("abs(*float) -> auto")]
 pub fn general_abs<T1: Signed + CheckedNeg>(expr: T1) -> Result<T1> {
     if expr.is_negative() {
         general_neg(expr)
@@ -162,14 +156,47 @@ pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
     Ok(Decimal::abs(&decimal))
 }
 
+fn err_pow_zero_negative() -> ExprError {
+    ExprError::InvalidParam {
+        name: "rhs",
+        reason: "zero raised to a negative power is undefined".into(),
+    }
+}
+fn err_pow_negative_fract() -> ExprError {
+    ExprError::InvalidParam {
+        name: "rhs",
+        reason: "a negative number raised to a non-integer power yields a complex result".into(),
+    }
+}
+
 #[function("pow(float64, float64) -> float64")]
 pub fn pow_f64(l: F64, r: F64) -> Result<F64> {
-    let res = l.powf(r);
-    if res.is_infinite() {
-        Err(ExprError::NumericOutOfRange)
-    } else {
-        Ok(res)
+    if l.is_zero() && r.0 < 0.0 {
+        return Err(err_pow_zero_negative());
     }
+    if l.0 < 0.0 && (r.is_finite() && !r.fract().is_zero()) {
+        return Err(err_pow_negative_fract());
+    }
+    let res = l.powf(r);
+    if res.is_infinite() && l.is_finite() && r.is_finite() {
+        return Err(ExprError::NumericOverflow);
+    }
+    if res.is_zero() && l.is_finite() && r.is_finite() && !l.is_zero() {
+        return Err(ExprError::NumericUnderflow);
+    }
+
+    Ok(res)
+}
+
+#[function("pow(decimal, decimal) -> decimal")]
+pub fn pow_decimal(l: Decimal, r: Decimal) -> Result<Decimal> {
+    use risingwave_common::types::DecimalPowError as PowError;
+
+    l.checked_powd(&r).map_err(|e| match e {
+        PowError::ZeroNegative => err_pow_zero_negative(),
+        PowError::NegativeFract => err_pow_negative_fract(),
+        PowError::Overflow => ExprError::NumericOverflow,
+    })
 }
 
 #[inline(always)]
@@ -282,13 +309,8 @@ fn timestamptz_interval_inner(l: i64, r: Interval, f: fn(i64, i64) -> Option<i64
             "timestamp with time zone +/- interval of days".into(),
         ));
     }
-
-    let result: Option<i64> = try {
-        let delta_usecs = r.usecs();
-        f(l, delta_usecs)?
-    };
-
-    result.ok_or(ExprError::NumericOutOfRange)
+    let delta_usecs = r.usecs();
+    f(l, delta_usecs).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("multiply(interval, *int) -> interval")]

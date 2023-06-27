@@ -42,7 +42,7 @@ use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
     Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
-use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
@@ -569,6 +569,15 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn list_worker_nodes(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
+        let request = ListAllNodesRequest {
+            worker_type: worker_type as _,
+            include_starting_nodes: true,
+        };
+        let resp = self.inner.list_all_nodes(request).await?;
+        Ok(resp.nodes)
+    }
+
     /// Starts a heartbeat worker.
     ///
     /// When sending heartbeat RPC, it also carries extra info from `extra_info_sources`.
@@ -867,6 +876,22 @@ impl MetaClient {
         };
         let resp = self.inner.get_tables(req).await?;
         Ok(resp.tables)
+    }
+
+    pub async fn risectl_list_compaction_status(
+        &self,
+    ) -> Result<(
+        Vec<CompactStatus>,
+        Vec<CompactTaskAssignment>,
+        Vec<CompactTaskProgress>,
+    )> {
+        let req = RiseCtlListCompactionStatusRequest {};
+        let resp = self.inner.rise_ctl_list_compaction_status(req).await?;
+        Ok((
+            resp.compaction_statuses,
+            resp.task_assignment,
+            resp.task_progress,
+        ))
     }
 }
 
@@ -1411,7 +1436,7 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
-            //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
+            ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
@@ -1468,6 +1493,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
+            ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

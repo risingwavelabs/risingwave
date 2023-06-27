@@ -36,7 +36,7 @@ pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 pub enum PinnedHummockSnapshot {
     FrontendPinned(
         HummockSnapshotGuard,
-        // `only_checkpoint_visible`.
+        // `is_barrier_read`.
         // It's embedded here because we always use it together with snapshot.
         bool,
     ),
@@ -49,8 +49,8 @@ pub enum PinnedHummockSnapshot {
 impl PinnedHummockSnapshot {
     pub fn get_batch_query_epoch(&self) -> BatchQueryEpoch {
         match self {
-            PinnedHummockSnapshot::FrontendPinned(s, checkpoint) => {
-                s.get_batch_query_epoch(*checkpoint)
+            PinnedHummockSnapshot::FrontendPinned(s, is_barrier_read) => {
+                s.get_batch_query_epoch(*is_barrier_read)
             }
             PinnedHummockSnapshot::Other(e) => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
@@ -60,7 +60,7 @@ impl PinnedHummockSnapshot {
 
     pub fn support_barrier_read(&self) -> bool {
         match self {
-            PinnedHummockSnapshot::FrontendPinned(_, checkpoint) => !*checkpoint,
+            PinnedHummockSnapshot::FrontendPinned(_, is_barrier_read) => *is_barrier_read,
             PinnedHummockSnapshot::Other(_) => false,
         }
     }
@@ -105,11 +105,11 @@ pub struct HummockSnapshotGuard {
 }
 
 impl HummockSnapshotGuard {
-    pub fn get_batch_query_epoch(&self, checkpoint: bool) -> BatchQueryEpoch {
-        let epoch = if checkpoint {
-            batch_query_epoch::Epoch::Committed(self.snapshot.committed_epoch)
-        } else {
+    pub fn get_batch_query_epoch(&self, is_barrier_read: bool) -> BatchQueryEpoch {
+        let epoch = if is_barrier_read {
             batch_query_epoch::Epoch::Current(self.snapshot.current_epoch)
+        } else {
+            batch_query_epoch::Epoch::Committed(self.snapshot.committed_epoch)
         };
         BatchQueryEpoch { epoch: Some(epoch) }
     }

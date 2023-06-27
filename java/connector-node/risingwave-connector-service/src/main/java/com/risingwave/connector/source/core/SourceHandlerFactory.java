@@ -17,6 +17,7 @@ package com.risingwave.connector.source.core;
 import com.risingwave.connector.api.source.SourceHandler;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
+import java.util.HashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,8 +26,17 @@ public abstract class SourceHandlerFactory {
     static final Logger LOG = LoggerFactory.getLogger(SourceHandlerFactory.class);
 
     public static SourceHandler createSourceHandler(
-            SourceTypeE source, long sourceId, String startOffset, Map<String, String> userProps) {
-        var config = new DbzConnectorConfig(source, sourceId, startOffset, userProps);
+            SourceTypeE source,
+            long sourceId,
+            String startOffset,
+            Map<String, String> userProps,
+            boolean snapshotDone) {
+        // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
+        Map<String, String> mutableUserProps = new HashMap<>(userProps);
+        mutableUserProps.put("source.id", Long.toString(sourceId));
+        var config =
+                new DbzConnectorConfig(
+                        source, sourceId, startOffset, mutableUserProps, snapshotDone);
         LOG.info("resolved config for source#{}: {}", sourceId, config.getResolvedDebeziumProps());
         return new DbzSourceHandler(config);
     }

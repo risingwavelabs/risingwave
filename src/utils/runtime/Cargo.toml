@@ -15,12 +15,14 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-await-tree = "0.1.1"
+await-tree = { workspace = true }
 console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.11", features = ["flamegraph"] }
+prometheus = { version = "0.13" }
+risingwave_common = { path = "../../common" }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

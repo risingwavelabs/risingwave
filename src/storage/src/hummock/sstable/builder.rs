@@ -140,9 +140,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
             writer,
             Xor16FilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             options,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         )
     }
 }
@@ -500,7 +498,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             return Ok(());
         }
 
-        let mut block_meta = self.block_metas.last_mut().unwrap();
+        let block_meta = self.block_metas.last_mut().unwrap();
         block_meta.uncompressed_size = self.block_builder.uncompressed_block_size() as u32;
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;

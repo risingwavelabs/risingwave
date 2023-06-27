@@ -55,8 +55,8 @@ where
 {
     // Increase version by 2.
     let mut epoch: u64 = 1;
-    let sstable_ids = get_sst_ids(hummock_manager, 3).await;
-    let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
+    let table_ids = get_sst_ids(hummock_manager, 3).await;
+    let test_tables = generate_test_tables(epoch, table_ids);
     register_sstable_infos_to_compaction_group(
         hummock_manager,
         &test_tables,
@@ -147,41 +147,6 @@ where
     vec![test_tables, test_tables_2, test_tables_3]
 }
 
-pub fn generate_test_sstables_with_table_id(
-    epoch: u64,
-    table_id: u32,
-    sst_ids: Vec<HummockSstableObjectId>,
-) -> Vec<SstableInfo> {
-    let mut sst_info = vec![];
-    for (i, sst_id) in sst_ids.into_iter().enumerate() {
-        sst_info.push(SstableInfo {
-            object_id: sst_id,
-            sst_id,
-            key_range: Some(KeyRange {
-                left: key_with_epoch(
-                    format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
-                        .as_bytes()
-                        .to_vec(),
-                    epoch,
-                ),
-                right: key_with_epoch(
-                    format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
-                        .as_bytes()
-                        .to_vec(),
-                    epoch,
-                ),
-                right_exclusive: false,
-            }),
-            file_size: 2,
-            table_ids: vec![table_id],
-            uncompressed_file_size: 2,
-            max_epoch: epoch,
-            ..Default::default()
-        });
-    }
-    sst_info
-}
-
 pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
@@ -196,7 +161,6 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) ->
             file_size: 2,
             table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
             uncompressed_file_size: 2,
-            max_epoch: epoch,
             ..Default::default()
         });
     }
@@ -263,7 +227,7 @@ pub fn iterator_test_key_of_epoch(
 ) -> Vec<u8> {
     // key format: {prefix_index}_version
     key_with_epoch(
-        format!("{:03}\0\0_key_test_{:05}", table, idx)
+        format!("{:03}_key_test_{:05}", table, idx)
             .as_bytes()
             .to_vec(),
         ts,
@@ -396,7 +360,13 @@ where
     S: MetaStore,
 {
     let table_ids = get_sst_ids(hummock_manager, 3).await;
-    let test_tables = generate_test_sstables_with_table_id(epoch, 1, table_ids);
+    let test_tables = generate_test_tables(epoch, table_ids);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager,
+        &test_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()

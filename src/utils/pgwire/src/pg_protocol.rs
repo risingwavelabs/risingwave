@@ -753,7 +753,7 @@ where
             BeParameterStatusMessage::StandardConformingString("on"),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ServerVersion("9.5.0"),
+            BeParameterStatusMessage::ServerVersion("8.3.0"),
         ))?;
         Ok(())
     }

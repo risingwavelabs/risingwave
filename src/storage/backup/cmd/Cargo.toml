@@ -15,6 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+prometheus = { version = "0.13" }
 risingwave_backup = { path = "../../backup" }
 risingwave_meta = { path = "../../../meta" }
 risingwave_rt = { path = "../../../utils/runtime" }

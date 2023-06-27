@@ -100,6 +100,7 @@ class Panels:
         "fillOpacity": 10,
         "interval": "1s",
         "maxDataPoints": 1000,
+        "legendDisplayMode": "table",
     }
 
     def __init__(self, datasource):
@@ -141,7 +142,6 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -158,7 +158,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -177,7 +176,6 @@ class Panels:
             gridPos=gridPos,
             unit="percentunit",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -195,7 +193,6 @@ class Panels:
             gridPos=gridPos,
             unit="s",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -213,7 +210,6 @@ class Panels:
             gridPos=gridPos,
             unit="s",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -231,7 +227,6 @@ class Panels:
             gridPos=gridPos,
             unit="s",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -249,7 +244,6 @@ class Panels:
             gridPos=gridPos,
             unit="Qps",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -267,7 +261,6 @@ class Panels:
             gridPos=gridPos,
             unit="Bps",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -285,7 +278,6 @@ class Panels:
             gridPos=gridPos,
             unit="bytes",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -299,7 +291,6 @@ class Panels:
             gridPos=gridPos,
             unit="row",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -312,7 +303,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -330,7 +320,6 @@ class Panels:
             gridPos=gridPos,
             unit="kbytes",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -348,7 +337,6 @@ class Panels:
             gridPos=gridPos,
             unit="$",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -362,7 +350,6 @@ class Panels:
             gridPos=gridPos,
             unit="ops",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -380,7 +367,6 @@ class Panels:
             gridPos=gridPos,
             unit="ops",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -398,7 +384,6 @@ class Panels:
             gridPos=gridPos,
             unit="ops",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -416,7 +401,6 @@ class Panels:
             gridPos=gridPos,
             unit="rows/s",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -434,7 +418,6 @@ class Panels:
             gridPos=gridPos,
             unit="MB/s",
             legendCalcs=legendCols,
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -447,7 +430,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="rows/s",
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -460,7 +442,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="bytes",
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -473,7 +454,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="percentunit",
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -486,7 +466,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -498,7 +477,6 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
-            legendDisplayMode="table",
             **self.common_options,
         )
 

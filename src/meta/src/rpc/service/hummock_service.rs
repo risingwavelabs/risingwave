@@ -23,7 +23,7 @@ use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
-use crate::hummock::{CompactionResumeTrigger, HummockManagerRef, VacuumManagerRef};
+use crate::hummock::{HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
@@ -252,8 +252,6 @@ where
             self.hummock_manager
                 .try_send_compaction_request(cg_id, compact_task::TaskType::Dynamic);
         }
-        self.hummock_manager
-            .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
@@ -514,5 +512,19 @@ where
         let mut resp: GetScaleCompactorResponse = info.into();
         resp.suggest_cores = scale_out_cores;
         Ok(Response::new(resp))
+    }
+
+    async fn rise_ctl_list_compaction_status(
+        &self,
+        _request: Request<RiseCtlListCompactionStatusRequest>,
+    ) -> Result<Response<RiseCtlListCompactionStatusResponse>, Status> {
+        let (compaction_statuses, task_assignment) =
+            self.hummock_manager.list_compaction_status().await;
+        let task_progress = self.hummock_manager.compactor_manager.get_progress();
+        Ok(Response::new(RiseCtlListCompactionStatusResponse {
+            compaction_statuses,
+            task_assignment,
+            task_progress,
+        }))
     }
 }

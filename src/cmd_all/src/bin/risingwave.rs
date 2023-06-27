@@ -18,6 +18,7 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use clap::{command, ArgMatches, Args, Command, FromArgMatches};
+use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
 use risingwave_cmd_all::PlaygroundOpts;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
@@ -56,14 +57,14 @@ impl Component {
         fn parse_opts<T: FromArgMatches>(matches: &ArgMatches) -> T {
             T::from_arg_matches(matches).map_err(|e| e.exit()).unwrap()
         }
-
+        let registry = prometheus::Registry::new();
         match self {
-            Self::Compute => compute(parse_opts(matches)),
-            Self::Meta => meta(parse_opts(matches)),
-            Self::Frontend => frontend(parse_opts(matches)),
-            Self::Compactor => compactor(parse_opts(matches)),
-            Self::Ctl => ctl(parse_opts(matches)),
-            Self::Playground => playground(parse_opts(matches)),
+            Self::Compute => compute(parse_opts(matches), registry),
+            Self::Meta => meta(parse_opts(matches), registry),
+            Self::Frontend => frontend(parse_opts(matches), registry),
+            Self::Compactor => compactor(parse_opts(matches), registry),
+            Self::Ctl => ctl(parse_opts(matches), registry),
+            Self::Playground => playground(parse_opts(matches), registry),
         }
     }
 
@@ -103,6 +104,7 @@ impl Component {
     }
 }
 
+#[cfg_attr(coverage, no_coverage)]
 fn main() -> Result<()> {
     let risingwave = || {
         command!(BINARY_NAME)
@@ -134,37 +136,10 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn compute(opts: ComputeNodeOpts) {
-    risingwave_rt::init_risingwave_logger(
-        risingwave_rt::LoggerSettings::new().enable_tokio_console(false),
-    );
-    risingwave_rt::main_okk(risingwave_compute::start(opts));
-}
-
-fn meta(opts: MetaNodeOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    risingwave_rt::main_okk(risingwave_meta::start(opts));
-}
-
-fn frontend(opts: FrontendOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    risingwave_rt::main_okk(risingwave_frontend::start(opts));
-}
-
-fn compactor(opts: CompactorOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    risingwave_rt::main_okk(risingwave_compactor::start(opts));
-}
-
-fn ctl(opts: CtlOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    risingwave_rt::main_okk(risingwave_ctl::start(opts)).unwrap();
-}
-
-fn playground(opts: PlaygroundOpts) {
+fn playground(opts: PlaygroundOpts, registry: prometheus::Registry) {
     let settings = risingwave_rt::LoggerSettings::new()
         .enable_tokio_console(false)
         .with_target("risingwave_storage", Level::WARN);
-    risingwave_rt::init_risingwave_logger(settings);
+    risingwave_rt::init_risingwave_logger(settings, registry);
     risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
 }

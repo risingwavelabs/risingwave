@@ -126,7 +126,7 @@ impl Expression for ArrayRemoveExpression {
             if !vis {
                 builder.append_null();
             } else {
-                builder.append_datum(Self::evaluate(left, right));
+                builder.append(Self::evaluate(left, right));
             }
         }
         Ok(Arc::new(builder.finish()))

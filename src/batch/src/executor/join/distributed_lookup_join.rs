@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -242,6 +243,8 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 chunk_size,
             );
 
+            let identity = source.plan_node().get_identity().clone();
+
             Ok(DistributedLookupJoinExecutorArgs {
                 join_type,
                 condition,
@@ -257,8 +260,9 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 schema: actual_schema,
                 output_indices,
                 chunk_size,
-                identity: source.plan_node().get_identity().clone(),
+                identity: identity.clone(),
                 shutdown_rx: Some(source.shutdown_rx.clone()),
+                mem_ctx: source.context.create_executor_mem_context(&identity),
             }
             .dispatch())
         })
@@ -282,6 +286,7 @@ struct DistributedLookupJoinExecutorArgs {
     chunk_size: usize,
     identity: String,
     shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    mem_ctx: MemoryContext,
 }
 
 impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
@@ -306,6 +311,7 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
                 chunk_size: self.chunk_size,
                 identity: self.identity,
                 shutdown_rx: self.shutdown_rx,
+                mem_ctx: self.mem_ctx,
                 _phantom: PhantomData,
             },
         ))

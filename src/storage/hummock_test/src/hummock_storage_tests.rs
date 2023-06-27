@@ -1086,7 +1086,7 @@ async fn test_iter_with_min_epoch() {
 
     let epoch1 = (31 * 1000) << 16;
 
-    let gen_key = |index: usize| -> String { format!("\0\0key_{}", index) };
+    let gen_key = |index: usize| -> String { format!("key_{}", index) };
 
     let gen_val = |index: usize| -> String { format!("val_{}", index) };
 
@@ -1321,7 +1321,7 @@ async fn test_hummock_version_reader() {
 
     let epoch1 = (31 * 1000) << 16;
 
-    let gen_key = |index: usize| -> String { format!("\0\0key_{}", index) };
+    let gen_key = |index: usize| -> String { format!("key_{}", index) };
 
     let gen_val = |index: usize| -> String { format!("val_{}", index) };
 

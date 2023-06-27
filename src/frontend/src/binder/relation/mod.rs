@@ -26,6 +26,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
+use thiserror::Error;
 
 use self::watermark::is_watermark_func;
 use super::bind_context::ColumnBinding;
@@ -131,30 +132,74 @@ impl Relation {
     }
 }
 
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ResolveQualifiedNameErrorKind {
+    QualifiedNameTooLong,
+    NotCurrentDatabase,
+}
+
+#[derive(Debug, Error)]
+pub struct ResolveQualifiedNameError {
+    qualified: String,
+    kind: ResolveQualifiedNameErrorKind,
+}
+
+impl std::fmt::Display for ResolveQualifiedNameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            ResolveQualifiedNameErrorKind::QualifiedNameTooLong => write!(
+                f,
+                "improper qualified name (too many dotted names): {}",
+                self.qualified
+            ),
+            ResolveQualifiedNameErrorKind::NotCurrentDatabase => write!(
+                f,
+                "cross-database references are not implemented: \"{}\"",
+                self.qualified
+            ),
+        }
+    }
+}
+
+impl ResolveQualifiedNameError {
+    pub fn new(qualified: String, kind: ResolveQualifiedNameErrorKind) -> Self {
+        Self { qualified, kind }
+    }
+}
+
+impl From<ResolveQualifiedNameError> for RwError {
+    fn from(e: ResolveQualifiedNameError) -> Self {
+        ErrorCode::InvalidInputSyntax(format!("{}", e)).into()
+    }
+}
+
 impl Binder {
     /// return (`schema_name`, `name`)
     pub fn resolve_schema_qualified_name(
         db_name: &str,
         name: ObjectName,
-    ) -> Result<(Option<String>, String)> {
-        let mut indentifiers = name.0;
+    ) -> std::result::Result<(Option<String>, String), ResolveQualifiedNameError> {
+        let formatted_name = name.to_string();
+        let mut identifiers = name.0;
 
-        if indentifiers.len() > 3 {
-            return Err(internal_error(
-                "schema qualified name can contain at most 3 arguments".to_string(),
+        if identifiers.len() > 3 {
+            return Err(ResolveQualifiedNameError::new(
+                formatted_name,
+                ResolveQualifiedNameErrorKind::QualifiedNameTooLong,
             ));
         }
 
-        let name = indentifiers.pop().unwrap().real_value();
+        let name = identifiers.pop().unwrap().real_value();
 
-        let schema_name = indentifiers.pop().map(|ident| ident.real_value());
-        let database_name = indentifiers.pop().map(|ident| ident.real_value());
+        let schema_name = identifiers.pop().map(|ident| ident.real_value());
+        let database_name = identifiers.pop().map(|ident| ident.real_value());
 
         if let Some(database_name) = database_name && database_name != db_name {
-            return Err(internal_error(format!(
-                "database in schema qualified name {}.{}.{} is not equal to current database name {}",
-                database_name, schema_name.unwrap(), name, db_name
-            )));
+            return Err(ResolveQualifiedNameError::new(
+                formatted_name,
+                ResolveQualifiedNameErrorKind::NotCurrentDatabase)
+            );
         }
 
         Ok((schema_name, name))
@@ -462,10 +507,28 @@ impl Binder {
                     .into());
                 };
                 let columns = if let DataType::Struct(s) = tf.return_type() {
+                    // If the table function returns a struct, it's fields can be accessed just
+                    // like a table's columns.
                     let schema = Schema::from(&*s);
                     schema.fields.into_iter().map(|f| (false, f)).collect_vec()
                 } else {
-                    vec![(false, Field::with_name(tf.return_type(), tf.name()))]
+                    // If there is an table alias, we should use the alias as the table function's
+                    // column name. If column aliases are also provided, they
+                    // are handled in bind_table_to_context.
+                    //
+                    // Note: named return value should take precedence over table alias.
+                    // But we don't support it yet.
+                    // e.g.,
+                    // ```
+                    // > create function foo(ret out int) language sql as 'select 1';
+                    // > select t.ret from foo() as t;
+                    // ```
+                    let col_name = if let Some(alias) = &alias {
+                        alias.name.real_value()
+                    } else {
+                        tf.name().to_string()
+                    };
+                    vec![(false, Field::with_name(tf.return_type(), col_name))]
                 };
 
                 self.bind_table_to_context(columns, tf.name().to_string(), alias)?;

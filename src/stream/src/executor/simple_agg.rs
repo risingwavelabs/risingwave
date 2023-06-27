@@ -305,6 +305,8 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             distinct_dedup: DistinctDeduplicater::new(
                 &this.agg_calls,
                 &this.watermark_epoch,
+                &this.distinct_dedup_tables,
+                this.actor_ctx.id,
                 this.metrics.clone(),
             ),
             state_changed: false,

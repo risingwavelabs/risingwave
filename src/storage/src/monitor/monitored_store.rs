@@ -185,7 +185,11 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
                 .may_exist_duration
                 .with_label_values(&[table_id_label.as_str()])
                 .start_timer();
-            let res = self.inner.may_exist(key_range, read_options).await;
+            let res = self
+                .inner
+                .may_exist(key_range, read_options)
+                .verbose_instrument_await("store_may_exist")
+                .await;
             timer.observe_duration();
             res
         }
@@ -217,7 +221,9 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     fn flush(&mut self, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) -> Self::FlushFuture<'_> {
         // TODO: collect metrics
-        self.inner.flush(delete_ranges)
+        self.inner
+            .flush(delete_ranges)
+            .verbose_instrument_await("store_flush")
     }
 
     fn epoch(&self) -> u64 {
@@ -264,7 +270,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             let sync_result = self
                 .inner
                 .sync(epoch)
-                .instrument_await("store_await_sync")
+                .instrument_await("store_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();

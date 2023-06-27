@@ -81,6 +81,7 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
+    registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config.clone()));
@@ -161,7 +162,7 @@ pub async fn compute_node_serve(
 
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
-    let registry = prometheus::Registry::new();
+
     monitor_process(&registry).unwrap();
     let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
@@ -233,6 +234,7 @@ pub async fn compute_node_serve(
                 output_memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
+                await_tree_reg: None,
             });
 
             let (handle, shutdown_sender) =
@@ -263,7 +265,7 @@ pub async fn compute_node_serve(
     let await_tree_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
         c => await_tree::ConfigBuilder::default()
-            .verbose(matches!(c, AsyncStackTraceOption::Verbose))
+            .verbose(c.is_verbose().unwrap())
             .build()
             .ok(),
     };

@@ -29,6 +29,7 @@ mod future_utils;
 pub mod hash_util;
 pub mod iter_util;
 pub mod memcmp_encoding;
+pub mod panic;
 pub mod pretty_bytes;
 pub mod prost;
 pub mod resource_util;

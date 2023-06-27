@@ -34,7 +34,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::session_config::ConfigMap;
+use risingwave_common::session_config::{ConfigMap, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -52,16 +52,17 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
+use thiserror::Error;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::info;
 
-use crate::binder::{Binder, BoundStatement};
+use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
+use crate::catalog::{check_schema_writable, CatalogError, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
@@ -429,6 +430,23 @@ pub struct SessionImpl {
     current_query_cancel_flag: Mutex<Option<Trigger>>,
 }
 
+#[derive(Error, Debug)]
+pub enum CheckRelationError {
+    #[error("{0}")]
+    Resolve(#[from] ResolveQualifiedNameError),
+    #[error("{0}")]
+    Catalog(#[from] CatalogError),
+}
+
+impl From<CheckRelationError> for RwError {
+    fn from(e: CheckRelationError) -> Self {
+        match e {
+            CheckRelationError::Resolve(e) => e.into(),
+            CheckRelationError::Catalog(e) => e.into(),
+        }
+    }
+}
+
 impl SessionImpl {
     pub fn new(
         env: FrontendEnv,
@@ -497,7 +515,10 @@ impl SessionImpl {
         self.id
     }
 
-    pub fn check_relation_name_duplicated(&self, name: ObjectName) -> Result<()> {
+    pub fn check_relation_name_duplicated(
+        &self,
+        name: ObjectName,
+    ) -> std::result::Result<(), CheckRelationError> {
         let db_name = self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
@@ -513,9 +534,9 @@ impl SessionImpl {
             };
             (schema_name, relation_name)
         };
-        catalog_reader
-            .check_relation_name_duplicated(db_name, &schema_name, &relation_name)
-            .map_err(RwError::from)
+        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name)?;
+
+        Ok(())
     }
 
     pub fn check_connection_name_duplicated(&self, name: ObjectName) -> Result<()> {
@@ -677,6 +698,14 @@ impl SessionImpl {
         let notice = str.into();
         tracing::trace!("notice to user:{}", notice);
         self.notices.write().push(notice);
+    }
+
+    pub fn is_barrier_read(&self) -> bool {
+        match self.config().get_visible_mode() {
+            VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
+            VisibilityMode::All => true,
+            VisibilityMode::Checkpoint => false,
+        }
     }
 }
 

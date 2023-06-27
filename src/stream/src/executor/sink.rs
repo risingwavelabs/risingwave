@@ -18,7 +18,6 @@ use std::time::Instant;
 use futures::stream::select;
 use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
-use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::Histogram;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -51,7 +50,6 @@ pub struct SinkExecutor<F: LogStoreFactory> {
 
 struct SinkMetrics {
     sink_commit_duration_metrics: Histogram,
-    sink_throughput_metrics: GenericCounter<AtomicU64>,
 }
 
 async fn build_sink(
@@ -133,14 +131,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .metrics
             .sink_commit_duration
             .with_label_values(&[self.identity.as_str(), self.config.get_connector()]);
-        let sink_throughput_metrics = self
-            .metrics
-            .sink_output_row_count
-            .with_label_values(&[self.identity.as_str(), self.config.get_connector()]);
 
         let sink_metrics = SinkMetrics {
             sink_commit_duration_metrics,
-            sink_throughput_metrics,
         };
 
         let write_log_stream = Self::execute_write_log(
@@ -270,9 +263,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         sink.abort().await?;
                         return Err(e.into());
                     }
-                    sink_metrics
-                        .sink_throughput_metrics
-                        .inc_by(chunk.cardinality() as u64);
                 }
                 LogStoreReadItem::Barrier { is_checkpoint } => {
                     state = match state {

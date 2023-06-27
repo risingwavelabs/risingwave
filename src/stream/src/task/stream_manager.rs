@@ -205,8 +205,8 @@ impl LocalStreamManager {
 
     /// Get await-tree contexts for all actors.
     pub async fn get_actor_traces(&self) -> HashMap<ActorId, await_tree::TreeContext> {
-        let mut core = self.core.lock().await;
-        match &mut core.await_tree_reg {
+        let core = self.core.lock().await;
+        match &core.await_tree_reg {
             Some(mgr) => mgr.iter().map(|(k, v)| (*k, v)).collect(),
             None => Default::default(),
         }

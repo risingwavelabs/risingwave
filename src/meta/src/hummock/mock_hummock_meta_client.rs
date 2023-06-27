@@ -175,8 +175,6 @@ impl HummockMetaClient for MockHummockMetaClient {
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let (sched_tx, mut sched_rx) = tokio::sync::mpsc::unbounded_channel();
         let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
-        self.hummock_manager
-            .init_compaction_scheduler(sched_channel.clone(), None);
 
         let worker_node = self
             .hummock_manager

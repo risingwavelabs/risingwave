@@ -112,9 +112,9 @@ impl Expression for SomeAllExpression {
                     ScalarRefImpl::List(array) => {
                         let len = array.iter().len();
                         num_array.push(Some(len));
-                        unfolded_arr_left_builder.append_datum_n(len, left);
+                        unfolded_arr_left_builder.append_n(len, left);
                         for item in array.iter() {
-                            unfolded_arr_right_builder.append_datum(item);
+                            unfolded_arr_right_builder.append(item);
                         }
                     }
                     _ => unreachable!(),

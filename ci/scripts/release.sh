@@ -22,6 +22,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify
 source "$HOME/.cargo/env"
 rustup show
 source ci/scripts/common.sh
+unset RUSTC_WRAPPER # disable sccache
 
 echo "--- Install protoc3"
 curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip

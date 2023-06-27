@@ -124,7 +124,7 @@ impl AvroParserConfig {
             Ok(fields)
         } else {
             Err(RwError::from(InternalError(
-                "schema invalid, record required".into(),
+                "Kafka message key schema is invalid. Record type is required, or specify a primary key column to bypass the primary key detection.".into(),
             )))
         }
     }
@@ -179,12 +179,13 @@ impl AvroParser {
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
+        #[derive(Debug)]
         enum Op {
             Insert,
             Delete,
         }
 
-        let (_payload, op) = if self.is_enable_upsert() {
+        let (raw_key, raw_value, op) = if self.is_enable_upsert() {
             let msg: UpsertMessage<'_> = bincode::deserialize(&payload).map_err(|e| {
                 RwError::from(ProtocolError(format!(
                     "extract payload err {:?}, you may need to check the 'upsert' parameter",
@@ -192,45 +193,103 @@ impl AvroParser {
                 )))
             })?;
             if !msg.record.is_empty() {
-                (msg.record, Op::Insert)
+                (Some(msg.primary_key), Some(msg.record), Op::Insert)
             } else {
-                (msg.primary_key, Op::Delete)
+                (Some(msg.primary_key), None, Op::Delete)
             }
         } else {
-            (Cow::from(&payload), Op::Insert)
+            (None, Some(Cow::from(&payload)), Op::Insert)
         };
 
-        // parse payload to avro value
-        // if use confluent schema, get writer schema from confluent schema registry
-        let avro_value = if let Some(resolver) = &self.schema_resolver {
-            let (schema_id, mut raw_payload) = extract_schema_id(&_payload)?;
-            let writer_schema = resolver.get(schema_id).await?;
-            let reader_schema = if matches!(op, Op::Delete) {
-                self.key_schema.as_deref()
+        let avro_value = if let Some(payload) = raw_value {
+            // parse payload to avro value
+            // if use confluent schema, get writer schema from confluent schema registry
+            if let Some(resolver) = &self.schema_resolver {
+                let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
+                let writer_schema = resolver.get(schema_id).await?;
+                let reader_schema = Some(&*self.schema);
+                Some(
+                    from_avro_datum(writer_schema.as_ref(), &mut raw_payload, reader_schema)
+                        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
+                )
             } else {
-                Some(&*self.schema)
-            };
-            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, reader_schema)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
-        } else {
-            let mut reader = Reader::with_schema(&self.schema, &payload as &[u8])
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-            match reader.next() {
-                Some(Ok(v)) => v,
-                Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
-                None => {
-                    return Err(RwError::from(ProtocolError(
-                        "avro parse unexpected eof".to_string(),
-                    )));
+                let mut reader = Reader::with_schema(&self.schema, &payload as &[u8])
+                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+                match reader.next() {
+                    Some(Ok(v)) => Some(v),
+                    Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
+                    None => {
+                        return Err(RwError::from(ProtocolError(
+                            "avro parse unexpected eof".to_string(),
+                        )));
+                    }
                 }
             }
+        } else {
+            None
+        };
+
+        let avro_key = if let Some(payload) = raw_key {
+            if let Some(resolver) = &self.schema_resolver {
+                let (schema_id, mut raw_payload) = extract_schema_id(payload.as_ref())?;
+                let writer_schema = resolver.get(schema_id).await?;
+                let reader_schema = self.key_schema.as_ref();
+                let value = from_avro_datum(
+                    writer_schema.as_ref(),
+                    &mut raw_payload,
+                    reader_schema.map(|x| &**x),
+                )
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+                Some(value)
+            } else if let Some(key_schema) = self.key_schema.as_ref() {
+                let mut reader = Reader::with_schema(key_schema, &payload as &[u8])
+                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+                match reader.next() {
+                    Some(Ok(v)) => Some(v),
+                    Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
+                    None => {
+                        return Err(RwError::from(ProtocolError(
+                            "avro parse unexpected eof".to_string(),
+                        )));
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
         };
 
         // the avro can be a key or a value
-        if let Value::Record(fields) = avro_value {
+        if let Some(Value::Record(fields)) = avro_value {
             let fill = |column: &SourceColumnDesc| {
                 let tuple = match fields.iter().find(|val| column.name.eq(&val.0)) {
-                    None => return Ok(None),
+                    None => {
+                        if self.upsert_primary_key_column_name.as_ref() == Some(&column.name) {
+                            if !(avro_key.is_some() && self.key_schema.is_some()) {
+                                tracing::error!(
+                                    upsert_primary_key_column_name =
+                                        self.upsert_primary_key_column_name,
+                                    "Upsert mode is enabled, but key or key schema is absent.",
+                                );
+                            }
+                            return from_avro_value(
+                                avro_key.as_ref().unwrap().clone(),
+                                self.key_schema.as_ref().unwrap(),
+                            )
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "failed to process value ({}): {}",
+                                    String::from_utf8_lossy(&payload),
+                                    e
+                                );
+                                e
+                            });
+                        } else {
+                            return Ok(None);
+                        }
+                    }
                     Some(tup) => tup,
                 };
 
@@ -248,35 +307,24 @@ impl AvroParser {
                 Op::Insert => writer.insert(fill),
                 Op::Delete => writer.delete(fill),
             }
-        } else if self.upsert_primary_key_column_name.is_some()
-            && matches!(op, Op::Delete)
-            && matches!(
-                avro_value,
-                Value::Boolean(_)
-                    | Value::String(_)
-                    | Value::Int(_)
-                    | Value::Long(_)
-                    | Value::Float(_)
-                    | Value::Decimal(_)
-                    | Value::Date(_)
-                    | Value::TimestampMillis(_)
-                    | Value::TimestampMicros(_)
-                    | Value::Duration(_)
-            )
-        {
+        } else if self.upsert_primary_key_column_name.is_some() && matches!(op, Op::Delete) {
             writer.delete(|desc| {
                 if &desc.name != self.upsert_primary_key_column_name.as_ref().unwrap() {
                     Ok(None)
                 } else {
-                    from_avro_value(avro_value.clone(), self.key_schema.as_deref().unwrap())
-                        .map_err(|e| {
-                            tracing::error!(
-                                "failed to process value ({}): {}",
-                                String::from_utf8_lossy(&payload),
-                                e
-                            );
+                    from_avro_value(
+                        avro_key.as_ref().unwrap().clone(),
+                        self.key_schema.as_deref().unwrap(),
+                    )
+                    .map_err(|e| {
+                        tracing::error!(upsert_primary_key_column_name=self.upsert_primary_key_column_name,
+                            ?avro_value,op=?op,
+                            "failed to process value ({}): {}",
+                            String::from_utf8_lossy(&payload),
                             e
-                        })
+                        );
+                        e
+                    })
                 }
             })
         } else {

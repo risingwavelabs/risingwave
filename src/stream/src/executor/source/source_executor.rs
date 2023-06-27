@@ -432,7 +432,8 @@ impl<S: StateStore> SourceExecutor<S> {
                                 self.stream_source_core
                                     .as_ref()
                                     .unwrap()
-                                    .source_identify
+                                    .source_id
+                                    .to_string()
                                     .as_ref(),
                             ])
                             .inc_by(metric_row_per_barrier);
@@ -494,13 +495,15 @@ impl<S: StateStore> SourceExecutor<S> {
                             self.stream_source_core
                                 .as_ref()
                                 .unwrap()
-                                .source_identify
-                                .as_str(),
+                                .source_id
+                                .to_string()
+                                .as_ref(),
                             self.stream_source_core
                                 .as_ref()
                                 .unwrap()
                                 .source_name
                                 .as_ref(),
+                            self.ctx.id.to_string().as_str(),
                         ])
                         .inc_by(chunk.cardinality() as u64);
                     yield Message::Chunk(chunk);
@@ -630,7 +633,6 @@ mod tests {
         let core = StreamSourceCore::<MemoryStateStore> {
             source_id: table_id,
             column_ids,
-            source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
             source_desc_builder: Some(source_desc_builder),
             stream_source_splits: HashMap::new(),
             split_state_store,
@@ -718,7 +720,6 @@ mod tests {
         let core = StreamSourceCore::<MemoryStateStore> {
             source_id: table_id,
             column_ids: column_ids.clone(),
-            source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
             source_desc_builder: Some(source_desc_builder),
             stream_source_splits: HashMap::new(),
             split_state_store,

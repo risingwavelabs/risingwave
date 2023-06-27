@@ -16,9 +16,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::LazyLock;
 
-use itertools::Itertools;
 use risingwave_common::types::DataTypeName;
 
+use super::FuncSigDebug;
 use crate::agg::{AggCall, AggKind, BoxedAggState};
 use crate::Result;
 
@@ -42,14 +42,13 @@ pub struct AggFuncSig {
 
 impl fmt::Debug for AggFuncSig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = format!(
-            "{}({})->{:?}",
-            self.func,
-            self.inputs_type.iter().map(|t| format!("{t:?}")).join(","),
-            self.ret_type
-        )
-        .to_lowercase();
-        f.write_str(&s)
+        FuncSigDebug {
+            func: self.func,
+            inputs_type: self.inputs_type,
+            ret_type: self.ret_type,
+            set_returning: false,
+        }
+        .fmt(f)
     }
 }
 

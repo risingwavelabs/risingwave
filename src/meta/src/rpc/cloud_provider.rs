@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use aws_config::retry::RetryConfig;
-use aws_sdk_ec2::model::{Filter, State, VpcEndpointType};
+use aws_sdk_ec2::types::{Filter, State, VpcEndpointType};
 use itertools::Itertools;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::catalog::connection::PrivateLinkService;

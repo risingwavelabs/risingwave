@@ -180,7 +180,7 @@ impl ConnectorSourceWorker {
                 .flat_map(|col| &col.column_desc)
                 .map(|col| Column {
                     name: col.name.clone(),
-                    data_type: col.column_type.as_ref().unwrap().type_name,
+                    data_type: col.column_type.clone(),
                 })
                 .collect(),
             pk_indices,

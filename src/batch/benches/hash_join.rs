@@ -19,6 +19,7 @@ use risingwave_batch::executor::hash_join::HashJoinExecutor;
 use risingwave_batch::executor::test_utils::{gen_projected_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, JoinType};
 use risingwave_common::catalog::schema_test_utils::field_n;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc_on_unix, hash};
 use risingwave_expr::expr::build_from_pretty;
@@ -75,6 +76,7 @@ fn create_hash_join_executor(
         // TODO: In practice this `shutdown_rx` will be constantly poll in execution, may need to
         // use it in bench too.
         None,
+        MemoryContext::none(),
     ))
 }
 

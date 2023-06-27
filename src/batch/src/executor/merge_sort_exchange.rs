@@ -109,7 +109,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
                 self.mem_ctx.add(new_chunk_size);
                 old
             }
-            None => std::mem::replace(&mut self.source_inputs[source_idx], None),
+            None => std::mem::take(&mut self.source_inputs[source_idx]),
         };
 
         if let Some(chunk) = old {
@@ -194,7 +194,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
                     let chunk_arr = cur_chunk.column_at(idx);
                     let chunk_arr = chunk_arr.as_ref();
                     let datum = chunk_arr.value_at(row_idx).to_owned_datum();
-                    builder.append_datum(&datum);
+                    builder.append(&datum);
                 }
                 want_to_produce -= 1;
                 array_len += 1;

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# NOTE(kwannoel): This script currently does not work locally...
+# It has been adapted for CI use.
+
 # USAGE: Script for generating queries via sqlsmith.
 # These queries can be used for fuzz testing.
 # Requires `$SNAPSHOT_DIR` to be set,
@@ -10,7 +13,7 @@
 
 ################# ENV
 
-set -u
+set -euo pipefail
 
 export RUST_LOG="info"
 export OUTDIR=$SNAPSHOT_DIR
@@ -21,8 +24,10 @@ export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
 export MADSIM_BIN="target/sim/ci-sim/risingwave_simulation"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
-
-set +u
+export TIME_BOUND="6m"
+export TEST_NUM_PER_SET=30
+export E2E_TEST_NUM=64
+export TIMEOUT_MESSAGE="Query Set timed out"
 
 ################## COMMON
 
@@ -40,27 +45,48 @@ echo_err() {
 # TODO(kwannoel): Write tests for these
 
 # Get reason for generation crash.
+# -m1 means that grep will early exit returning exit code 141, so we just ignore it for simplicity.
 get_failure_reason() {
-  tac | grep -B 10000 -m1 "\[EXECUTING" | tac | tail -n+2
+  set +e
+  cat "$1" | tac | grep -B 10000 -m1 "\[EXECUTING" | tac | tail -n+2
+  set -e
+}
+
+check_if_failed() {
+  grep -B 2 "$CRASH_MESSAGE" || true
+}
+
+check_if_timeout() {
+  grep "$TIMEOUT_MESSAGE" || true
 }
 
 # Extract queries from file $1, write to file $2
 extract_queries() {
-  QUERIES=$(grep "\[EXECUTING .*\]: " < "$1" | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/')
-  FAIL_REASON=$(get_failure_reason < "$1")
-  if [[ -n "$FAIL_REASON" ]]; then
-    echo_err "[WARN] Cluster crashed while generating queries. see $1 for more information."
-    QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
+  local QUERIES=$(grep "\[EXECUTING .*\]: " < "$1" | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/')
+  local FAILED=$(check_if_failed < "$1")
+  if [[ -n "$FAILED" ]]; then
+    echo "Cluster crashed, see $1. Removing failed query."
+    # Comment out the last line of queries.
+    local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
+  fi
+  if [[ -n $(check_if_timeout < "$1") ]]; then
+    echo "Cluster timed out, see $1. Removing last query in case."
+    # Comment out the last line of queries.
+    local QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
   echo -e "$QUERIES" > "$2"
 }
 
 extract_ddl() {
-  grep "\[EXECUTING CREATE .*\]: " | sed -E 's/^.*\[EXECUTING CREATE .*\]: (.*)$/\1;/' | pg_format || true
+  grep "\[EXECUTING CREATE .*\]: " | sed -E 's/^.*\[EXECUTING CREATE .*\]: (.*)$/\1;/' | $PG_FORMAT || true
 }
 
-extract_dml() {
+extract_inserts() {
   grep "\[EXECUTING INSERT\]: " | sed -E 's/^.*\[EXECUTING INSERT\]: (.*)$/\1;/' || true
+}
+
+extract_updates() {
+  grep "\[EXECUTING UPDATES\]: " | sed -E 's/^.*\[EXECUTING UPDATES\]: (.*)$/\1;/' || true
 }
 
 extract_last_session() {
@@ -72,9 +98,10 @@ extract_global_session() {
 }
 
 extract_failing_query() {
-  grep "\[EXECUTING .*\]: " | tail -n 1 | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/' | pg_format || true
+  grep "\[EXECUTING .*\]: " | tail -n 1 | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/' | $PG_FORMAT || true
 }
 
+# FIXME(kwannoel): Extract from query-log instead.
 # Extract fail info from [`generate-*.log`] in log dir
 # $1 := log file name prefix. E.g. if file is generate-XXX.log, prefix will be "generate"
 extract_fail_info_from_logs() {
@@ -82,20 +109,37 @@ extract_fail_info_from_logs() {
   for LOGFILENAME in $(ls "$LOGDIR" | grep "$LOGFILE_PREFIX")
   do
     LOGFILE="$LOGDIR/$LOGFILENAME"
-    REASON=$(get_failure_reason < "$LOGFILE")
-    if [[ -n "$REASON" ]]; then
-      echo_err "[INFO] $LOGFILE Encountered bug."
+    echo_err "[INFO] Checking $LOGFILE for bugs"
+    FAILED=$(check_if_failed < "$LOGFILE")
+    echo_err "[INFO] Checked $LOGFILE for bugs"
+    if [[ -n "$FAILED" ]]; then
+      echo_err "[WARN] $LOGFILE Encountered bug."
 
-      # TODO(Noel): Perhaps add verbose logs here, if any part is missing.
+      REASON=$(get_failure_reason "$LOGFILE")
+      echo_err "[INFO] extracted fail reason for $LOGFILE"
       SEED=$(echo "$LOGFILENAME" | sed -E "s/${LOGFILE_PREFIX}\-(.*)\.log/\1/")
+
       DDL=$(extract_ddl < "$LOGFILE")
+      echo_err "[INFO] extracted ddl for $LOGFILE"
       GLOBAL_SESSION=$(extract_global_session < "$LOGFILE")
-      DML=$(extract_dml < "$LOGFILE")
+      echo_err "[INFO] extracted global var for $LOGFILE"
+      INSERTS=$(extract_inserts < "$LOGFILE")
+      UPDATES=$(extract_updates < "$LOGFILE")
+      echo_err "[INFO] extracted dml for $LOGFILE"
       TEST_SESSION=$(extract_last_session < "$LOGFILE")
+      echo_err "[INFO] extracted session var for $LOGFILE"
       QUERY=$(extract_failing_query < "$LOGFILE")
+      echo_err "[INFO] extracted failing query for $LOGFILE"
+
       FAIL_DIR="$OUTDIR/failed/$SEED"
       mkdir -p "$FAIL_DIR"
-      echo -e "$DDL" "\n\n$GLOBAL_SESSION" "\n\n$DML" "\n\n$TEST_SESSION" "\n\n$QUERY" > "$FAIL_DIR/queries.sql"
+
+      echo -e "$DDL" \
+       "\n\n$GLOBAL_SESSION" \
+       "\n\n$INSERTS" \
+       "\n\n$UPDATES" \
+       "\n\n$TEST_SESSION" \
+       "\n\n$QUERY" > "$FAIL_DIR/queries.sql"
       echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.sql"
       echo -e "$REASON" > "$FAIL_DIR/fail.log"
       echo_err "[INFO] WROTE FAIL REASON to $FAIL_DIR/fail.log"
@@ -107,25 +151,62 @@ extract_fail_info_from_logs() {
 
 ################# Generate
 
+# Generate $TEST_NUM number of seeds.
+# if `ENABLE_RANDOM_SEED=1`, we will generate random seeds.
+# sample output:
+# 1 12329
+# 2 22929
+# 3 22921
+gen_seed() {
+  for i in $(seq 1 100)
+  do
+    if [[ $ENABLE_RANDOM_SEED -eq 1 ]]; then
+      echo "$i $RANDOM"
+    else
+      echo "$i $i"
+    fi
+  done
+}
+
 # Prefer to use [`generate_deterministic`], it is faster since
 # runs with all-in-one binary.
 generate_deterministic() {
-  # Allows us to use other functions defined in this file within `parallel`.
-  . $(which env_parallel.bash)
-  # Even if fails early, it should still generate some queries, do not exit script.
   set +e
-  echo "" > $LOGDIR/generate_deterministic.stdout.log
-  seq "$TEST_NUM" | env_parallel "
-    mkdir -p $OUTDIR/{}; \
-    MADSIM_TEST_SEED={} ./$MADSIM_BIN \
-      --sqlsmith 100 \
-      --generate-sqlsmith-queries $OUTDIR/{} \
+  gen_seed | timeout 15m parallel --colsep ' ' "
+    mkdir -p $OUTDIR/{1}
+    echo '[INFO] Generating For Seed {2}, Query Set {1}'
+    if MADSIM_TEST_SEED={2} timeout 5m $MADSIM_BIN \
+      --sqlsmith $TEST_NUM_PER_SET \
+      --generate-sqlsmith-queries $OUTDIR/{1} \
       $TESTDATA \
-      1>>$LOGDIR/generate_deterministic.stdout.log \
-      2>$LOGDIR/generate-{}.log; \
-    extract_queries $LOGDIR/generate-{}.log $OUTDIR/{}/queries.sql; \
+      2>$LOGDIR/generate-{1}.log;
+    then
+      echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
+    else
+      echo '[INFO] Finished Generating For Seed {2}, Query set {1}'
+      echo '[WARN] Cluster crashed or timed out while generating queries. see $LOGDIR/generate-{1}.log for more information.'
+      if ! cat $LOGDIR/generate-{1}.log | grep '$CRASH_MESSAGE'
+      then
+        echo $TIMEOUT_MESSAGE >> $LOGDIR/generate-{1}.log
+      fi
+      buildkite-agent artifact upload "$LOGDIR/generate-{1}.log"
+    fi
     "
+  TIMED_OUT=$?
   set -e
+  if [[ $TIMED_OUT -eq 124 ]]; then
+    echo "TIMED_OUT"
+    exit 124
+  fi
+  echo "--- Extracting queries"
+  for i in $(seq 1 100);
+  do
+    echo "[INFO] Extracting Queries For Query set ${i}"
+    extract_queries "${LOGDIR}/generate-${i}.log" "${OUTDIR}/${i}/queries.sql"
+    echo "[INFO] Extracted Queries For Query set ${i}."
+  done
+  echo "Extracted all queries"
+  wait
 }
 
 generate_sqlsmith() {
@@ -157,29 +238,58 @@ check_failed_to_generate_queries() {
   fi
 }
 
-# Run it to make sure it should have no errors
-run_queries() {
+# Run it to make sure it matches our expected timing for e2e test.
+# Otherwise don't update this batch of queries yet.
+run_queries_timed() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
-  seq $TEST_NUM | parallel "MADSIM_TEST_SEED={} \
-    ./$MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
+  timeout "$TIME_BOUND" seq $E2E_TEST_NUM | parallel "MADSIM_TEST_SEED={} \
+    timeout 6m $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
       && rm $LOGDIR/fuzzing-{}.log"
+}
+
+# Run it to make sure it should have no errors
+run_queries() {
+  set +e
+  echo "" > $LOGDIR/run_deterministic.stdout.log
+  seq $TEST_NUM | parallel "MADSIM_TEST_SEED={} \
+    timeout 15m $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
+      1>>$LOGDIR/run_deterministic.stdout.log \
+      2>$LOGDIR/fuzzing-{}.log \
+      && rm $LOGDIR/fuzzing-{}.log"
+  set -e
 }
 
 # Generated query sets should not fail.
 check_failed_to_run_queries() {
   FAILED_LOGS=$(ls "$LOGDIR" | grep fuzzing || true)
   if [[ -n "$FAILED_LOGS" ]]; then
-    echo_err -e "FAILING_LOGS: $FAILED_LOGS" && exit 1
+    echo_err -e "FAILING_LOGS: $FAILED_LOGS"
+    buildkite-agent artifact upload "$LOGDIR/fuzzing-*.log"
+    exit 1
   fi
 }
 
 ################### TOP LEVEL INTERFACE
 
 setup() {
-  set -euo pipefail
-  # -x is too verbose, selectively enable it if needed.
+  echo "--- Installing pg_format"
+  wget https://github.com/darold/pgFormatter/archive/refs/tags/v5.5.tar.gz
+  tar -xvf v5.5.tar.gz
+  export PG_FORMAT="$PWD/pgFormatter-5.5/pg_format"
+
+  echo "--- Configuring Test variables"
+  if [[ -z "$TEST_NUM" ]]; then
+    echo "TEST_NUM unset, default to TEST_NUM=100"
+    TEST_NUM=100
+  fi
+  if [[ -z "$ENABLE_RANDOM_SEED" ]]; then
+    echo "ENABLE_RANDOM_SEED unset, default ENABLE_RANDOM_SEED=false (0)"
+    ENABLE_RANDOM_SEED=0
+  fi
+  echo "[INFO]: TEST_NUM=$TEST_NUM"
+  echo "[INFO]: ENABLE_RANDOM_SEED=$ENABLE_RANDOM_SEED"
   pushd $RW_HOME
 }
 
@@ -194,7 +304,6 @@ build() {
 
 generate() {
   generate_deterministic
-  echo_err "[INFO] Finished generation"
 }
 
 validate() {
@@ -204,18 +313,23 @@ validate() {
   echo_err "[CHECK PASSED] No seeds failed to generate queries"
   extract_fail_info_from_logs "generate"
   echo_err "[INFO] Recorded new bugs from  generated queries"
+  echo "--- Running all queries check"
   run_queries
-  echo_err "[INFO] Queries were ran"
+  echo "--- Check fail to run queries"
   check_failed_to_run_queries
   echo_err "[CHECK PASSED] Queries all ran without failure"
+  echo_err "[INFO] Queries were ran and passed"
+  echo "--- Running timeout check"
+  run_queries_timed
+  echo_err "[INFO] pre-generated queries running in e2e deterministic test are ran and passed in $TIME_BOUND"
   echo_err "[INFO] Passed checks"
 }
 
 # sync step
 # Some queries maybe be added
 sync_queries() {
-  set +x
   pushd $OUTDIR
+  git stash
   git checkout main
   git pull
   set +e
@@ -223,10 +337,10 @@ sync_queries() {
   set -e
   git checkout -b stage
   popd
-  set -x
 }
 
 sync() {
+  echo_err "[INFO] Syncing"
   sync_queries
   echo_err "[INFO] Synced"
 }
@@ -245,6 +359,7 @@ upload_queries() {
 }
 
 upload() {
+  echo_err "[INFO] Uploading Queries"
   upload_queries
   echo_err "[INFO] Uploaded"
 }
@@ -256,7 +371,7 @@ cleanup() {
 
 ################### ENTRY POINTS
 
-generate() {
+run_generate() {
   setup
 
   build
@@ -268,7 +383,7 @@ generate() {
   cleanup
 }
 
-extract() {
+run_extract() {
   LOGDIR="$PWD" OUTDIR="$PWD" extract_fail_info_from_logs "fuzzing"
   for QUERY_FOLDER in failed/*
   do
@@ -287,9 +402,9 @@ extract() {
 main() {
   if [[ $1 == "extract" ]]; then
     echo "[INFO] Extracting queries"
-    extract
+    run_extract
   elif [[ $1 == "generate" ]]; then
-    generate
+    run_generate
   else
     echo "
 ================================================================

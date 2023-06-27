@@ -150,11 +150,7 @@ impl Planner {
 
         let need_restore_select_items = select_items.len() > original_select_items_len;
 
-        if select_items.iter().any(|e| e.has_table_function()) {
-            root = LogicalProjectSet::create(root, select_items)
-        } else {
-            root = LogicalProject::create(root, select_items);
-        }
+        root = LogicalProjectSet::create(root, select_items);
 
         if matches!(&distinct, BoundDistinct::DistinctOn(_)) {
             root = if order.is_empty() {

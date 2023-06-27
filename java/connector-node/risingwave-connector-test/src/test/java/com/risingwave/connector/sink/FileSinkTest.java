@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector;
+package com.risingwave.connector.sink;
 
 import static com.risingwave.proto.Data.*;
 import static org.junit.Assert.*;
 
 import com.google.common.collect.Iterators;
-import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.FileSink;
+import com.risingwave.connector.FileSinkConfig;
+import com.risingwave.connector.TestUtils;
 import com.risingwave.connector.api.sink.ArraySinkRow;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -36,7 +38,7 @@ public class FileSinkTest {
         }
 
         FileSinkConfig config = new FileSinkConfig(path);
-        FileSink sink = new FileSink(config, TableSchema.getMockTableSchema());
+        FileSink sink = new FileSink(config, TestUtils.getMockTableSchema());
         String filePath = sink.getSinkPath();
 
         Path file = Paths.get(filePath);
@@ -78,7 +80,7 @@ public class FileSinkTest {
             Files.createDirectories(Paths.get(path));
         }
         FileSinkConfig config = new FileSinkConfig(path);
-        FileSink sink = new FileSink(config, TableSchema.getMockTableSchema());
+        FileSink sink = new FileSink(config, TestUtils.getMockTableSchema());
 
         String filePath = sink.getSinkPath();
         try {
@@ -107,7 +109,7 @@ public class FileSinkTest {
             Files.createDirectories(Paths.get(path));
         }
         FileSinkConfig config = new FileSinkConfig(path);
-        FileSink sink = new FileSink(config, TableSchema.getMockTableSchema());
+        FileSink sink = new FileSink(config, TestUtils.getMockTableSchema());
 
         sink.drop();
 

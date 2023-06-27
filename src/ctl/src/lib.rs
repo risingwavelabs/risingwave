@@ -158,6 +158,11 @@ enum HummockCommands {
         #[clap(long)]
         table_ids: Vec<u32>,
     },
+    /// List compaction status
+    ListCompactionStatus {
+        #[clap(short, long = "verbose", default_value_t = false)]
+        verbose: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -318,6 +323,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
                 .await?;
+        }
+        Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => {
+            cmd_impl::hummock::list_compaction_status(context, verbose).await?;
         }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?

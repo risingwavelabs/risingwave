@@ -92,24 +92,32 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "hummock+memory-shared",
                 "--data-directory",
                 "hummock_001",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5687",
                 "--parallelism",
                 "4",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5688",
                 "--parallelism",
                 "4",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5689",
                 "--parallelism",
                 "4",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Frontend(osstrs([])),
         ],
@@ -207,8 +215,9 @@ pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
                 opts.insert(0, "compute-node".into());
                 tracing::info!("starting compute-node thread with cli args: {:?}", opts);
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from(opts);
-                let _compute_handle =
-                    tokio::spawn(async move { risingwave_compute::start(opts).await });
+                let _compute_handle = tokio::spawn(async move {
+                    risingwave_compute::start(opts, prometheus::Registry::new()).await
+                });
             }
             RisingWaveService::Frontend(mut opts) => {
                 opts.insert(0, "frontend-node".into());

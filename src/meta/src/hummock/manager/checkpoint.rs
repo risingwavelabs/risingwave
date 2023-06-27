@@ -131,7 +131,7 @@ where
         self.write_checkpoint(&new_checkpoint).await?;
         // 3. hold write lock and update in memory state
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let mut versioning = versioning_guard.deref_mut();
+        let versioning = versioning_guard.deref_mut();
         assert!(
             versioning.checkpoint.version.is_none()
                 || new_checkpoint.version.as_ref().unwrap().id
