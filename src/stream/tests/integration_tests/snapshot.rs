@@ -31,18 +31,17 @@ pub struct SnapshotOptions {
 
     /// Whether to include the result after applying the changes from each output chunk. One can
     /// imagine this as the result of a `SELECT * FROM mv` after each output chunk.
-    pub include_applied: bool,
+    pub include_applied_result: bool,
 }
 
-#[allow(dead_code)]
 impl SnapshotOptions {
     pub fn sort_chunk(mut self, sort_chunk: bool) -> Self {
         self.sort_chunk = sort_chunk;
         self
     }
 
-    pub fn include_applied(mut self, include_applied: bool) -> Self {
-        self.include_applied = include_applied;
+    pub fn include_applied_result(mut self, include_applied_result: bool) -> Self {
+        self.include_applied_result = include_applied_result;
         self
     }
 }
@@ -191,9 +190,9 @@ fn run_until_pending(
                     chunk = chunk.sort_rows();
                 }
                 let mut output = chunk.to_pretty_string();
-                if options.include_applied {
+                if options.include_applied_result {
                     let applied = store.apply_chunk(&chunk);
-                    output += &format!("\n\napplied:\n{}", applied.to_pretty_string());
+                    output += &format!("\napplied result:\n{}", applied.to_pretty_string());
                 }
                 SnapshotEvent::Chunk(output)
             }
