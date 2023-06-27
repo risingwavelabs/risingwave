@@ -227,7 +227,7 @@ where
         &self,
         worker_ids: &[u32],
         is_unschedulable: bool,
-    ) -> MetaResult<Vec<WorkerType>> {
+    ) -> MetaResult<()> {
         let mut core = self.core.write().await;
         let workers = core
             .workers
@@ -237,7 +237,6 @@ where
         if workers.is_empty() {
             return Err(MetaError::invalid_parameter("Worker nodes do not exist!"));
         }
-        let worker_types = workers.iter().map(|w| w.worker_type()).collect_vec();
 
         // return early if any worker has none property OR all already have required schedulability
         let mut all_correct = true;
@@ -257,7 +256,7 @@ where
             }
         }
         if all_correct {
-            return Ok(worker_types);
+            return Ok(());
         }
 
         for worker in workers {
@@ -265,7 +264,7 @@ where
             property.is_unschedulable = is_unschedulable;
             Worker::insert(worker, self.env.meta_store()).await?;
         }
-        Ok(worker_types)
+        Ok(())
     }
 
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
