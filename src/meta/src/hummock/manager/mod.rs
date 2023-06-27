@@ -14,7 +14,7 @@
 
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -31,8 +31,8 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    build_version_delta_after_version, get_compaction_group_ids, insert_new_sub_level,
-    try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockVersionExt,
+    build_version_delta_after_version, get_compaction_group_ids,
+    try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockLevelsExt, HummockVersionExt,
     HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
@@ -838,7 +838,7 @@ where
 
         if is_trivial_reclaim {
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(&mut compact_task, Some(compaction_guard), None)
+            self.report_compact_task_impl(&mut compact_task, &mut compaction_guard, None)
                 .await?;
             tracing::debug!(
                 "TrivialReclaim for compaction group {}: remove {} sstables, cost time: {:?}",
@@ -854,7 +854,7 @@ where
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
-            self.report_compact_task_impl(&mut compact_task, Some(compaction_guard), None)
+            self.report_compact_task_impl(&mut compact_task, &mut compaction_guard, None)
                 .await?;
             tracing::debug!(
                 "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
@@ -918,8 +918,6 @@ where
                 &current_version,
                 compaction_group_id,
             );
-
-            drop(compaction_guard);
 
             let (file_count, file_size) = {
                 let mut count = 0;
@@ -1030,6 +1028,7 @@ where
         }
         #[cfg(test)]
         {
+            drop(compaction_guard);
             self.check_state_consistency().await;
         }
 
@@ -1049,10 +1048,19 @@ where
         self.cancel_compact_task_impl(compact_task).await
     }
 
+    #[named]
     pub async fn cancel_compact_task_impl(&self, compact_task: &mut CompactTask) -> Result<bool> {
         assert!(CANCEL_STATUS_SET.contains(&compact_task.task_status()));
-        self.report_compact_task_impl(compact_task, None, None)
-            .await
+        let mut compaction_guard = write_lock!(self, compaction).await;
+        let ret = self
+            .report_compact_task_impl(compact_task, &mut compaction_guard, None)
+            .await?;
+        #[cfg(test)]
+        {
+            drop(compaction_guard);
+            self.check_state_consistency().await;
+        }
+        Ok(ret)
     }
 
     // need mutex protect
@@ -1148,15 +1156,21 @@ where
         false
     }
 
+    #[named]
     pub async fn report_compact_task(
         &self,
         compact_task: &mut CompactTask,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
+        let mut guard = write_lock!(self, compaction).await;
         let ret = self
-            .report_compact_task_impl(compact_task, None, table_stats_change)
+            .report_compact_task_impl(compact_task, &mut guard, table_stats_change)
             .await?;
-
+        #[cfg(test)]
+        {
+            drop(guard);
+            self.check_state_consistency().await;
+        }
         Ok(ret)
     }
 
@@ -1171,13 +1185,9 @@ where
     pub async fn report_compact_task_impl(
         &self,
         compact_task: &mut CompactTask,
-        compaction_guard: Option<RwLockWriteGuard<'_, Compaction>>,
+        compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
-        let mut compaction_guard = match compaction_guard {
-            None => write_lock!(self, compaction).await,
-            Some(compaction_guard) => compaction_guard,
-        };
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
@@ -1223,6 +1233,16 @@ where
                 compact_task.task_status() != TaskStatus::Pending,
                 "report pending compaction task"
             );
+            let input_sst_ids: HashSet<u64> = compact_task
+                .input_ssts
+                .iter()
+                .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
+                .collect();
+            let input_level_ids: Vec<u32> = compact_task
+                .input_ssts
+                .iter()
+                .map(|level| level.level_idx)
+                .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
                 let is_expired =
@@ -1231,10 +1251,20 @@ where
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
-                    assert!(current_version
+                    let group = current_version
                         .levels
-                        .contains_key(&compact_task.compaction_group_id));
-                    true
+                        .get(&compact_task.compaction_group_id)
+                        .unwrap();
+                    let input_exist =
+                        group.check_deleted_sst_exist(&input_level_ids, input_sst_ids);
+                    if !input_exist {
+                        compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                        warn!(
+                            "The task may be expired because of group split, task:\n {:?}",
+                            compact_task_to_string(compact_task)
+                        );
+                    }
+                    input_exist
                 }
             } else {
                 false
@@ -1340,12 +1370,6 @@ where
         if task_status == TaskStatus::Success {
             self.try_update_write_limits(&[compact_task.compaction_group_id])
                 .await;
-        }
-
-        #[cfg(test)]
-        {
-            drop(compaction_guard);
-            self.check_state_consistency().await;
         }
 
         Ok(true)
@@ -1504,11 +1528,6 @@ where
                 .entry(compaction_group_id)
                 .or_default()
                 .group_deltas;
-            let version_l0 = new_hummock_version
-                .get_compaction_group_levels_mut(compaction_group_id)
-                .l0
-                .as_mut()
-                .expect("Expect level 0 is not empty");
             let l0_sub_level_id = epoch;
             let group_delta = GroupDelta {
                 delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
@@ -1519,18 +1538,10 @@ where
                 })),
             };
             group_deltas.push(group_delta);
-
-            insert_new_sub_level(
-                version_l0,
-                l0_sub_level_id,
-                LevelType::Overlapping,
-                group_sstables,
-                None,
-            );
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
-        new_hummock_version.max_committed_epoch = epoch;
+        new_hummock_version.apply_version_delta(new_version_delta.deref());
 
         // Apply stats changes.
         let mut version_stats = VarTransaction::new(&mut versioning.version_stats);

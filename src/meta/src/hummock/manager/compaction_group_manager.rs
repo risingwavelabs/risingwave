@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
@@ -33,6 +34,7 @@ use risingwave_pb::hummock::{
     GroupDelta, GroupDestroy, GroupMetaChange, GroupTableChange,
 };
 use tokio::sync::{OnceCell, RwLock};
+use tracing::warn;
 
 use super::write_lock;
 use crate::hummock::compaction::compaction_config::{
@@ -453,6 +455,7 @@ impl<S: MetaStore> HummockManager<S> {
             return Ok(parent_group_id);
         }
         let table_ids = table_ids.iter().cloned().unique().collect_vec();
+        let mut compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
@@ -614,7 +617,9 @@ impl<S: MetaStore> HummockManager<S> {
             .current_version
             .apply_version_delta(&new_version_delta);
         // Updates SST split info
-        for (object_id, sst_id, _parent_old_sst_id, parent_new_sst_id) in sst_split_info {
+        let mut changed_sst_ids: HashSet<u64> = HashSet::default();
+        for (object_id, sst_id, parent_old_sst_id, parent_new_sst_id) in sst_split_info {
+            changed_sst_ids.insert(parent_old_sst_id);
             match branched_ssts.get_mut(object_id) {
                 Some(mut entry) => {
                     entry.insert(parent_group_id, parent_new_sst_id);
@@ -630,6 +635,34 @@ impl<S: MetaStore> HummockManager<S> {
         new_version_delta.commit();
         branched_ssts.commit_memory();
         self.notify_last_version_delta(versioning);
+        drop(versioning_guard);
+        let mut canceled_tasks = vec![];
+        for task_assignment in compaction_guard.compact_task_assignment.values() {
+            let mut need_cancel = false;
+            if let Some(task) = task_assignment.compact_task.as_ref() {
+                for input_level in &task.input_ssts {
+                    for sst in &input_level.table_infos {
+                        if changed_sst_ids.contains(&sst.sst_id) {
+                            need_cancel = true;
+                            break;
+                        }
+                    }
+                }
+                if need_cancel {
+                    canceled_tasks.push(task.clone());
+                }
+            }
+        }
+        for mut task in canceled_tasks {
+            task.set_task_status(TaskStatus::ManualCanceled);
+            if !self
+                .report_compact_task_impl(&mut task, &mut compaction_guard, None)
+                .await
+                .unwrap_or(false)
+            {
+                warn!("failed to cancel task-{}", task.task_id);
+            }
+        }
         // Don't trigger compactions if we enable deterministic compaction
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group

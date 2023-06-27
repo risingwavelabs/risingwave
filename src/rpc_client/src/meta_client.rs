@@ -984,6 +984,15 @@ impl MetaClient {
             resp.task_progress,
         ))
     }
+
+    pub async fn delete_worker_node(&self, worker: HostAddress) -> Result<()> {
+        let _resp = self
+            .inner
+            .delete_worker_node(DeleteWorkerNodeRequest { host: Some(worker) })
+            .await?;
+
+        Ok(())
+    }
 }
 
 #[async_trait]
