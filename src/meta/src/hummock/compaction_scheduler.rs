@@ -404,7 +404,7 @@ where
         sched_channel: Arc<CompactionRequestChannel>,
     ) -> bool {
         // Wait for a compactor to become available.
-        let compactor = match self.hummock_manager.get_idle_compactor().await {
+        let compactor = match self.hummock_manager.get_idle_compactor() {
             Some(compactor) => compactor,
             None => {
                 return false;
@@ -503,7 +503,7 @@ mod tests {
         let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
         assert_eq!(compactor_manager.compactor_num(), 1);
         // No task
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+        let compactor = hummock_manager.get_idle_compactor().unwrap();
         assert_eq!(
             ScheduleStatus::NoTask,
             compaction_scheduler
@@ -517,7 +517,7 @@ mod tests {
         );
 
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+        let compactor = hummock_manager.get_idle_compactor().unwrap();
         assert_eq!(
             ScheduleStatus::Ok,
             compaction_scheduler
@@ -536,7 +536,7 @@ mod tests {
 
         // Increase compactor concurrency and succeed
         let _receiver = compactor_manager.add_compactor(context_id, 10, 10);
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+        let compactor = hummock_manager.get_idle_compactor().unwrap();
         assert_eq!(
             ScheduleStatus::Ok,
             compaction_scheduler
@@ -574,7 +574,7 @@ mod tests {
         // Pick failure
         let fp_get_compact_task = "fp_get_compact_task";
         fail::cfg(fp_get_compact_task, "return").unwrap();
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+        let compactor = hummock_manager.get_idle_compactor().unwrap();
         assert_eq!(
             ScheduleStatus::PickFailure,
             compaction_scheduler
@@ -591,7 +591,7 @@ mod tests {
         // Send failed and task cancelled.
         let fp_compaction_send_task_fail = "compaction_send_task_fail";
         fail::cfg(fp_compaction_send_task_fail, "return").unwrap();
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+        let compactor = hummock_manager.get_idle_compactor().unwrap();
         assert_matches!(
             compaction_scheduler
                 .pick_and_send(
@@ -608,7 +608,7 @@ mod tests {
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
 
         // There is no idle compactor, because the compactor is paused after send failure.
-        assert_matches!(hummock_manager.get_idle_compactor().await, None);
+        assert_matches!(hummock_manager.get_idle_compactor(), None);
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
         let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
         // Send failed and task cancellation failed.
@@ -617,7 +617,7 @@ mod tests {
         let fp_cancel_compact_task = "fp_cancel_compact_task";
         fail::cfg(fp_compaction_send_task_fail, "return").unwrap();
         fail::cfg(fp_cancel_compact_task, "return").unwrap();
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+        let compactor = hummock_manager.get_idle_compactor().unwrap();
         assert_matches!(
             compaction_scheduler
                 .pick_and_send(
@@ -644,7 +644,7 @@ mod tests {
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
         // Succeeded.
         let _receiver = compactor_manager.add_compactor(context_id, 2, 1);
-        let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+        let compactor = hummock_manager.get_idle_compactor().unwrap();
         assert_matches!(
             compaction_scheduler
                 .pick_and_send(

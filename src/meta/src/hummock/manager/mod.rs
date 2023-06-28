@@ -1118,7 +1118,7 @@ where
             .await
     }
 
-    pub async fn get_idle_compactor(&self) -> Option<Arc<Compactor>> {
+    pub fn get_idle_compactor(&self) -> Option<Arc<Compactor>> {
         self.compactor_manager.next_idle_compactor()
     }
 
@@ -1869,7 +1869,7 @@ where
         let start_time = Instant::now();
 
         // 1. Get idle compactor.
-        let compactor = match self.get_idle_compactor().await {
+        let compactor = match self.get_idle_compactor() {
             Some(compactor) => compactor,
             None => {
                 tracing::warn!("trigger_manual_compaction No compactor is available.");

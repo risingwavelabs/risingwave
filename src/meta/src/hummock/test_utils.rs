@@ -91,7 +91,7 @@ where
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
-    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    let compactor = hummock_manager.get_idle_compactor().unwrap();
     let mut selector = default_level_selector();
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)

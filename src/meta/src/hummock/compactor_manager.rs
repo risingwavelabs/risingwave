@@ -185,7 +185,7 @@ impl CompactorManager {
         }
     }
 
-    /// Gets next idle compactor to assign task.
+    /// Gets next idle compactor to assign tassk.
     pub fn next_idle_compactor(&self) -> Option<Arc<Compactor>> {
         let policy = self.policy.read();
         policy.next_idle_compactor()
@@ -486,7 +486,7 @@ mod tests {
             let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
             let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
-            let _compactor = hummock_manager.get_idle_compactor().await.unwrap();
+            let _compactor = hummock_manager.get_idle_compactor().unwrap();
             hummock_manager
                 .get_compact_task(
                     StaticCompactionGroupId::StateDefault.into(),
