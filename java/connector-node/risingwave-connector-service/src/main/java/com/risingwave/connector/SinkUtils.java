@@ -30,7 +30,7 @@ public class SinkUtils {
             case "deltalake":
                 return new DeltaLakeSinkFactory();
             case "elasticsearch-7":
-                return new EsSinkFactory7();
+                return new EsSink7Factory();
             default:
                 throw UNIMPLEMENTED
                         .withDescription("unknown sink type: " + sinkType)

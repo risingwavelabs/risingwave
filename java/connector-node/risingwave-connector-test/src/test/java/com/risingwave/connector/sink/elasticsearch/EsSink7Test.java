@@ -20,7 +20,7 @@ import static org.junit.Assert.fail;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.risingwave.connector.EsSink7;
-import com.risingwave.connector.EsSinkConfig7;
+import com.risingwave.connector.EsSink7Config;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data;
@@ -54,7 +54,7 @@ public class EsSink7Test {
             throws IOException {
         EsSink7 sink =
                 new EsSink7(
-                        new EsSinkConfig7(
+                        new EsSink7Config(
                                 container.getHttpHostAddress(), "test", "$", username, password),
                         getTestTableSchema());
         sink.write(

@@ -20,7 +20,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.risingwave.connector.api.sink.CommonSinkConfig;
 
-public class EsSinkConfig7 extends CommonSinkConfig {
+public class EsSink7Config extends CommonSinkConfig {
     /** Required */
     private String url;
 
@@ -35,7 +35,7 @@ public class EsSinkConfig7 extends CommonSinkConfig {
     private String password;
 
     @JsonCreator
-    public EsSinkConfig7(
+    public EsSink7Config(
             @JsonProperty(value = "url", required = true) String url,
             @JsonProperty(value = "index", required = true) String index,
             @JsonProperty(value = "delimiter") String delimiter,

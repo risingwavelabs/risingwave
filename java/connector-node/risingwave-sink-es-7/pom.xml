@@ -12,7 +12,7 @@
 
     <artifactId>risingwave-sink-es-7</artifactId>
     <version>1.0-SNAPSHOT</version>
-    <name>risingwave-sink-es</name>
+    <name>risingwave-sink-es-7</name>
 
     <dependencies>
         <dependency>

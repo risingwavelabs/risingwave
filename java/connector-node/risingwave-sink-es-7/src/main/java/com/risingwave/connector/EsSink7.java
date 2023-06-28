@@ -60,13 +60,13 @@ public class EsSink7 extends SinkBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink7.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
-    private final EsSinkConfig7 config;
+    private final EsSink7Config config;
     private final BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
     // For bulk listener
     private final List<Integer> primaryKeyIndexes;
 
-    public EsSink7(EsSinkConfig7 config, TableSchema tableSchema) {
+    public EsSink7(EsSink7Config config, TableSchema tableSchema) {
         super(tableSchema);
         HttpHost host;
         try {
@@ -99,7 +99,7 @@ public class EsSink7 extends SinkBase {
     }
 
     private static RestClientBuilder configureRestClientBuilder(
-            RestClientBuilder builder, EsSinkConfig7 config) {
+            RestClientBuilder builder, EsSink7Config config) {
         // Possible config:
         // 1. Connection path prefix
         // 2. Username and password
@@ -117,7 +117,7 @@ public class EsSink7 extends SinkBase {
     }
 
     private BulkProcessor.Builder applyBulkConfig(
-            RestHighLevelClient client, EsSinkConfig7 config, BulkProcessor.Listener listener) {
+            RestHighLevelClient client, EsSink7Config config, BulkProcessor.Listener listener) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
                         new BulkRequestConsumerFactory() {

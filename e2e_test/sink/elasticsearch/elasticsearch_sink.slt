@@ -2,13 +2,12 @@ statement ok
 CREATE TABLE t7 (v1 int primary key, v2 bigint, v3 varchar);
 
 statement ok
-CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t7;
-
-statement ok
-CREATE SINK s7 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH (
+CREATE SINK s7 AS select t7.v1 as v1, t7.v2 as v2, t7.v3 as v3 from t7 WITH (
     connector = 'elasticsearch',
     index = 'test',
     url = 'http://elasticsearch:9200'
+    username = 'elastic',
+    password = 'risingwave'
 );
 
 statement ok
