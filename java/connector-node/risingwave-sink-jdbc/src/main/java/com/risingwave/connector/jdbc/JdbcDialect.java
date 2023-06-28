@@ -28,6 +28,8 @@ import java.util.stream.Collectors;
 /** A dialect for a specific database. ref: https://github.com/apache/flink-connector-jdbc */
 public interface JdbcDialect {
 
+    SchemaTableName createSchemaTableName(String schemaName, String tableName);
+
     /**
      * Quotes the identifier.
      *
@@ -50,7 +52,7 @@ public interface JdbcDialect {
      * @return The upsert statement if supported, otherwise None.
      */
     Optional<String> getUpsertStatement(
-            String tableName, List<String> fieldNames, List<String> uniqueKeyFields);
+            SchemaTableName tableName, List<String> fieldNames, List<String> uniqueKeyFields);
 
     void bindUpsertStatement(
             PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
@@ -63,12 +65,12 @@ public interface JdbcDialect {
      *
      * @return the dialects {@code INSERT INTO} statement.
      */
-    default String getInsertIntoStatement(String tableName, List<String> fieldNames) {
+    default String getInsertIntoStatement(SchemaTableName tableName, List<String> fieldNames) {
         String columns =
                 fieldNames.stream().map(this::quoteIdentifier).collect(Collectors.joining(", "));
         String placeholders = fieldNames.stream().map(f -> "?").collect(Collectors.joining(", "));
         return "INSERT INTO "
-                + quoteIdentifier(tableName)
+                + quoteIdentifier(tableName.getNormalizedTableName())
                 + "("
                 + columns
                 + ")"
@@ -85,11 +87,14 @@ public interface JdbcDialect {
      * WHERE cond [AND ...]
      * }</pre>
      */
-    default String getDeleteStatement(String tableName, List<String> conditionFields) {
+    default String getDeleteStatement(SchemaTableName tableName, List<String> conditionFields) {
         String conditionClause =
                 conditionFields.stream()
                         .map(f -> format("%s = ?", quoteIdentifier(f)))
                         .collect(Collectors.joining(" AND "));
-        return "DELETE FROM " + quoteIdentifier(tableName) + " WHERE " + conditionClause;
+        return "DELETE FROM "
+                + quoteIdentifier(tableName.getNormalizedTableName())
+                + " WHERE "
+                + conditionClause;
     }
 }

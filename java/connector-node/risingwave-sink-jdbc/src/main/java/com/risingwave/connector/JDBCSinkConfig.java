@@ -41,24 +41,9 @@ public class JDBCSinkConfig extends CommonSinkConfig {
             @JsonProperty(value = "table.name") String tableName,
             @JsonProperty(value = "type") String sinkType) {
         this.jdbcUrl = jdbcUrl;
-        boolean isPostgres = jdbcUrl.startsWith("jdbc:postgresql");
-        if (schemaName != null && !schemaName.isBlank()) {
-            this.schemaName = isPostgres ? schemaName : null;
-        } else {
-            this.schemaName = isPostgres ? "public" : null;
-        }
         this.tableName = tableName;
         this.sinkType = sinkType;
         this.isUpsertSink = "upsert".equalsIgnoreCase(sinkType);
-    }
-
-    /** Used in SQL statements to refer to the table. */
-    public String getNormalizedTableName() {
-        if (schemaName != null && !schemaName.isBlank()) {
-            return schemaName + '.' + tableName;
-        } else {
-            return tableName;
-        }
     }
 
     public String getSchemaName() {

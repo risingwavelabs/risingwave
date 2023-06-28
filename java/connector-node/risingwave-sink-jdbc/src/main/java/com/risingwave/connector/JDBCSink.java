@@ -69,20 +69,19 @@ public class JDBCSink extends SinkBase {
         }
 
         try {
+            var schemaTableName =
+                    jdbcDialect.createSchemaTableName(
+                            config.getSchemaName(), config.getTableName());
             var upsertSql =
                     jdbcDialect.getUpsertStatement(
-                            config.getNormalizedTableName(),
-                            List.of(tableSchema.getColumnNames()),
-                            pkColumnNames);
+                            schemaTableName, List.of(tableSchema.getColumnNames()), pkColumnNames);
             // MySQL and Postgres have upsert SQL
             assert (upsertSql.isPresent());
             this.upsertPreparedStmt =
                     conn.prepareStatement(upsertSql.get(), Statement.RETURN_GENERATED_KEYS);
             // upsert sink will handle DELETE events
             if (config.isUpsertSink()) {
-                var deleteSql =
-                        jdbcDialect.getDeleteStatement(
-                                config.getNormalizedTableName(), pkColumnNames);
+                var deleteSql = jdbcDialect.getDeleteStatement(schemaTableName, pkColumnNames);
                 this.deletePreparedStmt =
                         conn.prepareStatement(deleteSql, Statement.RETURN_GENERATED_KEYS);
             }

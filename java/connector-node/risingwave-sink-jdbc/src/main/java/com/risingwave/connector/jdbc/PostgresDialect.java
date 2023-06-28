@@ -28,13 +28,18 @@ import org.postgresql.util.PGobject;
 public class PostgresDialect implements JdbcDialect {
 
     @Override
+    public SchemaTableName createSchemaTableName(String schemaName, String tableName) {
+        return new PostgresSchemaTableName(schemaName, tableName);
+    }
+
+    @Override
     public String quoteIdentifier(String identifier) {
         return identifier;
     }
 
     @Override
     public Optional<String> getUpsertStatement(
-            String tableName, List<String> fieldNames, List<String> primaryKeyFields) {
+            SchemaTableName tableName, List<String> fieldNames, List<String> primaryKeyFields) {
         String pkColumns =
                 primaryKeyFields.stream()
                         .map(this::quoteIdentifier)
