@@ -32,11 +32,6 @@ impl<R1: Row, R2: Row> PartialEq for Chain<R1, R2> {
 impl<R1: Row, R2: Row> Eq for Chain<R1, R2> {}
 
 impl<R1: Row, R2: Row> Row for Chain<R1, R2> {
-    type Iter<'a> = std::iter::Chain<R1::Iter<'a>, R2::Iter<'a>>
-    where
-        R1: 'a,
-        R2: 'a;
-
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         if index < self.r1.len() {
@@ -67,7 +62,7 @@ impl<R1: Row, R2: Row> Row for Chain<R1, R2> {
     }
 
     #[inline]
-    fn iter(&self) -> Self::Iter<'_> {
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
         self.r1.iter().chain(self.r2.iter())
     }
 
