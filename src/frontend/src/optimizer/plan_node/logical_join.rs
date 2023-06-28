@@ -1006,20 +1006,20 @@ impl LogicalJoin {
         let order_col_ids = table_desc.order_column_ids();
         let order_key = table_desc.order_column_indices();
         let dist_key = table_desc.distribution_key.clone();
+
+        let mut dist_key_in_order_key_pos = vec![];
+        for d in dist_key {
+            let pos = order_key
+                .iter()
+                .position(|&x| x == d)
+                .expect("dist_key must in order_key");
+            dist_key_in_order_key_pos.push(pos);
+        }
         // The at least prefix of order key that contains distribution key.
-        let at_least_prefix_len = {
-            let mut max_pos = 0;
-            for d in dist_key {
-                max_pos = max(
-                    max_pos,
-                    order_key
-                        .iter()
-                        .position(|&x| x == d)
-                        .expect("dist_key must in order_key"),
-                );
-            }
-            max_pos + 1
-        };
+        let at_least_prefix_len = dist_key_in_order_key_pos
+            .iter()
+            .max()
+            .map_or(0, |pos| pos + 1);
 
         // Reorder the join equal predicate to match the order key.
         let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
@@ -1046,13 +1046,21 @@ impl LogicalJoin {
         let lookup_prefix_len = reorder_idx.len();
         let predicate = predicate.reorder(&reorder_idx);
 
-        let left = self.left().to_stream_with_dist_required(
-            &RequiredDist::shard_by_key(
-                self.left().schema().len(),
-                &predicate.left_eq_indexes()[..lookup_prefix_len],
-            ),
-            ctx,
-        )?;
+        let left = if dist_key_in_order_key_pos.is_empty() {
+            self.left()
+                .to_stream_with_dist_required(&RequiredDist::single(), ctx)?
+        } else {
+            let left_eq_indexes = predicate.left_eq_indexes();
+            let left_dist_key = dist_key_in_order_key_pos
+                .iter()
+                .map(|pos| left_eq_indexes[*pos])
+                .collect_vec();
+
+            self.left().to_stream_with_dist_required(
+                &RequiredDist::shard_by_key(self.left().schema().len(), &left_dist_key),
+                ctx,
+            )?
+        };
 
         if !left.append_only() {
             return Err(RwError::from(ErrorCode::NotSupported(
