@@ -687,7 +687,14 @@ fn find_affected_ranges(
                 FrameBounds::Rows(_start, end) => {
                     let mut cursor = part_with_delta
                         .lower_bound(Bound::Included(delta.first_key_value().unwrap().0));
-                    cursor.saturating_move_prev_n(end.n_following_rows().unwrap());
+                    for _ in 0..end.n_following_rows().unwrap() {
+                        // Note that we have to move before check, to handle situation where the
+                        // cursor is at ghost position at first.
+                        cursor.move_prev();
+                        if cursor.position().is_ghost() {
+                            break;
+                        }
+                    }
                     cursor.key().unwrap_or(first_key)
                 }
             })
@@ -706,7 +713,12 @@ fn find_affected_ranges(
             .map(|call| match &call.frame.bounds {
                 FrameBounds::Rows(start, _end) => {
                     let mut cursor = part_with_delta.find(&first_curr_key).unwrap();
-                    cursor.saturating_move_prev_n(start.n_preceding_rows().unwrap());
+                    for _ in 0..start.n_preceding_rows().unwrap() {
+                        cursor.move_prev();
+                        if cursor.position().is_ghost() {
+                            break;
+                        }
+                    }
                     cursor.key().unwrap_or(first_key)
                 }
             })
@@ -724,7 +736,12 @@ fn find_affected_ranges(
                 FrameBounds::Rows(start, _end) => {
                     let mut cursor = part_with_delta
                         .upper_bound(Bound::Included(delta.last_key_value().unwrap().0));
-                    cursor.saturating_move_next_n(start.n_preceding_rows().unwrap());
+                    for _ in 0..start.n_preceding_rows().unwrap() {
+                        cursor.move_next();
+                        if cursor.position().is_ghost() {
+                            break;
+                        }
+                    }
                     cursor.key().unwrap_or(last_key)
                 }
             })
@@ -741,7 +758,12 @@ fn find_affected_ranges(
             .map(|call| match &call.frame.bounds {
                 FrameBounds::Rows(_start, end) => {
                     let mut cursor = part_with_delta.find(&last_curr_key).unwrap();
-                    cursor.saturating_move_next_n(end.n_following_rows().unwrap());
+                    for _ in 0..end.n_following_rows().unwrap() {
+                        cursor.move_next();
+                        if cursor.position().is_ghost() {
+                            break;
+                        }
+                    }
                     cursor.key().unwrap_or(last_key)
                 }
             })
@@ -749,6 +771,11 @@ fn find_affected_ranges(
             .expect("# of window function calls > 0")
             .clone()
     };
+
+    if first_curr_key > last_curr_key {
+        // all affected keys are deleted in the delta
+        return vec![];
+    }
 
     vec![(
         first_frame_start,
@@ -778,7 +805,7 @@ mod tests {
         }
 
         macro_rules! create_snapshot {
-            ($( $pk:literal ),* $(,)?) => {
+            ($( $pk:expr ),* $(,)?) => {
                 {
                     #[allow(unused_mut)]
                     let mut snapshot = BTreeMap::new();
@@ -808,7 +835,7 @@ mod tests {
         }
 
         macro_rules! create_delta {
-            ($(( $pk:literal, $change:ident )),* $(,)?) => {
+            ($(( $pk:expr, $change:ident )),* $(,)?) => {
                 {
                     #[allow(unused_mut)]
                     let mut delta = BTreeMap::new();
@@ -939,6 +966,82 @@ mod tests {
             assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(1.into())]));
             assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(4.into())]));
             assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(5.into())]));
+        }
+
+        {
+            // test lag corner case
+            let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
+            let delta = create_delta!((1, Delete), (2, Delete), (3, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+
+            let calls = vec![create_call(Frame::rows(
+                FrameBound::Preceding(1),
+                FrameBound::Preceding(1),
+            ))];
+            let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
+                find_affected_ranges(&calls, &part_with_delta)
+                    .into_iter()
+                    .next()
+                    .unwrap();
+            assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(4.into())]));
+            assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(4.into())]));
+            assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(4.into())]));
+            assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(4.into())]));
+        }
+
+        {
+            // test lead corner case
+            let snapshot = create_snapshot!(1, 2, 3, 4, 5, 6);
+            let delta = create_delta!((4, Delete), (5, Delete), (6, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+
+            let calls = vec![create_call(Frame::rows(
+                FrameBound::Following(1),
+                FrameBound::Following(1),
+            ))];
+            let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
+                find_affected_ranges(&calls, &part_with_delta)
+                    .into_iter()
+                    .next()
+                    .unwrap();
+            assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(3.into())]));
+            assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(3.into())]));
+            assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(3.into())]));
+            assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(3.into())]));
+        }
+
+        {
+            // test lag/lead(x, 0) corner case
+            let snapshot = create_snapshot!(1, 2, 3, 4);
+            let delta = create_delta!((2, Delete), (3, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+
+            let calls = vec![create_call(Frame::rows(
+                FrameBound::CurrentRow,
+                FrameBound::CurrentRow,
+            ))];
+            assert!(find_affected_ranges(&calls, &part_with_delta).is_empty());
+        }
+
+        {
+            // test lag/lead(x, 0) corner case 2
+            let snapshot = create_snapshot!(1, 2, 3, 4, 5);
+            let delta = create_delta!((2, Delete), (3, Insert), (4, Delete));
+            let part_with_delta = DeltaBTreeMap::new(&snapshot, delta);
+
+            let calls = vec![create_call(Frame::rows(
+                FrameBound::CurrentRow,
+                FrameBound::CurrentRow,
+            ))];
+            let (first_frame_start, first_curr_key, last_curr_key, last_frame_end) =
+                find_affected_ranges(&calls, &part_with_delta)
+                    .into_iter()
+                    .next()
+                    .unwrap();
+            assert_eq!(first_frame_start.pk.0, OwnedRow::new(vec![Some(3.into())]));
+            assert_eq!(first_curr_key.pk.0, OwnedRow::new(vec![Some(3.into())]));
+            assert_eq!(last_curr_key.pk.0, OwnedRow::new(vec![Some(3.into())]));
+            assert_eq!(last_frame_end.pk.0, OwnedRow::new(vec![Some(3.into())]));
         }
     }
 }

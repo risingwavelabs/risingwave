@@ -303,29 +303,9 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
         self.curr_key_value = self.peek_next();
     }
 
-    /// Move the cursor to the next position `n` times, but stop at the ghost position.
-    pub fn saturating_move_next_n(&mut self, n: usize) {
-        for _ in 0..n {
-            if self.position().is_ghost() {
-                break;
-            }
-            self.move_next();
-        }
-    }
-
     /// Move the cursor to the previous position.
     pub fn move_prev(&mut self) {
         self.curr_key_value = self.peek_prev();
-    }
-
-    /// Move the cursor to the previous position `n` times, but stop at the ghost position.
-    pub fn saturating_move_prev_n(&mut self, n: usize) {
-        for _ in 0..n {
-            if self.position().is_ghost() {
-                break;
-            }
-            self.move_prev();
-        }
     }
 }
 
@@ -502,6 +482,25 @@ mod tests {
 
         let cursor = delta_map.find(&1).unwrap();
         assert_eq!(cursor.position(), PositionType::Snapshot);
+    }
+
+    #[test]
+    fn test_delete_all() {
+        let mut map = BTreeMap::new();
+        map.insert(1, "1");
+        map.insert(3, "3");
+        let mut delta = BTreeMap::new();
+        delta.insert(1, Change::Delete);
+        delta.insert(3, Change::Delete);
+        let delta_map = DeltaBTreeMap::new(&map, delta);
+
+        assert_eq!(delta_map.first_key(), None);
+        assert_eq!(delta_map.last_key(), None);
+        assert_eq!(delta_map.find(&1), None);
+        assert_eq!(delta_map.find(&2), None);
+        assert_eq!(delta_map.find(&3), None);
+        assert_eq!(delta_map.lower_bound(Bound::Included(&1)).key(), None);
+        assert_eq!(delta_map.upper_bound(Bound::Excluded(&3)).key(), None);
     }
 
     #[test]
