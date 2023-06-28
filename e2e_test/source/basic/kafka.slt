@@ -399,6 +399,59 @@ CREATE TABLE dbz_ignore_case_json (
     topic = 'debezium_ignore_case_json'
 ) row format debezium_json
 
+# last_name is absent in RW schema and absent in old rows
+statement ok
+create table add_column_before_create_table (
+  id integer,
+  first_name varchar,
+  email varchar,
+  PRIMARY KEY (id)
+) with (
+  connector = 'kafka',
+  topic = 'debezium_log_missing_column_in_old_rows',
+  properties.bootstrap.server = 'message_queue:29092'
+) row format debezium_json
+
+# last_name is present in RW schema but absent in old rows
+statement ok
+create table add_column_after_create_table (
+  id integer,
+  first_name varchar,
+  last_name varchar,
+  email varchar,
+  PRIMARY KEY (id)
+) with (
+  connector = 'kafka',
+  topic = 'debezium_log_missing_column_in_old_rows',
+  properties.bootstrap.server = 'message_queue:29092'
+) row format debezium_json
+
+# last_name is absent in RW schema and absent in new rows
+statement ok
+create table drop_column_before_create_table (
+  id integer,
+  first_name varchar,
+  email varchar,
+  PRIMARY KEY (id)
+) with (
+  connector = 'kafka',
+  topic = 'debezium_log_missing_column_in_new_rows',
+  properties.bootstrap.server = 'message_queue:29092'
+) row format debezium_json
+
+# last_name is present in RW schema but absent in new rows
+statement ok
+create table drop_column_after_create_table (
+  id integer,
+  first_name varchar,
+  last_name varchar,
+  email varchar,
+  PRIMARY KEY (id)
+) with (
+  connector = 'kafka',
+  topic = 'debezium_log_missing_column_in_new_rows',
+  properties.bootstrap.server = 'message_queue:29092'
+) row format debezium_json
 
 statement ok
 flush;
@@ -663,6 +716,46 @@ order by
 56166    1
 56166    2
 
+# last_name is present in RW schema but absent in old rows
+query ITTT rowsort
+select id, first_name, last_name, email from add_column_after_create_table order by id;
+----
+1001 Sally NULL sally.thomas@acme.com
+1002 George NULL gbailey@foobar.com
+1003 Edward NULL ed@walker.com
+1004 Anne1 Kretchmar annek@noanswer.org
+1005 add add2 add
+
+# last_name is absent in RW schema and absent in old rows
+query ITT rowsort
+select id, first_name, email from add_column_before_create_table order by id;
+----
+1001 Sally sally.thomas@acme.com
+1002 George gbailey@foobar.com
+1003 Edward ed@walker.com
+1004 Anne1 annek@noanswer.org
+1005 add add
+
+# last_name is present in RW schema but absent in new rows
+query ITTT rowsort
+select id, first_name, last_name, email from drop_column_after_create_table order by id;
+----
+1001 Sally Thomas sally.thomas@acme.com
+1002 George Bailey gbailey@foobar.com
+1003 Edward Walker ed@walker.com
+1004 Anne1 Kretchmar annek@noanswer.org
+1005 add NULL add
+
+# last_name is absent in RW schema and absent in new rows
+query ITT rowsort
+select id, first_name, email from drop_column_before_create_table order by id;
+----
+1001 Sally sally.thomas@acme.com
+1002 George gbailey@foobar.com
+1003 Edward ed@walker.com
+1004 Anne1 annek@noanswer.org
+1005 add add
+
 statement ok
 drop materialized view source_mv1
 
@@ -728,3 +821,15 @@ DROP TABLE upsert_students;
 
 statement ok
 drop table dbz_ignore_case_json;
+
+statement ok
+drop table add_column_after_create_table;
+
+statement ok
+drop table add_column_before_create_table;
+
+statement ok
+drop table drop_column_after_create_table;
+
+statement ok
+drop table drop_column_before_create_table;
