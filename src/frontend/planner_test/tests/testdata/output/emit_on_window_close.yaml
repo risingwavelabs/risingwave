@@ -169,9 +169,6 @@
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
 
-  stream_error: |-
-    Feature is not yet implemented: General version of streaming over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;
     explain create sink s1 emit on window close as select
