@@ -39,7 +39,7 @@ import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.junit.Test;
 import org.testcontainers.elasticsearch.ElasticsearchContainer;
 
-public class EsSinkTest7 {
+public class EsSink7Test {
 
     static TableSchema getTestTableSchema() {
         return new TableSchema(
@@ -50,10 +50,12 @@ public class EsSinkTest7 {
                 Lists.newArrayList("id", "name"));
     }
 
-    public void testEsSink(ElasticsearchContainer container) throws IOException {
+    public void testEsSink(ElasticsearchContainer container, String username, String password)
+            throws IOException {
         EsSink7 sink =
                 new EsSink7(
-                        new EsSinkConfig7(container.getHttpHostAddress(), "test", "$"),
+                        new EsSinkConfig7(
+                                container.getHttpHostAddress(), "test", "$", username, password),
                         getTestTableSchema());
         sink.write(
                 Iterators.forArray(
@@ -95,10 +97,17 @@ public class EsSinkTest7 {
 
     @Test
     public void testElasticSearch() throws IOException {
-        ElasticsearchContainer container =
+        ElasticsearchContainer containerWithoutAuth =
                 new ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:7.11.0");
-        container.start();
-        testEsSink(container);
-        container.stop();
+        containerWithoutAuth.start();
+        testEsSink(containerWithoutAuth, null, null);
+        containerWithoutAuth.stop();
+
+        ElasticsearchContainer containerWithAuth =
+                new ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:7.11.0")
+                        .withPassword("test");
+        containerWithAuth.start();
+        testEsSink(containerWithAuth, "elastic", "test");
+        containerWithAuth.stop();
     }
 }

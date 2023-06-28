@@ -30,14 +30,22 @@ public class EsSinkConfig7 extends CommonSinkConfig {
     /** Optional, delimiter for generating id */
     private String delimiter;
 
+    private String username;
+
+    private String password;
+
     @JsonCreator
     public EsSinkConfig7(
             @JsonProperty(value = "url", required = true) String url,
             @JsonProperty(value = "index", required = true) String index,
-            @JsonProperty(value = "delimiter", required = false) String delimiter) {
+            @JsonProperty(value = "delimiter") String delimiter,
+            @JsonProperty(value = "username") String username,
+            @JsonProperty(value = "password") String password) {
         this.url = url;
         this.index = index;
         this.delimiter = delimiter == null ? "_" : delimiter;
+        this.username = username;
+        this.password = password;
     }
 
     public String getUrl() {
@@ -50,5 +58,13 @@ public class EsSinkConfig7 extends CommonSinkConfig {
 
     public String getDelimiter() {
         return delimiter;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public String getPassword() {
+        return password;
     }
 }
