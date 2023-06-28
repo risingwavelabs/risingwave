@@ -263,6 +263,11 @@ pub struct MetaConfig {
     /// If the size of one table is smaller than `min_table_split_write_throughput`, we would not
     /// split it to an single group.
     pub min_table_split_write_throughput: u64,
+
+    #[serde(default = "default::meta::compaction_task_max_heartbeat_interval_secs")]
+    // If the compaction task does not change in progress beyond the
+    // `compaction_task_max_heartbeat_interval_secs` interval, we will cancel the task
+    pub compaction_task_max_heartbeat_interval_secs: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -720,6 +725,10 @@ mod default {
         pub fn min_table_split_write_throughput() -> u64 {
             32 * 1024 * 1024 // 32MB
         }
+
+        pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
+            60 // 1min
+        }
     }
 
     pub mod server {
@@ -877,19 +886,19 @@ mod default {
         }
 
         pub fn stream_chunk_size() -> usize {
-            1024
+            256
         }
 
         pub fn stream_exchange_initial_permits() -> usize {
-            8192
+            2048
         }
 
         pub fn stream_exchange_batched_permits() -> usize {
-            1024
+            256
         }
 
         pub fn stream_exchange_concurrent_barriers() -> usize {
-            2
+            1
         }
     }
 

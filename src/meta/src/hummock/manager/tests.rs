@@ -39,7 +39,8 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::{
-    default_level_selector, LevelSelector, ManualCompactionOption, SpaceReclaimCompactionSelector,
+    default_level_selector, CompactStatus, LevelSelector, ManualCompactionOption,
+    SpaceReclaimCompactionSelector,
 };
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
@@ -1641,6 +1642,144 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
     );
 }
 
+#[tokio::test]
+async fn test_split_compaction_group_trivial_expired() {
+    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let original_groups = hummock_manager
+        .get_current_version()
+        .await
+        .levels
+        .keys()
+        .cloned()
+        .sorted()
+        .collect_vec();
+    assert_eq!(original_groups, vec![2, 3]);
+    hummock_manager
+        .compactor_manager
+        .add_compactor(context_id, 2, 1);
+
+    hummock_manager
+        .register_table_ids(&[(100, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids(&[(101, 2)])
+        .await
+        .unwrap();
+    let sst_1 = ExtendedSstableInfo {
+        compaction_group_id: 2,
+        sst_info: SstableInfo {
+            object_id: 10,
+            sst_id: 10,
+            key_range: None,
+            table_ids: vec![100],
+            min_epoch: 20,
+            max_epoch: 20,
+            ..Default::default()
+        },
+        table_stats: Default::default(),
+    };
+    let sst_2 = ExtendedSstableInfo {
+        compaction_group_id: 2,
+        sst_info: SstableInfo {
+            object_id: 11,
+            sst_id: 11,
+            key_range: None,
+            table_ids: vec![101],
+            min_epoch: 20,
+            max_epoch: 20,
+            ..Default::default()
+        },
+        table_stats: Default::default(),
+    };
+    hummock_manager
+        .commit_epoch(
+            30,
+            vec![sst_1, sst_2],
+            HashMap::from([(10, context_id), (11, context_id)]),
+        )
+        .await
+        .unwrap();
+
+    // Now group 2 has member tables [100,101,102], so split [100, 101] can succeed even though
+    // there is no data of 102.
+    hummock_manager
+        .register_table_ids(&[(102, 2)])
+        .await
+        .unwrap();
+    let mut task = hummock_manager
+        .get_compact_task(2, &mut default_level_selector())
+        .await
+        .unwrap()
+        .unwrap();
+    hummock_manager
+        .assign_compaction_task(&task, context_id)
+        .await
+        .unwrap();
+    hummock_manager
+        .split_compaction_group(2, &[100])
+        .await
+        .unwrap();
+    let mut selector: Box<dyn LevelSelector> = Box::<SpaceReclaimCompactionSelector>::default();
+    let reclaim_task = hummock_manager
+        .get_compact_task_impl(2, &mut selector)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(CompactStatus::is_trivial_reclaim(&reclaim_task));
+
+    let current_version = hummock_manager.get_current_version().await;
+    let new_group_id = current_version.levels.keys().max().cloned().unwrap();
+    assert_eq!(current_version.levels.len(), 3);
+    assert!(new_group_id > StaticCompactionGroupId::End as u64);
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(2)
+            .member_table_ids,
+        vec![101, 102]
+    );
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(new_group_id)
+            .member_table_ids,
+        vec![100]
+    );
+
+    let mut task2 = hummock_manager
+        .get_compact_task(new_group_id, &mut default_level_selector())
+        .await
+        .unwrap()
+        .unwrap();
+    task2.sorted_output_ssts = vec![SstableInfo {
+        object_id: 12,
+        sst_id: 12,
+        key_range: None,
+        table_ids: vec![100],
+        min_epoch: 20,
+        max_epoch: 20,
+        ..Default::default()
+    }];
+    // delete all reference of sst-10
+    task2.task_status = TaskStatus::Success as i32;
+    hummock_manager
+        .assign_compaction_task(&task2, context_id)
+        .await
+        .unwrap();
+    let ret = hummock_manager
+        .report_compact_task(context_id, &mut task2, None)
+        .await
+        .unwrap();
+    assert!(ret);
+    task.task_status = TaskStatus::Success as i32;
+    let ret = hummock_manager
+        .report_compact_task(context_id, &mut task, None)
+        .await
+        .unwrap();
+    // the task has been canceld
+    assert!(!ret);
+}
+
 async fn get_manual_compact_task<S: MetaStore>(
     hummock_manager: &HummockManager<S>,
     context_id: HummockContextId,
@@ -1872,7 +2011,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
 
     let version_1 = hummock_manager.get_current_version().await;
     compaction_task.task_status = TaskStatus::Success.into();
-    assert!(hummock_manager
+    assert!(!hummock_manager
         .report_compact_task(context_id, &mut compaction_task, None)
         .await
         .unwrap());
@@ -1885,10 +2024,11 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let mut compaction_task = get_manual_compact_task(&hummock_manager, context_id).await;
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
     compaction_task.task_status = TaskStatus::Success.into();
-    assert!(hummock_manager
+    hummock_manager
         .report_compact_task(context_id, &mut compaction_task, None)
         .await
-        .unwrap());
+        .unwrap();
+
     let version_3 = hummock_manager.get_current_version().await;
     assert_ne!(
         version_2, version_3,

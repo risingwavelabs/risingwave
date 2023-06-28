@@ -82,7 +82,8 @@ pub enum WildcardOrExpr {
     /// See also [`Expr::FieldIdentifier`] for behaviors of parentheses.
     ExprQualifiedWildcard(Expr, Vec<Ident>),
     QualifiedWildcard(ObjectName),
-    Wildcard,
+    // Either it's `*` or `* excepts (columns)`
+    WildcardOrWithExcept(Option<Vec<Expr>>),
 }
 
 impl From<WildcardOrExpr> for FunctionArgExpr {
@@ -93,7 +94,7 @@ impl From<WildcardOrExpr> for FunctionArgExpr {
                 Self::ExprQualifiedWildcard(expr, prefix)
             }
             WildcardOrExpr::QualifiedWildcard(prefix) => Self::QualifiedWildcard(prefix),
-            WildcardOrExpr::Wildcard => Self::Wildcard,
+            WildcardOrExpr::WildcardOrWithExcept(w) => Self::WildcardOrWithExcept(w),
         }
     }
 }
@@ -313,7 +314,14 @@ impl Parser {
                 return self.word_concat_wildcard_expr(w.to_ident()?, wildcard_expr);
             }
             Token::Mul => {
-                return Ok(WildcardOrExpr::Wildcard);
+                if self.parse_keyword(Keyword::EXCEPT) && self.consume_token(&Token::LParen) {
+                    let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+                    if self.consume_token(&Token::RParen) {
+                        return Ok(WildcardOrExpr::WildcardOrWithExcept(Some(exprs)));
+                    }
+                } else {
+                    return Ok(WildcardOrExpr::WildcardOrWithExcept(None));
+                }
             }
             // parses wildcard field selection expression.
             // Code is similar to `parse_struct_selection`
@@ -346,9 +354,10 @@ impl Parser {
         let mut idents = vec![ident];
         match simple_wildcard_expr {
             WildcardOrExpr::QualifiedWildcard(ids) => idents.extend(ids.0),
-            WildcardOrExpr::Wildcard => {}
+            WildcardOrExpr::WildcardOrWithExcept(None) => {}
             WildcardOrExpr::ExprQualifiedWildcard(_, _) => unreachable!(),
             WildcardOrExpr::Expr(e) => return Ok(WildcardOrExpr::Expr(e)),
+            WildcardOrExpr::WildcardOrWithExcept(Some(_)) => unreachable!(),
         }
         Ok(WildcardOrExpr::QualifiedWildcard(ObjectName(idents)))
     }
@@ -387,9 +396,10 @@ impl Parser {
 
         match simple_wildcard_expr {
             WildcardOrExpr::QualifiedWildcard(ids) => idents.extend(ids.0),
-            WildcardOrExpr::Wildcard => {}
+            WildcardOrExpr::WildcardOrWithExcept(None) => {}
             WildcardOrExpr::ExprQualifiedWildcard(_, _) => unreachable!(),
             WildcardOrExpr::Expr(_) => unreachable!(),
+            WildcardOrExpr::WildcardOrWithExcept(Some(_)) => unreachable!(),
         }
         Ok(WildcardOrExpr::ExprQualifiedWildcard(expr, idents))
     }
@@ -408,7 +418,7 @@ impl Parser {
                 Token::Word(w) => id_parts.push(w.to_ident()?),
                 Token::Mul => {
                     return if id_parts.is_empty() {
-                        Ok(WildcardOrExpr::Wildcard)
+                        Ok(WildcardOrExpr::WildcardOrWithExcept(None))
                     } else {
                         Ok(WildcardOrExpr::QualifiedWildcard(ObjectName(id_parts)))
                     }
@@ -1906,7 +1916,7 @@ impl Parser {
         } else {
             None
         };
-        let with_options = self.parse_options(Keyword::WITH)?;
+        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
         self.expect_keyword(Keyword::AS)?;
         let query = Box::new(self.parse_query()?);
         // Optional `WITH [ CASCADED | LOCAL ] CHECK OPTION` is widely supported here.
@@ -2116,8 +2126,10 @@ impl Parser {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
     }
 
-    fn parse_with_properties(&mut self) -> Result<Vec<SqlOption>, ParserError> {
-        Ok(self.parse_options(Keyword::WITH)?.to_vec())
+    pub fn parse_with_properties(&mut self) -> Result<Vec<SqlOption>, ParserError> {
+        Ok(self
+            .parse_options_with_preceding_keyword(Keyword::WITH)?
+            .to_vec())
     }
 
     pub fn parse_drop(&mut self) -> Result<Statement, ParserError> {
@@ -2219,7 +2231,7 @@ impl Parser {
         };
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
-        let with_options = self.parse_with_properties()?;
+        let mut with_options = self.parse_with_properties()?;
 
         let option = with_options
             .iter()
@@ -2248,14 +2260,20 @@ impl Parser {
                     && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
                 {
                     self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
-                    Some(SourceSchema::parse_to(self)?)
+                    let schema = SourceSchemaV2::parse_to(self)?;
+                    let (schema, mut row_format_options) = schema.into_source_schema()?;
+                    with_options.append(&mut row_format_options);
+                    Some(schema)
                 } else {
                     Some(SourceSchema::Native)
                 }
             } else {
                 // other connectors
                 self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
-                Some(SourceSchema::parse_to(self)?)
+                let schema = SourceSchemaV2::parse_to(self)?;
+                let (schema, mut row_format_options) = schema.into_source_schema()?;
+                with_options.append(&mut row_format_options);
+                Some(schema)
             }
         } else {
             // Table is NOT created with an external connector.
@@ -2512,24 +2530,41 @@ impl Parser {
         }
     }
 
-    pub fn parse_options(&mut self, keyword: Keyword) -> Result<Vec<SqlOption>, ParserError> {
+    pub fn parse_options_with_preceding_keyword(
+        &mut self,
+        keyword: Keyword,
+    ) -> Result<Vec<SqlOption>, ParserError> {
         if self.parse_keyword(keyword) {
             self.expect_token(&Token::LParen)?;
-            let mut values = vec![];
-            loop {
-                values.push(Parser::parse_sql_option(self)?);
-                let comma = self.consume_token(&Token::Comma);
-                if self.consume_token(&Token::RParen) {
-                    // allow a trailing comma, even though it's not in standard
-                    break;
-                } else if !comma {
-                    return self.expected("',' or ')' after option definition", self.peek_token());
-                }
-            }
-            Ok(values)
+            self.parse_options_inner()
         } else {
             Ok(vec![])
         }
+    }
+
+    pub fn parse_options(&mut self) -> Result<Vec<SqlOption>, ParserError> {
+        if self.peek_token() == Token::LParen {
+            self.next_token();
+            self.parse_options_inner()
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    // has parsed a LParen
+    pub fn parse_options_inner(&mut self) -> Result<Vec<SqlOption>, ParserError> {
+        let mut values = vec![];
+        loop {
+            values.push(Parser::parse_sql_option(self)?);
+            let comma = self.consume_token(&Token::Comma);
+            if self.consume_token(&Token::RParen) {
+                // allow a trailing comma, even though it's not in standard
+                break;
+            } else if !comma {
+                return self.expected("',' or ')' after option definition", self.peek_token());
+            }
+        }
+        Ok(values)
     }
 
     pub fn parse_sql_option(&mut self) -> Result<SqlOption, ParserError> {
@@ -4253,7 +4288,7 @@ impl Parser {
             WildcardOrExpr::ExprQualifiedWildcard(expr, prefix) => {
                 Ok(SelectItem::ExprQualifiedWildcard(expr, prefix))
             }
-            WildcardOrExpr::Wildcard => Ok(SelectItem::Wildcard),
+            WildcardOrExpr::WildcardOrWithExcept(w) => Ok(SelectItem::WildcardOrWithExcept(w)),
         }
     }
 

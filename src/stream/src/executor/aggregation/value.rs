@@ -82,26 +82,13 @@ impl ValueState {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I64Array, Op};
-    use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_expr::agg::{AggArgs, AggKind};
+    use risingwave_common::types::ScalarImpl;
 
     use super::*;
 
-    fn create_test_count_agg() -> AggCall {
-        AggCall {
-            kind: AggKind::Count,
-            args: AggArgs::Unary(DataType::Int64, 0),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-            direct_args: vec![],
-        }
-    }
-
     #[tokio::test]
     async fn test_managed_value_state_count() {
-        let agg_call = create_test_count_agg();
+        let agg_call = AggCall::from_pretty("(count:int8 $0:int8)");
         let mut state = ValueState::new(&agg_call, None).unwrap();
 
         // apply a batch and get the output
@@ -130,21 +117,9 @@ mod tests {
         assert_eq!(state.get_output(), Some(ScalarImpl::Int64(4)));
     }
 
-    fn create_test_max_agg_append_only() -> AggCall {
-        AggCall {
-            kind: AggKind::Max,
-            args: AggArgs::Unary(DataType::Int64, 0),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-            direct_args: vec![],
-        }
-    }
-
     #[tokio::test]
     async fn test_managed_value_state_append_only_max() {
-        let agg_call = create_test_max_agg_append_only();
+        let agg_call = AggCall::from_pretty("(max:int8 $0:int8)");
         let mut state = ValueState::new(&agg_call, None).unwrap();
 
         // apply a batch and get the output

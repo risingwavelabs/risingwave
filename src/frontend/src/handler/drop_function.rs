@@ -80,10 +80,12 @@ pub async fn handle_drop_function(
                 function.id
             }
             Err(CatalogError::NotFound(kind, _)) if kind == "function" && if_exists => {
-                return Ok(RwPgResponse::empty_result_with_notice(
-                    StatementType::DROP_FUNCTION,
-                    format!("function \"{}\" does not exist, skipping", function_name),
-                ));
+                return Ok(RwPgResponse::builder(StatementType::DROP_FUNCTION)
+                    .notice(format!(
+                        "function \"{}\" does not exist, skipping",
+                        function_name
+                    ))
+                    .into());
             }
             Err(e) => return Err(e.into()),
         }

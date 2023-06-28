@@ -42,6 +42,10 @@ impl TierCompactionPicker {
                 continue;
             }
 
+            if level.table_infos.is_empty() {
+                continue;
+            }
+
             if level_handler.is_level_pending_compact(level) {
                 continue;
             }

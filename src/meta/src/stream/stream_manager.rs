@@ -25,7 +25,7 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
 use tokio::sync::mpsc::Sender;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 use super::Locations;
@@ -172,7 +172,7 @@ pub struct GlobalStreamManager<S: MetaStore> {
 
     hummock_manager: HummockManagerRef<S>,
 
-    pub(crate) streaming_job_lock: Mutex<()>,
+    pub(crate) reschedule_lock: RwLock<()>,
 }
 
 impl<S> GlobalStreamManager<S>
@@ -195,7 +195,7 @@ where
             source_manager,
             hummock_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
-            streaming_job_lock: Mutex::new(()),
+            reschedule_lock: RwLock::new(()),
         })
     }
 
@@ -536,6 +536,7 @@ where
     }
 
     pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) {
+        let _reschedule_job_lock = self.reschedule_lock.read().await;
         self.creating_job_info.cancel_jobs(table_ids).await;
     }
 }
@@ -734,10 +735,8 @@ mod tests {
             let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
 
-            // TODO: what should we choose the task heartbeat interval to be? Anyway, we don't run a
-            // heartbeat thread here, so it doesn't matter.
             let compactor_manager =
-                Arc::new(CompactorManager::with_meta(env.clone(), 1).await.unwrap());
+                Arc::new(CompactorManager::with_meta(env.clone()).await.unwrap());
 
             let hummock_manager = HummockManager::new(
                 env.clone(),

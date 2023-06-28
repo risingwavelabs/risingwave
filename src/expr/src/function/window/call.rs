@@ -238,6 +238,7 @@ impl Display for FrameBound<usize> {
 }
 
 impl FrameBound<usize> {
+    /// Convert the bound to sized offset from current row. `None` if the bound is unbounded.
     pub fn to_offset(&self) -> Option<isize> {
         match self {
             FrameBound::UnboundedPreceding | FrameBound::UnboundedFollowing => None,
@@ -245,6 +246,16 @@ impl FrameBound<usize> {
             FrameBound::Preceding(n) => Some(-(*n as isize)),
             FrameBound::Following(n) => Some(*n as isize),
         }
+    }
+
+    /// View the bound as frame start, and get the number of preceding rows.
+    pub fn n_preceding_rows(&self) -> Option<usize> {
+        self.to_offset().map(|x| x.min(0).unsigned_abs())
+    }
+
+    /// View the bound as frame end, and get the number of following rows.
+    pub fn n_following_rows(&self) -> Option<usize> {
+        self.to_offset().map(|x| x.max(0) as usize)
     }
 }
 
