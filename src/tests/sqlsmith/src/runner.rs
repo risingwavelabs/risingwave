@@ -21,15 +21,16 @@ use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
 use risingwave_sqlparser::ast::Statement;
+use similar::{ChangeTag, TextDiff};
 use tokio::time::{sleep, timeout, Duration};
 use tokio_postgres::error::Error as PgError;
-use tokio_postgres::Client;
+use tokio_postgres::{Client, SimpleQueryMessage};
 
 use crate::utils::read_file_contents;
 use crate::validation::{is_permissible_error, is_recovery_in_progress_error};
 use crate::{
-    generate_update_statements, insert_sql_gen, mview_sql_gen, parse_create_table_statements,
-    parse_sql, session_sql_gen, sql_gen, Table,
+    differential_sql_gen, generate_update_statements, insert_sql_gen, mview_sql_gen,
+    parse_create_table_statements, parse_sql, session_sql_gen, sql_gen, Table,
 };
 
 type PgResult<A> = std::result::Result<A, PgError>;
@@ -37,22 +38,13 @@ type Result<A> = anyhow::Result<A>;
 
 /// e2e test runner for pre-generated queries from sqlsmith
 pub async fn run_pre_generated(client: &Client, outdir: &str) {
+    let timeout_duration = 12; // allow for some variance.
     let queries_path = format!("{}/queries.sql", outdir);
     let queries = read_file_contents(queries_path).unwrap();
-    let ddl = queries
-        .lines()
-        .filter(|s| s.starts_with("CREATE"))
-        .collect::<String>();
-    tracing::info!("[DDL]: {}", ddl);
-    let dml = queries
-        .lines()
-        .filter(|s| s.starts_with("INSERT"))
-        .collect::<String>();
-    tracing::info!("[DML]: {}", dml);
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
         tracing::info!("[EXECUTING STATEMENT]: {}", sql);
-        run_query(client, &sql).await.unwrap();
+        run_query(timeout_duration, client, &sql).await.unwrap();
     }
     tracing::info!("[EXECUTION SUCCESS]");
 }
@@ -70,6 +62,8 @@ pub async fn generate(
     _outdir: &str,
     seed: Option<u64>,
 ) {
+    let timeout_duration = 5;
+
     set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
     set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
     tracing::info!("Set session variables");
@@ -101,24 +95,21 @@ pub async fn generate(
 
     tracing::info!("Ran updates");
 
-    let mut queries = String::with_capacity(10000);
     let mut generated_queries = 0;
     for _ in 0..count {
         test_session_variable(client, &mut rng).await;
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
-        let result = run_query(client, sql.as_str()).await;
+        let result = run_query(timeout_duration, client, sql.as_str()).await;
         match result {
             Err(_e) => {
                 generated_queries += 1;
-                queries.push_str(&format!("-- {};\n", &sql));
                 tracing::info!("Generated {} batch queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
             Ok(skipped) if skipped == 0 => {
                 generated_queries += 1;
-                queries.push_str(&format!("{};\n", &sql));
             }
             _ => {}
         }
@@ -130,20 +121,16 @@ pub async fn generate(
         test_session_variable(client, &mut rng).await;
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
-        let result = run_query(client, sql.as_str()).await;
+        let result = run_query(timeout_duration, client, sql.as_str()).await;
         match result {
             Err(_e) => {
                 generated_queries += 1;
-                queries.push_str(&format!("-- {};\n", &sql));
-                queries.push_str(&format!("-- {};\n", format_drop_mview(&table)));
                 tracing::info!("Generated {} stream queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
             Ok(skipped) if skipped == 0 => {
                 generated_queries += 1;
-                queries.push_str(&format!("{};\n", &sql));
-                queries.push_str(&format!("{};\n", format_drop_mview(&table)));
             }
             _ => {}
         }
@@ -202,6 +189,43 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
     tracing::info!("[EXECUTION SUCCESS]");
 }
 
+/// Differential testing for batch and stream
+pub async fn run_differential_testing(
+    client: &Client,
+    testdata: &str,
+    count: usize,
+    seed: Option<u64>,
+) -> Result<()> {
+    let mut rng = generate_rng(seed);
+
+    set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
+    set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
+    tracing::info!("Set session variables");
+
+    let base_tables = create_base_tables(testdata, client).await.unwrap();
+
+    let rows_per_table = 50;
+    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    tracing::info!("Populated base tables");
+
+    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
+        .await
+        .unwrap();
+    tracing::info!("Created tables");
+
+    // Generate an update for some inserts, on the corresponding table.
+    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+    tracing::info!("Ran updates");
+
+    for i in 0..count {
+        diff_stream_and_batch(&mut rng, tables.clone(), client, i).await?
+    }
+
+    drop_tables(&mviews, testdata, client).await;
+    tracing::info!("[EXECUTION SUCCESS]");
+    Ok(())
+}
+
 fn generate_rng(seed: Option<u64>) -> impl Rng {
     #[cfg(madsim)]
     if let Some(seed) = seed {
@@ -225,11 +249,9 @@ async fn update_base_tables<R: Rng>(
 ) {
     let update_statements = generate_update_statements(rng, base_tables, inserts).unwrap();
     for update_statement in update_statements {
-        if rng.gen_bool(0.5) {
-            let sql = update_statement.to_string();
-            tracing::info!("[EXECUTING UPDATES]: {}", &sql);
-            client.simple_query(&sql).await.unwrap();
-        }
+        let sql = update_statement.to_string();
+        tracing::info!("[EXECUTING UPDATES]: {}", &sql);
+        client.simple_query(&sql).await.unwrap();
     }
 }
 
@@ -264,9 +286,8 @@ async fn test_sqlsmith<R: Rng>(
     test_population_count(client, base_tables, row_count).await;
     tracing::info!("passed population count test");
 
-    // Test percentage of skipped queries <=5% of sample size.
-    let threshold = 0.40; // permit at most 40% of queries to be skipped.
-    let sample_size = 50;
+    let threshold = 0.50; // permit at most 50% of queries to be skipped.
+    let sample_size = 20;
 
     let skipped_percentage = test_batch_queries(client, rng, tables.clone(), sample_size)
         .await
@@ -337,8 +358,8 @@ async fn test_batch_queries<R: Rng>(
     for _ in 0..sample_size {
         test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
-        tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
-        skipped += run_query(client, &sql).await?;
+        tracing::info!("[TEST BATCH]: {}", sql);
+        skipped += run_query(30, client, &sql).await?;
     }
     Ok(skipped as f64 / sample_size as f64)
 }
@@ -355,9 +376,9 @@ async fn test_stream_queries<R: Rng>(
     for _ in 0..sample_size {
         test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
-        tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
-        skipped += run_query(client, &sql).await?;
-        tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(&table));
+        tracing::info!("[TEST STREAM]: {}", sql);
+        skipped += run_query(12, client, &sql).await?;
+        tracing::info!("[TEST DROP MVIEW]: {}", &format_drop_mview(&table));
         drop_mview_table(&table, client).await;
     }
     Ok(skipped as f64 / sample_size as f64)
@@ -400,11 +421,11 @@ async fn create_mviews(
     let mut mvs_and_base_tables = mvs_and_base_tables;
     let mut mviews = vec![];
     // Generate some mviews
-    for i in 0..10 {
+    for i in 0..20 {
         let (create_sql, table) =
             mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
         tracing::info!("[EXECUTING CREATE MVIEW]: {}", &create_sql);
-        let skip_count = run_query(client, &create_sql).await?;
+        let skip_count = run_query(6, client, &create_sql).await?;
         if skip_count == 0 {
             mvs_and_base_tables.push(table.clone());
             mviews.push(table);
@@ -444,15 +465,17 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
     }
 }
 
-/// Validate client responses, returning a count of skipped queries.
-fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
+/// Validate client responses, returning a count of skipped queries, number of result rows.
+fn validate_response(
+    response: PgResult<Vec<SimpleQueryMessage>>,
+) -> Result<(i64, Vec<SimpleQueryMessage>)> {
     match response {
-        Ok(_) => Ok(0),
+        Ok(rows) => Ok((0, rows)),
         Err(e) => {
             // Permit runtime errors conservatively.
             if let Some(e) = e.as_db_error() && is_permissible_error(&e.to_string()) {
                 tracing::info!("[SKIPPED ERROR]: {:#?}", e);
-                return Ok(1);
+                return Ok((1, vec![]));
             }
             // consolidate error reason for deterministic test
             tracing::info!("[UNEXPECTED ERROR]: {:#?}", e);
@@ -461,14 +484,21 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
     }
 }
 
+async fn run_query(timeout_duration: u64, client: &Client, query: &str) -> Result<i64> {
+    let (skipped_count, _) = run_query_inner(timeout_duration, client, query).await?;
+    Ok(skipped_count)
+}
 /// Run query, handle permissible errors
 /// For recovery error, just do bounded retry.
 /// For other errors, validate them accordingly, skipping if they are permitted.
 /// Otherwise just return success.
 /// If takes too long return the query which timed out + execution time + timeout error
-/// Returns: Number of skipped queries.
-async fn run_query(client: &Client, query: &str) -> Result<i64> {
-    let timeout_duration = 3;
+/// Returns: Number of skipped queries, number of rows returned.
+async fn run_query_inner(
+    timeout_duration: u64,
+    client: &Client,
+    query: &str,
+) -> Result<(i64, Vec<SimpleQueryMessage>)> {
     let query_task = client.simple_query(query);
     let result = timeout(Duration::from_secs(timeout_duration), query_task).await;
     let response = match result {
@@ -484,10 +514,16 @@ async fn run_query(client: &Client, query: &str) -> Result<i64> {
             let tries = 5;
             let interval = 1;
             for _ in 0..tries { // retry 5 times
-                sleep(Duration::from_millis(interval * 1000)).await;
-                let response = client.simple_query(query).await;
-                if response.is_ok() {
-                    return Ok(0);
+                sleep(Duration::from_secs(interval)).await;
+                let query_task = client.simple_query(query);
+                let response = timeout(Duration::from_secs(timeout_duration), query_task).await;
+                match response {
+                    Ok(Ok(r)) => { return Ok((0, r)); }
+                    Err(_) => bail!(
+                        "[UNEXPECTED ERROR] Query timeout after {timeout_duration}s:\n{:?}",
+                        query
+                    ),
+                    _ => {}
                 }
             }
             bail!("[UNEXPECTED ERROR] Failed to recover after {tries} tries with interval {interval}s")
@@ -495,5 +531,147 @@ async fn run_query(client: &Client, query: &str) -> Result<i64> {
             return validate_response(response);
         }
     }
-    Ok(0)
+    let rows = response?;
+    Ok((0, rows))
+}
+
+/// Create the tables defined in testdata, along with some mviews.
+/// Just test number of rows for now.
+/// TODO(kwannoel): Test row contents as well. That requires us to run a batch query
+/// with select * ORDER BY <all columns>.
+async fn diff_stream_and_batch(
+    rng: &mut impl Rng,
+    mvs_and_base_tables: Vec<Table>,
+    client: &Client,
+    i: usize,
+) -> Result<()> {
+    // Generate some mviews
+    let mview_name = format!("stream_{}", i);
+    let (batch, stream, table) = differential_sql_gen(rng, mvs_and_base_tables, &mview_name)?;
+
+    tracing::info!("[EXECUTING DIFF - CREATE MVIEW id={}]: {}", i, &stream);
+    let skip_count = run_query(12, client, &stream).await?;
+    if skip_count > 0 {
+        tracing::info!(
+            "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
+            i,
+            &format_drop_mview(&table)
+        );
+        drop_mview_table(&table, client).await;
+        return Ok(());
+    }
+
+    let select = format!("SELECT * FROM {}", &mview_name);
+    tracing::info!(
+        "[EXECUTING DIFF - SELECT * FROM MVIEW id={}]: {}",
+        i,
+        select
+    );
+    let (skip_count, stream_result) = run_query_inner(12, client, &select).await?;
+    if skip_count > 0 {
+        bail!("SQL should not fail: {:?}", select)
+    }
+
+    tracing::info!("[EXECUTING DIFF - BATCH QUERY id={}]: {}", i, &batch);
+    let (skip_count, batch_result) = run_query_inner(12, client, &batch).await?;
+    if skip_count > 0 {
+        tracing::info!(
+            "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
+            i,
+            &format_drop_mview(&table)
+        );
+        drop_mview_table(&table, client).await;
+        return Ok(());
+    }
+    let n_stream_rows = stream_result.len();
+    let n_batch_rows = batch_result.len();
+    let formatted_stream_rows = format_rows(&batch_result);
+    let formatted_batch_rows = format_rows(&stream_result);
+    tracing::debug!(
+        "[EXECUTING DIFF - STREAM_FORMATTED_ROW id={}]: {formatted_stream_rows}",
+        i,
+    );
+    tracing::debug!(
+        "[EXECUTING DIFF - BATCH_FORMATTED_ROW id={}]: {formatted_batch_rows}",
+        i,
+    );
+
+    let diff = TextDiff::from_lines(&formatted_batch_rows, &formatted_stream_rows);
+
+    let diff: String = diff
+        .iter_all_changes()
+        .filter_map(|change| match change.tag() {
+            ChangeTag::Delete => Some(format!("-{}", change)),
+            ChangeTag::Insert => Some(format!("+{}", change)),
+            ChangeTag::Equal => None,
+        })
+        .collect();
+
+    if diff.is_empty() {
+        tracing::info!(
+            "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
+            i,
+            &format_drop_mview(&table)
+        );
+        tracing::info!("[PASSED DIFF id={}, rows_compared={n_stream_rows}]", i);
+
+        drop_mview_table(&table, client).await;
+        Ok(())
+    } else {
+        bail!(
+            "
+Different results for batch and stream:
+
+BATCH SQL:
+{batch}
+
+STREAM SQL:
+{stream}
+
+SELECT FROM STREAM SQL:
+{select}
+
+BATCH_ROW_LEN:
+{n_batch_rows}
+
+STREAM_ROW_LEN:
+{n_stream_rows}
+
+BATCH_ROWS:
+{formatted_batch_rows}
+
+STREAM_ROWS:
+{formatted_stream_rows}
+
+ROW DIFF (+/-):
+{diff}
+",
+        )
+    }
+}
+
+/// Format + sort rows so they can be diffed.
+fn format_rows(rows: &[SimpleQueryMessage]) -> String {
+    rows.iter()
+        .filter_map(|r| match r {
+            SimpleQueryMessage::Row(row) => {
+                let n_cols = row.columns().len();
+                let formatted_row: String = (0..n_cols)
+                    .map(|i| {
+                        format!(
+                            "{:#?}",
+                            match row.get(i) {
+                                Some(s) => s,
+                                _ => "NULL",
+                            }
+                        )
+                    })
+                    .join(", ");
+                Some(formatted_row)
+            }
+            SimpleQueryMessage::CommandComplete(_n_rows) => None,
+            _ => unreachable!(),
+        })
+        .sorted()
+        .join("\n")
 }

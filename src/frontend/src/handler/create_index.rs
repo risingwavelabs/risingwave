@@ -246,7 +246,7 @@ pub(crate) fn gen_create_index_plan(
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Index:");
-        ctx.trace(plan.explain_to_string().unwrap());
+        ctx.trace(plan.explain_to_string());
     }
 
     Ok((plan, index_table_prost, index_prost))
@@ -407,10 +407,9 @@ pub async fn handle_create_index(
                 Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name)))
                     if if_not_exists =>
                 {
-                    return Ok(PgResponse::empty_result_with_notice(
-                        StatementType::CREATE_INDEX,
-                        format!("relation \"{}\" already exists, skipping", name),
-                    ));
+                    return Ok(PgResponse::builder(StatementType::CREATE_INDEX)
+                        .notice(format!("relation \"{}\" already exists, skipping", name))
+                        .into());
                 }
                 Err(e) => return Err(e.into()),
                 Ok(_) => {}

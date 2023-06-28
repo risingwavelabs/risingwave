@@ -94,6 +94,7 @@ steps:
           - "debezium-mongo"
           - "debezium-postgres"
           - "tidb-cdc-sink"
+          - "debezium-sqlserver"
         format:
           - "json"
           - "protobuf"
@@ -112,5 +113,9 @@ steps:
           skip: true
         - with:
             testcase: "tidb-cdc-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "debezium-sqlserver"
             format: "protobuf"
           skip: true

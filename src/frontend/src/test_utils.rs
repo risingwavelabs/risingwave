@@ -127,7 +127,7 @@ impl LocalFrontend {
 
     pub async fn get_explain_output(&self, sql: impl Into<String>) -> String {
         let mut rsp = self.run_sql(sql).await.unwrap();
-        assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
+        assert_eq!(rsp.stmt_type(), StatementType::EXPLAIN);
         let mut res = String::new();
         #[for_await]
         for row_set in rsp.values_stream() {
@@ -166,7 +166,7 @@ impl LocalFrontend {
 }
 
 pub async fn get_explain_output(mut rsp: RwPgResponse) -> String {
-    if rsp.get_stmt_type() != StatementType::EXPLAIN {
+    if rsp.stmt_type() != StatementType::EXPLAIN {
         panic!("RESPONSE INVALID: {rsp:?}");
     }
     let mut res = String::new();

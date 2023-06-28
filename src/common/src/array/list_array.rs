@@ -434,6 +434,7 @@ impl<'a> ListRef<'a> {
         self.len() == 0
     }
 
+    /// Returns the elements in the flattened list.
     pub fn flatten(self) -> Vec<DatumRef<'a>> {
         // XXX: avoid using vector
         iter_elems_ref!(self, it, {
@@ -446,6 +447,20 @@ impl<'a> ListRef<'a> {
                 .into_iter()
             })
             .collect()
+        })
+    }
+
+    /// Returns the total number of elements in the flattened list.
+    pub fn flatten_len(self) -> usize {
+        iter_elems_ref!(self, it, {
+            it.map(|datum_ref| {
+                if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
+                    list_ref.flatten_len()
+                } else {
+                    1
+                }
+            })
+            .sum()
         })
     }
 

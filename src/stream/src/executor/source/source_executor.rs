@@ -19,7 +19,8 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceContext, SplitMetaData, StreamChunkWithState,
+    BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
+    StreamChunkWithState,
 };
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -55,6 +56,9 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Expected barrier latency.
     expected_barrier_latency_ms: u64,
+
+    // control options for connector level
+    source_ctrl_opts: SourceCtrlOpts,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -68,6 +72,7 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         expected_barrier_latency_ms: u64,
         executor_id: u64,
+        source_ctrl_opts: SourceCtrlOpts,
     ) -> Self {
         Self {
             ctx,
@@ -78,6 +83,7 @@ impl<S: StateStore> SourceExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             expected_barrier_latency_ms,
+            source_ctrl_opts,
         }
     }
 
@@ -96,6 +102,7 @@ impl<S: StateStore> SourceExecutor<S> {
             self.stream_source_core.as_ref().unwrap().source_id,
             self.ctx.fragment_id,
             source_desc.metrics.clone(),
+            self.source_ctrl_opts.clone(),
         );
         source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
         source_desc
@@ -136,7 +143,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<Option<Vec<SplitImpl>>> {
         if let Some(target_splits) = split_assignment.get(&self.ctx.id).cloned() {
@@ -218,7 +225,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -362,7 +369,10 @@ impl<S: StateStore> SourceExecutor<S> {
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
-        let mut stream = StreamReaderWithPause::<true>::new(barrier_stream, source_chunk_reader);
+        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
+            barrier_stream,
+            source_chunk_reader,
+        );
 
         // If the first barrier is configuration change, then the source executor must be newly
         // created, and we should start with the paused state.
@@ -649,6 +659,7 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
+            SourceCtrlOpts::default(),
         );
         let mut executor = Box::new(executor).execute();
 
@@ -736,6 +747,7 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
+            SourceCtrlOpts::default(),
         );
         let mut handler = Box::new(executor).execute();
 

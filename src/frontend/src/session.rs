@@ -34,7 +34,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{load_config, BatchConfig, MetaConfig};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::session_config::{ConfigMap, VisibilityMode};
+use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -198,6 +198,9 @@ impl FrontendEnv {
             &meta_config,
         )
         .await?;
+
+        let worker_id = meta_client.worker_id();
+        info!("Assigned worker node id {}", worker_id);
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
@@ -516,7 +519,22 @@ impl SessionImpl {
     }
 
     pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
-        self.config_map.write().set(key, value)
+        struct Nop;
+
+        impl ConfigReporter for Nop {
+            fn report_status(&mut self, _key: &str, _new_val: String) {}
+        }
+
+        self.config_map.write().set(key, value, Nop)
+    }
+
+    pub fn set_config_report(
+        &self,
+        key: &str,
+        value: Vec<String>,
+        reporter: impl ConfigReporter,
+    ) -> Result<()> {
+        self.config_map.write().set(key, value, reporter)
     }
 
     pub fn session_id(&self) -> SessionId {
@@ -672,10 +690,11 @@ impl SessionImpl {
             ));
         }
         if stmts.len() > 1 {
-            return Ok(PgResponse::empty_result_with_notice(
-                pgwire::pg_response::StatementType::EMPTY,
-                "cannot insert multiple commands into statement".to_string(),
-            ));
+            return Ok(
+                PgResponse::builder(pgwire::pg_response::StatementType::EMPTY)
+                    .notice("cannot insert multiple commands into statement")
+                    .into(),
+            );
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {
@@ -969,7 +988,7 @@ impl Session for SessionImpl {
         })
     }
 
-    fn describe_portral(
+    fn describe_portal(
         self: Arc<Self>,
         portal: Portal,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
@@ -977,6 +996,10 @@ impl Session for SessionImpl {
             Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
+    }
+
+    fn set_config(&self, key: &str, value: Vec<String>) -> std::result::Result<(), BoxedError> {
+        Self::set_config(self, key, value).map_err(Into::into)
     }
 
     fn take_notices(self: Arc<Self>) -> Vec<String> {
