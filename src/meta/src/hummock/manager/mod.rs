@@ -1095,7 +1095,7 @@ where
             .get_compact_task_impl(compaction_group_id, selector)
             .await?
         {
-        if let TaskStatus::Pending = task.task_status() {
+            if let TaskStatus::Pending = task.task_status() {
                 return Ok(Some(task));
             }
             assert!(
