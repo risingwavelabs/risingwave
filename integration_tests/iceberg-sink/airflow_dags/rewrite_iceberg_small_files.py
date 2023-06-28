@@ -10,9 +10,10 @@ SPARK_PACKAGES = "org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.0.0,org.ap
 
 with DAG(
     dag_id=DAG_ID,
-    start_date=pendulum.datetime(2023, 1, 1, tz="UTC"),
+    start_date=pendulum.datetime(2021, 1, 1, tz="UTC"),
     catchup=False,
-    schedule_interval= datetime.timedelta(minutes=1),
+    dagrun_timeout=datetime.timedelta(minutes=60),
+    schedule_interval= datetime.timedelta(minutes=5),
     tags=["iceberg"],
 ) as dag:
 

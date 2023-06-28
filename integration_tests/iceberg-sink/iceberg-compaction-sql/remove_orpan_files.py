@@ -3,6 +3,20 @@ from pyspark.sql import SparkSession
 def get_spark():
     spark = SparkSession.builder \
         .config('spark.sql.extensions','org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions') \
+        .config("spark.sql.catalog.demo",
+                   "org.apache.iceberg.spark.SparkCatalog") \
+        .config("spark.sql.catalog.demo.type",
+                   "hadoop") \
+        .config("spark.sql.catalog.demo.warehouse",
+                   "s3a://hummock001/iceberg-data") \
+        .config("spark.sql.catalog.demo.hadoop.fs.s3a.endpoint",
+                   "http://minio-0:9301") \
+        .config("spark.sql.catalog.demo.hadoop.fs.s3a.path.style.access",
+                   "true") \
+        .config("spark.sql.catalog.demo.hadoop.fs.s3a.access.key",
+                   "hummockadmin") \
+        .config("spark.sql.catalog.demo.hadoop.fs.s3a.secret.key",
+                   "hummockadmin") \
         .getOrCreate()
         # .config('spark.sql.debug.maxToStringFields', 2000) \
         # .config('spark.debug.maxToStringFields', 2000) \
@@ -10,14 +24,6 @@ def get_spark():
         # .config('spark.executor.memory', '16g') \
         # .config('spark.driver.maxResultSize', '4g') \
         # .config('spark.network.timeout', 180) \
-    spark.conf.set("spark.sql.catalog.demo",
-                   "org.apache.iceberg.spark.SparkCatalog")
-    spark.conf.set("spark.sql.catalog.demo.type", "hadoop")
-    spark.conf.set("spark.sql.catalog.demo.warehouse",
-                   "s3a://iceberg/")
-    spark.conf.set("spark.sql.catalog.demo.hadoop.fs.s3a.endpoint", "http://127.0.0.1:9301") 
-    spark.conf.set("spark.sql.catalog.demo.hadoop.fs.s3a.access.key", "hummockadmin")
-    spark.conf.set("spark.sql.catalog.demo.hadoop.fs.s3a.secret.key", "hummockadmin")
     return spark
 
 if __name__ == "__main__":

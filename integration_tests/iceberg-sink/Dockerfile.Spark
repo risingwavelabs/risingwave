@@ -15,6 +15,7 @@ RUN curl https://repo1.maven.org/maven2/net/java/dev/jets3t/jets3t/0.9.4/jets3t-
 
 
 COPY ./iceberg-compaction-sql/rewrite_small_files.py /opt/bitnami/spark
+COPY ./iceberg-compaction-sql/remove_orpan_files.py /opt/bitnami/spark
 
 # CMD [ "/bin/bash" ]
 
