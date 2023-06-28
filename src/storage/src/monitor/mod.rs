@@ -42,6 +42,7 @@ pub trait HummockTraceFutureExt: Sized + Future {
 impl<F: Future> HummockTraceFutureExt for F {
     type TraceOutput = impl Future<Output = F::Output>;
 
+    // simply return a future that does nothing if trace is not enabled
     fn may_trace_hummock(self) -> Self::TraceOutput {
         #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
         {
