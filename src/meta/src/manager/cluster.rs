@@ -491,6 +491,9 @@ pub struct StreamingClusterInfo {
 
     /// All parallel units of the **active** compute nodes in the cluster.
     pub parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
+
+    /// All unschedulable parallel units of compute nodes in the cluster.
+    pub unschedulable_parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
 }
 
 pub struct ClusterManagerCore {
@@ -570,7 +573,6 @@ impl ClusterManagerCore {
         &self,
         worker_type: WorkerType,
         worker_state: Option<State>,
-        list_unschedulable: bool,
     ) -> Vec<WorkerNode> {
         let worker_state = worker_state.map(|worker_state| worker_state as i32);
 
@@ -582,22 +584,14 @@ impl ClusterManagerCore {
                 None => true,
                 Some(state) => state == w.state,
             })
-            .filter(|w| {
-                if list_unschedulable {
-                    true
-                } else {
-                    !w.property.as_ref().map_or(false, |p| p.is_unschedulable)
-                }
-            })
             .collect_vec()
     }
 
     pub fn list_streaming_worker_node(
         &self,
         worker_state: Option<State>,
-        list_unschedulable: bool,
     ) -> Vec<WorkerNode> {
-        self.list_worker_node(WorkerType::ComputeNode, worker_state, list_unschedulable)
+        self.list_worker_node(WorkerType::ComputeNode, worker_state)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
             .collect()
@@ -605,7 +599,7 @@ impl ClusterManagerCore {
 
     // List all parallel units on running nodes
     pub fn list_serving_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
-        self.list_worker_node(WorkerType::ComputeNode, worker_state, false)
+        self.list_worker_node(WorkerType::ComputeNode, worker_state)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
             .collect()
@@ -613,7 +607,7 @@ impl ClusterManagerCore {
 
     fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
         let active_workers: HashSet<_> = self
-            .list_streaming_worker_node(Some(State::Running), true)
+            .list_streaming_worker_node(Some(State::Running))
             .into_iter()
             .map(|w| w.id)
             .collect();
@@ -627,8 +621,18 @@ impl ClusterManagerCore {
 
     // Lists active worker nodes
     fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
-        let active_workers: HashMap<_, _> = self
-            .list_streaming_worker_node(Some(State::Running), false)
+        let mut streaming_worker_node = self.list_streaming_worker_node(Some(State::Running));
+
+        let unschedulable_worker_node = streaming_worker_node
+            .drain_filter(|worker| {
+                worker
+                    .property
+                    .as_ref()
+                    .map_or(false, |p| p.is_unschedulable)
+            })
+            .collect_vec();
+
+        let active_workers: HashMap<_, _> = streaming_worker_node
             .into_iter()
             .map(|w| (w.id, w))
             .collect();
@@ -640,9 +644,14 @@ impl ClusterManagerCore {
             .map(|p| (p.id, p.clone()))
             .collect();
 
+        let unschedulable_parallel_units = unschedulable_worker_node.iter()
+            .flat_map(|worker| worker.parallel_units.iter().map(|p| (p.id, p.clone())))
+            .collect();
+
         StreamingClusterInfo {
             worker_nodes: active_workers,
             parallel_units: active_parallel_units,
+            unschedulable_parallel_units,
         }
     }
 
