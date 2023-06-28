@@ -50,11 +50,11 @@ const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
 
 const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
 
-/// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
-/// logs are needed, add them here.
+/// Configure log targets for some `RisingWave` crates.
+///
+/// Other RisingWave crates will follow the default level (`DEBUG` or `INFO` according to
+/// the `debug_assertions` and `is_ci` flag).
 fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets {
-    // Other RisingWave crates will follow the default level (`DEBUG` or `INFO` according to
-    // the `debug_assertions` and `is_ci` flag).
     targets
         // force a lower level for important logs
         .with_target("risingwave_stream", Level::DEBUG)
