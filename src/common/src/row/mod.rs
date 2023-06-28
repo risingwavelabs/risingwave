@@ -15,6 +15,7 @@
 use std::borrow::Cow;
 use std::fmt::Display;
 use std::hash::{BuildHasher, Hasher};
+use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use itertools::Itertools;
@@ -27,10 +28,6 @@ use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
 pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
-    type Iter<'a>: Iterator<Item = DatumRef<'a>>
-    where
-        Self: 'a;
-
     /// Returns the [`DatumRef`] at the given `index`.
     fn datum_at(&self, index: usize) -> DatumRef<'_>;
 
@@ -50,7 +47,7 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     }
 
     /// Returns an iterator over the datums in the row, in [`DatumRef`] form.
-    fn iter(&self) -> Self::Iter<'_>;
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>>;
 
     /// Converts the row into an [`OwnedRow`].
     ///
@@ -156,6 +153,17 @@ pub trait RowExt: Row {
         assert_row(Project::new(self, indices))
     }
 
+    /// Adapter for slicing a row with the given `range`.
+    ///
+    /// # Panics
+    /// Panics if range is out of bounds.
+    fn slice(self, range: impl RangeBounds<usize>) -> Slice<Self>
+    where
+        Self: Sized,
+    {
+        assert_row(Slice::new(self, range))
+    }
+
     fn display(&self) -> impl Display + '_ {
         struct D<'a, T: Row>(&'a T);
         impl<'a, T: Row> Display for D<'a, T> {
@@ -197,7 +205,7 @@ macro_rules! deref_forward_row {
             (**self).is_empty()
         }
 
-        fn iter(&self) -> Self::Iter<'_> {
+        fn iter(&self) -> impl Iterator<Item = crate::types::DatumRef<'_>> {
             (**self).iter()
         }
 
@@ -236,18 +244,10 @@ macro_rules! deref_forward_row {
 }
 
 impl<R: Row> Row for &R {
-    type Iter<'a> = R::Iter<'a>
-    where
-        Self: 'a;
-
     deref_forward_row!();
 }
 
 impl<R: Row + Clone> Row for Cow<'_, R> {
-    type Iter<'a> = R::Iter<'a>
-    where
-        Self: 'a;
-
     deref_forward_row!();
 
     // Manually implemented in case `R` has a more efficient implementation.
@@ -257,10 +257,6 @@ impl<R: Row + Clone> Row for Cow<'_, R> {
 }
 
 impl<R: Row> Row for Box<R> {
-    type Iter<'a> = R::Iter<'a>
-    where
-        Self: 'a;
-
     deref_forward_row!();
 
     // Manually implemented in case the `Cow` is `Owned` and `R` has a more efficient
@@ -289,36 +285,22 @@ macro_rules! impl_slice_row {
         }
 
         #[inline]
-        fn iter(&self) -> Self::Iter<'_> {
+        fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
             self.as_ref().iter().map(ToDatumRef::to_datum_ref)
         }
     };
 }
 
-type SliceIter<'a, D> = std::iter::Map<std::slice::Iter<'a, D>, fn(&'a D) -> DatumRef<'a>>;
-
 impl<D: ToDatumRef> Row for &[D] {
-    type Iter<'a> = SliceIter<'a, D>
-    where
-        Self: 'a;
-
     impl_slice_row!();
 }
 
 impl<D: ToDatumRef, const N: usize> Row for [D; N] {
-    type Iter<'a> = SliceIter<'a, D>
-    where
-        Self: 'a;
-
     impl_slice_row!();
 }
 
 /// Implements [`Row`] for an optional row.
 impl<R: Row> Row for Option<R> {
-    type Iter<'a> = itertools::Either<R::Iter<'a>, <Empty as Row>::Iter<'a>>
-    where
-        Self: 'a;
-
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         match self {
             Some(row) => row.datum_at(index),
@@ -340,7 +322,7 @@ impl<R: Row> Row for Option<R> {
         }
     }
 
-    fn iter(&self) -> Self::Iter<'_> {
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
         match self {
             Some(row) => itertools::Either::Left(row.iter()),
             None => itertools::Either::Right(EMPTY.iter()),
@@ -382,6 +364,7 @@ mod ordered;
 mod owned_row;
 mod project;
 mod repeat_n;
+mod slice;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};
@@ -389,3 +372,4 @@ pub use once::{once, Once};
 pub use owned_row::{OwnedRow, RowDeserializer};
 pub use project::Project;
 pub use repeat_n::{repeat_n, RepeatN};
+pub use slice::Slice;
