@@ -659,7 +659,7 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
-            SourceCtrlOpts::default(),
+            SourceCtrlOpts::for_test(),
         );
         let mut executor = Box::new(executor).execute();
 
@@ -747,7 +747,7 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
-            SourceCtrlOpts::default(),
+            SourceCtrlOpts::for_test(),
         );
         let mut handler = Box::new(executor).execute();
 

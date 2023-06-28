@@ -93,21 +93,33 @@ pub struct SourceCtrlOpts {
     pub chunk_size: usize,
 }
 
-impl Default for SourceCtrlOpts {
-    fn default() -> Self {
+impl SourceCtrlOpts {
+    pub fn for_test() -> Self {
         Self {
             chunk_size: MAX_CHUNK_SIZE,
         }
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SourceContext {
     pub source_info: SourceInfo,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
     error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
+
+impl Default for SourceContext {
+    fn default() -> Self {
+        Self {
+            source_info: Default::default(),
+            metrics: Arc::new(Default::default()),
+            source_ctrl_opts: SourceCtrlOpts::for_test(),
+            error_suppressor: None,
+        }
+    }
+}
+
 impl SourceContext {
     pub fn new(
         actor_id: u32,

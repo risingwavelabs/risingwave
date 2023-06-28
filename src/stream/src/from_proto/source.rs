@@ -154,7 +154,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 barrier_interval_ms,
                 params.executor_id,
                 // we don't expect any data in, so no need to set chunk_sizes
-                SourceCtrlOpts::default(),
+                SourceCtrlOpts::for_test(),
             )))
         }
     }

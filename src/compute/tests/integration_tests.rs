@@ -175,7 +175,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         barrier_rx,
         u64::MAX,
         1,
-        SourceCtrlOpts::default(),
+        SourceCtrlOpts::for_test(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
