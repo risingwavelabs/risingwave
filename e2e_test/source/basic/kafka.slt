@@ -330,7 +330,7 @@ create source s24 (id bytea) with (
 ) row format bytes
 
 # bytes format only accept one column
-statment error 
+statement error 
 create source s25 (v1 bytea, v2 int) with (
   connector = 'kafka',
   topic = 'kafka_source_format_bytes',
