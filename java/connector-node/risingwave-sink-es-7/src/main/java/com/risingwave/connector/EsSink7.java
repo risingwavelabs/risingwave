@@ -26,7 +26,6 @@ import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.bulk.BackoffPolicy;
 import org.elasticsearch.action.bulk.BulkProcessor;
 import org.elasticsearch.action.bulk.BulkRequest;
@@ -120,17 +119,12 @@ public class EsSink7 extends SinkBase {
             RestHighLevelClient client, EsSink7Config config, BulkProcessor.Listener listener) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
-                        new BulkRequestConsumerFactory() {
-                            @Override
-                            public void accept(
-                                    BulkRequest bulkRequest,
-                                    ActionListener<BulkResponse> bulkResponseActionListener) {
-                                client.bulkAsync(
-                                        bulkRequest,
-                                        RequestOptions.DEFAULT,
-                                        bulkResponseActionListener);
-                            }
-                        },
+                        (BulkRequestConsumerFactory)
+                                (bulkRequest, bulkResponseActionListener) ->
+                                        client.bulkAsync(
+                                                bulkRequest,
+                                                RequestOptions.DEFAULT,
+                                                bulkResponseActionListener),
                         listener);
         // Possible feature: move these to config
         // execute the bulk every 10 000 requests

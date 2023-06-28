@@ -23,8 +23,13 @@ import io.grpc.Status;
 import java.io.IOException;
 import java.util.Map;
 import org.apache.http.HttpHost;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestClient;
+import org.elasticsearch.client.RestClientBuilder;
 import org.elasticsearch.client.RestHighLevelClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,10 +58,19 @@ public class EsSink7Factory implements SinkFactory {
         } catch (IllegalArgumentException e) {
             throw Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException();
         }
-        System.out.println("check url success");
 
         // 2. check connection
-        RestHighLevelClient client = new RestHighLevelClient(RestClient.builder(host));
+        RestClientBuilder builder = RestClient.builder(host);
+        if (config.getPassword() != null && config.getUsername() != null) {
+            final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+            credentialsProvider.setCredentials(
+                    AuthScope.ANY,
+                    new UsernamePasswordCredentials(config.getUsername(), config.getPassword()));
+            builder.setHttpClientConfigCallback(
+                    httpClientBuilder ->
+                            httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider));
+        }
+        RestHighLevelClient client = new RestHighLevelClient(builder);
         // Test connection
         try {
             boolean isConnected = client.ping(RequestOptions.DEFAULT);
@@ -68,7 +82,6 @@ public class EsSink7Factory implements SinkFactory {
         } catch (Exception e) {
             throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
         }
-        System.out.println("check connection success");
 
         // 3. close client
         try {

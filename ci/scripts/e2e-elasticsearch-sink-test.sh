@@ -4,7 +4,7 @@
 set -euo pipefail
 
 echo "--- check elasticsearch"
-curl http://elasticsearch:9200
+curl -u elastic:risingwave http://elasticsearch:9200
 
 echo "--- testing elasticsearch sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch/elasticsearch_sink.slt'
@@ -12,7 +12,7 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch/elasticsearch_sink.sl
 sleep 5
 
 echo "--- checking elasticsearch sink result"
-curl -XGET "http://elasticsearch:9200/test/_search" -H 'Content-Type: application/json' -d'{"query":{"match_all":{}}}' > ./e2e_test/sink/elasticsearch/elasticsearch_sink.tmp.result
+curl -XGET -u elastic:risingwave "http://elasticsearch:9200/test/_search" -H 'Content-Type: application/json' -d'{"query":{"match_all":{}}}' > ./e2e_test/sink/elasticsearch/elasticsearch_sink.tmp.result
 python3 e2e_test/sink/elasticsearch/elasticsearch.py e2e_test/sink/elasticsearch/elasticsearch_sink.result e2e_test/sink/elasticsearch/elasticsearch_sink.tmp.result
 if [ $? -ne 0 ]; then
   echo "The output is not as expected."
