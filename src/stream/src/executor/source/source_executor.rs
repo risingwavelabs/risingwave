@@ -140,12 +140,39 @@ impl<S: StateStore> SourceExecutor<S> {
         false
     }
 
+    #[inline]
+    fn get_metric_labels(&self) -> [String; 3] {
+        [
+            self.stream_source_core
+                .as_ref()
+                .unwrap()
+                .source_id
+                .to_string(),
+            self.stream_source_core
+                .as_ref()
+                .unwrap()
+                .source_name
+                .clone(),
+            self.ctx.id.to_string(),
+        ]
+    }
+
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<Option<Vec<SplitImpl>>> {
+        self.metrics
+            .source_split_change_count
+            .with_label_values(
+                &self
+                    .get_metric_labels()
+                    .iter()
+                    .map(AsRef::as_ref)
+                    .collect::<Vec<&str>>(),
+            )
+            .inc();
         if let Some(target_splits) = split_assignment.get(&self.ctx.id).cloned() {
             if let Some(target_state) = self.update_state_if_changed(Some(target_splits)).await? {
                 tracing::info!(
@@ -501,20 +528,13 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     self.metrics
                         .source_output_row_count
-                        .with_label_values(&[
-                            self.stream_source_core
-                                .as_ref()
-                                .unwrap()
-                                .source_id
-                                .to_string()
-                                .as_ref(),
-                            self.stream_source_core
-                                .as_ref()
-                                .unwrap()
-                                .source_name
-                                .as_ref(),
-                            self.ctx.id.to_string().as_str(),
-                        ])
+                        .with_label_values(
+                            &self
+                                .get_metric_labels()
+                                .iter()
+                                .map(AsRef::as_ref)
+                                .collect::<Vec<&str>>(),
+                        )
                         .inc_by(chunk.cardinality() as u64);
                     yield Message::Chunk(chunk);
                 }

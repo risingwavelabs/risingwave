@@ -43,6 +43,7 @@ pub struct StreamingMetrics {
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
+    pub source_split_change_count: GenericCounterVec<AtomicU64>,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
@@ -142,6 +143,14 @@ impl StreamingMetrics {
             "stream_source_rows_per_barrier_counts",
             "Total number of rows that have been output from source per barrier",
             &["actor_id", "executor_id"],
+            registry
+        )
+        .unwrap();
+
+        let source_split_change_count = register_int_counter_vec_with_registry!(
+            "stream_source_split_change_event_count",
+            "Total number of split change events that have been operated by source",
+            &["source_id", "source_name", "actor_id"],
             registry
         )
         .unwrap();
@@ -665,6 +674,7 @@ impl StreamingMetrics {
             actor_sampled_deserialize_duration_ns,
             source_output_row_count,
             source_row_per_barrier,
+            source_split_change_count,
             exchange_frag_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
