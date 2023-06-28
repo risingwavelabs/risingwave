@@ -591,14 +591,26 @@ impl S3ObjectStore {
         }
 
         // Retry 3 times if we get server-side errors or throttling errors
-        let sdk_config_loader =
-            aws_config::from_env().retry_config(RetryConfig::standard().with_max_attempts(4));
-        let sdk_config = match std::env::var("RW_S3_ENDPOINT") {
-            Ok(endpoint) => sdk_config_loader.endpoint_url(endpoint).load().await,
-            Err(_) => sdk_config_loader.load().await,
+        let client = match std::env::var("RW_S3_ENDPOINT") {
+            Ok(endpoint) => {
+                // s3 compatible storage
+                let sdk_config_loader = aws_config::from_env()
+                    .retry_config(RetryConfig::standard().with_max_attempts(4));
+                let sdk_config: aws_config::SdkConfig = sdk_config_loader.load().await;
+                let config = aws_sdk_s3::config::Builder::from(&sdk_config)
+                    .endpoint_url(endpoint)
+                    .force_path_style(true)
+                    .build();
+                Client::from_conf(config)
+            }
+            Err(_) => {
+                // s3
+                let sdk_config_loader = aws_config::from_env()
+                    .retry_config(RetryConfig::standard().with_max_attempts(4));
+                let sdk_config = sdk_config_loader.load().await;
+                Client::new(&sdk_config)
+            }
         };
-
-        let client = Client::new(&sdk_config);
 
         Self {
             client,
