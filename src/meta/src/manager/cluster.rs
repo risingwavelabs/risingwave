@@ -411,17 +411,16 @@ where
         &self,
         worker_type: WorkerType,
         worker_state: Option<State>,
-        list_unschedulable: bool,
     ) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_worker_node(worker_type, worker_state, list_unschedulable)
+        core.list_worker_node(worker_type, worker_state)
     }
 
     /// A convenient method to get all running compute nodes that may have running actors on them
     /// i.e. CNs which are running
     pub async fn list_active_streaming_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_streaming_worker_node(Some(State::Running), true)
+        core.list_streaming_worker_node(Some(State::Running))
     }
 
     pub async fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
@@ -587,10 +586,7 @@ impl ClusterManagerCore {
             .collect_vec()
     }
 
-    pub fn list_streaming_worker_node(
-        &self,
-        worker_state: Option<State>,
-    ) -> Vec<WorkerNode> {
+    pub fn list_streaming_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
         self.list_worker_node(WorkerType::ComputeNode, worker_state)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
@@ -644,7 +640,8 @@ impl ClusterManagerCore {
             .map(|p| (p.id, p.clone()))
             .collect();
 
-        let unschedulable_parallel_units = unschedulable_worker_node.iter()
+        let unschedulable_parallel_units = unschedulable_worker_node
+            .iter()
             .flat_map(|worker| worker.parallel_units.iter().map(|p| (p.id, p.clone())))
             .collect();
 
@@ -789,7 +786,7 @@ mod tests {
         // Two live nodes
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None, false)
+                .list_worker_node(WorkerType::ComputeNode, None)
                 .await
                 .len(),
             2
@@ -816,7 +813,7 @@ mod tests {
         // started.
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None, false)
+                .list_worker_node(WorkerType::ComputeNode, None)
                 .await
                 .len(),
             2
@@ -829,7 +826,7 @@ mod tests {
         // One live node left.
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None, false)
+                .list_worker_node(WorkerType::ComputeNode, None)
                 .await
                 .len(),
             1

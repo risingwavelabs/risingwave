@@ -129,7 +129,7 @@ where
 
         let node_list = self
             .cluster_manager
-            .list_worker_node(worker_type, worker_states, true)
+            .list_worker_node(worker_type, worker_states)
             .await;
         Ok(Response::new(ListAllNodesResponse {
             status: None,

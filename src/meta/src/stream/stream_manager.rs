@@ -810,7 +810,8 @@ mod tests {
                 let StreamingClusterInfo {
                     worker_nodes,
                     parallel_units,
-                } = self
+                    unschedulable_parallel_units: _,
+                }: StreamingClusterInfo = self
                     .global_stream_manager
                     .cluster_manager
                     .get_streaming_cluster_info()

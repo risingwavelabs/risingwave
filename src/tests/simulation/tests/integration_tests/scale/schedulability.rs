@@ -54,9 +54,7 @@ async fn test_cordon_normal() -> Result<()> {
         })
         .collect();
 
-    cluster
-        .cordon_worker(cordoned_worker.host.clone().unwrap())
-        .await?;
+    cluster.cordon_worker(cordoned_worker.id).await?;
 
     session.run("create table t (v int);").await?;
 
@@ -70,9 +68,7 @@ async fn test_cordon_normal() -> Result<()> {
 
     session.run("drop table t;").await?;
 
-    cluster
-        .uncordon_worker(cordoned_worker.host.unwrap())
-        .await?;
+    cluster.uncordon_worker(cordoned_worker.id).await?;
 
     session.run("create table t2 (v int);").await?;
 
@@ -109,15 +105,13 @@ async fn test_cordon_no_shuffle_failed() -> Result<()> {
 
     let cordoned_worker = workers.pop().unwrap();
 
-    cluster.cordon_worker(cordoned_worker.host.unwrap()).await?;
+    cluster.cordon_worker(cordoned_worker.id).await?;
 
-    // remove this comments after fixing issue #10547
+    let result = session
+        .run("create materialized view mv1 as select * from t;")
+        .await;
 
-    // let result = session
-    //     .run("create materialized view mv1 as select * from t;")
-    //     .await;
-    //
-    // assert!(result.is_err());
+    assert!(result.is_err());
 
     Ok(())
 }

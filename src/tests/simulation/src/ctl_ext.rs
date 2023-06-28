@@ -321,12 +321,13 @@ impl Cluster {
         Ok(())
     }
 
-    pub async fn cordon_worker(&self, addr: HostAddress) -> Result<()> {
-        self.update_worker_node_schedulability(addr, true).await
+    pub async fn cordon_worker(&self, id: u32) -> Result<()> {
+        self.update_worker_node_schedulability(vec![id], true).await
     }
 
-    pub async fn uncordon_worker(&self, addr: HostAddress) -> Result<()> {
-        self.update_worker_node_schedulability(addr, false).await
+    pub async fn uncordon_worker(&self, id: u32) -> Result<()> {
+        self.update_worker_node_schedulability(vec![id], false)
+            .await
     }
 
     /// Reschedule with the given `plan`. Check the document of

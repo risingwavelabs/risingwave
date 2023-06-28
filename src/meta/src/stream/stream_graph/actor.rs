@@ -680,7 +680,7 @@ impl ActorGraphBuilder {
             external_locations,
         } = self.build_actor_graph(id_gen)?;
 
-        for (_, parallel_unit_id) in external_locations.iter() {
+        for parallel_unit_id in external_locations.values() {
             if let Some(parallel_unit) = self
                 .cluster_info
                 .unschedulable_parallel_units
