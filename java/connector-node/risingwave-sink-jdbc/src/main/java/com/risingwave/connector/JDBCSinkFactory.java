@@ -14,6 +14,7 @@
 
 package com.risingwave.connector;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
@@ -45,6 +46,7 @@ public class JDBCSinkFactory implements SinkFactory {
     public void validate(
             TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
         ObjectMapper mapper = new ObjectMapper();
+        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
         JDBCSinkConfig config = mapper.convertValue(tableProperties, JDBCSinkConfig.class);
 
         String jdbcUrl = config.getJdbcUrl();

@@ -25,8 +25,6 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     private String tableName;
 
-    private String schemaName;
-
     private String sinkType;
 
     private final boolean isUpsertSink;
@@ -34,12 +32,14 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "force_append_only")
     private Boolean forceAppendOnly;
 
+    @JsonProperty(value = "schema.name")
+    private String schemaName;
+
     @JsonCreator
     public JDBCSinkConfig(
-            @JsonProperty(value = "jdbc.url", required = true) String jdbcUrl,
-            @JsonProperty(value = "table.name", required = true) String tableName,
-            @JsonProperty(value = "schema.name") String schemaName,
-            @JsonProperty(value = "type", required = true) String sinkType) {
+            @JsonProperty(value = "jdbc.url") String jdbcUrl,
+            @JsonProperty(value = "table.name") String tableName,
+            @JsonProperty(value = "type") String sinkType) {
         this.jdbcUrl = jdbcUrl;
         boolean isPostgres = jdbcUrl.startsWith("jdbc:postgresql");
         if (schemaName != null && !schemaName.isBlank()) {
