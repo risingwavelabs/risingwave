@@ -28,10 +28,12 @@ pub struct BytesParser {
 
 impl BytesParser {
     pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
-        let non_hidden_column_count = rw_columns
-            .iter()
-            .fold(0, |cnt, col| cnt + if col.is_visible() { 1 } else { 0 });
-        debug_assert_eq!(1, non_hidden_column_count);
+        debug_assert_eq!(
+            1,
+            rw_columns
+                .iter()
+                .fold(0, |cnt, col| cnt + if col.is_visible() { 1 } else { 0 })
+        );
         Ok(Self {
             rw_columns,
             source_ctx,

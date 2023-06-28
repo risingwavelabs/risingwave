@@ -145,8 +145,9 @@ impl ParseTo for SourceSchemaV2 {
             "CANAL_JSON" => RowFormat::CanalJson,
             "CSV" => RowFormat::Csv,
             "DEBEZIUM_AVRO" => RowFormat::DebeziumAvro,
+            "BYTES" => RowFormat::Bytes,
              _ => return Err(ParserError::ParserError(
-                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
+                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON | BYTES after ROW FORMAT".to_string(),
             ))
         };
         let row_options = p.parse_options()?;
@@ -263,6 +264,7 @@ impl SourceSchemaV2 {
                         row_schema_location,
                     })
                 }
+                RowFormat::Bytes => SourceSchema::Bytes,
             },
             self.row_options,
         ))
