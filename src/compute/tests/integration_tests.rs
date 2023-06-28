@@ -284,7 +284,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let mut col_row_ids = vec![];
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].as_serial();
@@ -363,7 +363,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let message = materialize.next().await.unwrap()?;
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].as_serial();

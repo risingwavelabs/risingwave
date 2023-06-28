@@ -85,7 +85,7 @@ pub fn merge(inputs: Vec<BoxedMessageStream>) -> BoxedMessageStream {
             for item in input {
                 match item? {
                     Message::Watermark(_) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                     }
                     msg @ Message::Chunk(_) => yield msg,
                     msg @ Message::Barrier(_) => {
