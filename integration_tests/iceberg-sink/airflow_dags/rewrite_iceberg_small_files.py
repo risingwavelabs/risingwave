@@ -5,7 +5,7 @@ from airflow.models import DAG
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 
 DAG_ID = "rewrite_iceberg_small_files"
-PYSPARK_APPLICATION_PATH = "../iceberg-compaction-sql/rewrite_small_files.py"
+PYSPARK_APPLICATION_PATH = "./iceberg-compaction-sql/rewrite_small_files.py"
 SPARK_PACKAGES = "org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.0.0,org.apache.hadoop:hadoop-aws:3.3.2"
 
 with DAG(
@@ -19,6 +19,7 @@ with DAG(
     spark_sql_rewrite_files = SparkSubmitOperator(
         application=PYSPARK_APPLICATION_PATH,
         task_id="spark_sql_rewrite_files", 
-        packages=SPARK_PACKAGES,  
+        packages=SPARK_PACKAGES, 
+        conn_id = "spark_local" 
     )
 

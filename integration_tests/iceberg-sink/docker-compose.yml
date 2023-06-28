@@ -2,7 +2,7 @@
 version: "3"
 x-airflow-common:
     &airflow-common
-    image: apache/airflow:2.6.2-python3.10
+    image: airflow-spark:latest
     environment:
       &airflow-common-env
       AIRFLOW__CORE__EXECUTOR: CeleryExecutor
@@ -19,6 +19,7 @@ x-airflow-common:
       - ./airflow_dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
+      - ./iceberg-compaction-sql:/opt/airflow/iceberg-compaction-sql
     # depends_on:
     #   &airflow-common-depends-on
     #   redis:
@@ -28,13 +29,23 @@ x-airflow-common:
 
 services:
   spark:
-    image: apache/spark:3.3.1
-    command: tail -f /dev/null
-    depends_on:
-      - minio-0
-    volumes:
-      - "./spark-script:/spark-script"
-    container_name: spark
+    image: spark-air:latest
+    build: Dockerfile.Spark
+    environment:
+      - SPARK_MODE=master
+      - AWS_ACCESS_KEY=hummockadmin
+      - AWS_SECRET_KEY=hummockadmin
+    ports:
+      - '7077:7077'
+  spark-worker:
+    image: spark-air:latest
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark:7077
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_WORKER_CORES=1
+      - AWS_ACCESS_KEY=hummockadmin
+      - AWS_SECRET_KEY=hummockadmin
   presto:
     build: ./presto-with-iceberg
     container_name: presto
