@@ -376,9 +376,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
         layers.push(Box::new(MetricsLayer::new(registry).with_filter(filter)));
     }
-
     tracing_subscriber::registry().with(layers).init();
-
     // TODO: add file-appender tracing subscriber in the future
 }
 
