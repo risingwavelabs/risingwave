@@ -581,11 +581,11 @@ impl MetaClient {
 
     pub async fn update_schedulability(
         &self,
-        worker_ids: &[u32],
+        worker_id: u32,
         set_is_unschedulable: bool,
     ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
         let request = UpdateWorkerNodeSchedulabilityRequest {
-            worker_ids: worker_ids.to_vec(),
+            worker_id,
             set_is_unschedulable,
         };
         let resp = self

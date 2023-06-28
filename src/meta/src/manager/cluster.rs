@@ -225,47 +225,34 @@ where
 
     pub async fn update_schedulability(
         &self,
-        worker_ids: &[u32],
+        worker_id: u32,
         is_unschedulable: bool,
     ) -> MetaResult<()> {
         let mut core = self.core.write().await;
-        let mut workers = core
+        let worker = core
             .workers
             .values_mut()
-            .filter(|w| worker_ids.contains(&w.worker_id()))
-            .collect_vec();
-        if workers.len() != worker_ids.len() {
-            return Err(MetaError::invalid_parameter(format!(
-                "Tried to update schedulability of workers {:?}. Only found workers {:?}",
-                worker_ids,
-                workers.iter().map(|w| w.worker_id()).collect_vec()
-            )));
-        }
-        let workers_need_change = workers
-            .iter_mut()
-            .filter(|w| match w.worker_node.property.as_ref() {
-                None => true,
-                Some(p) => p.is_unschedulable != is_unschedulable,
-            })
-            .collect_vec();
-        if workers_need_change.is_empty() {
-            return Ok(());
+            .find(|w| worker_id == w.worker_id())
+            .ok_or_else(|| {
+                MetaError::invalid_parameter(format!("Did not find worker {}", worker_id))
+            })?;
+
+        match worker.worker_node.property.as_ref() {
+            None => {
+                return Err(MetaError::invalid_parameter(
+                    "Worker node does not have property",
+                ));
+            }
+            Some(prop) => {
+                if prop.is_unschedulable == is_unschedulable {
+                    return Ok(());
+                }
+            }
         }
 
-        if workers_need_change
-            .iter()
-            .any(|w| w.worker_node.property.is_none())
-        {
-            return Err(MetaError::invalid_parameter(
-                "Worker node does not have property",
-            ));
-        }
-
-        for worker in workers_need_change {
-            let property = &mut worker.worker_node.property.as_mut().unwrap();
-            property.is_unschedulable = is_unschedulable;
-            Worker::insert(worker, self.env.meta_store()).await?;
-        }
+        let property = worker.worker_node.property.as_mut().unwrap();
+        property.is_unschedulable = is_unschedulable;
+        Worker::insert(worker, self.env.meta_store()).await?;
         Ok(())
     }
 

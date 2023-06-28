@@ -330,8 +330,10 @@ pub async fn update_schedulability(
 
     let target_worker_ids = target_worker_ids.into_iter().collect_vec();
 
-    meta_client
-        .update_schedulability(&target_worker_ids, is_unschedulable)
-        .await?;
+    for target_worker_id in target_worker_ids {
+        meta_client
+            .update_schedulability(target_worker_id, is_unschedulable)
+            .await?;
+    }
     Ok(())
 }
