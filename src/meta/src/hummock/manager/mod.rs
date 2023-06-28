@@ -911,9 +911,18 @@ where
             let (compact_task_size, compact_task_file_count, _) =
                 estimate_state_for_compaction(&compact_task);
 
+            if compact_task.input_ssts.len() == 1 {
+                tracing::info!(
+                    "is_trivial_move: {}, can_trivial_move: {}, target level: {}",
+                    is_trivial_move,
+                    can_trivial_move,
+                    compact_task.target_level
+                );
+            }
             let level_type_label = format!(
                 "L{}->L{}",
-                compact_task.input_ssts[0].level_idx, compact_task.input_ssts[1].level_idx,
+                compact_task.input_ssts[0].level_idx,
+                compact_task.input_ssts.last().unwrap().level_idx,
             );
 
             let level_count = compact_task.input_ssts.len();
