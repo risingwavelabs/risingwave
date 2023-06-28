@@ -317,8 +317,6 @@ impl FunctionAttr {
             Some(state) => state.parse().unwrap(),
             None => types::owned_type(&self.ret).parse().unwrap(),
         };
-        let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
-        let args = quote! { #(#args),* };
         let let_arrays = self.args.iter().enumerate().map(|(i, arg)| {
             let array = format_ident!("a{i}");
             let variant: TokenStream2 = types::variant(arg).parse().unwrap();
@@ -346,7 +344,20 @@ impl FunctionAttr {
             _ => quote! { None },
         };
         let fn_name = format_ident!("{}", self.user_fn.name);
-        let mut next_state = quote! { #fn_name(state, #args) };
+        let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
+        let args = quote! { #(#args),* };
+        let retract = match self.user_fn.retract {
+            true => quote! { matches!(input.ops()[row_id], Op::Delete | Op::UpdateDelete) },
+            false => quote! {},
+        };
+        let check_retract = match self.user_fn.retract {
+            true => quote! {},
+            false => {
+                let msg = format!("aggregate function {} only supports append", self.name);
+                quote! { assert_eq!(input.ops()[row_id], Op::Insert, #msg); }
+            }
+        };
+        let mut next_state = quote! { #fn_name(state, #args, #retract) };
         next_state = match self.user_fn.return_type {
             ReturnType::T => quote! { Some(#next_state) },
             ReturnType::Option => next_state,
@@ -394,7 +405,7 @@ impl FunctionAttr {
                     }
                     async fn update_multi(
                         &mut self,
-                        input: &DataChunk,
+                        input: &StreamChunk,
                         start_row_id: usize,
                         end_row_id: usize,
                     ) -> Result<()> {
@@ -404,6 +415,7 @@ impl FunctionAttr {
                             if !input.vis().is_set(row_id) {
                                 continue;
                             }
+                            #check_retract
                             #(#let_values)*
                             state = #next_state;
                         }

@@ -42,8 +42,8 @@ impl From<State> for ListValue {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::{Array, DataChunk, ListValue};
-    use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::array::{Array, ListValue, StreamChunk};
+    use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarRef};
 
     use crate::agg::AggCall;
@@ -51,11 +51,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_array_agg_basic() -> Result<()> {
-        let chunk = DataChunk::from_pretty(
-            "i
-             123
-             456
-             789",
+        let chunk = StreamChunk::from_pretty(
+            " i
+            + 123
+            + 456
+            + 789",
         );
         let return_type = DataType::List(Box::new(DataType::Int32));
         let mut agg = crate::agg::build(AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
@@ -94,9 +94,9 @@ mod tests {
             .collect_vec();
         assert_eq!(actual, vec![None]);
 
-        let chunk = DataChunk::from_pretty(
-            "i
-             .",
+        let chunk = StreamChunk::from_pretty(
+            " i
+            + .",
         );
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
@@ -114,12 +114,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_array_agg_with_order() -> Result<()> {
-        let chunk = DataChunk::from_pretty(
-            "i    i
-             123  3
-             456  2
-             789  2
-             321  9",
+        let chunk = StreamChunk::from_pretty(
+            " i    i
+            + 123  3
+            + 456  2
+            + 789  2
+            + 321  9",
         );
         let return_type = DataType::List(Box::new(DataType::Int32));
         let mut agg = crate::agg::build(AggCall::from_pretty(

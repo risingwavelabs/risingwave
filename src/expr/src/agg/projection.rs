@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::array::{ArrayBuilderImpl, StreamChunk};
 use risingwave_common::types::DataType;
 
 use super::{Aggregator, BoxedAggState};
@@ -38,7 +38,7 @@ impl Aggregator for Projection {
 
     async fn update_multi(
         &mut self,
-        input: &DataChunk,
+        input: &StreamChunk,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {

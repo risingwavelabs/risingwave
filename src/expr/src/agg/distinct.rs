@@ -14,7 +14,7 @@
 
 use std::collections::HashSet;
 
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::array::{ArrayBuilderImpl, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row};
@@ -49,14 +49,14 @@ impl Aggregator for Distinct {
 
     async fn update_multi(
         &mut self,
-        input: &DataChunk,
+        input: &StreamChunk,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
         let mut bitmap_builder = BitmapBuilder::with_capacity(input.capacity());
-        bitmap_builder.append_bitmap(&input.vis().to_bitmap());
+        bitmap_builder.append_bitmap(&input.data_chunk().vis().to_bitmap());
         for row_id in start_row_id..end_row_id {
-            let (row_ref, vis) = input.row_at(row_id);
+            let (row_ref, vis) = input.data_chunk().row_at(row_id);
             let row = row_ref.to_owned_row();
             let row_size = row.estimated_heap_size();
             let b = vis && self.exists.insert(row);

@@ -80,6 +80,7 @@ impl UserFunctionAttr {
         Ok(UserFunctionAttr {
             name: item.sig.ident.to_string(),
             write: last_arg_is_write(item),
+            retract: last_arg_is_retract(item),
             arg_option: args_are_all_option(item),
             return_type,
             iterator_item_type,
@@ -102,6 +103,13 @@ fn last_arg_is_write(item: &syn::ItemFn) -> bool {
         return false;
     };
     path.segments.last().map_or(false, |s| s.ident == "Write")
+}
+
+/// Check if the last argument is `retract: bool`.
+fn last_arg_is_retract(item: &syn::ItemFn) -> bool {
+    let Some(syn::FnArg::Typed(arg)) = item.sig.inputs.last() else { return false };
+    let syn::Pat::Ident(pat) = &*arg.pat else { return false };
+    pat.ident.to_string().contains("retract")
 }
 
 /// Check if all arguments are `Option`s.

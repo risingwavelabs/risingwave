@@ -14,7 +14,7 @@
 
 use anyhow::anyhow;
 use futures_util::FutureExt;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk, RowRef};
+use risingwave_common::array::{ArrayBuilderImpl, Op, RowRef, StreamChunk};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
@@ -83,13 +83,14 @@ impl Aggregator for ProjectionOrderBy {
 
     async fn update_multi(
         &mut self,
-        input: &DataChunk,
+        input: &StreamChunk,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
         self.unordered_values.reserve(end_row_id - start_row_id);
         for row_id in start_row_id..end_row_id {
-            let (row, vis) = input.row_at(row_id);
+            let (op, row, vis) = input.row_at(row_id);
+            assert_eq!(op, Op::Insert, "only support append");
             if vis {
                 self.push_row(row)?;
             }
@@ -105,14 +106,16 @@ impl Aggregator for ProjectionOrderBy {
         // build chunk
         let mut chunk_builder = DataChunkBuilder::new(self.arg_types.clone(), 1024);
         for (_, row) in rows {
-            if let Some(chunk) = chunk_builder.append_one_row(row) {
+            if let Some(data_chunk) = chunk_builder.append_one_row(row) {
+                let chunk = StreamChunk::from(data_chunk);
                 self.inner
                     .update_multi(&chunk, 0, chunk.capacity())
                     .now_or_never()
                     .expect("todo: support async aggregation with orderby")?;
             }
         }
-        if let Some(chunk) = chunk_builder.consume_all() {
+        if let Some(data_chunk) = chunk_builder.consume_all() {
+            let chunk = StreamChunk::from(data_chunk);
             self.inner
                 .update_multi(&chunk, 0, chunk.capacity())
                 .now_or_never()

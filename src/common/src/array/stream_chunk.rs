@@ -14,6 +14,7 @@
 
 use std::fmt;
 use std::mem::size_of;
+use std::ops::{Deref, DerefMut};
 
 use itertools::Itertools;
 use risingwave_pb::data::{PbOp, PbStreamChunk};
@@ -71,8 +72,7 @@ pub type Ops<'a> = &'a [Op];
 pub struct StreamChunk {
     // TODO: Optimize using bitmap
     ops: Vec<Op>,
-
-    pub(super) data: DataChunk,
+    data: DataChunk,
 }
 
 impl Default for StreamChunk {
@@ -124,31 +124,9 @@ impl StreamChunk {
         StreamChunk::new(ops, new_columns, None)
     }
 
-    /// `cardinality` return the number of visible tuples
-    pub fn cardinality(&self) -> usize {
-        self.data.cardinality()
-    }
-
-    /// `capacity` return physical length of internals ops & columns
-    pub fn capacity(&self) -> usize {
-        self.data.capacity()
-    }
-
-    pub fn selectivity(&self) -> f64 {
-        self.data.selectivity()
-    }
-
     /// Get the reference of the underlying data chunk.
     pub fn data_chunk(&self) -> &DataChunk {
         &self.data
-    }
-
-    pub fn columns(&self) -> &[ArrayRef] {
-        self.data.columns()
-    }
-
-    pub fn column_at(&self, index: usize) -> &ArrayRef {
-        self.data.column_at(index)
     }
 
     /// compact the `StreamChunk` with its visibility map
@@ -214,10 +192,6 @@ impl StreamChunk {
         &self.ops
     }
 
-    pub fn visibility(&self) -> Option<&Bitmap> {
-        self.data.visibility()
-    }
-
     /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
     pub fn to_pretty_string(&self) -> String {
         use comfy_table::{Cell, CellAlignment, Table};
@@ -269,6 +243,27 @@ impl StreamChunk {
                 data: self.data.reorder_columns(column_mapping),
             }
         }
+    }
+}
+
+impl Deref for StreamChunk {
+    type Target = DataChunk;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl DerefMut for StreamChunk {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
+/// `StreamChunk` can be created from `DataChunk` with all operations set to `Insert`.
+impl From<DataChunk> for StreamChunk {
+    fn from(data: DataChunk) -> Self {
+        Self::from_parts(vec![Op::Insert; data.capacity()], data)
     }
 }
 

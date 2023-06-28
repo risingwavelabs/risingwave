@@ -22,7 +22,7 @@ impl StreamChunk {
     pub fn records(&self) -> StreamChunkRefIter<'_> {
         StreamChunkRefIter {
             chunk: self,
-            inner: self.data.rows(),
+            inner: self.data_chunk().rows(),
         }
     }
 
@@ -30,13 +30,20 @@ impl StreamChunk {
     ///
     /// Should consider using [`StreamChunk::records`] if possible.
     pub fn rows(&self) -> impl Iterator<Item = (Op, RowRef<'_>)> {
-        self.data.rows().map(|row| {
+        self.data_chunk().rows().map(|row| {
             (
                 // SAFETY: index is checked since we are in the iterator.
                 unsafe { *self.ops().get_unchecked(row.index()) },
                 row,
             )
         })
+    }
+
+    /// Random access a row at `pos`. Return the op, data and whether the row is visible.
+    pub fn row_at(&self, pos: usize) -> (Op, RowRef<'_>, bool) {
+        let op = self.ops()[pos];
+        let (row, visible) = self.data_chunk().row_at(pos);
+        (op, row, visible)
     }
 }
 

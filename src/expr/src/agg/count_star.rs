@@ -40,7 +40,7 @@ impl Aggregator for CountStar {
 
     async fn update_multi(
         &mut self,
-        input: &DataChunk,
+        input: &StreamChunk,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {

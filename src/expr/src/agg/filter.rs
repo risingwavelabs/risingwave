@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::array::{ArrayBuilderImpl, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -44,18 +44,22 @@ impl Aggregator for Filter {
 
     async fn update_multi(
         &mut self,
-        input: &DataChunk,
+        input: &StreamChunk,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
         let bitmap = if start_row_id == 0 && end_row_id == input.capacity() {
             // if the input if the whole chunk, use `eval` to speed up
-            self.condition.eval(input).await?.as_bool().to_bitmap()
+            self.condition
+                .eval(input.data_chunk())
+                .await?
+                .as_bool()
+                .to_bitmap()
         } else {
             let mut bitmap_builder = BitmapBuilder::default();
             // otherwise, run `eval_row` on each row
             for row_id in start_row_id..end_row_id {
-                let (row_ref, vis) = input.row_at(row_id);
+                let (_, row_ref, vis) = input.row_at(row_id);
                 assert!(vis); // cuz the input chunk is supposed to be compacted
                 let b = self
                     .condition
@@ -101,7 +105,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::test_prelude::StreamChunkTestExt;
 
     use super::*;
     use crate::expr::{build_from_pretty, Expression, LiteralExpression};
@@ -119,7 +123,7 @@ mod tests {
 
         async fn update_multi(
             &mut self,
-            _input: &DataChunk,
+            _input: &StreamChunk,
             start_row_id: usize,
             end_row_id: usize,
         ) -> Result<()> {
@@ -149,12 +153,12 @@ mod tests {
             }),
         );
 
-        let chunk = DataChunk::from_pretty(
-            "I
-             9
-             5
-             6
-             1",
+        let chunk = StreamChunk::from_pretty(
+            " I
+            + 9
+            + 5
+            + 6
+            + 1",
         );
 
         agg.update_single(&chunk, 0).await?;
@@ -181,12 +185,12 @@ mod tests {
             }),
         );
 
-        let chunk = DataChunk::from_pretty(
-            "I
-             9
-             5
-             6
-             1",
+        let chunk = StreamChunk::from_pretty(
+            " I
+            + 9
+            + 5
+            + 6
+            + 1",
         );
 
         agg.update_single(&chunk, 0).await?;
@@ -215,12 +219,12 @@ mod tests {
             }),
         );
 
-        let chunk = DataChunk::from_pretty(
-            "I
-             9
-             5
-             6
-             1",
+        let chunk = StreamChunk::from_pretty(
+            " I
+            + 9
+            + 5
+            + 6
+            + 1",
         );
 
         agg.update_single(&chunk, 0).await?;

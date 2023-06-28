@@ -15,7 +15,7 @@
 use std::convert::From;
 use std::ops::{BitAnd, BitOr, BitXor};
 
-use num_traits::CheckedAdd;
+use num_traits::{CheckedAdd, CheckedSub};
 use risingwave_expr_macro::aggregate;
 
 use crate::{ExprError, Result};
@@ -30,13 +30,19 @@ use crate::{ExprError, Result};
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256", state = "Int256")]
 #[aggregate("sum0(int64) -> int64", init_state = "Some(0)")]
-fn sum<S, T>(state: S, input: T) -> Result<S>
+fn sum<S, T>(state: S, input: T, retract: bool) -> Result<S>
 where
-    S: From<T> + CheckedAdd<Output = S>,
+    S: From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
 {
-    state
-        .checked_add(&S::from(input))
-        .ok_or(ExprError::NumericOutOfRange)
+    if retract {
+        state
+            .checked_sub(&S::from(input))
+            .ok_or(ExprError::NumericOutOfRange)
+    } else {
+        state
+            .checked_add(&S::from(input))
+            .ok_or(ExprError::NumericOutOfRange)
+    }
 }
 
 #[aggregate("min(*) -> auto")]
@@ -66,7 +72,7 @@ where
 }
 
 #[aggregate("bit_xor(*int) -> auto")]
-fn bit_xor<T>(state: T, input: T) -> T
+fn bit_xor<T>(state: T, input: T, _retract: bool) -> T
 where
     T: BitXor<Output = T>,
 {
@@ -106,8 +112,12 @@ fn first<T>(state: T, _: T) -> T {
 /// drop table t;
 /// ```
 #[aggregate("count(*) -> int64", init_state = "Some(0)")]
-fn count<T>(state: i64, _: T) -> i64 {
-    state + 1
+fn count<T>(state: i64, _: T, retract: bool) -> i64 {
+    if retract {
+        state - 1
+    } else {
+        state + 1
+    }
 }
 
 /// Returns true if all non-null input values are true, otherwise false.
@@ -204,7 +214,7 @@ mod tests {
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
         let len = input.len();
-        let input_chunk = DataChunk::new(vec![input], len);
+        let input_chunk = DataChunk::new(vec![input], len).into();
         let mut agg_state = crate::agg::build(AggCall::from_pretty(pretty))?;
         agg_state
             .update_multi(&input_chunk, 0, input_chunk.cardinality())

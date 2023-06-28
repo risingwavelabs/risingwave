@@ -132,7 +132,7 @@ impl Aggregator for ApproxCountDistinct {
 
     async fn update_multi(
         &mut self,
-        input: &DataChunk,
+        input: &StreamChunk,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
@@ -164,32 +164,27 @@ impl Aggregator for ApproxCountDistinct {
 mod tests {
 
     use risingwave_common::array::{
-        ArrayBuilder, ArrayBuilderImpl, DataChunk, I32Array, I64ArrayBuilder,
+        ArrayBuilder, ArrayBuilderImpl, I32Array, I64ArrayBuilder, StreamChunk,
     };
     use risingwave_common::types::DataType;
 
     use super::*;
 
-    fn generate_data_chunk(size: usize, start: i32) -> DataChunk {
-        let mut lhs = vec![];
-        for i in start..((size as i32) + start) {
-            lhs.push(Some(i));
-        }
-
-        let col1 = I32Array::from_iter(&lhs).into_ref();
-        DataChunk::new(vec![col1], size)
+    fn generate_chunk(size: usize, start: i32) -> StreamChunk {
+        let col = I32Array::from_iter(start..(start + size as i32)).into_ref();
+        DataChunk::new(vec![col], size).into()
     }
 
     #[tokio::test]
     async fn test_update_single() {
-        let inputs_size: [usize; 3] = [20000, 10000, 5000];
-        let inputs_start: [i32; 3] = [0, 20000, 30000];
+        let inputs_size = [20000, 10000, 5000];
+        let inputs_start = [0, 20000, 30000];
 
         let mut agg = ApproxCountDistinct::new(DataType::Int64);
         let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
         for i in 0..3 {
-            let data_chunk = generate_data_chunk(inputs_size[i], inputs_start[i]);
+            let data_chunk = generate_chunk(inputs_size[i], inputs_start[i]);
             for row_id in 0..data_chunk.cardinality() {
                 agg.update_single(&data_chunk, row_id).await.unwrap();
             }
@@ -202,14 +197,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_multi() {
-        let inputs_size: [usize; 3] = [20000, 10000, 5000];
-        let inputs_start: [i32; 3] = [0, 20000, 30000];
+        let inputs_size = [20000, 10000, 5000];
+        let inputs_start = [0, 20000, 30000];
 
         let mut agg = ApproxCountDistinct::new(DataType::Int64);
         let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
         for i in 0..3 {
-            let data_chunk = generate_data_chunk(inputs_size[i], inputs_start[i]);
+            let data_chunk = generate_chunk(inputs_size[i], inputs_start[i]);
             agg.update_multi(&data_chunk, 0, data_chunk.cardinality())
                 .await
                 .unwrap();

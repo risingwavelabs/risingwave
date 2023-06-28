@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 
 use futures::FutureExt;
-use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -154,7 +154,7 @@ impl BatchAggregatorWrapper<'_> {
             .into_iter()
             .map(|builder| builder.finish().into())
             .collect::<Vec<_>>();
-        let chunk = DataChunk::new(columns, Vis::Compact(n_values));
+        let chunk = StreamChunk::from(DataChunk::new(columns, n_values));
 
         let mut aggregator = builg_agg(self.agg_call.clone())?;
         aggregator

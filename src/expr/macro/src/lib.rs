@@ -431,6 +431,8 @@ struct UserFunctionAttr {
     name: String,
     /// The last argument type is `&mut dyn Write`.
     write: bool,
+    /// The last argument type is `retract: bool`.
+    retract: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
     /// The return type.

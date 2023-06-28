@@ -16,7 +16,7 @@ use std::ops::Range;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayBuilderImpl, ArrayImpl, DataChunk};
+use risingwave_common::array::{Array, ArrayBuilderImpl, ArrayImpl, DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -120,7 +120,7 @@ impl SortAggExecutor {
 
         #[for_await]
         for child_chunk in self.child.execute() {
-            let child_chunk = child_chunk?.compact();
+            let child_chunk = StreamChunk::from(child_chunk?.compact());
             let mut group_columns = Vec::with_capacity(self.group_key.len());
             for expr in &mut self.group_key {
                 check_shutdown(&self.shutdown_rx)?;
@@ -202,7 +202,7 @@ impl SortAggExecutor {
 
     async fn update_agg_states(
         agg_states: &mut [BoxedAggState],
-        child_chunk: &DataChunk,
+        child_chunk: &StreamChunk,
         start_row_idx: usize,
         end_row_idx: usize,
     ) -> Result<()> {

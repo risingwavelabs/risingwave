@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
@@ -223,7 +223,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         // consume all chunks to compute the agg result
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = chunk?.compact();
+            let chunk = StreamChunk::from(chunk?.compact());
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             let mut memory_usage_diff = 0;
             for (row_id, key) in keys.into_iter().enumerate() {

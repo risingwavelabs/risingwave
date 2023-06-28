@@ -37,12 +37,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_string_agg_basic() -> Result<()> {
-        let chunk = DataChunk::from_pretty(
-            "T   T
-             aaa ,
-             bbb ,
-             ccc ,
-             ddd ,",
+        let chunk = StreamChunk::from_pretty(
+            " T   T
+            + aaa ,
+            + bbb ,
+            + ccc ,
+            + ddd ,",
         );
         let mut agg = crate::agg::build(AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
@@ -60,12 +60,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_string_agg_complex() -> Result<()> {
-        let chunk = DataChunk::from_pretty(
-            "T   T
-             aaa ,
-             .   _
-             ccc _
-             ddd .",
+        let chunk = StreamChunk::from_pretty(
+            " T   T
+            + aaa ,
+            + .   _
+            + ccc _
+            + ddd .",
         );
         let mut agg = crate::agg::build(AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
@@ -83,12 +83,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_string_agg_with_order() -> Result<()> {
-        let chunk = DataChunk::from_pretty(
-            "T   T i i
-             aaa _ 1 3
-             bbb _ 0 4
-             ccc _ 0 8
-             ddd _ 1 3",
+        let chunk = StreamChunk::from_pretty(
+            " T   T i i
+            + aaa _ 1 3
+            + bbb _ 0 4
+            + ccc _ 0 8
+            + ddd _ 1 3",
         );
         let mut agg = crate::agg::build(AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $3:desc $0:desc)",
