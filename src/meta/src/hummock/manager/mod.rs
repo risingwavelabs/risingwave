@@ -1325,7 +1325,6 @@ where
                     &mut branched_ssts,
                     current_version,
                     compact_task,
-                    CompactStatus::is_trivial_move_task(compact_task),
                     deterministic_mode,
                 );
                 let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
@@ -2551,14 +2550,12 @@ fn gen_version_delta<'a>(
     branched_ssts: &mut BTreeMapTransaction<'a, HummockSstableObjectId, BranchedSstInfo>,
     old_version: &HummockVersion,
     compact_task: &CompactTask,
-    trivial_move: bool,
     deterministic_mode: bool,
 ) -> HummockVersionDelta {
     let mut version_delta = HummockVersionDelta {
         id: old_version.id + 1,
         prev_id: old_version.id,
         max_committed_epoch: old_version.max_committed_epoch,
-        trivial_move,
         ..Default::default()
     };
     let group_deltas = &mut version_delta
@@ -2566,6 +2563,11 @@ fn gen_version_delta<'a>(
         .entry(compact_task.compaction_group_id)
         .or_default()
         .group_deltas;
+    let output_sst_ids: HashSet<u64> = compact_task
+        .sorted_output_ssts
+        .iter()
+        .map(|sst| sst.sst_id)
+        .collect();
     let mut gc_object_ids = vec![];
     for level in &compact_task.input_ssts {
         let group_delta = GroupDelta {
@@ -2577,7 +2579,7 @@ fn gen_version_delta<'a>(
                     .map(|sst| {
                         let object_id = sst.get_object_id();
                         let sst_id = sst.get_sst_id();
-                        if !trivial_move
+                        if !output_sst_ids.contains(&sst_id)
                             && drop_sst(
                                 branched_ssts,
                                 compact_task.compaction_group_id,

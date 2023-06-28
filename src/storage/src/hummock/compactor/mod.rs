@@ -41,8 +41,11 @@ pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    HummockCompactionTaskId, HummockEpoch, KeyComparator, LocalSstableInfo,
+};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -235,28 +238,7 @@ impl Compactor {
             .iter()
             .map(|table_info| table_info.file_size)
             .sum::<u64>();
-        match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
-            Ok(splits) => {
-                if !splits.is_empty() {
-                    compact_task.splits = splits;
-                }
-            }
 
-            Err(e) => {
-                tracing::warn!("Failed to generate_splits {:#?}", e);
-                task_status = TaskStatus::ExecuteFailed;
-                Self::compact_done(&mut compact_task, context.clone(), vec![], task_status).await;
-                return task_status;
-            }
-        }
-        // Number of splits (key ranges) is equal to number of compaction tasks
-        let parallelism = compact_task.splits.len();
-        assert_ne!(parallelism, 0, "splits cannot be empty");
-        let mut output_ssts = Vec::with_capacity(parallelism);
-        let mut compaction_futures = vec![];
-        let mut abort_handles = vec![];
-        let task_progress_guard =
-            TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
             &sstable_infos,
             compact_task.gc_delete_keys,
@@ -273,6 +255,79 @@ impl Compactor {
                 return task_status;
             }
         };
+        let mut could_optimize_by_trivial = false;
+        if compact_task.input_ssts.len() == 1
+            && compact_task.target_level == 0
+            && compact_task.input_ssts[0].table_infos.len() > 1
+        {
+            for level in &mut compact_task.input_ssts {
+                level.table_infos.sort_by(|sst1, sst2| {
+                    let a = sst1.key_range.as_ref().unwrap();
+                    let b = sst2.key_range.as_ref().unwrap();
+                    a.compare(b)
+                });
+            }
+            for (idx, sst) in compact_task.input_ssts[0].table_infos.iter().enumerate() {
+                let sst_key_range = sst.key_range.as_ref().unwrap();
+                let mut no_overlap = true;
+                for i in 0..idx {
+                    if !KeyComparator::encoded_full_key_less_than(
+                        &compact_task.input_ssts[0].table_infos[i]
+                            .key_range
+                            .as_ref()
+                            .unwrap()
+                            .right,
+                        &sst_key_range.left,
+                    ) {
+                        no_overlap = false;
+                        break;
+                    }
+                }
+                if idx + 1 < compact_task.input_ssts[0].table_infos.len()
+                    && !KeyComparator::encoded_full_key_less_than(
+                        &sst_key_range.right,
+                        &compact_task.input_ssts[0].table_infos[idx + 1]
+                            .key_range
+                            .as_ref()
+                            .unwrap()
+                            .left,
+                    )
+                {
+                    no_overlap = false;
+                }
+                if no_overlap {
+                    could_optimize_by_trivial = true;
+                }
+            }
+        }
+        if could_optimize_by_trivial {
+            compact_task.splits = vec![risingwave_pb::hummock::KeyRange::new(vec![], vec![])];
+        } else {
+            match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
+                Ok(splits) => {
+                    if !splits.is_empty() {
+                        compact_task.splits = splits;
+                    }
+                }
+
+                Err(e) => {
+                    tracing::warn!("Failed to generate_splits {:#?}", e);
+                    task_status = TaskStatus::ExecuteFailed;
+                    Self::compact_done(&mut compact_task, context.clone(), vec![], task_status)
+                        .await;
+                    return task_status;
+                }
+            }
+        }
+
+        // Number of splits (key ranges) is equal to number of compaction tasks
+        let parallelism = compact_task.splits.len();
+        assert_ne!(parallelism, 0, "splits cannot be empty");
+        let mut output_ssts = Vec::with_capacity(parallelism);
+        let mut compaction_futures = vec![];
+        let mut abort_handles = vec![];
+        let task_progress_guard =
+            TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
 
         let task_memory_capacity_with_parallelism =
             estimate_task_memory_capacity(context.clone(), &compact_task) * parallelism;
@@ -309,83 +364,112 @@ impl Compactor {
 
         drop(memory_detector);
         context.compactor_metrics.compact_task_pending_num.inc();
-        for (split_index, _) in compact_task.splits.iter().enumerate() {
-            let filter = multi_filter.clone();
-            let multi_filter_key_extractor = multi_filter_key_extractor.clone();
+        if could_optimize_by_trivial {
             let compactor_runner =
-                CompactorRunner::new(split_index, compactor_context.clone(), compact_task.clone());
-            let del_agg = delete_range_agg.clone();
-            let task_progress = task_progress_guard.progress.clone();
-            let runner = async move {
-                compactor_runner
-                    .run(filter, multi_filter_key_extractor, del_agg, task_progress)
-                    .await
-            };
-            let traced = match context.await_tree_reg.as_ref() {
-                None => runner.right_future(),
-                Some(await_tree_reg) => await_tree_reg
-                    .write()
-                    .register(
-                        format!("{}-{}", compact_task.task_id, split_index),
-                        format!(
-                            "Compaction Task {} Split {} ",
-                            compact_task.task_id, split_index
-                        ),
-                    )
-                    .instrument(runner)
-                    .left_future(),
-            };
-            let handle = tokio::spawn(traced);
-            abort_handles.push(handle.abort_handle());
-            compaction_futures.push(handle);
-        }
-
-        let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
-        loop {
-            tokio::select! {
-                _ = &mut shutdown_rx => {
-                    tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
-                    task_status = TaskStatus::ManualCanceled;
-                    break;
+                CompactorRunner::new(0, compactor_context.clone(), compact_task.clone());
+            match compactor_runner
+                .run_with_trivial_move(
+                    multi_filter,
+                    multi_filter_key_extractor,
+                    delete_range_agg,
+                    task_progress_guard.progress.clone(),
+                )
+                .await
+            {
+                Ok(ret) => {
+                    output_ssts.push(ret);
                 }
-                future_result = buffered.next() => {
-                    match future_result {
-                        Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
-                            output_ssts.push((split_index, ssts, compact_stat));
+                Err(e) => {
+                    task_status = TaskStatus::ExecuteFailed;
+                    tracing::warn!(
+                        "Compaction task {} failed with error: {:#?}",
+                        compact_task.task_id,
+                        e
+                    );
+                }
+            };
+        } else {
+            for (split_index, _) in compact_task.splits.iter().enumerate() {
+                let filter = multi_filter.clone();
+                let multi_filter_key_extractor = multi_filter_key_extractor.clone();
+                let compactor_runner = CompactorRunner::new(
+                    split_index,
+                    compactor_context.clone(),
+                    compact_task.clone(),
+                );
+                let del_agg = delete_range_agg.clone();
+                let task_progress = task_progress_guard.progress.clone();
+                let runner = async move {
+                    compactor_runner
+                        .run(filter, multi_filter_key_extractor, del_agg, task_progress)
+                        .await
+                };
+                let traced = match context.await_tree_reg.as_ref() {
+                    None => runner.right_future(),
+                    Some(await_tree_reg) => await_tree_reg
+                        .write()
+                        .register(
+                            format!("{}-{}", compact_task.task_id, split_index),
+                            format!(
+                                "Compaction Task {} Split {} ",
+                                compact_task.task_id, split_index
+                            ),
+                        )
+                        .instrument(runner)
+                        .left_future(),
+                };
+                let handle = tokio::spawn(traced);
+                abort_handles.push(handle.abort_handle());
+                compaction_futures.push(handle);
+            }
+
+            let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => {
+                        tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
+                        task_status = TaskStatus::ManualCanceled;
+                        break;
+                    }
+                    future_result = buffered.next() => {
+                        match future_result {
+                            Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
+                                output_ssts.push((split_index, ssts, compact_stat));
+                            }
+                            Some(Ok(Err(e))) => {
+                                task_status = TaskStatus::ExecuteFailed;
+                                tracing::warn!(
+                                    "Compaction task {} failed with error: {:#?}",
+                                    compact_task.task_id,
+                                    e
+                                );
+                                break;
+                            }
+                            Some(Err(e)) => {
+                                task_status = TaskStatus::JoinHandleFailed;
+                                tracing::warn!(
+                                    "Compaction task {} failed with join handle error: {:#?}",
+                                    compact_task.task_id,
+                                    e
+                                );
+                                break;
+                            }
+                            None => break,
                         }
-                        Some(Ok(Err(e))) => {
-                            task_status = TaskStatus::ExecuteFailed;
-                            tracing::warn!(
-                                "Compaction task {} failed with error: {:#?}",
-                                compact_task.task_id,
-                                e
-                            );
-                            break;
-                        }
-                        Some(Err(e)) => {
-                            task_status = TaskStatus::JoinHandleFailed;
-                            tracing::warn!(
-                                "Compaction task {} failed with join handle error: {:#?}",
-                                compact_task.task_id,
-                                e
-                            );
-                            break;
-                        }
-                        None => break,
                     }
                 }
             }
-        }
 
-        if task_status != TaskStatus::Success {
-            for abort_handle in abort_handles {
-                abort_handle.abort();
+            if task_status != TaskStatus::Success {
+                for abort_handle in abort_handles {
+                    abort_handle.abort();
+                }
+                output_ssts.clear();
             }
-            output_ssts.clear();
-        }
-        // Sort by split/key range index.
-        if !output_ssts.is_empty() {
-            output_ssts.sort_by_key(|(split_index, ..)| *split_index);
+            // Sort by split/key range index.
+            if !output_ssts.is_empty() {
+                output_ssts.sort_by_key(|(split_index, ..)| *split_index);
+            }
         }
 
         // After a compaction is done, mutate the compaction task.

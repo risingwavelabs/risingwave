@@ -19,7 +19,8 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
-use risingwave_hummock_sdk::{can_concat, HummockEpoch};
+use risingwave_hummock_sdk::table_stats::TableStatsMap;
+use risingwave_hummock_sdk::{can_concat, HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 
 use super::compaction_utils::estimate_task_memory_capacity;
@@ -27,7 +28,10 @@ use super::task_progress::TaskProgress;
 use super::TaskConfig;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
-use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
+use crate::hummock::compactor::{
+    CompactOutput, CompactionFilter, CompactionStatistics, Compactor, CompactorContext,
+    MultiCompactionFilter,
+};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::{
@@ -84,6 +88,134 @@ impl CompactorRunner {
             key_range,
             split_index,
         }
+    }
+
+    async fn compact_sstables(
+        &self,
+        input_ssts: Vec<SstableInfo>,
+        compaction_filter: impl CompactionFilter,
+        del_agg: Arc<CompactionDeleteRanges>,
+        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        task_progress: Arc<TaskProgress>,
+    ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
+        let mut table_iters = Vec::with_capacity(input_ssts.len());
+        for table_info in &input_ssts {
+            let table_ids = &table_info.table_ids;
+            let exist_table = table_ids
+                .iter()
+                .any(|table_id| self.compact_task.existing_table_ids.contains(table_id));
+            if !exist_table {
+                continue;
+            }
+            table_iters.push(ConcatSstableIterator::new(
+                self.compact_task.existing_table_ids.clone(),
+                vec![table_info.clone()],
+                self.compactor.task_config.key_range.clone(),
+                self.sstable_store.clone(),
+                task_progress.clone(),
+            ));
+        }
+        let iter = UnorderedMergeIteratorInner::for_compactor(table_iters);
+        let (ssts, compaction_stat) = self
+            .compactor
+            .compact_key_range(
+                iter,
+                compaction_filter,
+                del_agg.clone(),
+                filter_key_extractor.clone(),
+                Some(task_progress.clone()),
+                Some(self.compact_task.task_id),
+                Some(self.split_index),
+            )
+            .await?;
+        Ok((ssts, compaction_stat))
+    }
+
+    pub async fn run_with_trivial_move(
+        &self,
+        compaction_filter: MultiCompactionFilter,
+        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        del_agg: Arc<CompactionDeleteRanges>,
+        task_progress: Arc<TaskProgress>,
+    ) -> HummockResult<CompactOutput> {
+        let mut output_ssts = vec![];
+        let mut input_ssts = vec![];
+        let mut max_largest_key = vec![];
+        let input_level = &self.compact_task.input_ssts[0];
+        let mut compaction_stat = CompactionStatistics::default();
+        let mut trivial_move_count = 0;
+        for sst in input_level.table_infos.iter() {
+            if KeyComparator::encoded_full_key_less_than(
+                &max_largest_key,
+                &sst.key_range.as_ref().unwrap().left,
+            ) {
+                if input_ssts.len() == 1 {
+                    let sst = input_ssts.pop().unwrap();
+                    compaction_stat.iter_total_key_counts += sst.total_key_count;
+                    trivial_move_count += 1;
+                    output_ssts.push(LocalSstableInfo::with_stats(sst, TableStatsMap::default()));
+                } else if input_ssts.len() > 1 {
+                    let (ssts, stat) = self
+                        .compact_sstables(
+                            std::mem::take(&mut input_ssts),
+                            compaction_filter.clone(),
+                            del_agg.clone(),
+                            filter_key_extractor.clone(),
+                            task_progress.clone(),
+                        )
+                        .await?;
+                    output_ssts.extend(ssts);
+                    compaction_stat.iter_total_key_counts += stat.iter_total_key_counts;
+                    compaction_stat.iter_drop_key_counts += stat.iter_drop_key_counts;
+                    for (k, v) in stat.delta_drop_stat {
+                        compaction_stat
+                            .delta_drop_stat
+                            .entry(k)
+                            .or_default()
+                            .add(&v);
+                    }
+                }
+                max_largest_key = sst.key_range.as_ref().unwrap().right.clone();
+            } else if KeyComparator::encoded_full_key_less_than(
+                &max_largest_key,
+                &sst.key_range.as_ref().unwrap().right,
+            ) {
+                max_largest_key = sst.key_range.as_ref().unwrap().right.clone();
+            }
+            input_ssts.push(sst.clone());
+        }
+        if input_ssts.len() == 1 {
+            let sst = input_ssts.pop().unwrap();
+            compaction_stat.iter_total_key_counts += sst.total_key_count;
+            trivial_move_count += 1;
+            output_ssts.push(LocalSstableInfo::with_stats(sst, TableStatsMap::default()));
+        } else if input_ssts.len() > 1 {
+            let (ssts, stat) = self
+                .compact_sstables(
+                    input_ssts,
+                    compaction_filter.clone(),
+                    del_agg.clone(),
+                    filter_key_extractor.clone(),
+                    task_progress.clone(),
+                )
+                .await?;
+            output_ssts.extend(ssts);
+            compaction_stat.iter_total_key_counts += stat.iter_total_key_counts;
+            compaction_stat.iter_drop_key_counts += stat.iter_drop_key_counts;
+            for (k, v) in stat.delta_drop_stat {
+                compaction_stat
+                    .delta_drop_stat
+                    .entry(k)
+                    .or_default()
+                    .add(&v);
+            }
+        }
+        tracing::info!("use trivial move optimize for compact-task: {}. trivial move file count: {}, total file count: {}",
+            self.compact_task.task_id,
+            trivial_move_count,
+            self.compact_task.input_ssts[0].table_infos.len()
+        );
+        Ok((self.split_index, output_ssts, compaction_stat))
     }
 
     pub async fn run(
