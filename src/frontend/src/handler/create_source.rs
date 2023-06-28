@@ -38,8 +38,8 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
-    AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema, ProtobufSchema,
-    SourceSchema, SourceWatermark,
+    AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema,
+    ProtobufSchema, SourceSchema, SourceWatermark, self,
 };
 
 use super::RwPgResponse;
@@ -420,16 +420,20 @@ pub(crate) async fn try_bind_columns_from_source(
                 ..Default::default()
             },
         ),
-        // TODO: check type
         SourceSchema::Bytes => {
-            // TODO: reject non bytea type
-            if !sql_defined_schema
-                || sql_defined_columns.len() != 1
-                || sql_defined_columns[0].data_type.is_none()
-            {
+            if !sql_defined_schema || sql_defined_columns.len() != 1 {
                 return Err(RwError::from(ProtocolError(
-                    "need to specify one column".to_string(),
+                    "BYTES format only accepts one column".to_string(),
                 )));
+            }
+
+            match sql_defined_columns[0].data_type {
+                Some(ast::DataType::Bytea) => {}
+                _ => {
+                    return Err(RwError::from(ProtocolError(
+                        "BYTES format only accepts BYTEA type".to_string(),
+                    )))
+                }
             }
 
             (

@@ -103,7 +103,32 @@ pub enum SourceSchema {
     Bytes,
 }
 
-impl ParseTo for SourceSchema {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum RowFormat {
+    Protobuf,          // Keyword::PROTOBUF
+    Json,              // Keyword::JSON
+    DebeziumJson,      // Keyword::DEBEZIUM_JSON
+    DebeziumMongoJson, // Keyword::DEBEZIUM_MONGO_JSON
+    UpsertJson,        // Keyword::UPSERT_JSON
+    Avro,              // Keyword::AVRO
+    UpsertAvro,        // Keyword::UpsertAVRO
+    Maxwell,           // Keyword::MAXWELL
+    CanalJson,         // Keyword::CANAL_JSON
+    Csv,               // Keyword::CSV
+    Native,
+    DebeziumAvro,      // Keyword::DEBEZIUM_AVRO
+    Bytes,             // Keyword::BYTES
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct SourceSchemaV2 {
+    row_format: RowFormat,
+    row_options: Vec<SqlOption>,
+}
+
+impl ParseTo for SourceSchemaV2 {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         let id = p.parse_identifier()?;
         let value = id.value.to_ascii_uppercase();
