@@ -330,7 +330,24 @@ statement ok
 create source s24 (id bytea) with (
   connector = 'kafka',
   topic = 'kafka_source_format_bytes',
-  type = 'append-only',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) row format bytes
+
+# bytes format only accept one column
+statment error 
+create source s25 (v1 bytea, v2 int) with (
+  connector = 'kafka',
+  topic = 'kafka_source_format_bytes',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) row format bytes
+
+# bytes format only accept bytea type
+statement error 
+create source s26 (id int) with (
+  connector = 'kafka',
+  topic = 'kafka_source_format_bytes',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format bytes
@@ -681,13 +698,7 @@ order by
 56166    2
 
 query I 
-SELECT * FROM s24;
-----
-\x6b6b
-\x776561776566776566
-
-query I 
-SELECT * FROM source_mv3;
+SELECT * FROM source_mv3 ORDER BY id;
 ----
 \x6b6b
 \x776561776566776566
