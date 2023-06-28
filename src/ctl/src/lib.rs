@@ -19,6 +19,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
@@ -489,10 +490,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::scale::resize(context, resize).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
-            cmd_impl::scale::update_schedulability(context, workers, true).await?
+            cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
+                .await?
         }
         Commands::Scale(ScaleCommands::Uncordon { workers }) => {
-            cmd_impl::scale::update_schedulability(context, workers, false).await?
+            cmd_impl::scale::update_schedulability(context, workers, Schedulability::Schedulable)
+                .await?
         }
     }
     Ok(())

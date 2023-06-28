@@ -25,13 +25,14 @@ use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
-use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
-use crate::storage::MetaStore;
+use crate::model::{MetadataModel, Transactional, Worker, INVALID_EXPIRE_AT};
+use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
 
 pub type WorkerId = u32;
@@ -225,47 +226,28 @@ where
 
     pub async fn update_schedulability(
         &self,
-        worker_ids: &[u32],
-        is_unschedulable: bool,
+        worker_ids: Vec<u32>,
+        schedulability: Schedulability,
     ) -> MetaResult<()> {
+        let worker_ids: HashSet<_> = worker_ids.into_iter().collect();
+
         let mut core = self.core.write().await;
-        let mut workers = core
-            .workers
-            .values_mut()
-            .filter(|w| worker_ids.contains(&w.worker_id()))
-            .collect_vec();
-        if workers.len() != worker_ids.len() {
-            return Err(MetaError::invalid_parameter(format!(
-                "Tried to update schedulability of workers {:?}. Only found workers {:?}",
-                worker_ids,
-                workers.iter().map(|w| w.worker_id()).collect_vec()
-            )));
-        }
-        let workers_need_change = workers
-            .iter_mut()
-            .filter(|w| match w.worker_node.property.as_ref() {
-                None => true,
-                Some(p) => p.is_unschedulable != is_unschedulable,
-            })
-            .collect_vec();
-        if workers_need_change.is_empty() {
-            return Ok(());
+
+        let mut txn = Transaction::default();
+        for worker in core.workers.values_mut() {
+            if worker_ids.contains(&worker.worker_node.id) {
+                if let Some(property) = worker.worker_node.property.as_mut() {
+                    let target = schedulability == Schedulability::Unschedulable;
+                    if property.is_unschedulable != target {
+                        property.is_unschedulable = target;
+                        worker.upsert_in_transaction(&mut txn)?;
+                    }
+                }
+            }
         }
 
-        if workers_need_change
-            .iter()
-            .any(|w| w.worker_node.property.is_none())
-        {
-            return Err(MetaError::invalid_parameter(
-                "Worker node does not have property",
-            ));
-        }
+        self.env.meta_store().txn(txn).await?;
 
-        for worker in workers_need_change {
-            let property = &mut worker.worker_node.property.as_mut().unwrap();
-            property.is_unschedulable = is_unschedulable;
-            Worker::insert(worker, self.env.meta_store()).await?;
-        }
         Ok(())
     }
 

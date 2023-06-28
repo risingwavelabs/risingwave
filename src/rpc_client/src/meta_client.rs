@@ -64,6 +64,7 @@ use risingwave_pb::meta::serving_service_client::ServingServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{PbReschedule, *};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -582,11 +583,11 @@ impl MetaClient {
     pub async fn update_schedulability(
         &self,
         worker_ids: &[u32],
-        set_is_unschedulable: bool,
+        schedulability: Schedulability,
     ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
         let request = UpdateWorkerNodeSchedulabilityRequest {
             worker_ids: worker_ids.to_vec(),
-            set_is_unschedulable,
+            schedulability: schedulability.into(),
         };
         let resp = self
             .inner
