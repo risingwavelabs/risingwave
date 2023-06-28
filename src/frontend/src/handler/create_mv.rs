@@ -152,10 +152,9 @@ pub async fn handle_create_mv(
 
     match session.check_relation_name_duplicated(name.clone()) {
         Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::empty_result_with_notice(
-                StatementType::CREATE_MATERIALIZED_VIEW,
-                format!("relation \"{}\" already exists, skipping", name),
-            ));
+            return Ok(PgResponse::builder(StatementType::CREATE_MATERIALIZED_VIEW)
+                .notice(format!("relation \"{}\" already exists, skipping", name))
+                .into());
         }
         Err(e) => return Err(e.into()),
         Ok(_) => {}
@@ -240,7 +239,7 @@ pub mod tests {
         let sql = format!(
             r#"CREATE SOURCE t1
     WITH (connector = 'kinesis')
-    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+    ROW FORMAT PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;
@@ -334,12 +333,12 @@ pub mod tests {
         // Without order by
         let sql = "create materialized view mv1 as select * from t";
         let response = frontend.run_sql(sql).await.unwrap();
-        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
-        assert!(response.get_notices().is_empty());
+        assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert!(response.notices().is_empty());
 
         // With order by
         let sql = "create materialized view mv2 as select * from t order by x";
         let response = frontend.run_sql(sql).await.unwrap();
-        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
     }
 }

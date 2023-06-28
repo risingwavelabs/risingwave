@@ -99,10 +99,6 @@ impl EstimateSize for OwnedRow {
 }
 
 impl Row for OwnedRow {
-    type Iter<'a> = std::iter::Map<std::slice::Iter<'a, Datum>, fn(&'a Datum) -> DatumRef<'a>>
-    where
-        Self: 'a;
-
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         self[index].to_datum_ref()
@@ -119,7 +115,7 @@ impl Row for OwnedRow {
     }
 
     #[inline]
-    fn iter(&self) -> Self::Iter<'_> {
+    fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
         self.0.iter().map(ToDatumRef::to_datum_ref)
     }
 
@@ -140,6 +136,12 @@ impl IntoIterator for OwnedRow {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_vec().into_iter()
+    }
+}
+
+impl FromIterator<Datum> for OwnedRow {
+    fn from_iter<T: IntoIterator<Item = Datum>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
 
