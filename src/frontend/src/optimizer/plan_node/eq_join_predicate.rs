@@ -276,8 +276,8 @@ impl EqJoinPredicate {
     pub fn retain_prefix_eq_key(self, prefix_len: usize) -> Self {
         assert!(prefix_len <= self.eq_keys.len());
         let (retain_eq_key, other_eq_key) = self.eq_keys.split_at(prefix_len);
-        let mut new_other_conjuctions = self.other_cond.conjunctions;
-        new_other_conjuctions.extend(
+        let mut new_other_conjunctions = self.other_cond.conjunctions;
+        new_other_conjunctions.extend(
             other_eq_key
                 .iter()
                 .cloned()
@@ -297,7 +297,7 @@ impl EqJoinPredicate {
         );
 
         let new_other_cond = Condition {
-            conjunctions: new_other_conjuctions,
+            conjunctions: new_other_conjunctions,
         };
 
         Self::new(
