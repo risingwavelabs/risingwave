@@ -154,7 +154,7 @@ impl CompactorManager {
             policy: RwLock::new(Box::new(ScoredPolicy::with_task_assignment(
                 &task_assignment,
             ))),
-            task_expiry_seconds: env.opts.compaction_task_heartbeat_interval_sec,
+            task_expiry_seconds: env.opts.compaction_task_max_heartbeat_interval_secs,
             task_heartbeats: Default::default(),
         };
         // Initialize heartbeat for existing tasks.
