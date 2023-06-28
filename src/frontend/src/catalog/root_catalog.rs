@@ -361,6 +361,10 @@ impl Catalog {
         self.database_by_name.keys().cloned().collect_vec()
     }
 
+    pub fn iter_databases(&self) -> impl Iterator<Item = &DatabaseCatalog> {
+        self.database_by_name.values()
+    }
+
     pub fn get_schema_by_name(
         &self,
         db_name: &str,

@@ -60,6 +60,7 @@ steps:
     command: "ci/scripts/e2e-test.sh -p ci-dev"
     depends_on:
       - "build-dev"
+      - "build-other"
       - "docslt"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -79,6 +80,7 @@ steps:
     command: "ci/scripts/e2e-test.sh -p ci-release"
     depends_on:
       - "build-release"
+      - "build-other"
       - "docslt"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -280,7 +282,9 @@ steps:
 
   - label: "e2e java-binding test (at release)"
     command: "ci/scripts/java-binding-test.sh -p ci-release"
-    depends_on: "build-release"
+    depends_on:
+      - "build-release"
+      - "build-other"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env

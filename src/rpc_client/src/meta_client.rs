@@ -581,11 +581,11 @@ impl MetaClient {
 
     pub async fn update_schedulability(
         &self,
-        host: HostAddress,
+        worker_ids: &[u32],
         set_is_unschedulable: bool,
     ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
         let request = UpdateWorkerNodeSchedulabilityRequest {
-            host: Some(host),
+            worker_ids: worker_ids.to_vec(),
             set_is_unschedulable,
         };
         let resp = self
@@ -983,6 +983,15 @@ impl MetaClient {
             resp.task_assignment,
             resp.task_progress,
         ))
+    }
+
+    pub async fn delete_worker_node(&self, worker: HostAddress) -> Result<()> {
+        let _resp = self
+            .inner
+            .delete_worker_node(DeleteWorkerNodeRequest { host: Some(worker) })
+            .await?;
+
+        Ok(())
     }
 }
 
