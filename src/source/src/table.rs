@@ -52,6 +52,9 @@ pub struct TableDmlHandle {
     pub column_descs: Vec<ColumnDesc>,
 }
 
+/// The buffer size of the channel between each [`TableDmlHandle`] and the dml executors.
+const DML_CHUNK_BUFFER_SIZE: usize = 32;
+
 impl TableDmlHandle {
     pub fn new(column_descs: Vec<ColumnDesc>) -> Self {
         let core = TableDmlHandleCore {
@@ -66,7 +69,7 @@ impl TableDmlHandle {
 
     pub fn stream_reader(&self) -> TableStreamReader {
         let mut core = self.core.write();
-        let (tx, rx) = txn_channel(8192, 1024);
+        let (tx, rx) = txn_channel(DML_CHUNK_BUFFER_SIZE);
         core.changes_txs.push(tx);
 
         TableStreamReader { rx }
@@ -96,12 +99,12 @@ impl TableDmlHandle {
 
             drop(guard);
 
-            if sender.tx.is_closed() {
+            if sender.is_closed() {
                 // Remove all closed channels.
                 self.core
                     .write()
                     .changes_txs
-                    .retain(|sender| !sender.tx.is_closed());
+                    .retain(|sender| !sender.is_closed());
             } else {
                 return Ok(WriteHandle::new(txn_id, sender));
             }
@@ -214,7 +217,7 @@ impl WriteHandle {
     fn write_txn_control_msg(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_id, txn_msg.txn_id());
         let (notifier_tx, notifier_rx) = oneshot::channel();
-        match self.tx.send_raw(txn_msg, notifier_tx) {
+        match self.tx.send_immediate(txn_msg, notifier_tx) {
             Ok(_) => Ok(notifier_rx),
 
             // It's possible that the source executor is scaled in or migrated, so the channel

@@ -26,14 +26,12 @@ pub struct TxnMsgWithPermits {
 }
 
 /// Create a channel for transaction messages.
-pub fn txn_channel(initial_permits: usize, batched_permits: usize) -> (Sender, Receiver) {
+pub fn txn_channel(max_chunk_permits: usize) -> (Sender, Receiver) {
     // Use an unbounded channel since we manage the permits manually.
     let (tx, rx) = mpsc::unbounded_channel();
 
-    let records = Semaphore::new(initial_permits);
+    let records = Semaphore::new(max_chunk_permits);
     let permits = Arc::new(Permits { records });
-
-    let max_chunk_permits: usize = initial_permits - batched_permits;
 
     (
         Sender {
@@ -68,8 +66,7 @@ pub struct Sender {
     permits: Arc<Permits>,
 
     /// The maximum permits required by a chunk. If there're too many rows in a chunk, we only
-    /// acquire these permits. [`BATCHED_PERMITS`] is subtracted to avoid deadlock with
-    /// batching.
+    /// acquire these permits.
     max_chunk_permits: usize,
 }
 
@@ -117,7 +114,7 @@ impl Sender {
     /// Used to send transaction control messages.
     ///
     /// Returns error if the receive half of the channel is closed, including the message passed.
-    pub fn send_raw(
+    pub fn send_immediate(
         &self,
         txn_msg: TxnMsg,
         notificator: oneshot::Sender<usize>,
@@ -129,6 +126,10 @@ impl Sender {
                 permit_value: None,
             })
             .map_err(|e| mpsc::error::SendError(e.0.txn_msg))
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.tx.is_closed()
     }
 }
 
