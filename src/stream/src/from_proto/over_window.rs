@@ -60,8 +60,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
                 .expect("vnodes not set for EOWC over window"),
         ));
         let state_table =
-            StateTable::from_table_catalog_inconsistent_op(node.get_state_table()?, store, vnodes)
-                .await;
+            StateTable::from_table_catalog(node.get_state_table()?, store, vnodes).await;
         Ok(OverWindowExecutor::new(OverWindowExecutorArgs {
             input,
             actor_ctx: params.actor_context,
