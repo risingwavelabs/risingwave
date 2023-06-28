@@ -61,7 +61,7 @@ def test_table(input_file, actual_list):
     expected = []
     for batch in sink_input:
         for row in batch:
-            expected.append(row)
+            expected.append(row['line'])
     expected = sorted(expected, key = lambda ele: sorted(ele.items()))
 
     if actual == expected:
@@ -115,8 +115,15 @@ def read_deltalake_table():
 
 def create_deltalake_table():
     spark = init_deltalake_spark()
-    spark.sql("create table delta.`s3a://bucket/delta`(id int, name string) using delta;")
+    spark.sql(
+        "create table IF NOT EXISTS delta.`s3a://bucket/delta`(id int, name string) using delta;")
     print("Table delta.`s3a://bucket/delta`(id int, name string) created")
+
+
+def delete_deltalake_table_data():
+    spark = init_deltalake_spark()
+    spark.sql("DELETE FROM delta.`s3a://bucket/delta`")
+    print("Table delta.`s3a://bucket/delta` dropped")
 
 def test_deltalake_table(input_file):
     spark = init_deltalake_spark()
@@ -139,12 +146,13 @@ if __name__ == "__main__":
             test_iceberg_table(args.input_file)
         case "test_upsert_iceberg":
             test_upsert_iceberg_table(args.input_file)
-
         case "read_deltalake":
             read_deltalake_table()
         case "create_deltalake":
             create_deltalake_table()
         case "test_deltalake":
             test_deltalake_table(args.input_file)
+        case "clean_deltalake":
+            delete_deltalake_table_data()
         case _:
             raise Exception("Unknown operation")

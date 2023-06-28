@@ -368,10 +368,6 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_pretty;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::PbDataType;
-    use risingwave_pb::expr::agg_call::Type;
-    use risingwave_pb::expr::{PbAggCall, PbInputRef};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -409,20 +405,7 @@ mod tests {
              4 5 9",
         ));
 
-        let prost = PbAggCall {
-            r#type: Type::Count as i32,
-            args: vec![],
-            return_type: Some(risingwave_pb::data::DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            distinct: false,
-            order_by: vec![],
-            filter: None,
-            direct_args: vec![],
-        };
-
-        let count_star = build_agg(AggCall::from_protobuf(&prost)?)?;
+        let count_star = build_agg(AggCall::from_pretty("(count:int8)"))?;
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![count_star];
 
@@ -503,20 +486,7 @@ mod tests {
              5 8 9",
         ));
 
-        let prost = PbAggCall {
-            r#type: Type::Count as i32,
-            args: vec![],
-            return_type: Some(PbDataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            distinct: false,
-            order_by: vec![],
-            filter: None,
-            direct_args: vec![],
-        };
-
-        let count_star = build_agg(AggCall::from_protobuf(&prost)?)?;
+        let count_star = build_agg(AggCall::from_pretty("(count:int8)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -613,26 +583,7 @@ mod tests {
              10",
         ));
 
-        let prost = PbAggCall {
-            r#type: Type::Sum as i32,
-            args: vec![PbInputRef {
-                index: 0,
-                r#type: Some(PbDataType {
-                    type_name: TypeName::Int32 as i32,
-                    ..Default::default()
-                }),
-            }],
-            return_type: Some(PbDataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            distinct: false,
-            order_by: vec![],
-            filter: None,
-            direct_args: vec![],
-        };
-
-        let sum_agg = build_agg(AggCall::from_protobuf(&prost)?)?;
+        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
 
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![sum_agg];
@@ -698,26 +649,7 @@ mod tests {
              4 5 9",
         ));
 
-        let prost = PbAggCall {
-            r#type: Type::Sum as i32,
-            args: vec![PbInputRef {
-                index: 0,
-                r#type: Some(PbDataType {
-                    type_name: TypeName::Int32 as i32,
-                    ..Default::default()
-                }),
-            }],
-            return_type: Some(PbDataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            distinct: false,
-            order_by: vec![],
-            filter: None,
-            direct_args: vec![],
-        };
-
-        let sum_agg = build_agg(AggCall::from_protobuf(&prost)?)?;
+        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -809,26 +741,7 @@ mod tests {
               2  7 12",
         ));
 
-        let prost = PbAggCall {
-            r#type: Type::Sum as i32,
-            args: vec![PbInputRef {
-                index: 0,
-                r#type: Some(PbDataType {
-                    type_name: TypeName::Int32 as i32,
-                    ..Default::default()
-                }),
-            }],
-            return_type: Some(PbDataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            distinct: false,
-            order_by: vec![],
-            filter: None,
-            direct_args: vec![],
-        };
-
-        let sum_agg = build_agg(AggCall::from_protobuf(&prost)?)?;
+        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -921,26 +834,7 @@ mod tests {
             Schema::new(vec![Field::unnamed(DataType::Int32)]),
         );
 
-        let prost = PbAggCall {
-            r#type: Type::Sum as i32,
-            args: vec![PbInputRef {
-                index: 0,
-                r#type: Some(PbDataType {
-                    type_name: TypeName::Int32 as i32,
-                    ..Default::default()
-                }),
-            }],
-            return_type: Some(PbDataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            distinct: false,
-            order_by: vec![],
-            filter: None,
-            direct_args: vec![],
-        };
-
-        let sum_agg = build_agg(AggCall::from_protobuf(&prost)?)?;
+        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();

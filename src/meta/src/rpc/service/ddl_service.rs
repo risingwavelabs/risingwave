@@ -604,7 +604,23 @@ where
                     },
                     PbPrivateLinkProvider::Aws => {
                         if let Some(aws_cli) = self.aws_client.as_ref() {
-                            aws_cli.create_aws_private_link(&link.service_name).await?
+                            let tags_env = self
+                                .env
+                                .opts
+                                .privatelink_endpoint_default_tags
+                                .as_ref()
+                                .map(|tags| {
+                                    tags.iter()
+                                        .map(|(key, val)| (key.as_str(), val.as_str()))
+                                        .collect()
+                                });
+                            aws_cli
+                                .create_aws_private_link(
+                                    &link.service_name,
+                                    link.tags.as_deref(),
+                                    tags_env,
+                                )
+                                .await?
                         } else {
                             return Err(Status::from(MetaError::unavailable(
                                 "AWS client is not configured".into(),
