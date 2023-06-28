@@ -116,9 +116,9 @@ pub enum RowFormat {
     Maxwell,           // Keyword::MAXWELL
     CanalJson,         // Keyword::CANAL_JSON
     Csv,               // Keyword::CSV
-    Native,
     DebeziumAvro,      // Keyword::DEBEZIUM_AVRO
     Bytes,             // Keyword::BYTES
+    Native,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

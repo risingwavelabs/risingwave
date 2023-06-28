@@ -38,8 +38,8 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
-    AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema,
-    ProtobufSchema, SourceSchema, SourceWatermark, self,
+    self, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema,
+    ProtobufSchema, SourceSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
