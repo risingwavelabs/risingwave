@@ -302,7 +302,7 @@ mod tests {
 
         // Message from batch
         write_handle.begin().unwrap();
-        write_handle.write_chunk(batch_chunk).unwrap();
+        write_handle.write_chunk(batch_chunk).await.unwrap();
         write_handle.end().unwrap();
 
         // Consume the 1st message from upstream executor
