@@ -37,7 +37,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs"
 ] }
 tracing = "0.1"
-tracing-log = "0.1"
 tracing-opentelemetry = "0.19"
 tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std", "time", "local-time"] }
 

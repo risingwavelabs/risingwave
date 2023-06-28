@@ -25,7 +25,6 @@ use futures::Future;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::env_var::is_ci;
 use tracing::level_filters::LevelFilter as Level;
-use tracing_log::LogTracer;
 use tracing_subscriber::filter::{FilterFn, Targets};
 use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::layer::SubscriberExt;
@@ -371,8 +370,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
         layers.push(Box::new(MetricsLayer::new(registry).with_filter(filter)));
     }
-    LogTracer::init().expect("Failed to set logger");
-    tracing_subscriber::registry().with(layers).set_default();
+    tracing_subscriber::registry().with(layers).init();
     // TODO: add file-appender tracing subscriber in the future
 }
 
