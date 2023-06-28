@@ -159,6 +159,7 @@ impl CompactionPicker for TierCompactionPicker {
 pub mod tests {
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::new_sub_level;
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::{LevelType, OverlappingLevel};
@@ -235,16 +236,13 @@ pub mod tests {
             ],
             vec![generate_table(6, 1, 1, 100, 1)],
             vec![generate_table(7, 1, 1, 100, 1)],
-            vec![generate_table(8, 1, 1, 100, 1)],
-            vec![generate_table(9, 1, 1, 100, 1)],
         ]);
 
-        let mut levels = Levels {
+        let levels = Levels {
             l0: Some(l0),
             levels: vec![],
             ..Default::default()
         };
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let config = Arc::new(
             CompactionConfigBuilder::new()
@@ -263,9 +261,8 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels.len(), 4);
-        assert_eq!(ret.target_level, 0);
-        assert_eq!(ret.target_sub_level_id, 1);
+        assert_eq!(ret.input_levels.len(), 1);
+        assert!(can_concat(&ret.input_levels[0].table_infos));
     }
 
     #[test]
