@@ -1672,7 +1672,11 @@ async fn test_split_compaction_group_trivial_expired() {
         sst_info: SstableInfo {
             object_id: 10,
             sst_id: 10,
-            key_range: None,
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(100, 1, 20),
+                right: iterator_test_key_of_epoch(100, 100, 20),
+                right_exclusive: false,
+            }),
             table_ids: vec![100],
             min_epoch: 20,
             max_epoch: 20,
@@ -1685,19 +1689,34 @@ async fn test_split_compaction_group_trivial_expired() {
         sst_info: SstableInfo {
             object_id: 11,
             sst_id: 11,
-            key_range: None,
             table_ids: vec![101],
             min_epoch: 20,
             max_epoch: 20,
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(101, 1, 20),
+                right: iterator_test_key_of_epoch(101, 100, 20),
+                right_exclusive: false,
+            }),
             ..Default::default()
         },
         table_stats: Default::default(),
     };
+    let mut sst_3 = sst_2.clone();
+    let mut sst_4 = sst_1.clone();
+    sst_3.sst_info.sst_id = 8;
+    sst_3.sst_info.object_id = 8;
+    sst_4.sst_info.sst_id = 9;
+    sst_4.sst_info.object_id = 9;
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1, sst_2],
-            HashMap::from([(10, context_id), (11, context_id)]),
+            vec![sst_1, sst_2, sst_3, sst_4],
+            HashMap::from([
+                (10, context_id),
+                (11, context_id),
+                (9, context_id),
+                (8, context_id),
+            ]),
         )
         .await
         .unwrap();
