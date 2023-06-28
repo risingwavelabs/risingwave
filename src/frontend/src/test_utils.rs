@@ -454,8 +454,8 @@ impl MockCatalogWriter {
         });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(1_u32, 0_u32);
-        map.insert(PG_CATALOG_SCHEMA_ID as u32, 0_u32);
-        map.insert(RW_CATALOG_SCHEMA_ID as u32, 0_u32);
+        map.insert(PG_CATALOG_SCHEMA_ID, 0_u32);
+        map.insert(RW_CATALOG_SCHEMA_ID, 0_u32);
         Self {
             catalog,
             id: AtomicU32::new(START_TABLE_ID as u32),
