@@ -47,7 +47,7 @@ use tokio::spawn;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tonic::Streaming;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, warn, Instrument};
 use StageEvent::Failed;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -127,6 +127,8 @@ pub struct StageExecution {
 
     /// Execution context ref
     ctx: ExecutionContextRef,
+
+    span: tracing::Span,
 }
 
 struct StageRunner {
@@ -173,9 +175,12 @@ impl StageExecution {
         catalog_reader: CatalogReader,
         ctx: ExecutionContextRef,
     ) -> Self {
+        let span = tracing::info_span!("stage", id = stage.id, query_id = %stage.query_id);
+
         let tasks = (0..stage.parallelism.unwrap())
             .map(|task_id| (task_id, TaskStatusHolder::new(task_id)))
             .collect();
+
         Self {
             epoch,
             stage,
@@ -187,6 +192,7 @@ impl StageExecution {
             compute_client_pool,
             catalog_reader,
             ctx,
+            span,
         }
     }
 
@@ -218,7 +224,9 @@ impl StageExecution {
                 // Change state before spawn runner.
                 *s = StageState::Started;
 
-                spawn(async move { runner.run(receiver).await });
+                let span = self.span.clone();
+                spawn(async move { runner.run(receiver).instrument(span).await });
+
                 tracing::trace!(
                     "Stage {:?}-{:?} started.",
                     self.stage.query_id.id,

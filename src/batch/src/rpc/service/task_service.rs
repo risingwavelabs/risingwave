@@ -62,6 +62,7 @@ impl TaskService for BatchServiceImpl {
             task_id,
             plan,
             epoch,
+            tracing_context,
         } = request.into_inner();
 
         let (state_tx, state_rx) = tokio::sync::mpsc::channel(TASK_STATUS_BUFFER_SIZE);
@@ -77,6 +78,7 @@ impl TaskService for BatchServiceImpl {
                     TaskId::from(task_id.as_ref().expect("no task id found")),
                 ),
                 state_reporter,
+                TracingContext::from_protobuf(&tracing_context),
             )
             .await;
         match res {
