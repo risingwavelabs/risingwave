@@ -6,7 +6,7 @@
     create materialized view v as select count(*) cnt from t;
     SET QUERY_MODE TO distributed;
     select * from v cross join (select count(*) from t) T;
-  batch_plan: |
+  batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
       ├─BatchScan { table: v, columns: [v.cnt], distribution: Single }
@@ -14,10 +14,10 @@
         └─BatchExchange { order: [], dist: Single }
           └─BatchSimpleAgg { aggs: [count] }
             └─BatchScan { table: t, columns: [], distribution: SomeShard }
-  batch_local_plan: |
+  batch_local_plan: |-
     BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
     ├─BatchExchange { order: [], dist: Single }
-    | └─BatchScan { table: v, columns: [v.cnt], distribution: SomeShard }
+    │ └─BatchScan { table: v, columns: [v.cnt], distribution: SomeShard }
     └─BatchSimpleAgg { aggs: [count] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchScan { table: t, columns: [], distribution: SomeShard }

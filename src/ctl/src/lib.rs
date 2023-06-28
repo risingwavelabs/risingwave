@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(let_chains)]
+#![feature(hash_drain_filter)]
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
@@ -54,6 +57,9 @@ enum Commands {
     /// Commands for Meta
     #[clap(subcommand)]
     Meta(MetaCommands),
+    /// Commands for Scaling
+    #[clap(subcommand)]
+    Scale(ScaleCommands),
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
@@ -164,6 +170,11 @@ enum HummockCommands {
     ResumeVersionCheckpoint,
     /// Replay version from the checkpoint one to the latest one.
     ReplayVersion,
+    /// List compaction status
+    ListCompactionStatus {
+        #[clap(short, long = "verbose", default_value_t = false)]
+        verbose: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -184,6 +195,76 @@ enum TableCommands {
     },
     /// list all state tables
     List,
+}
+
+#[derive(clap::Args, Debug)]
+#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers"])))]
+pub struct ScaleResizeCommands {
+    /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
+    /// supported
+    #[clap(
+        long,
+        value_delimiter = ',',
+        value_name = "worker_id or worker_host, ..."
+    )]
+    exclude_workers: Option<Vec<String>>,
+
+    /// The worker that needs to be included during scheduling, worker_id and worker_host are both
+    /// supported
+    #[clap(
+        long,
+        value_delimiter = ',',
+        value_name = "worker_id or worker_host, ..."
+    )]
+    include_workers: Option<Vec<String>>,
+
+    /// Will generate a plan supported by the `reschedule` command and save it to the provided path
+    /// by the `--output`.
+    #[clap(long, default_value_t = false)]
+    generate: bool,
+
+    /// The output file to write the generated plan to, standard output by default
+    #[clap(long)]
+    output: Option<String>,
+
+    /// Automatic yes to prompts
+    #[clap(short = 'y', long, default_value_t = false)]
+    yes: bool,
+
+    /// Specify the fragment ids that need to be scheduled.
+    /// empty by default, which means all fragments will be scheduled
+    #[clap(long)]
+    fragments: Option<Vec<u32>>,
+}
+
+#[derive(Subcommand, Debug)]
+enum ScaleCommands {
+    /// The resize command scales the cluster by specifying the workers to be included and
+    /// excluded.
+    Resize(ScaleResizeCommands),
+    /// mark a compute node as unschedulable
+    #[clap(verbatim_doc_comment)]
+    Cordon {
+        /// Workers that need to be cordoned, both id and host are supported.
+        #[clap(
+            long,
+            required = true,
+            value_delimiter = ',',
+            value_name = "id or host,..."
+        )]
+        workers: Vec<String>,
+    },
+    /// mark a compute node as schedulable. Nodes are schedulable unless they are cordoned
+    Uncordon {
+        /// Workers that need to be uncordoned, both id and host are supported.
+        #[clap(
+            long,
+            required = true,
+            value_delimiter = ',',
+            value_name = "id or host,..."
+        )]
+        workers: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -211,16 +292,20 @@ enum MetaCommands {
     /// }
     /// Use ; to separate multiple fragment
     #[clap(verbatim_doc_comment)]
+    #[clap(group(clap::ArgGroup::new("input_group").required(true).args(&["plan", "from"])))]
     Reschedule {
-        /// Plan of reschedule
-        #[clap(long)]
-        plan: String,
-        /// Show the plan only, no actual operation
-        #[clap(long)]
-        dry_run: bool,
+        /// Plan of reschedule, needs to be used with `revision`
+        #[clap(long, requires = "revision")]
+        plan: Option<String>,
         /// Revision of the plan
         #[clap(long)]
-        revision: u64,
+        revision: Option<u64>,
+        /// Reschedule from a specific file
+        #[clap(long, conflicts_with = "revision", value_hint = clap::ValueHint::AnyPath)]
+        from: Option<String>,
+        /// Show the plan only, no actual operation
+        #[clap(long, default_value = "false")]
+        dry_run: bool,
     },
     /// backup meta by taking a meta snapshot
     BackupMeta,
@@ -229,6 +314,29 @@ enum MetaCommands {
 
     /// List all existing connections in the catalog
     ListConnections,
+
+    /// List fragment to parallel units mapping for serving
+    ListServingFragmentMapping,
+
+    /// Unregister workers from the cluster
+    UnregisterWorkers {
+        /// The workers that needs to be unregistered, worker_id and worker_host are both supported
+        #[clap(
+            long,
+            required = true,
+            value_delimiter = ',',
+            value_name = "worker_id or worker_host, ..."
+        )]
+        workers: Vec<String>,
+
+        /// Automatic yes to prompts
+        #[clap(short = 'y', long, default_value_t = false)]
+        yes: bool,
+
+        /// The worker not found will be ignored
+        #[clap(long, default_value_t = false)]
+        ignore_not_found: bool,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -337,6 +445,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::ReplayVersion) => {
             cmd_impl::hummock::replay_version(context).await?;
         }
+        Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => {
+            cmd_impl::hummock::list_compaction_status(context, verbose).await?;
+        }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?
         }
@@ -352,10 +463,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::meta::source_split_info(context).await?
         }
         Commands::Meta(MetaCommands::Reschedule {
-            plan,
+            from,
             dry_run,
+            plan,
             revision,
-        }) => cmd_impl::meta::reschedule(context, plan, dry_run, revision).await?,
+        }) => cmd_impl::meta::reschedule(context, plan, revision, from, dry_run).await?,
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
@@ -363,8 +475,25 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ListConnections) => {
             cmd_impl::meta::list_connections(context).await?
         }
+        Commands::Meta(MetaCommands::ListServingFragmentMapping) => {
+            cmd_impl::meta::list_serving_fragment_mappings(context).await?
+        }
+        Commands::Meta(MetaCommands::UnregisterWorkers {
+            workers,
+            yes,
+            ignore_not_found,
+        }) => cmd_impl::meta::unregister_workers(context, workers, yes, ignore_not_found).await?,
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
+        Commands::Scale(ScaleCommands::Resize(resize)) => {
+            cmd_impl::scale::resize(context, resize).await?
+        }
+        Commands::Scale(ScaleCommands::Cordon { workers }) => {
+            cmd_impl::scale::update_schedulability(context, workers, true).await?
+        }
+        Commands::Scale(ScaleCommands::Uncordon { workers }) => {
+            cmd_impl::scale::update_schedulability(context, workers, false).await?
+        }
     }
     Ok(())
 }

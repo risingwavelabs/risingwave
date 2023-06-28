@@ -127,7 +127,12 @@ impl HummockStorage {
                     let read_guard = self.read_version_mapping.read();
                     read_guard
                         .get(&table_id)
-                        .map(|v| v.values().cloned().collect_vec())
+                        .map(|v| {
+                            v.values()
+                                .filter(|v| !v.read_arc().is_replicated())
+                                .cloned()
+                                .collect_vec()
+                        })
                         .unwrap_or(Vec::new())
                 };
 

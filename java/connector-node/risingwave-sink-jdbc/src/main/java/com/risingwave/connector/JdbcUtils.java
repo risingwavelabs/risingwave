@@ -14,71 +14,20 @@
 
 package com.risingwave.connector;
 
-import com.risingwave.proto.Data;
+import com.risingwave.connector.jdbc.JdbcDialectFactory;
+import com.risingwave.connector.jdbc.MySqlDialectFactory;
+import com.risingwave.connector.jdbc.PostgresDialectFactory;
+import java.util.Optional;
 
 public abstract class JdbcUtils {
 
-    public static String getDbSqlType(
-            DatabaseType db, Data.DataType.TypeName typeName, Object value) {
-        String sqlType;
-        switch (db) {
-            case MYSQL:
-                sqlType = getMySqlSqlType(typeName, value);
-                break;
-            case POSTGRES:
-                sqlType = getPostgresSqlType(typeName, value);
-                break;
-            default:
-                throw io.grpc.Status.INVALID_ARGUMENT
-                        .withDescription("Unsupported database type: " + db)
-                        .asRuntimeException();
+    public static Optional<JdbcDialectFactory> getDialectFactory(String jdbcUrl) {
+        if (jdbcUrl.startsWith("jdbc:mysql")) {
+            return Optional.of(new MySqlDialectFactory());
+        } else if (jdbcUrl.startsWith("jdbc:postgresql")) {
+            return Optional.of(new PostgresDialectFactory());
+        } else {
+            return Optional.empty();
         }
-        return sqlType;
-    }
-
-    // https://dev.mysql.com/doc/workbench/en/wb-migration-database-postgresql-typemapping.html
-    private static String getMySqlSqlType(Data.DataType.TypeName typeName, Object value) {
-        // convert to mysql data type name from postgres data type
-        switch (typeName) {
-            case INT32:
-                return "INT";
-            case INT64:
-                return "BIGINT";
-            case FLOAT:
-                return "FLOAT";
-            case DOUBLE:
-                return "DOUBLE";
-            case BOOLEAN:
-                return "TINYINT";
-            case VARCHAR:
-                if (!(value instanceof String)) {
-                    throw io.grpc.Status.INVALID_ARGUMENT
-                            .withDescription("Expected string, got " + value.getClass())
-                            .asRuntimeException();
-                }
-                String string = (String) value;
-                if (string.length() > 65535) {
-                    return "LONGTEXT";
-                } else {
-                    return "VARCHAR";
-                }
-            case BYTEA:
-                return "LONGBLOB";
-            case DATE:
-                return "DATE";
-            case TIME:
-            case INTERVAL:
-                return "TIME";
-            case TIMESTAMP:
-                return "TIMESTAMP";
-            case DECIMAL:
-                return "DECIMAL";
-            default:
-                return null;
-        }
-    }
-
-    private static String getPostgresSqlType(Data.DataType.TypeName typeName, Object value) {
-        return typeName.name();
     }
 }

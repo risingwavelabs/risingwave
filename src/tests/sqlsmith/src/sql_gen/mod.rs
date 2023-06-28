@@ -155,6 +155,11 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
     ///    Under this mode certain restrictions and workarounds are applied
     ///    for unsupported stream executors.
     is_mview: bool,
+
+    recursion_weight: f64,
+    // /// Count number of subquery.
+    // /// We don't want too many per query otherwise it is hard to debug.
+    // with_statements: u64,
 }
 
 /// Generators
@@ -169,6 +174,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: false,
+            recursion_weight: 0.3,
         }
     }
 
@@ -182,6 +188,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: true,
+            recursion_weight: 0.3,
         }
     }
 
@@ -215,6 +222,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Provide recursion bounds.
     pub(crate) fn can_recurse(&mut self) -> bool {
-        self.rng.gen_bool(0.3)
+        if self.recursion_weight <= 0.0 {
+            return false;
+        }
+        let can_recurse = self.rng.gen_bool(self.recursion_weight);
+        if can_recurse {
+            self.recursion_weight *= 0.9;
+            if self.recursion_weight < 0.05 {
+                self.recursion_weight = 0.0;
+            }
+        }
+        can_recurse
     }
 }

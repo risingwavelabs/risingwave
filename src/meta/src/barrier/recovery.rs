@@ -18,7 +18,6 @@ use std::time::{Duration, Instant};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
@@ -30,6 +29,7 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
+use super::TracedEpoch;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
@@ -107,7 +107,7 @@ where
     }
 
     /// Recovery the whole cluster from the latest epoch.
-    pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> Epoch {
+    pub(crate) async fn recovery(&self, prev_epoch: TracedEpoch) -> TracedEpoch {
         // pause discovery of all connector split changes and trigger config change.
         let _source_pause_guard = self.source_manager.paused.lock().await;
 
@@ -124,7 +124,7 @@ where
         // get recovered.
         let recovery_timer = self.metrics.recovery_latency.start_timer();
         let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let recovery_result: MetaResult<(Epoch, Vec<BarrierCompleteResponse>)> = try {
+            let recovery_result: MetaResult<(TracedEpoch, Vec<BarrierCompleteResponse>)> = try {
                 let mut info = self.resolve_actor_info_for_recovery().await;
                 let mut new_epoch = prev_epoch.next();
 
@@ -166,7 +166,7 @@ where
                     self.env.stream_client_pool_ref(),
                     info,
                     prev_epoch,
-                    new_epoch,
+                    new_epoch.clone(),
                     command,
                     true,
                     self.source_manager.clone(),

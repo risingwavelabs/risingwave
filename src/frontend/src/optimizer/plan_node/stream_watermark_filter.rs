@@ -17,6 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::RwError;
 use risingwave_common::types::DataType;
@@ -24,7 +25,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::WatermarkDesc;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::utils::TableCatalogBuilder;
+use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprDisplay, ExprImpl};
 use crate::optimizer::plan_node::utils::formatter_debug_plan_node;
@@ -66,6 +67,27 @@ impl StreamWatermarkFilter {
     }
 }
 
+impl Distill for StreamWatermarkFilter {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let input_schema = self.input.schema();
+
+        let display_watermark_descs = (self.watermark_descs.iter())
+            .map(|desc| {
+                let expr = ExprDisplay {
+                    expr: &ExprImpl::from_expr_proto(desc.get_expr().unwrap()).unwrap(),
+                    input_schema,
+                };
+                let fields = vec![
+                    ("idx", Pretty::debug(&desc.watermark_idx)),
+                    ("expr", Pretty::display(&expr)),
+                ];
+                Pretty::childless_record("Desc", fields)
+            })
+            .collect();
+        let fields = vec![("watermark_descs", Pretty::Array(display_watermark_descs))];
+        childless_record("StreamWatermarkFilter", fields)
+    }
+}
 impl fmt::Display for StreamWatermarkFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct DisplayWatermarkDesc<'a> {

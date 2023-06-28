@@ -19,6 +19,7 @@ use risingwave_common::estimate_size::{EstimateSize, KvSize, VecWithKvSize};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 
 use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::task::AtomicU64Ref;
 
 /// A cache for lookup's arrangement side.
@@ -73,8 +74,8 @@ impl LookupCache {
         self.data.clear();
     }
 
-    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
-        let cache = new_unbounded(watermark_epoch);
+    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = new_unbounded(watermark_epoch, metrics_info);
         Self { data: cache }
     }
 }

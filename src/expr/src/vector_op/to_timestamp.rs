@@ -22,7 +22,7 @@ use crate::Result;
 #[inline(always)]
 pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
     let mut parsed = Parsed::new();
-    chrono::format::parse(&mut parsed, s, tmpl.borrow_items().iter())?;
+    chrono::format::parse(&mut parsed, s, tmpl.borrow_dependent().iter())?;
 
     // chrono will only assign the default value for seconds/nanoseconds fields, and raise an error
     // for other ones. We should specify the default value manually.

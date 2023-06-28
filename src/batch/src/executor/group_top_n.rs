@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
+use std::mem::swap;
 use std::sync::Arc;
 use std::vec::Vec;
 
@@ -216,7 +217,9 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         }
 
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-        for (_, heap) in groups {
+        for (_, h) in groups.iter_mut() {
+            let mut heap = TopNHeap::empty();
+            swap(&mut heap, h);
             for ele in heap.dump() {
                 if let Some(spilled) = chunk_builder.append_one_row(ele.row()) {
                     yield spilled
@@ -232,6 +235,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
 #[cfg(test)]
 mod tests {
     use futures::stream::StreamExt;
+    use prometheus::IntGauge;
     use risingwave_common::array::DataChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
@@ -245,16 +249,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_group_top_n_executor() {
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int32),
-            ],
-        };
-        let mut mock_executor = MockExecutor::new(schema);
-        mock_executor.add(DataChunk::from_pretty(
-            "i i i
+        let parent_mem = MemoryContext::root(IntGauge::new("root_memory_usage", " ").unwrap());
+        {
+            let schema = Schema {
+                fields: vec![
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Int32),
+                ],
+            };
+            let mut mock_executor = MockExecutor::new(schema);
+            mock_executor.add(DataChunk::from_pretty(
+                "i i i
              1 5 1
              2 4 1
              3 3 1
@@ -266,56 +272,60 @@ mod tests {
              4 3 2
              5 2 2
              ",
-        ));
-        let column_orders = vec![
-            ColumnOrder {
-                column_index: 1,
-                order_type: OrderType::ascending(),
-            },
-            ColumnOrder {
-                column_index: 0,
-                order_type: OrderType::ascending(),
-            },
-        ];
-        let top_n_executor = (GroupTopNExecutorBuilder {
-            child: Box::new(mock_executor),
-            column_orders,
-            offset: 1,
-            limit: 3,
-            with_ties: false,
-            group_key: vec![2],
-            group_key_types: vec![DataType::Int32],
-            identity: "GroupTopNExecutor".to_string(),
-            chunk_size: CHUNK_SIZE,
-            mem_ctx: MemoryContext::none(),
-        })
-        .dispatch();
+            ));
+            let column_orders = vec![
+                ColumnOrder {
+                    column_index: 1,
+                    order_type: OrderType::ascending(),
+                },
+                ColumnOrder {
+                    column_index: 0,
+                    order_type: OrderType::ascending(),
+                },
+            ];
+            let mem_ctx = MemoryContext::new(
+                Some(parent_mem.clone()),
+                IntGauge::new("memory_usage", " ").unwrap(),
+            );
+            let top_n_executor = (GroupTopNExecutorBuilder {
+                child: Box::new(mock_executor),
+                column_orders,
+                offset: 1,
+                limit: 3,
+                with_ties: false,
+                group_key: vec![2],
+                group_key_types: vec![DataType::Int32],
+                identity: "GroupTopNExecutor".to_string(),
+                chunk_size: CHUNK_SIZE,
+                mem_ctx,
+            })
+            .dispatch();
 
-        let fields = &top_n_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataType::Int32);
-        assert_eq!(fields[1].data_type, DataType::Int32);
+            let fields = &top_n_executor.schema().fields;
+            assert_eq!(fields[0].data_type, DataType::Int32);
+            assert_eq!(fields[1].data_type, DataType::Int32);
 
-        let mut stream = top_n_executor.execute();
-        let res = stream.next().await;
+            let mut stream = top_n_executor.execute();
+            let res = stream.next().await;
 
-        assert!(matches!(res, Some(_)));
-        if let Some(res) = res {
-            let res = res.unwrap();
-            assert!(
-                res == DataChunk::from_pretty(
-                    "
-                    i i i
-                    4 2 1
-                    3 3 1
-                    2 4 1
-                    4 3 2
-                    3 4 2
-                    2 5 2
-                    "
-                ) || res
-                    == DataChunk::from_pretty(
+            assert!(matches!(res, Some(_)));
+            if let Some(res) = res {
+                let res = res.unwrap();
+                assert!(
+                    res == DataChunk::from_pretty(
                         "
                     i i i
+                    4 2 1
+                    3 3 1
+                    2 4 1
+                    4 3 2
+                    3 4 2
+                    2 5 2
+                    "
+                    ) || res
+                        == DataChunk::from_pretty(
+                            "
+                    i i i
                     4 3 2
                     3 4 2
                     2 5 2
@@ -323,11 +333,14 @@ mod tests {
                     3 3 1
                     2 4 1
                     "
-                    )
-            );
+                        )
+                );
+            }
+
+            let res = stream.next().await;
+            assert!(matches!(res, None));
         }
 
-        let res = stream.next().await;
-        assert!(matches!(res, None));
+        assert_eq!(0, parent_mem.get_bytes_used());
     }
 }

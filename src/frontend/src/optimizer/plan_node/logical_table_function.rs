@@ -14,12 +14,12 @@
 
 use std::fmt;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch,
     ToStream,
@@ -70,9 +70,9 @@ impl fmt::Display for LogicalTableFunction {
     }
 }
 impl Distill for LogicalTableFunction {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let data = Pretty::debug(&self.table_function);
-        Pretty::childless_record("LogicalTableFunction", vec![("table_function", data)])
+        childless_record("LogicalTableFunction", vec![("table_function", data)])
     }
 }
 

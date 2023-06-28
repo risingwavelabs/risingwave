@@ -54,7 +54,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
     ///
     /// i.e., for the `i`-th input row, the output rows are `(i, output_1)`, `(i, output_2)`, ...
     ///
-    /// How the output is splited into the `Stream` is arbitrary. It's usually done by a
+    /// How the output is split into the `Stream` is arbitrary. It's usually done by a
     /// `DataChunkBuilder`.
     ///
     /// ## Example

@@ -14,9 +14,11 @@
 
 use std::fmt;
 
+use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::PbStreamNode;
 
+use super::utils::Distill;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamExchange, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -47,6 +49,11 @@ impl StreamShare {
 impl fmt::Display for StreamShare {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         LogicalShare::fmt_with_name(&self.base, f, "StreamShare")
+    }
+}
+impl Distill for StreamShare {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        LogicalShare::pretty_fields(&self.base, "StreamShare")
     }
 }
 

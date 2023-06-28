@@ -201,10 +201,19 @@ pub struct HummockReadVersion {
 
     /// Remote version for committed data.
     committed: CommittedVersion,
+
+    /// Indicate if this is replicated. If it is, we should ignore it during
+    /// global state store read, to avoid duplicated results.
+    /// Otherwise for local state store, it is fine, see we will see the
+    /// ReadVersion just for that local state store.
+    is_replicated: bool,
 }
 
 impl HummockReadVersion {
-    pub fn new(committed_version: CommittedVersion) -> Self {
+    pub fn new_with_replication_option(
+        committed_version: CommittedVersion,
+        is_replicated: bool,
+    ) -> Self {
         // before build `HummockReadVersion`, we need to get the a initial version which obtained
         // from meta. want this initialization after version is initialized (now with
         // notification), so add a assert condition to guarantee correct initialization order
@@ -217,7 +226,13 @@ impl HummockReadVersion {
             },
 
             committed: committed_version,
+
+            is_replicated,
         }
+    }
+
+    pub fn new(committed_version: CommittedVersion) -> Self {
+        Self::new_with_replication_option(committed_version, false)
     }
 
     /// Updates the read version with `VersionUpdate`.
@@ -415,6 +430,10 @@ impl HummockReadVersion {
 
         // add the newly merged imm into front
         self.staging.merged_imm.push_front(merged_imm);
+    }
+
+    pub fn is_replicated(&self) -> bool {
+        self.is_replicated
     }
 }
 

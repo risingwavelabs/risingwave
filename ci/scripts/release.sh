@@ -13,8 +13,8 @@ fi
 echo "--- Install java and maven"
 yum install -y java-11-openjdk wget python3
 pip3 install toml-cli
-wget https://dlcdn.apache.org/maven/maven-3/3.9.2/binaries/apache-maven-3.9.2-bin.tar.gz && tar -zxvf apache-maven-3.9.2-bin.tar.gz
-export PATH="${REPO_ROOT}/apache-maven-3.9.2/bin:$PATH"
+wget https://ci-deps-dist.s3.amazonaws.com/apache-maven-3.9.3-bin.tar.gz && tar -zxvf apache-maven-3.9.3-bin.tar.gz
+export PATH="${REPO_ROOT}/apache-maven-3.9.3/bin:$PATH"
 mvn -v
 
 echo "--- Install rust"
@@ -83,7 +83,7 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
   echo "--- Release build and upload risingwave connector node jar asset"
-  cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true
+  cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true
   cd connector-node/assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
   gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 fi
