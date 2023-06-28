@@ -24,7 +24,8 @@ use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_ID, PG_CATALOG_SCHEMA_ID, START_TABLE_ID, START_USER_ID,
+    DEFAULT_SUPER_USER_ID, PG_CATALOG_SCHEMA_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_ID,
+    RW_CATALOG_SCHEMA_NAME, START_TABLE_ID, START_USER_ID,
 };
 use risingwave_common::error::Result;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -127,7 +128,7 @@ impl LocalFrontend {
 
     pub async fn get_explain_output(&self, sql: impl Into<String>) -> String {
         let mut rsp = self.run_sql(sql).await.unwrap();
-        assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
+        assert_eq!(rsp.stmt_type(), StatementType::EXPLAIN);
         let mut res = String::new();
         #[for_await]
         for row_set in rsp.values_stream() {
@@ -166,7 +167,7 @@ impl LocalFrontend {
 }
 
 pub async fn get_explain_output(mut rsp: RwPgResponse) -> String {
-    if rsp.get_stmt_type() != StatementType::EXPLAIN {
+    if rsp.stmt_type() != StatementType::EXPLAIN {
         panic!("RESPONSE INVALID: {rsp:?}");
     }
     let mut res = String::new();
@@ -199,6 +200,10 @@ impl CatalogWriter for MockCatalogWriter {
             owner,
         });
         self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner)
+            .await?;
+        self.create_schema(database_id, PG_CATALOG_SCHEMA_NAME, owner)
+            .await?;
+        self.create_schema(database_id, RW_CATALOG_SCHEMA_NAME, owner)
             .await?;
         Ok(())
     }
@@ -449,7 +454,8 @@ impl MockCatalogWriter {
         });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(1_u32, 0_u32);
-        map.insert(PG_CATALOG_SCHEMA_ID, 0_u32);
+        map.insert(PG_CATALOG_SCHEMA_ID as u32, 0_u32);
+        map.insert(RW_CATALOG_SCHEMA_ID as u32, 0_u32);
         Self {
             catalog,
             id: AtomicU32::new(START_TABLE_ID as u32),

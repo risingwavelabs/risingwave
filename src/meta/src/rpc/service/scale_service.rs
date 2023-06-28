@@ -85,7 +85,7 @@ where
         &self,
         _: Request<GetClusterInfoRequest>,
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
-        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
         let table_fragments = self
             .fragment_manager
@@ -137,7 +137,7 @@ where
     ) -> Result<Response<RescheduleResponse>, Status> {
         let req = request.into_inner();
 
-        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.write().await;
 
         let current_revision = self.fragment_manager.get_revision().await;
 
@@ -193,7 +193,7 @@ where
     ) -> Result<Response<GetReschedulePlanResponse>, Status> {
         let req = request.into_inner();
 
-        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
         let current_revision = self.fragment_manager.get_revision().await;
 

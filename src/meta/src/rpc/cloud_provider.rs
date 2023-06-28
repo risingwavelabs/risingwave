@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use aws_config::retry::RetryConfig;
 use aws_sdk_ec2::error::ProvideErrorMetadata;
-use aws_sdk_ec2::types::{Filter, State, VpcEndpointType};
+use aws_sdk_ec2::types::{Filter, ResourceType, State, Tag, TagSpecification, VpcEndpointType};
 use itertools::Itertools;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::catalog::connection::PrivateLinkService;
@@ -75,9 +75,13 @@ impl AwsEc2Client {
     }
 
     /// `service_name`: The name of the endpoint service we want to access
+    /// `tags_user_str`: The tags specified in with clause of `create connection`
+    /// `tags_env`: The default tags specified in env var `RW_PRIVATELINK_ENDPOINT_DEFAULT_TAGS`
     pub async fn create_aws_private_link(
         &self,
         service_name: &str,
+        tags_user_str: Option<&str>,
+        tags_env: Option<Vec<(&str, &str)>>,
     ) -> MetaResult<PrivateLinkService> {
         // fetch the AZs of the endpoint service
         let service_azs = self.get_endpoint_service_az_names(service_name).await?;
@@ -89,12 +93,34 @@ impl AwsEc2Client {
             .map(|(_, az, az_id)| (az, az_id))
             .collect();
 
+        let tags_vec = match tags_user_str {
+            Some(tags_user_str) => {
+                let mut tags_user = tags_user_str
+                    .split(',')
+                    .map(|s| {
+                        s.split_once('=').ok_or_else(|| {
+                            MetaError::invalid_parameter("Failed to parse `tags` parameter")
+                        })
+                    })
+                    .collect::<MetaResult<Vec<(&str, &str)>>>()?;
+                match tags_env {
+                    Some(tags_env) => {
+                        tags_user.extend(tags_env);
+                        Some(tags_user)
+                    }
+                    None => Some(tags_user),
+                }
+            }
+            None => tags_env,
+        };
+
         let (endpoint_id, endpoint_dns_names) = self
             .create_vpc_endpoint(
                 &self.vpc_id,
                 service_name,
                 &self.security_group_id,
                 &subnet_ids,
+                tags_vec,
             )
             .await?;
 
@@ -256,7 +282,27 @@ impl AwsEc2Client {
         service_name: &str,
         security_group_id: &str,
         subnet_ids: &[String],
+        tags_vec: Option<Vec<(&str, &str)>>,
     ) -> MetaResult<(String, Vec<String>)> {
+        let tag_spec = match tags_vec {
+            Some(tags_vec) => {
+                let tags = tags_vec
+                    .into_iter()
+                    .map(|(tag_key, tag_val)| {
+                        Tag::builder()
+                            .set_key(Some(tag_key.to_string()))
+                            .set_value(Some(tag_val.to_string()))
+                            .build()
+                    })
+                    .collect();
+                Some(vec![TagSpecification::builder()
+                    .set_resource_type(Some(ResourceType::VpcEndpoint))
+                    .set_tags(Some(tags))
+                    .build()])
+            }
+            None => None,
+        };
+
         let output = self
             .client
             .create_vpc_endpoint()
@@ -265,6 +311,7 @@ impl AwsEc2Client {
             .security_group_ids(security_group_id)
             .service_name(service_name)
             .set_subnet_ids(Some(subnet_ids.to_owned()))
+            .set_tag_specifications(tag_spec)
             .send()
             .await
             .map_err(|e| {
