@@ -281,6 +281,8 @@ where
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
@@ -321,7 +323,7 @@ where
     }
 
     async fn drop_streaming_job(&self, job_id: StreamingJobId) -> MetaResult<NotificationVersion> {
-        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
         let table_fragments = self
             .fragment_manager
             .select_table_fragments_by_table_id(&job_id.id().into())
@@ -628,7 +630,7 @@ where
         fragment_graph: StreamFragmentGraphProto,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
-        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
         let fragment_graph = self

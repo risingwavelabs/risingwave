@@ -42,13 +42,12 @@ pub async fn handle_drop_connection(
                 Ok((c, s)) => (c, s),
                 Err(e) => {
                     return if if_exists {
-                        Ok(RwPgResponse::empty_result_with_notice(
-                            StatementType::DROP_CONNECTION,
-                            format!(
+                        Ok(RwPgResponse::builder(StatementType::DROP_CONNECTION)
+                            .notice(format!(
                                 "connection \"{}\" does not exist, skipping",
                                 connection_name
-                            ),
-                        ))
+                            ))
+                            .into())
                     } else {
                         Err(e.into())
                     }

@@ -304,15 +304,15 @@ impl Cluster {
     // mark a worker node as unschedulable
     pub async fn update_worker_node_schedulability(
         &self,
-        addr: HostAddress,
+        worker_ids: Vec<u32>,
         is_unschedulable: bool,
     ) -> Result<()> {
         let _ = self
             .ctl
             .spawn(async move {
-                risingwave_ctl::cmd_impl::meta::update_schedulability(
+                risingwave_ctl::cmd_impl::scale::update_schedulability(
                     &risingwave_ctl::common::CtlContext::default(),
-                    addr,
+                    worker_ids.iter().map(|id| id.to_string()).collect_vec(),
                     is_unschedulable,
                 )
                 .await

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::catalog::is_system_schema;
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
@@ -33,10 +33,10 @@ pub async fn handle_drop_schema(
     let catalog_reader = session.env().catalog_reader();
     let schema_name = Binder::resolve_schema_name(schema_name)?;
 
-    if schema_name == PG_CATALOG_SCHEMA_NAME {
+    if is_system_schema(&schema_name) {
         return Err(ErrorCode::ProtocolError(format!(
             "cannot drop schema {} because it is required by the database system",
-            PG_CATALOG_SCHEMA_NAME
+            schema_name
         ))
         .into());
     }
@@ -48,10 +48,12 @@ pub async fn handle_drop_schema(
             Err(err) => {
                 // If `if_exist` is true, not return error.
                 return if if_exist {
-                    Ok(PgResponse::empty_result_with_notice(
-                        StatementType::DROP_SCHEMA,
-                        format!("schema \"{}\" does not exist, skipping", schema_name),
-                    ))
+                    Ok(PgResponse::builder(StatementType::DROP_SCHEMA)
+                        .notice(format!(
+                            "schema \"{}\" does not exist, skipping",
+                            schema_name
+                        ))
+                        .into())
                 } else {
                     Err(err.into())
                 };
