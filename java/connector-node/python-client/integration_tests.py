@@ -241,7 +241,7 @@ def validate_jdbc_sink(input_file):
 
 
 def test_elasticsearch_sink(input_file):
-    test_sink("elasticsearch",
+    test_sink("elasticsearch-7",
               {"url": "http://127.0.0.1:9200",
                "index": "test"},
               input_file)

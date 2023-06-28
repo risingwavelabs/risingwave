@@ -52,17 +52,17 @@ import org.slf4j.LoggerFactory;
  *
  * 4. bulkprocessor and high-level-client are deprecated in es 8 java api.
  */
-public class EsSink extends SinkBase {
-    private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
+public class EsSink7 extends SinkBase {
+    private static final Logger LOG = LoggerFactory.getLogger(EsSink7.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
-    private final EsSinkConfig config;
+    private final EsSinkConfig7 config;
     private final BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
     // For bulk listener
     private final List<Integer> primaryKeyIndexes;
 
-    public EsSink(EsSinkConfig config, TableSchema tableSchema) {
+    public EsSink7(EsSinkConfig7 config, TableSchema tableSchema) {
         super(tableSchema);
         HttpHost host;
         try {
@@ -95,7 +95,7 @@ public class EsSink extends SinkBase {
     }
 
     private static RestClientBuilder configureRestClientBuilder(
-            RestClientBuilder builder, EsSinkConfig config) {
+            RestClientBuilder builder, EsSinkConfig7 config) {
         // Possible config:
         // 1. Connection path prefix
         // 2. Username and password
@@ -104,7 +104,7 @@ public class EsSink extends SinkBase {
     }
 
     private BulkProcessor.Builder applyBulkConfig(
-            RestHighLevelClient client, EsSinkConfig config, BulkProcessor.Listener listener) {
+            RestHighLevelClient client, EsSinkConfig7 config, BulkProcessor.Listener listener) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
                         new BulkRequestConsumerFactory() {

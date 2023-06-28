@@ -19,8 +19,8 @@ import static org.junit.Assert.fail;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
-import com.risingwave.connector.EsSink;
-import com.risingwave.connector.EsSinkConfig;
+import com.risingwave.connector.EsSink7;
+import com.risingwave.connector.EsSinkConfig7;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data;
@@ -39,7 +39,7 @@ import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.junit.Test;
 import org.testcontainers.elasticsearch.ElasticsearchContainer;
 
-public class EsSinkTest {
+public class EsSinkTest7 {
 
     static TableSchema getTestTableSchema() {
         return new TableSchema(
@@ -51,9 +51,9 @@ public class EsSinkTest {
     }
 
     public void testEsSink(ElasticsearchContainer container) throws IOException {
-        EsSink sink =
-                new EsSink(
-                        new EsSinkConfig(container.getHttpHostAddress(), "test", "$"),
+        EsSink7 sink =
+                new EsSink7(
+                        new EsSinkConfig7(container.getHttpHostAddress(), "test", "$"),
                         getTestTableSchema());
         sink.write(
                 Iterators.forArray(

@@ -29,13 +29,13 @@ import org.elasticsearch.client.RestHighLevelClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class EsSinkFactory implements SinkFactory {
-    private static final Logger LOG = LoggerFactory.getLogger(EsSinkFactory.class);
+public class EsSinkFactory7 implements SinkFactory {
+    private static final Logger LOG = LoggerFactory.getLogger(EsSinkFactory7.class);
 
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
-        EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
-        return new EsSink(config, tableSchema);
+        EsSinkConfig7 config = mapper.convertValue(tableProperties, EsSinkConfig7.class);
+        return new EsSink7(config, tableSchema);
     }
 
     @Override
@@ -44,7 +44,7 @@ public class EsSinkFactory implements SinkFactory {
             Map<String, String> tableProperties,
             Catalog.SinkType sinkType) {
         ObjectMapper mapper = new ObjectMapper();
-        EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
+        EsSinkConfig7 config = mapper.convertValue(tableProperties, EsSinkConfig7.class);
 
         // 1. check url
         HttpHost host;
