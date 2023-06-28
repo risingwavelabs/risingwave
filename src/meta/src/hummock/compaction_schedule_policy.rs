@@ -29,10 +29,7 @@ const STREAM_BUFFER_SIZE: usize = 4;
 /// The implementation of compaction task scheduling policy.
 pub trait CompactionSchedulePolicy: Send + Sync {
     /// Get next idle compactor to assign task.
-    fn next_idle_compactor(
-        &self,
-        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
-    ) -> Option<Arc<Compactor>>;
+    fn next_idle_compactor(&self) -> Option<Arc<Compactor>>;
 
     /// Get next compactor to assign task.
     fn next_compactor(&self) -> Option<Arc<Compactor>>;
@@ -109,28 +106,16 @@ impl RoundRobinPolicy {
 }
 
 impl CompactionSchedulePolicy for RoundRobinPolicy {
-    fn next_idle_compactor(
-        &self,
-        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
-    ) -> Option<Arc<Compactor>> {
+    fn next_idle_compactor(&self) -> Option<Arc<Compactor>> {
         if self.compactors.is_empty() {
             return None;
         }
         let compactor_index = self.next_compactor % self.compactors.len();
-        for context_id in self.compactors[compactor_index..]
-            .iter()
-            .chain(&self.compactors[..compactor_index])
-        {
-            let compactor = self.compactor_map.get(context_id).unwrap();
-            if *compactor_assigned_task_num
-                .get(&compactor.context_id())
-                .unwrap_or(&0)
-                < compactor.max_concurrent_task_number()
-            {
-                return Some(compactor.clone());
-            }
-        }
-        None
+        let compactor = self
+            .get_compactor(self.compactors[compactor_index])
+            .unwrap();
+
+        Some(compactor)
     }
 
     fn next_compactor(&self) -> Option<Arc<Compactor>> {

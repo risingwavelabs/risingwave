@@ -1095,7 +1095,7 @@ where
             .get_compact_task_impl(compaction_group_id, selector)
             .await?
         {
-            if let TaskStatus::Pending = task.task_status() {
+        if let TaskStatus::Pending = task.task_status() {
                 return Ok(Some(task));
             }
             assert!(
@@ -1118,23 +1118,8 @@ where
             .await
     }
 
-    #[named]
     pub async fn get_idle_compactor(&self) -> Option<Arc<Compactor>> {
-        let compaction_guard = read_lock!(self, compaction).await;
-        // Calculate the number of tasks assigned to each compactor.
-        let mut compactor_assigned_task_num = HashMap::new();
-        compaction_guard
-            .compact_task_assignment
-            .values()
-            .for_each(|assignment| {
-                compactor_assigned_task_num
-                    .entry(assignment.context_id)
-                    .and_modify(|n| *n += 1)
-                    .or_insert(1);
-            });
-        drop(compaction_guard);
-        self.compactor_manager
-            .next_idle_compactor(&compactor_assigned_task_num)
+        self.compactor_manager.next_idle_compactor()
     }
 
     fn is_compact_task_expired(

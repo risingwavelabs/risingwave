@@ -100,16 +100,6 @@ where
     }
 
     #[named]
-    pub async fn get_assigned_tasks_number(&self, context_id: HummockContextId) -> u64 {
-        read_lock!(self, compaction)
-            .await
-            .compact_task_assignment
-            .values()
-            .filter(|s| s.context_id == context_id)
-            .count() as u64
-    }
-
-    #[named]
     pub async fn list_all_tasks_ids(&self) -> Vec<HummockCompactionTaskId> {
         let compaction = read_lock!(self, compaction).await;
         compaction

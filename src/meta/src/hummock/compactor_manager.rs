@@ -86,10 +86,12 @@ impl Compactor {
             "compaction_send_task_fail"
         )
         .into()));
+
         self.sender
             .send(Ok(SubscribeCompactTasksResponse { task: Some(task) }))
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
+
         Ok(())
     }
 
@@ -184,12 +186,9 @@ impl CompactorManager {
     }
 
     /// Gets next idle compactor to assign task.
-    pub fn next_idle_compactor(
-        &self,
-        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
-    ) -> Option<Arc<Compactor>> {
+    pub fn next_idle_compactor(&self) -> Option<Arc<Compactor>> {
         let policy = self.policy.read();
-        policy.next_idle_compactor(compactor_assigned_task_num)
+        policy.next_idle_compactor()
     }
 
     /// Gets next compactor to assign task.

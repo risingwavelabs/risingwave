@@ -237,7 +237,6 @@ pub async fn compact_once(
         .unwrap()
         .unwrap();
     compact_task.gc_delete_keys = false;
-    let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
 
     let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
