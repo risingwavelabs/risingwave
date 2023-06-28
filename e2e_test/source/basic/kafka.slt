@@ -743,7 +743,7 @@ select id, first_name, last_name, email from drop_column_after_create_table orde
 1001 Sally Thomas sally.thomas@acme.com
 1002 George Bailey gbailey@foobar.com
 1003 Edward Walker ed@walker.com
-1004 Anne1 Kretchmar annek@noanswer.org
+1004 Anne1 NULL annek@noanswer.org
 1005 add NULL add
 
 # last_name is absent in RW schema and absent in new rows
