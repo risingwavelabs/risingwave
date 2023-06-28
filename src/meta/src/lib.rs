@@ -289,6 +289,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 do_not_config_object_storage_lifecycle: config
                     .meta
                     .do_not_config_object_storage_lifecycle,
+                compaction_task_max_heartbeat_interval_secs: config
+                    .meta
+                    .compaction_task_max_heartbeat_interval_secs,
             },
             config.system.into_init_system_params(),
         )
