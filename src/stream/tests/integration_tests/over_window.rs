@@ -541,5 +541,6 @@ async fn test_over_window_sum() {
               - !barrier 6
         "#]],
         snapshot_options(),
-    ).await;
+    )
+    .await;
 }
