@@ -15,6 +15,7 @@
 use std::convert::Into;
 use std::sync::Arc;
 
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
@@ -115,10 +116,14 @@ impl TaskService for BatchServiceImpl {
             task_id,
             plan,
             epoch,
+            tracing_context,
         } = req.into_inner();
+
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
         let epoch = epoch.expect("no epoch found");
+        let tracing_context = TracingContext::from_protobuf(&tracing_context);
+
         let context = ComputeNodeContext::new_for_local(self.env.clone());
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
@@ -128,7 +133,7 @@ impl TaskService for BatchServiceImpl {
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
         let task = Arc::new(task);
         let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
-        if let Err(e) = task.clone().async_execute(None).await {
+        if let Err(e) = task.clone().async_execute(None, tracing_context).await {
             error!(
                 "failed to build executors and trigger execution of Task {:?}: {}",
                 task_id, e

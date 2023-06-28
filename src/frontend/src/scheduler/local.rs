@@ -30,6 +30,7 @@ use risingwave_common::error::RwError;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_cancel::{cancellable_stream, Tripwire};
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -42,6 +43,7 @@ use risingwave_pb::common::WorkerNode;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
+use tracing_futures::Instrument;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
@@ -64,6 +66,8 @@ pub struct LocalQueryExecution {
     auth_context: Arc<AuthContext>,
     cancel_flag: Option<Tripwire<Result<DataChunk, BoxedError>>>,
     worker_node_manager: WorkerNodeSelector,
+
+    span: tracing::Span,
 }
 
 impl LocalQueryExecution {
@@ -75,27 +79,29 @@ impl LocalQueryExecution {
         auth_context: Arc<AuthContext>,
         cancel_flag: Tripwire<Result<DataChunk, BoxedError>>,
     ) -> Self {
+        let sql = sql.into();
         let worker_node_manager = WorkerNodeSelector::new(
             front_env.worker_node_manager_ref(),
             snapshot.support_barrier_read(),
         );
+
+        let span = tracing::info_span!("local_execute", query_id = %query.query_id, sql);
+
         Self {
-            sql: sql.into(),
+            sql,
             query,
             front_env,
             snapshot,
             auth_context,
             cancel_flag: Some(cancel_flag),
             worker_node_manager,
+            span,
         }
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
     pub async fn run_inner(self) {
-        debug!(
-            "Starting to run query: {:?}, sql: '{}'",
-            self.query.query_id, self.sql
-        );
+        debug!(%self.query.query_id, self.sql, "Starting to run query");
 
         let context =
             FrontendBatchTaskContext::new(self.front_env.clone(), self.auth_context.clone());
@@ -109,7 +115,7 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
 
-        // TODO(ZENOTME): For now this rx is only used as placehodler, it didn't take effect.
+        // TODO(ZENOTME): For now this rx is only used as placeholder, it didn't take effect.
         // Refactor later to make use it.
         let (_tx, rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
         let executor = ExecutorBuilder::new(
@@ -128,7 +134,8 @@ impl LocalQueryExecution {
     }
 
     pub fn run(self) -> BoxedDataChunkStream {
-        Box::pin(self.run_inner())
+        let span = self.span.clone();
+        Box::pin(self.run_inner().instrument(span.clone()))
     }
 
     pub fn stream_rows(mut self) -> LocalQueryStream {
@@ -241,6 +248,8 @@ impl LocalQueryExecution {
                 };
                 assert!(sources.is_empty());
 
+                let tracing_context = TracingContext::from_span(&self.span).to_protobuf();
+
                 if let Some(table_scan_info) = second_stage.table_scan_info.clone()
                     && let Some(vnode_bitmaps) = table_scan_info.partitions()
                 {
@@ -268,6 +277,7 @@ impl LocalQueryExecution {
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
+                            tracing_context: tracing_context.clone(),
                         };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
@@ -300,6 +310,7 @@ impl LocalQueryExecution {
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
+                            tracing_context: tracing_context.clone(),
                         };
                         // NOTE: select a random work node here.
                         let worker_node = self.worker_node_manager.next_random_worker()?;
@@ -331,6 +342,7 @@ impl LocalQueryExecution {
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
                         epoch: Some(self.snapshot.get_batch_query_epoch()),
+                        tracing_context,
                     };
 
                     let workers = self.choose_worker(&second_stage)?;

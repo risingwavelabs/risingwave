@@ -23,6 +23,7 @@ use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::Result;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
@@ -124,7 +125,7 @@ impl BatchManager {
             ))
             .into())
         };
-        task.async_execute(Some(state_reporter))
+        task.async_execute(Some(state_reporter), TracingContext::none()) // TODO
             .await
             .inspect_err(|_| {
                 self.cancel_task(&task_id.to_prost());

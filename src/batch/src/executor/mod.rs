@@ -229,10 +229,9 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,
         }
         .await?;
-        let input_desc = real_executor.identity().to_string();
+
         Ok(Box::new(ManagedExecutor::new(
             real_executor,
-            input_desc,
             self.shutdown_rx.clone(),
         )) as BoxedExecutor)
     }
