@@ -52,8 +52,8 @@ pub struct TableDmlHandle {
     pub column_descs: Vec<ColumnDesc>,
 }
 
-/// The buffer size of the channel between each [`TableDmlHandle`] and the dml executors.
-const DML_CHUNK_BUFFER_SIZE: usize = 32;
+/// The max chunk permits of the channel between each [`TableDmlHandle`] and the dml executors.
+const DML_MAX_CHUNK_PERMITS: usize = 32 * 1024;
 
 impl TableDmlHandle {
     pub fn new(column_descs: Vec<ColumnDesc>) -> Self {
@@ -69,7 +69,9 @@ impl TableDmlHandle {
 
     pub fn stream_reader(&self) -> TableStreamReader {
         let mut core = self.core.write();
-        let (tx, rx) = txn_channel(DML_CHUNK_BUFFER_SIZE);
+        // The `txn_channel` is used to limit the maximum chunk permits to avoid the producer
+        // produces chunks too fast and cause an out of memory error.
+        let (tx, rx) = txn_channel(DML_MAX_CHUNK_PERMITS);
         core.changes_txs.push(tx);
 
         TableStreamReader { rx }
