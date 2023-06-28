@@ -37,7 +37,13 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         actor_splits: _actor_splits,
         source_infos: _source_infos,
         revision,
-    } = meta_client.get_cluster_info().await?;
+    } = match meta_client.get_cluster_info().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            println!("Failed to fetch cluster info: {}", e);
+            exit(1);
+        }
+    };
 
     if worker_nodes.is_empty() {
         println!("No worker nodes found");
@@ -52,7 +58,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
     println!("Cluster info fetched, revision: {}", revision);
     println!("Worker nodes: {}", worker_nodes.len());
 
-    let streaming_worker_map = worker_nodes
+    let streaming_workers_index_by_id = worker_nodes
         .into_iter()
         .filter(|worker| {
             worker
@@ -64,7 +70,41 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         .map(|worker| (worker.id, worker))
         .collect::<HashMap<_, _>>();
 
-    println!("Streaming workers found: {}", streaming_worker_map.len());
+    let streaming_workers_index_by_host = streaming_workers_index_by_id
+        .values()
+        .map(|worker| {
+            let host = worker.get_host().expect("worker host must be set");
+            (format!("{}:{}", host.host, host.port), worker.clone())
+        })
+        .collect::<HashMap<_, _>>();
+
+    let worker_input_to_worker_id = |inputs: Vec<String>| -> Vec<u32> {
+        let mut result: HashSet<_> = HashSet::new();
+
+        for input in inputs {
+            let worker_id = input.parse::<u32>().ok().or_else(|| {
+                streaming_workers_index_by_host
+                    .get(&input)
+                    .map(|worker| worker.id)
+            });
+
+            if let Some(worker_id) = worker_id {
+                if !result.insert(worker_id) {
+                    println!("warn: {} and {} are the same worker", input, worker_id);
+                }
+            } else {
+                println!("Invalid worker input: {}", input);
+                exit(1);
+            }
+        }
+
+        result.into_iter().collect()
+    };
+
+    println!(
+        "Streaming workers found: {}",
+        streaming_workers_index_by_id.len()
+    );
 
     let ScaleResizeCommands {
         exclude_workers,
@@ -78,18 +118,35 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
     let worker_changes = match (exclude_workers, include_workers) {
         (None, None) => unreachable!(),
         (exclude, include) => {
-            let exclude_worker_ids = exclude.unwrap_or_default();
-            let include_worker_ids = include.unwrap_or_default();
+            let excludes = worker_input_to_worker_id(exclude.unwrap_or_default());
+            let includes = worker_input_to_worker_id(include.unwrap_or_default());
 
-            for worker_id in exclude_worker_ids.iter().chain(include_worker_ids.iter()) {
-                if !streaming_worker_map.contains_key(worker_id) {
-                    anyhow::bail!("Invalid worker id: {}", worker_id);
+            for worker_input in excludes.iter().chain(includes.iter()) {
+                if !streaming_workers_index_by_id.contains_key(worker_input) {
+                    println!("Invalid worker id: {}", worker_input);
+                    exit(1);
+                }
+            }
+
+            for include_worker_id in &includes {
+                let worker_is_unschedulable = streaming_workers_index_by_id
+                    .get(include_worker_id)
+                    .and_then(|worker| worker.property.as_ref())
+                    .map(|property| property.is_unschedulable)
+                    .unwrap_or(false);
+
+                if worker_is_unschedulable {
+                    println!(
+                        "Worker {} is unschedulable, should not be included",
+                        include_worker_id
+                    );
+                    exit(1);
                 }
             }
 
             WorkerChanges {
-                include_worker_ids,
-                exclude_worker_ids,
+                include_worker_ids: includes,
+                exclude_worker_ids: excludes,
             }
         }
     };
@@ -113,12 +170,13 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
                 .iter()
                 .any(|fragment_id| !all_fragment_ids.contains(fragment_id))
             {
-                anyhow::bail!(
+                println!(
                     "Invalid fragment ids: {:?}",
                     provide_fragment_ids
                         .difference(&all_fragment_ids)
                         .collect_vec()
                 );
+                exit(1);
             }
 
             provide_fragment_ids.into_iter().collect()
@@ -132,11 +190,19 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
             .collect(),
     });
 
+    let response = meta_client.get_reschedule_plan(policy, revision).await;
+
     let GetReschedulePlanResponse {
         revision,
         reschedules,
         success,
-    } = meta_client.get_reschedule_plan(policy, revision).await?;
+    } = match response {
+        Ok(response) => response,
+        Err(e) => {
+            println!("Failed to generate plan: {:?}", e);
+            exit(1);
+        }
+    };
 
     if !success {
         println!("Failed to generate plan, current revision is {}", revision);
@@ -197,7 +263,14 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
             }
         }
 
-        let (success, next_revision) = meta_client.reschedule(reschedules, revision).await?;
+        let (success, next_revision) = match meta_client.reschedule(reschedules, revision).await {
+            Ok(response) => response,
+            Err(e) => {
+                println!("Failed to execute plan: {:?}", e);
+                exit(1);
+            }
+        };
+
         if !success {
             println!("Failed to execute plan, current revision is {}", revision);
             exit(1);
@@ -209,5 +282,56 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
         );
     }
 
+    Ok(())
+}
+
+pub async fn update_schedulability(
+    context: &CtlContext,
+    workers: Vec<String>,
+    is_unschedulable: bool,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+
+    let GetClusterInfoResponse { worker_nodes, .. } = match meta_client.get_cluster_info().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            println!("Failed to get cluster info: {:?}", e);
+            exit(1);
+        }
+    };
+
+    let worker_ids: HashSet<_> = worker_nodes.iter().map(|worker| worker.id).collect();
+
+    let worker_index_by_host: HashMap<_, _> = worker_nodes
+        .iter()
+        .map(|worker| {
+            let host = worker.get_host().expect("worker host must be set");
+            (format!("{}:{}", host.host, host.port), worker.id)
+        })
+        .collect();
+
+    let mut target_worker_ids = HashSet::new();
+
+    for worker in workers {
+        let worker_id = worker
+            .parse::<u32>()
+            .ok()
+            .or_else(|| worker_index_by_host.get(&worker).cloned());
+
+        if let Some(worker_id) = worker_id && worker_ids.contains(&worker_id){
+            if !target_worker_ids.insert(worker_id) {
+                println!("Warn: {} and {} are the same worker", worker, worker_id);
+            }
+        } else {
+            println!("Invalid worker id: {}", worker);
+            exit(1);
+        }
+    }
+
+    let target_worker_ids = target_worker_ids.into_iter().collect_vec();
+
+    meta_client
+        .update_schedulability(&target_worker_ids, is_unschedulable)
+        .await?;
     Ok(())
 }

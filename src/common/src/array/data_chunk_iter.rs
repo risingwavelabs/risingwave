@@ -152,10 +152,6 @@ impl PartialEq for RowRef<'_> {
 impl Eq for RowRef<'_> {}
 
 impl Row for RowRef<'_> {
-    type Iter<'a> = RowRefIter<'a>
-    where
-        Self: 'a;
-
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         debug_assert!(self.idx < self.chunk.capacity());
         // for `RowRef`, the index is always in bound.
@@ -175,7 +171,7 @@ impl Row for RowRef<'_> {
         self.chunk.columns().len()
     }
 
-    fn iter(&self) -> Self::Iter<'_> {
+    fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
         debug_assert!(self.idx < self.chunk.capacity());
         RowRefIter {
             columns: self.chunk.columns().iter(),

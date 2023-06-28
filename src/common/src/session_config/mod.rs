@@ -143,7 +143,7 @@ impl<const NAME: usize, const DEFAULT: bool> Deref for ConfigBool<NAME, DEFAULT>
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, PartialEq, Eq)]
 struct ConfigString<const NAME: usize>(String);
 
 impl<const NAME: usize> Deref for ConfigString<NAME> {
@@ -295,6 +295,11 @@ type EnableJoinOrdering = ConfigBool<RW_ENABLE_JOIN_ORDERING, true>;
 type ServerVersion = ConfigString<SERVER_VERSION>;
 type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 80_300>;
 
+/// Report status or notice to caller.
+pub trait ConfigReporter {
+    fn report_status(&mut self, key: &str, new_val: String);
+}
+
 #[derive(Educe)]
 #[educe(Default)]
 pub struct ConfigMap {
@@ -386,7 +391,12 @@ pub struct ConfigMap {
 }
 
 impl ConfigMap {
-    pub fn set(&mut self, key: &str, val: Vec<String>) -> Result<(), RwError> {
+    pub fn set(
+        &mut self,
+        key: &str,
+        val: Vec<String>,
+        mut reporter: impl ConfigReporter,
+    ) -> Result<(), RwError> {
         info!(%key, ?val, "set config");
         let val = val.iter().map(AsRef::as_ref).collect_vec();
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
@@ -398,7 +408,11 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
             self.extra_float_digit = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
-            self.application_name = val.as_slice().try_into()?;
+            let new_application_name = val.as_slice().try_into()?;
+            if self.application_name != new_application_name {
+                self.application_name = new_application_name.clone();
+                reporter.report_status(ApplicationName::entry_name(), new_application_name.0);
+            }
         } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
             self.date_style = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
@@ -480,7 +494,7 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
             Ok(self.query_epoch.to_string())
         } else if key.eq_ignore_ascii_case(Timezone::entry_name()) {
-            Ok(self.timezone.clone())
+            Ok(self.timezone.to_string())
         } else if key.eq_ignore_ascii_case(StreamingParallelism::entry_name()) {
             Ok(self.streaming_parallelism.to_string())
         } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
@@ -500,9 +514,11 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
             Ok(self.batch_parallelism.to_string())
         } else if key.eq_ignore_ascii_case(ServerVersion::entry_name()) {
-            Ok(self.server_version.clone())
+            Ok(self.server_version.to_string())
         } else if key.eq_ignore_ascii_case(ServerVersionNum::entry_name()) {
             Ok(self.server_version_num.to_string())
+        } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
+            Ok(self.application_name.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
