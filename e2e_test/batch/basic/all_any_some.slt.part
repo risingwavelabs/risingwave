@@ -116,3 +116,15 @@ drop materialized view mv2;
 
 statement ok
 drop table tmp;
+
+statement ok
+create materialized view mv as with cte(v1, v2) as (values ('a1', array[1,2]), ('a2', array[3,4]), ('b', array[5,6])) select v1, 1 = any(v2) as any from cte where v1 like 'a%';
+
+query TT rowsort
+select * from mv;
+----
+a1 t
+a2 f
+
+statement ok
+drop materialized view mv;

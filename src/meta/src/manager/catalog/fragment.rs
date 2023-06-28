@@ -239,14 +239,23 @@ where
         &self,
         table_fragment: TableFragments,
     ) -> MetaResult<()> {
-        let map = &mut self.core.write().await.table_fragments;
+        let mut guard = self.core.write().await;
+        let current_revision = guard.table_revision;
+        let map = &mut guard.table_fragments;
         let table_id = table_fragment.table_id();
         if map.contains_key(&table_id) {
             bail!("table_fragment already exist: id={}", table_id);
         }
+
         let mut table_fragments = BTreeMapTransaction::new(map);
         table_fragments.insert(table_id, table_fragment);
-        commit_meta!(self, table_fragments)
+        let mut trx = Transaction::default();
+
+        let next_revision = current_revision.next();
+        next_revision.store(&mut trx);
+        commit_meta_with_trx!(self, trx, table_fragments)?;
+        guard.table_revision = next_revision;
+        Ok(())
     }
 
     /// Called after the barrier collection of `CreateStreamingJob` command, which updates the

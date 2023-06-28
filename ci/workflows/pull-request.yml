@@ -166,14 +166,16 @@ steps:
 
   - label: "e2e java-binding test"
     command: "ci/scripts/java-binding-test.sh -p ci-dev"
-    depends_on: "build"
+    depends_on:
+      - "build"
+      - "build-other"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 7
+    timeout_in_minutes: 10
 
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"
@@ -386,3 +388,16 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 20
+
+  # Sqlsmith differential testing
+  - label: "Sqlsmith Differential Testing"
+    command: "ci/scripts/sqlsmith-differential-test.sh -p ci-dev"
+    if: build.pull_request.labels includes "ci/run-sqlsmith-differential-tests"
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: ci-flamegraph-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 40
