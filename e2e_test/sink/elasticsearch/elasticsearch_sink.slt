@@ -26,7 +26,4 @@ statement ok
 DROP SINK s7;
 
 statement ok
-DROP MATERIALIZED VIEW mv6;
-
-statement ok
 DROP TABLE t7;
