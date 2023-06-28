@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use futures::FutureExt;
 use risingwave_common::transaction::transaction_message::TxnMsg;
 use tokio::sync::{mpsc, oneshot, Semaphore};
 
@@ -119,13 +120,9 @@ impl Sender {
         txn_msg: TxnMsg,
         notificator: oneshot::Sender<usize>,
     ) -> Result<(), mpsc::error::SendError<TxnMsg>> {
-        self.tx
-            .send(TxnMsgWithPermits {
-                txn_msg,
-                notificator,
-                permit_value: None,
-            })
-            .map_err(|e| mpsc::error::SendError(e.0.txn_msg))
+        self.send(txn_msg, notificator)
+            .now_or_never()
+            .expect("cannot send immediately")
     }
 
     pub fn is_closed(&self) -> bool {
