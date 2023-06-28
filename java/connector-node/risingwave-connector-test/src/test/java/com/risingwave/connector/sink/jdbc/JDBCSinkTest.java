@@ -134,7 +134,7 @@ public class JDBCSinkTest {
 
         JDBCSink sink =
                 new JDBCSink(
-                        new (container.getJdbcUrl(), tableName, "upsert"),
+                        new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
         Connection conn = sink.getConn();
