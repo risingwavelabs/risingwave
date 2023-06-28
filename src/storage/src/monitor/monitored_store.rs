@@ -25,6 +25,7 @@ use tokio::time::Instant;
 use tracing::error;
 use tracing_futures::Instrument;
 
+#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
 use super::traced_store::TracedStateStore;
 use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
