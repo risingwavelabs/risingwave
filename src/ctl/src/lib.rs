@@ -242,6 +242,29 @@ enum ScaleCommands {
     /// The resize command scales the cluster by specifying the workers to be included and
     /// excluded.
     Resize(ScaleResizeCommands),
+    /// mark a compute node as unschedulable
+    #[clap(verbatim_doc_comment)]
+    Cordon {
+        /// Workers that need to be cordoned, both id and host are supported.
+        #[clap(
+            long,
+            required = true,
+            value_delimiter = ',',
+            value_name = "id or host,..."
+        )]
+        workers: Vec<String>,
+    },
+    /// mark a compute node as schedulable. Nodes are schedulable unless they are cordoned
+    Uncordon {
+        /// Workers that need to be uncordoned, both id and host are supported.
+        #[clap(
+            long,
+            required = true,
+            value_delimiter = ',',
+            value_name = "id or host,..."
+        )]
+        workers: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -440,10 +463,10 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::meta::source_split_info(context).await?
         }
         Commands::Meta(MetaCommands::Reschedule {
-            plan,
-            revision,
             from,
             dry_run,
+            plan,
+            revision,
         }) => cmd_impl::meta::reschedule(context, plan, revision, from, dry_run).await?,
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
@@ -464,6 +487,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
         Commands::Scale(ScaleCommands::Resize(resize)) => {
             cmd_impl::scale::resize(context, resize).await?
+        }
+        Commands::Scale(ScaleCommands::Cordon { workers }) => {
+            cmd_impl::scale::update_schedulability(context, workers, true).await?
+        }
+        Commands::Scale(ScaleCommands::Uncordon { workers }) => {
+            cmd_impl::scale::update_schedulability(context, workers, false).await?
         }
     }
     Ok(())
