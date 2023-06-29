@@ -29,7 +29,7 @@ fn build_count_star(_: AggCall) -> Result<Box<dyn Aggregator>> {
 
 #[derive(Clone, Default, EstimateSize)]
 pub struct CountStar {
-    result: usize,
+    result: i64,
 }
 
 #[async_trait::async_trait]
@@ -44,20 +44,19 @@ impl Aggregator for CountStar {
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
-        if let Some(visibility) = input.visibility() {
-            for row_id in start_row_id..end_row_id {
-                if visibility.is_set(row_id) {
-                    self.result += 1;
+        for row_id in start_row_id..end_row_id {
+            if input.vis().is_set(row_id) {
+                match input.ops()[row_id] {
+                    Op::Insert | Op::UpdateInsert => self.result += 1,
+                    Op::Delete | Op::UpdateDelete => self.result -= 1,
                 }
             }
-        } else {
-            self.result += end_row_id - start_row_id;
         }
         Ok(())
     }
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        let res = std::mem::replace(&mut self.result, 0) as i64;
+        let res = std::mem::replace(&mut self.result, 0);
         let ArrayBuilderImpl::Int64(b) = builder else {
             bail!("Unexpected builder for count(*).");
         };
@@ -67,5 +66,70 @@ impl Aggregator for CountStar {
 
     fn estimated_size(&self) -> usize {
         EstimateSize::estimated_size(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::FutureExt;
+
+    use super::*;
+
+    #[test]
+    fn test_countable_agg() {
+        let mut state = CountStar::default();
+
+        // when there is no element, output should be `0`.
+        assert_eq!(state.result, 0);
+
+        // insert one element to state
+        state
+            .update_multi(&StreamChunk::from_pretty("i\n+ 0"), 0, 1)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+
+        // should be one row
+        assert_eq!(state.result, 1);
+
+        // delete one element from state
+        state
+            .update_multi(&StreamChunk::from_pretty("i\n- 0"), 0, 1)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+
+        // should be 0 rows.
+        assert_eq!(state.result, 0);
+
+        // one more deletion, so we are having `-1` elements inside.
+        state
+            .update_multi(&StreamChunk::from_pretty("i\n- 0"), 0, 1)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+
+        // should be the same as `TestState`'s output
+        assert_eq!(state.result, -1);
+
+        // one more insert, so we are having `0` elements inside.
+        state
+            .update_multi(&StreamChunk::from_pretty("i\n- 0 D\n+ 1"), 0, 2)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+
+        // should be `0`
+        assert_eq!(state.result, 0);
+
+        // one more deletion, so we are having `-1` elements inside.
+        state
+            .update_multi(&StreamChunk::from_pretty("i\n- 1\n+ 0 D"), 0, 2)
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+
+        // should be `-1`
+        assert_eq!(state.result, -1);
     }
 }
