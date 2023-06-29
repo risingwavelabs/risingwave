@@ -24,6 +24,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::jemalloc;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
 
 use crate::hummock::event_handler::LocalInstanceId;
@@ -379,12 +380,13 @@ impl SharedBufferBatch {
         batch_items
             .iter()
             .map(|(k, v)| {
-                k.len() + {
-                    match v {
-                        HummockValue::Put(val) => val.len(),
+                jemalloc::aligned_size(std::mem::size_of::<Bytes>())
+                    + jemalloc::aligned_size(k.len())
+                    + jemalloc::aligned_size(std::mem::size_of::<HummockValue<Bytes>>())
+                    + match v {
+                        HummockValue::Put(val) => jemalloc::aligned_size(val.len()),
                         HummockValue::Delete => 0,
                     }
-                }
             })
             .sum()
     }
