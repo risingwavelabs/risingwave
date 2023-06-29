@@ -38,8 +38,8 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
-    AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema, ProtobufSchema,
-    SourceSchema, SourceWatermark,
+    self, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema,
+    ProtobufSchema, SourceSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -419,6 +419,31 @@ pub(crate) async fn try_bind_columns_from_source(
                 ..Default::default()
             },
         ),
+        SourceSchema::Bytes => {
+            if !sql_defined_schema || sql_defined_columns.len() != 1 {
+                return Err(RwError::from(ProtocolError(
+                    "BYTES format only accepts one column".to_string(),
+                )));
+            }
+
+            match sql_defined_columns[0].data_type {
+                Some(ast::DataType::Bytea) => {}
+                _ => {
+                    return Err(RwError::from(ProtocolError(
+                        "BYTES format only accepts BYTEA type".to_string(),
+                    )))
+                }
+            }
+
+            (
+                None,
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::Bytes as i32,
+                    ..Default::default()
+                },
+            )
+        }
         SourceSchema::DebeziumMongoJson => {
             let mut columns = vec![
                 ColumnCatalog {
@@ -551,16 +576,16 @@ pub(super) fn bind_source_watermark(
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType>>> = LazyLock::new(
     || {
         convert_args!(hashmap!(
-                KAFKA_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
-                PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
-                KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
-                GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
-                NEXMARK_CONNECTOR => vec![RowFormatType::Native],
-                DATAGEN_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Json],
+                KAFKA_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro, RowFormatType::Bytes],
+                PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
+                KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
+                GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
+                NEXMARK_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Bytes],
+                DATAGEN_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Json, RowFormatType::Bytes],
                 S3_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json],
-                MYSQL_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
-                POSTGRES_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
-                CITUS_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
+                MYSQL_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson, RowFormatType::Bytes],
+                POSTGRES_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson, RowFormatType::Bytes],
+                CITUS_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson, RowFormatType::Bytes],
         ))
     },
 );
@@ -579,6 +604,7 @@ fn source_shema_to_row_format(source_schema: &SourceSchema) -> RowFormatType {
         SourceSchema::CanalJson => RowFormatType::CanalJson,
         SourceSchema::Csv(_) => RowFormatType::Csv,
         SourceSchema::Native => RowFormatType::Native,
+        SourceSchema::Bytes => RowFormatType::Bytes,
     }
 }
 

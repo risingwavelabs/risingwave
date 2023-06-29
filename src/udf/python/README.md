@@ -65,11 +65,9 @@ To create functions in RisingWave, use the following syntax:
 ```sql
 create function <name> ( <arg_type>[, ...] )
     [ returns <ret_type> | returns table ( <column_name> <column_type> [, ...] ) ]
-    language python as <name_defined_in_server>
-    using link '<udf_server_address>';
+    as <name_defined_in_server> using link '<udf_server_address>';
 ```
 
-- The `language` parameter must be set to `python`.
 - The `as` parameter specifies the function name defined in the UDF server.
 - The `link` parameter specifies the address of the UDF server.
 
@@ -77,10 +75,10 @@ For example:
 
 ```sql
 create function gcd(int, int) returns int
-language python as gcd using link 'http://localhost:8815';
+as gcd using link 'http://localhost:8815';
 
 create function series(int) returns table (x int)
-language python as series using link 'http://localhost:8815';
+as series using link 'http://localhost:8815';
 
 select gcd(25, 15);
 

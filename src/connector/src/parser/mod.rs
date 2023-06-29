@@ -32,6 +32,7 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::StreamSourceInfo;
 
+use self::bytes_parser::BytesParser;
 pub use self::csv_parser::CsvParserConfig;
 use crate::parser::maxwell::MaxwellParser;
 use crate::source::{
@@ -40,6 +41,7 @@ use crate::source::{
 };
 
 mod avro;
+mod bytes_parser;
 mod canal;
 mod common;
 mod csv_parser;
@@ -395,6 +397,7 @@ pub enum ByteStreamSourceParserImpl {
     Maxwell(MaxwellParser),
     CanalJson(CanalJsonParser),
     DebeziumAvro(DebeziumAvroParser),
+    Bytes(BytesParser),
 }
 
 pub type ParserStream = impl SourceWithStateStream + Unpin;
@@ -413,6 +416,7 @@ impl ByteStreamSourceParserImpl {
             Self::Maxwell(parser) => parser.into_stream(msg_stream),
             Self::CanalJson(parser) => parser.into_stream(msg_stream),
             Self::DebeziumAvro(parser) => parser.into_stream(msg_stream),
+            Self::Bytes(parser) => parser.into_stream(msg_stream),
         };
         Box::pin(stream)
     }
@@ -450,6 +454,9 @@ impl ByteStreamSourceParserImpl {
             SpecificParserConfig::DebeziumAvro(config) => {
                 DebeziumAvroParser::new(rw_columns, config, source_ctx).map(Self::DebeziumAvro)
             }
+            SpecificParserConfig::Bytes => {
+                BytesParser::new(rw_columns, source_ctx).map(Self::Bytes)
+            }
             SpecificParserConfig::Native => {
                 unreachable!("Native parser should not be created")
             }
@@ -483,6 +490,7 @@ pub enum SpecificParserConfig {
     #[default]
     Native,
     DebeziumAvro(DebeziumAvroParserConfig),
+    Bytes,
 }
 
 impl SpecificParserConfig {
@@ -500,6 +508,7 @@ impl SpecificParserConfig {
             SpecificParserConfig::Native => SourceFormat::Native,
             SpecificParserConfig::DebeziumAvro(_) => SourceFormat::DebeziumAvro,
             SpecificParserConfig::DebeziumMongoJson => SourceFormat::DebeziumMongoJson,
+            SpecificParserConfig::Bytes => SourceFormat::Bytes,
         }
     }
 
@@ -562,6 +571,7 @@ impl SpecificParserConfig {
             SourceFormat::Maxwell => SpecificParserConfig::Maxwell,
             SourceFormat::CanalJson => SpecificParserConfig::CanalJson,
             SourceFormat::Native => SpecificParserConfig::Native,
+            SourceFormat::Bytes => SpecificParserConfig::Bytes,
             SourceFormat::DebeziumAvro => SpecificParserConfig::DebeziumAvro(
                 DebeziumAvroParserConfig::new(props, &info.row_schema_location).await?,
             ),
