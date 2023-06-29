@@ -14,6 +14,3 @@
 
 mod metrics;
 pub use metrics::{MetricsMiddleware, MetricsMiddlewareLayer};
-
-mod tracing;
-pub use self::tracing::{TracingMiddleware, TracingMiddlewareLayer};

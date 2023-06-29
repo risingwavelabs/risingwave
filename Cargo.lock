@@ -5786,6 +5786,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "hex",
+ "http",
  "humantime",
  "hytra",
  "itertools",
@@ -5858,6 +5859,7 @@ name = "risingwave_common_service"
 version = "1.0.0-alpha"
 dependencies = [
  "async-trait",
+ "futures",
  "hyper",
  "madsim-tokio",
  "madsim-tonic",
@@ -6427,6 +6429,7 @@ dependencies = [
  "async-trait",
  "either",
  "futures",
+ "hyper",
  "itertools",
  "lru 0.10.0",
  "madsim-tokio",

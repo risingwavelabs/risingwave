@@ -48,14 +48,36 @@ impl TracingContext {
         span
     }
 
-    pub fn to_protobuf(&self) -> HashMap<String, String> {
+    fn to_w3c(&self) -> HashMap<String, String> {
         let mut fields = HashMap::new();
         Propagator::new().inject_context(&self.0, &mut fields);
         fields
     }
 
-    pub fn from_protobuf(fields: &HashMap<String, String>) -> Self {
+    fn from_w3c(fields: &HashMap<String, String>) -> Self {
         let context = Propagator::new().extract(fields);
         Self(context)
+    }
+
+    pub fn to_protobuf(&self) -> HashMap<String, String> {
+        self.to_w3c()
+    }
+
+    pub fn from_protobuf(fields: &HashMap<String, String>) -> Self {
+        Self::from_w3c(fields)
+    }
+
+    pub fn to_http_headers(&self) -> http::HeaderMap {
+        let map = self.to_w3c();
+        http::HeaderMap::try_from(&map).unwrap_or_default()
+    }
+
+    pub fn from_http_headers(headers: &http::HeaderMap) -> Option<Self> {
+        let mut map = HashMap::new();
+        for key in ["traceparent", "tracestate"] {
+            let value = headers.get(key)?.to_str().ok()?;
+            map.insert(key.to_string(), value.to_string());
+        }
+        Some(Self::from_w3c(&map))
     }
 }

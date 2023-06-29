@@ -25,7 +25,7 @@ use futures::Future;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::env_var::is_ci;
 use tracing::level_filters::LevelFilter as Level;
-use tracing_subscriber::filter::{FilterFn, Targets};
+use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
