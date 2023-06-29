@@ -12,27 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
 use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-pub const RW_FUNCTIONS_TABLE_NAME: &str = "rw_functions";
+/// `rw_worker_nodes` contains all information about the compute nodes in the cluster.
+/// TODO: Add other type of nodes if necessary in the future.
+pub const RW_WORKER_NODES_TABLE_NAME: &str = "rw_worker_nodes";
 
-pub static RW_FUNCTIONS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
-    vec![
-        (DataType::Int32, "id"),
-        (DataType::Varchar, "name"),
-        (DataType::Int32, "schema_id"),
-        (DataType::Int32, "owner"),
-        (DataType::Varchar, "type"),
-        // [16, 20]
-        (DataType::List(Box::new(DataType::Int32)), "arg_type_ids"),
-        // 16
-        (DataType::Int32, "return_type_id"),
-        (DataType::Varchar, "language"),
-        (DataType::Varchar, "link"),
-        (DataType::Varchar, "acl"),
-    ]
-});
+pub const RW_WORKER_NODES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
+    (DataType::Int32, "id"),
+    (DataType::Varchar, "host"),
+    (DataType::Int16, "port"),
+    (DataType::Varchar, "type"),
+    (DataType::Varchar, "state"),
+    (DataType::Int32, "parallelism"),
+    (DataType::Boolean, "is_streaming"),
+    (DataType::Boolean, "is_serving"),
+    (DataType::Boolean, "is_unschedulable"),
+];
