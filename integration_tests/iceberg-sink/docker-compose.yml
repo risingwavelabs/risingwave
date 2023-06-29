@@ -10,22 +10,13 @@ x-airflow-common:
       AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
       AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
       AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-      # AIRFLOW__CORE__FERNET_KEY: ''
       AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-      # AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
       AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-      _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- apache-airflow-providers-apache-spark}
     volumes:
       - ./airflow_dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
       - ./iceberg-compaction-sql:/opt/airflow/iceberg-compaction-sql
-    # depends_on:
-    #   &airflow-common-depends-on
-    #   redis:
-    #     condition: service_healthy
-    #   postgres:
-    #     condition: service_healthy
+      - ./.airflow/logs:/opt/airflow/logs
+      - ./.airflow/plugins:/opt/airflow/plugins
 
 services:
   spark:
@@ -37,6 +28,8 @@ services:
       - AWS_SECRET_KEY=hummockadmin
     ports:
       - '7077:7077'
+    volumes:
+      - './spark-script:/spark-script'
   spark-worker:
     image: spark-air:latest
     environment:
@@ -129,7 +122,6 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - ./db:/var/lib/postgresql/data
-        # - postgresql_data:/var/lib/postgresql/data
   redis:
     image: 'redis:latest'
     expose:
@@ -140,21 +132,18 @@ services:
     ports:
       - 8080:8080
     depends_on:
-      # <<: *airflow-common-depends-on
       airflow-init:
           condition: service_completed_successfully
   airflow-scheduler:
     <<: *airflow-common
     command: scheduler
     depends_on:
-      # <<: *airflow-common-depends-on
       airflow-init:
           condition: service_completed_successfully
   airflow-worker:
     <<: *airflow-common
     command: celery worker
     depends_on:
-      # <<: *airflow-common-depends-on  
       airflow-init:
           condition: service_completed_successfully
   airflow-init:
@@ -163,9 +152,8 @@ services:
     environment:
       _AIRFLOW_DB_UPGRADE: 'true'
       _AIRFLOW_WWW_USER_CREATE: 'true'
-      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
-      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
-      # _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- apache-airflow-providers-apache-spark}
+      _AIRFLOW_WWW_USER_NAME: 'airflow'
+      _AIRFLOW_WWW_USER_PASSWORD: 'airflow'
 
 volumes:
   compute-node-0:
