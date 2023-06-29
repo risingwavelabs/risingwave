@@ -14,16 +14,17 @@
 
 package com.risingwave.connector.jdbc;
 
-import static java.lang.String.format;
-
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+
+import static java.lang.String.format;
 
 /** A dialect for a specific database. ref: https://github.com/apache/flink-connector-jdbc */
 public interface JdbcDialect {
@@ -34,7 +35,7 @@ public interface JdbcDialect {
      */
     SchemaTableName createSchemaTableName(String schemaName, String tableName);
 
-    /** Returns the noralized table name to be used in the SQL statements */
+    /** Returns the normalized table name to be used in the SQL statements */
     String getNormalizedTableName(SchemaTableName schemaTableName);
 
     /**
