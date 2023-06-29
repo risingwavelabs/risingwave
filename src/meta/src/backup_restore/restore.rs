@@ -81,6 +81,7 @@ async fn restore_hummock_version(
             hummock_storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
             "Version Checkpoint",
+            false,
         )
         .await,
     );

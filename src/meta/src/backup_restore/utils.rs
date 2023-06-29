@@ -82,6 +82,7 @@ pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotSto
         &opts.backup_storage_url,
         Arc::new(ObjectStoreMetrics::unused()),
         "Meta Backup",
+        false,
     )
     .await;
     let backup_store =

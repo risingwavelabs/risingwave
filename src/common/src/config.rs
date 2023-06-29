@@ -253,6 +253,10 @@ pub struct MetaConfig {
     #[serde(default)]
     pub do_not_config_object_storage_lifecycle: bool,
 
+    /// Whether the endpoint of object storage is force path style.
+    #[serde(default)]
+    pub is_force_path_style: bool,
+
     #[serde(default = "default::meta::partition_vnode_count")]
     pub partition_vnode_count: u32,
 

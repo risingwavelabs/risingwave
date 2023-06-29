@@ -297,11 +297,13 @@ where
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
         let deterministic_mode = env.opts.compaction_deterministic_test;
+        let is_force_path_style = env.opts.is_force_path_style;
         let object_store = Arc::new(
             parse_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
                 metrics.object_store_metric.clone(),
                 "Version Checkpoint",
+                is_force_path_style,
             )
             .await,
         );

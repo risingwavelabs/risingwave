@@ -159,6 +159,7 @@ For `./risedev apply-compose-deploy` users,
             self.hummock_url.strip_prefix("hummock+").unwrap(),
             Arc::new(ObjectStoreMetrics::unused()),
             "Hummock",
+            false,
         )
         .await;
 

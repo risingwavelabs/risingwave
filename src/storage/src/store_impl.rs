@@ -580,6 +580,7 @@ impl StateStoreImpl {
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
+                    false,
                 )
                 .await;
 
