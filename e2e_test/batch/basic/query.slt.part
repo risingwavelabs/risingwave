@@ -60,7 +60,7 @@ statement error Need column name in except list
 select * except (1) from t3;
 
 statement error Need column name in except list
-select * except ('test') from t;
+select * except ('test') from t3;
 
 statement error Division by zero
 select v1/0 from t3;
