@@ -17,7 +17,7 @@ package com.risingwave.connector.jdbc;
 /**
  * A simple class to hold the schema name and table name. A database dialect may extend this class
  * to customize the schema name and table name for the database. And the getNormalizedTableName()
- * should generage a normalized table name for the database.
+ * should generate a normalized table name for the database.
  */
 public class SchemaTableName {
     protected String schemaName;
