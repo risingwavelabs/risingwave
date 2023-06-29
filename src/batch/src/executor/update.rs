@@ -165,13 +165,13 @@ impl UpdateExecutor {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };
                 if let Some(chunk) = builder.append_one_row(row_insert) {
-                    notifiers.push(write_txn_data(chunk)?);
+                    notifiers.push(write_txn_data(chunk).await?);
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            notifiers.push(write_txn_data(chunk)?);
+            notifiers.push(write_txn_data(chunk).await?);
         }
 
         notifiers.push(write_handle.end()?);

@@ -172,8 +172,8 @@ mod tests {
 
     const TEST_TRANSACTION_ID: TxnId = 0;
 
-    #[test]
-    fn test_register_and_drop() {
+    #[tokio::test]
+    async fn test_register_and_drop() {
         let dml_manager = DmlManager::new(WorkerNodeId::default());
         let table_id = TableId::new(1);
         let table_version_id = INITIAL_TABLE_VERSION_ID;
@@ -201,27 +201,27 @@ mod tests {
         write_handle.begin().unwrap();
 
         // Should be able to write to the table.
-        write_handle.write_chunk(chunk()).unwrap();
+        write_handle.write_chunk(chunk()).await.unwrap();
 
         // After dropping the corresponding reader, the write handle should be not allowed to write.
         // This is to simulate the scale-in of DML executors.
         drop(r1);
 
-        write_handle.write_chunk(chunk()).unwrap_err();
+        write_handle.write_chunk(chunk()).await.unwrap_err();
 
         // Unless we create a new write handle.
         let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
         write_handle.begin().unwrap();
-        write_handle.write_chunk(chunk()).unwrap();
+        write_handle.write_chunk(chunk()).await.unwrap();
 
         // After dropping the last reader, no more writes are allowed.
         // This is to simulate the dropping of the table.
         drop(r2);
-        write_handle.write_chunk(chunk()).unwrap_err();
+        write_handle.write_chunk(chunk()).await.unwrap_err();
     }
 
-    #[test]
-    fn test_versioned() {
+    #[tokio::test]
+    async fn test_versioned() {
         let dml_manager = DmlManager::new(WorkerNodeId::default());
         let table_id = TableId::new(1);
 
@@ -249,7 +249,7 @@ mod tests {
         write_handle.begin().unwrap();
 
         // Should be able to write to the table.
-        write_handle.write_chunk(old_chunk()).unwrap();
+        write_handle.write_chunk(old_chunk()).await.unwrap();
 
         // Start reading the new version.
         let new_h = dml_manager
@@ -258,7 +258,7 @@ mod tests {
         let _new_r = new_h.stream_reader();
 
         // Still be able to write to the old write handle, if the channel is not closed.
-        write_handle.write_chunk(old_chunk()).unwrap();
+        write_handle.write_chunk(old_chunk()).await.unwrap();
 
         // However, it is no longer possible to create a `table_dml_handle` with the old version;
         dml_manager
@@ -271,7 +271,7 @@ mod tests {
             .unwrap();
         let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
         write_handle.begin().unwrap();
-        write_handle.write_chunk(new_chunk()).unwrap();
+        write_handle.write_chunk(new_chunk()).await.unwrap();
     }
 
     #[test]
