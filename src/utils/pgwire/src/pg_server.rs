@@ -90,7 +90,7 @@ pub trait Session: Send + Sync {
         prepare_statement: Self::PreparedStatement,
     ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError>;
 
-    fn describe_portral(
+    fn describe_portal(
         self: Arc<Self>,
         portal: Self::Portal,
     ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
@@ -98,6 +98,8 @@ pub trait Session: Send + Sync {
     fn user_authenticator(&self) -> &UserAuthenticator;
 
     fn id(&self) -> SessionId;
+
+    fn set_config(&self, key: &str, value: Vec<String>) -> Result<(), BoxedError>;
 }
 
 #[derive(Debug, Clone)]
@@ -232,17 +234,18 @@ mod tests {
             _sql: Statement,
             _format: types::Format,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
-            Ok(PgResponse::new_for_stream(
-                StatementType::SELECT,
-                None,
-                futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])]).boxed(),
-                vec![
-                    // 1043 is the oid of varchar type.
-                    // -1 is the type len of varchar type.
-                    PgFieldDescriptor::new("".to_string(), 1043, -1);
-                    1
-                ],
-            ))
+            Ok(PgResponse::builder(StatementType::SELECT)
+                .values(
+                    futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])])
+                        .boxed(),
+                    vec![
+                        // 1043 is the oid of varchar type.
+                        // -1 is the type len of varchar type.
+                        PgFieldDescriptor::new("".to_string(), 1043, -1);
+                        1
+                    ],
+                )
+                .into())
         }
 
         fn parse(
@@ -268,17 +271,18 @@ mod tests {
             self: Arc<Self>,
             _portal: String,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
-            Ok(PgResponse::new_for_stream(
-                StatementType::SELECT,
-                None,
-                futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])]).boxed(),
-                vec![
+            Ok(PgResponse::builder(StatementType::SELECT)
+                .values(
+                    futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])])
+                        .boxed(),
+                    vec![
                     // 1043 is the oid of varchar type.
                     // -1 is the type len of varchar type.
                     PgFieldDescriptor::new("".to_string(), 1043, -1);
                     1
                 ],
-            ))
+                )
+                .into())
         }
 
         fn describe_statement(
@@ -291,7 +295,7 @@ mod tests {
             ))
         }
 
-        fn describe_portral(
+        fn describe_portal(
             self: Arc<Self>,
             _portal: String,
         ) -> Result<Vec<PgFieldDescriptor>, BoxedError> {
@@ -304,6 +308,10 @@ mod tests {
 
         fn id(&self) -> SessionId {
             (0, 0)
+        }
+
+        fn set_config(&self, _key: &str, _value: Vec<String>) -> Result<(), BoxedError> {
+            Ok(())
         }
 
         fn take_notices(self: Arc<Self>) -> Vec<String> {

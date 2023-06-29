@@ -18,7 +18,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::worker_node::{Property, State};
@@ -226,28 +225,48 @@ where
 
     pub async fn update_schedulability(
         &self,
-        host_address: HostAddress,
+        worker_ids: &[u32],
         is_unschedulable: bool,
-    ) -> MetaResult<WorkerType> {
+    ) -> MetaResult<()> {
         let mut core = self.core.write().await;
-        let worker = core
+        let mut workers = core
             .workers
-            .get_mut(&WorkerKey(host_address.clone()))
-            .ok_or_else(|| anyhow!("Worker node does not exist!"))?;
-        let worker_type = worker.worker_type();
+            .values_mut()
+            .filter(|w| worker_ids.contains(&w.worker_id()))
+            .collect_vec();
+        if workers.len() != worker_ids.len() {
+            return Err(MetaError::invalid_parameter(format!(
+                "Tried to update schedulability of workers {:?}. Only found workers {:?}",
+                worker_ids,
+                workers.iter().map(|w| w.worker_id()).collect_vec()
+            )));
+        }
+        let workers_need_change = workers
+            .iter_mut()
+            .filter(|w| match w.worker_node.property.as_ref() {
+                None => true,
+                Some(p) => p.is_unschedulable != is_unschedulable,
+            })
+            .collect_vec();
+        if workers_need_change.is_empty() {
+            return Ok(());
+        }
 
-        if let Some(property) = &mut worker.worker_node.property {
-            if property.is_unschedulable == is_unschedulable {
-                return Ok(worker_type);
-            }
-            property.is_unschedulable = is_unschedulable;
-        } else {
+        if workers_need_change
+            .iter()
+            .any(|w| w.worker_node.property.is_none())
+        {
             return Err(MetaError::invalid_parameter(
                 "Worker node does not have property",
             ));
         }
-        Worker::insert(worker, self.env.meta_store()).await?;
-        Ok(worker_type)
+
+        for worker in workers_need_change {
+            let property = &mut worker.worker_node.property.as_mut().unwrap();
+            property.is_unschedulable = is_unschedulable;
+            Worker::insert(worker, self.env.meta_store()).await?;
+        }
+        Ok(())
     }
 
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {

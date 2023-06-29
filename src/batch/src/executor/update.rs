@@ -21,6 +21,7 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -48,6 +49,7 @@ pub struct UpdateExecutor {
     schema: Schema,
     identity: String,
     returning: bool,
+    txn_id: TxnId,
 }
 
 impl UpdateExecutor {
@@ -70,6 +72,7 @@ impl UpdateExecutor {
 
         let chunk_size = chunk_size.next_multiple_of(2);
         let table_schema = child.schema().clone();
+        let txn_id = dml_manager.gen_txn_id();
 
         Self {
             table_id,
@@ -87,6 +90,7 @@ impl UpdateExecutor {
             },
             identity,
             returning,
+            txn_id,
         }
     }
 }
@@ -111,10 +115,17 @@ impl UpdateExecutor {
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types.clone(), self.chunk_size);
 
+        let table_dml_handle = self
+            .dml_manager
+            .table_dml_handle(self.table_id, self.table_version_id)?;
+        let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
+
         let mut notifiers = Vec::new();
 
+        notifiers.push(write_handle.begin()?);
+
         // Transform the data chunk to a stream chunk, then write to the source.
-        let write_chunk = |chunk: DataChunk| async {
+        let write_txn_data = |chunk: DataChunk| {
             // TODO: if the primary key is updated, we should use plain `+,-` instead of `U+,U-`.
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
@@ -123,9 +134,10 @@ impl UpdateExecutor {
                 .collect_vec();
             let stream_chunk = StreamChunk::from_parts(ops, chunk);
 
-            self.dml_manager
-                .write_chunk(self.table_id, self.table_version_id, stream_chunk)
-                .await
+            #[cfg(debug_assertions)]
+            table_dml_handle.check_chunk_schema(&stream_chunk);
+
+            write_handle.write_chunk(stream_chunk)
         };
 
         #[for_await]
@@ -153,14 +165,16 @@ impl UpdateExecutor {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };
                 if let Some(chunk) = builder.append_one_row(row_insert) {
-                    notifiers.push(write_chunk(chunk).await?);
+                    notifiers.push(write_txn_data(chunk).await?);
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            notifiers.push(write_chunk(chunk).await?);
+            notifiers.push(write_txn_data(chunk).await?);
         }
+
+        notifiers.push(write_handle.end()?);
 
         // Wait for all chunks to be taken / written.
         let rows_updated = try_join_all(notifiers)
@@ -227,6 +241,7 @@ mod tests {
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::util::worker_util::WorkerNodeId;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_source::dml_manager::DmlManager;
 
@@ -236,7 +251,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_executor() -> Result<()> {
-        let dml_manager = Arc::new(DmlManager::default());
+        let dml_manager = Arc::new(DmlManager::new(WorkerNodeId::default()));
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();
@@ -302,22 +317,21 @@ mod tests {
             );
         });
 
+        reader.next().await.unwrap()?.into_begin().unwrap();
+
         // Read
         // As we set the chunk size to 5, we'll get 2 chunks. Note that the update records for one
         // row cannot be cut into two chunks, so the first chunk will actually have 6 rows.
         for updated_rows in [1..=3, 4..=5] {
-            let chunk = reader.next().await.unwrap()?;
-
+            let txn_msg = reader.next().await.unwrap()?;
+            let chunk = txn_msg.as_stream_chunk().unwrap();
             assert_eq!(
-                chunk.chunk.ops().chunks(2).collect_vec(),
+                chunk.ops().chunks(2).collect_vec(),
                 vec![&[Op::UpdateDelete, Op::UpdateInsert]; updated_rows.clone().count()]
             );
 
             assert_eq!(
-                chunk.chunk.columns()[0]
-                    .as_int32()
-                    .iter()
-                    .collect::<Vec<_>>(),
+                chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
                 updated_rows
                     .clone()
                     .flat_map(|i| [i * 2 - 1, i * 2]) // -1, +2, -3, +4, ...
@@ -326,10 +340,7 @@ mod tests {
             );
 
             assert_eq!(
-                chunk.chunk.columns()[1]
-                    .as_int32()
-                    .iter()
-                    .collect::<Vec<_>>(),
+                chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
                 updated_rows
                     .clone()
                     .flat_map(|i| [i * 2, i * 2 - 1]) // -2, +1, -4, +3, ...
@@ -337,6 +348,8 @@ mod tests {
                     .collect_vec()
             );
         }
+
+        reader.next().await.unwrap()?.into_end().unwrap();
 
         handle.await.unwrap();
 

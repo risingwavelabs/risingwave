@@ -30,11 +30,6 @@ impl<'i, R: Row> PartialEq for Project<'i, R> {
 impl<'i, R: Row> Eq for Project<'i, R> {}
 
 impl<'i, R: Row> Row for Project<'i, R> {
-    type Iter<'a> = std::iter::Map<std::slice::Iter<'i, usize>, impl FnMut(&'i usize) -> DatumRef<'a>>
-    where
-        R: 'a,
-        'i: 'a;
-
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         // SAFETY: we have checked that `self.indices` are all valid in `new`.
@@ -53,10 +48,11 @@ impl<'i, R: Row> Row for Project<'i, R> {
     }
 
     #[inline]
-    fn iter(&self) -> Self::Iter<'_> {
-        self.indices.iter().map(|&i|
-                // SAFETY: we have checked that `self.indices` are all valid in `new`.
-                unsafe { self.row.datum_at_unchecked(i) })
+    fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
+        self.indices
+            .iter()
+            // SAFETY: we have checked that `self.indices` are all valid in `new`.
+            .map(|&i| unsafe { self.row.datum_at_unchecked(i) })
     }
 }
 
