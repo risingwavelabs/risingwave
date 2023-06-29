@@ -247,39 +247,39 @@ def section_compaction(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_task_duration_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_task_duration_bucket')}[$__rate_interval])) by (le, job))",
                                 f"compact-task p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [50, 90, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_sst_duration_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_sst_duration_bucket')}[$__rate_interval])) by (le, job))",
                                 f"compact-key-range p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [90, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_get_table_id_total_time_duration_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_get_table_id_total_time_duration_bucket')}[$__rate_interval])) by (le, job))",
                                 f"get-table-id p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [90, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_remote_read_time_per_task_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_remote_read_time_bucket')}[$__rate_interval])) by (le, job))",
                                 f"remote-io p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [90, "max"],
                         ),
                         panels.target(
-                            f"histogram_quantile(0.99, sum(rate({metric('compute_refill_cache_duration_bucket')}[$__rate_interval])) by (le, instance))",
-                            "compute_apply_version_duration_p99 - {{instance}}",
+                            f"histogram_quantile(0.99, sum(rate({metric('compute_refill_cache_duration_bucket')}[$__rate_interval])) by (le))",
+                            "compute_apply_version_duration_p99",
                         ),
                         panels.target(
                             f"sum by(le)(rate({metric('compactor_compact_task_duration_sum')}[$__rate_interval])) / sum by(le)(rate({metric('compactor_compact_task_duration_count')}[$__rate_interval]))",
