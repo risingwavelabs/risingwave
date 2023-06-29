@@ -279,10 +279,15 @@ impl Binder {
                         for expr in exprs {
                             let bound = self.bind_expr(expr)?;
                             if let ExprImpl::InputRef(inner) = bound {
-                                except_indices.insert(inner.index);
+                                if !except_indices.insert(inner.index) {
+                                    return Err(ErrorCode::BindError(
+                                        "Duplicate entry in except list".into(),
+                                    )
+                                    .into());
+                                }
                             } else {
                                 return Err(ErrorCode::BindError(
-                                    "SELECT * EXCEPT (column name)".into(),
+                                    "Need column name in except list".into(),
                                 )
                                 .into());
                             }
@@ -300,13 +305,6 @@ impl Binder {
                                     .contains_key(&c.index)
                                 && !except_indices.contains(&c.index)
                         }));
-
-                    if exprs.is_empty() {
-                        return Err(ErrorCode::BindError(
-                            "SELECT * EXCEPT with no column left".into(),
-                        )
-                        .into());
-                    }
 
                     select_list.extend(exprs);
                     aliases.extend(names);
