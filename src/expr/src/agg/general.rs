@@ -202,89 +202,57 @@ fn bool_or(state: bool, input: bool) -> bool {
 mod tests {
     use std::sync::Arc;
 
+    use futures_util::FutureExt;
     use risingwave_common::array::*;
-    use risingwave_common::types::{DataType, Decimal};
+    use risingwave_common::types::{DataType, Datum, Decimal};
 
     use crate::agg::AggCall;
-    use crate::Result;
 
-    async fn eval_agg(
-        pretty: &str,
-        input: ArrayRef,
-        mut builder: ArrayBuilderImpl,
-    ) -> Result<ArrayImpl> {
+    fn eval_agg(pretty: &str, input: impl Array) -> Datum {
+        let input = Arc::new(input.into());
         let len = input.len();
         let input_chunk = DataChunk::new(vec![input], len).into();
-        let mut agg_state = crate::agg::build(AggCall::from_pretty(pretty))?;
+        let mut agg_state = crate::agg::build(AggCall::from_pretty(pretty)).unwrap();
+        let mut builder = agg_state.return_type().create_array_builder(1);
         agg_state
             .update_multi(&input_chunk, 0, input_chunk.cardinality())
-            .await?;
-        agg_state.output(&mut builder)?;
-        Ok(builder.finish())
+            .now_or_never()
+            .unwrap()
+            .unwrap();
+        agg_state.output(&mut builder).unwrap();
+        builder.finish().datum_at(0)
     }
 
-    #[tokio::test]
-    async fn vec_sum_int32() -> Result<()> {
+    #[test]
+    fn sum_int32() {
         let input = I32Array::from_iter([1, 2, 3]);
-        let actual = eval_agg(
-            "(sum:int8 $0:int4)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_int64();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, &[Some(6)]);
-        Ok(())
+        let actual = eval_agg("(sum:int8 $0:int4)", input);
+        assert_eq!(actual, Some(6i64.into()));
     }
 
-    #[tokio::test]
-    async fn vec_sum_int64() -> Result<()> {
+    #[test]
+    fn sum_int64() {
         let input = I64Array::from_iter([1, 2, 3]);
-        let actual = eval_agg(
-            "(sum:decimal $0:int8)",
-            Arc::new(input.into()),
-            DecimalArrayBuilder::new(0).into(),
-        )
-        .await?;
-        let actual: DecimalArray = actual.into();
-        let actual = actual.iter().collect::<Vec<Option<Decimal>>>();
-        assert_eq!(actual, vec![Some(Decimal::from(6))]);
-        Ok(())
+        let actual = eval_agg("(sum:decimal $0:int8)", input);
+        assert_eq!(actual, Some(Decimal::from(6).into()));
     }
 
-    #[tokio::test]
-    async fn vec_min_float32() -> Result<()> {
+    #[test]
+    fn min_float32() {
         let input = F32Array::from_iter([1.0, 2.0, 3.0]);
-        let actual = eval_agg(
-            "(min:float4 $0:float4)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_float32();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, &[Some(1.0.into())]);
-        Ok(())
+        let actual = eval_agg("(min:float4 $0:float4)", input);
+        assert_eq!(actual, Some(1.0f32.into()));
     }
 
-    #[tokio::test]
-    async fn vec_min_char() -> Result<()> {
+    #[test]
+    fn min_char() {
         let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg(
-            "(min:varchar $0:varchar)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, vec![Some("aa")]);
-        Ok(())
+        let actual = eval_agg("(min:varchar $0:varchar)", input);
+        assert_eq!(actual, Some("aa".into()));
     }
 
-    #[tokio::test]
-    async fn vec_min_list() -> Result<()> {
+    #[test]
+    fn min_list() {
         let input = ListArray::from_iter(
             [
                 Some(I32Array::from_iter([Some(0)]).into()),
@@ -293,165 +261,71 @@ mod tests {
             ],
             DataType::Int32,
         );
-        let actual = eval_agg(
-            "(min:int4[] $0:int4[])",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::List(ListArrayBuilder::with_type(
-                0,
-                DataType::List(Box::new(DataType::Int32)),
-            )),
-        )
-        .await?;
-        let actual = actual.as_list();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(
-            actual,
-            vec![Some(ListRef::ValueRef {
-                val: &ListValue::new(vec![Some(0i32.into())])
-            })]
-        );
-        Ok(())
+        let actual = eval_agg("(min:int4[] $0:int4[])", input);
+        assert_eq!(actual, Some(ListValue::new(vec![Some(0i32.into())]).into()));
     }
 
-    #[tokio::test]
-    async fn vec_max_char() -> Result<()> {
+    #[test]
+    fn max_char() {
         let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg(
-            "(max:varchar $0:varchar)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, vec![Some("b")]);
-        Ok(())
+        let actual = eval_agg("(max:varchar $0:varchar)", input);
+        assert_eq!(actual, Some("b".into()));
     }
 
-    #[tokio::test]
-    async fn vec_count_int32() -> Result<()> {
-        async fn test_case(input: ArrayImpl, expected: &[Option<i64>]) -> Result<()> {
-            let actual = eval_agg(
-                "(count:int8 $0:int4)",
-                Arc::new(input),
-                ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
-            )
-            .await?;
-            let actual = actual.as_int64();
-            let actual = actual.iter().collect::<Vec<_>>();
-            assert_eq!(actual, expected);
-            Ok(())
+    #[test]
+    fn count_int32() {
+        fn test_case(input: impl Array, expected: i64) {
+            let actual = eval_agg("(count:int8 $0:int4)", input);
+            assert_eq!(actual, Some(expected.into()));
         }
-        let input = I32Array::from_iter([1, 2, 3]);
-        let expected = &[Some(3)];
-        test_case(input.into(), expected).await?;
-        #[allow(clippy::needless_borrow)]
-        let input = I32Array::from_iter(&[]);
-        let expected = &[Some(0)];
-        test_case(input.into(), expected).await?;
-        let input = I32Array::from_iter([None]);
-        let expected = &[Some(0)];
-        test_case(input.into(), expected).await
+        test_case(I32Array::from_iter([1, 2, 3]), 3);
+        test_case(I32Array::from_iter([0; 0]), 0);
+        test_case(I32Array::from_iter([None]), 0);
     }
 
-    #[tokio::test]
-    async fn vec_distinct_sum_int32() -> Result<()> {
+    #[test]
+    fn distinct_sum_int32() {
         let input = I32Array::from_iter([1, 1, 3]);
-        let actual = eval_agg(
-            "(sum:int8 $0:int4 distinct)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_int64();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, &[Some(4)]);
-        Ok(())
+        let actual = eval_agg("(sum:int8 $0:int4 distinct)", input);
+        assert_eq!(actual, Some(4i64.into()));
     }
 
-    #[tokio::test]
-    async fn vec_distinct_sum_int64() -> Result<()> {
+    #[test]
+    fn distinct_sum_int64() {
         let input = I64Array::from_iter([1, 1, 3]);
-        let actual = eval_agg(
-            "(sum:decimal $0:int8 distinct)",
-            Arc::new(input.into()),
-            DecimalArrayBuilder::new(0).into(),
-        )
-        .await?;
-        let actual: &DecimalArray = (&actual).into();
-        let actual = actual.iter().collect::<Vec<Option<Decimal>>>();
-        assert_eq!(actual, vec![Some(Decimal::from(4))]);
-        Ok(())
+        let actual = eval_agg("(sum:decimal $0:int8 distinct)", input);
+        assert_eq!(actual, Some(Decimal::from(4).into()));
     }
 
-    #[tokio::test]
-    async fn vec_distinct_min_float32() -> Result<()> {
+    #[test]
+    fn distinct_min_float32() {
         let input = F32Array::from_iter([1.0, 2.0, 3.0]);
-        let actual = eval_agg(
-            "(min:float4 $0:float4 distinct)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_float32();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, &[Some(1.0.into())]);
-        Ok(())
+        let actual = eval_agg("(min:float4 $0:float4 distinct)", input);
+        assert_eq!(actual, Some(1.0f32.into()));
     }
 
-    #[tokio::test]
-    async fn vec_distinct_min_char() -> Result<()> {
+    #[test]
+    fn distinct_min_char() {
         let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg(
-            "(min:varchar $0:varchar distinct)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, vec![Some("aa")]);
-        Ok(())
+        let actual = eval_agg("(min:varchar $0:varchar distinct)", input);
+        assert_eq!(actual, Some("aa".into()));
     }
 
-    #[tokio::test]
-    async fn vec_distinct_max_char() -> Result<()> {
+    #[test]
+    fn distinct_max_char() {
         let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg(
-            "(max:varchar $0:varchar distinct)",
-            Arc::new(input.into()),
-            ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
-        )
-        .await?;
-        let actual = actual.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, vec![Some("b")]);
-        Ok(())
+        let actual = eval_agg("(max:varchar $0:varchar distinct)", input);
+        assert_eq!(actual, Some("b".into()));
     }
 
-    #[tokio::test]
-    async fn vec_distinct_count_int32() -> Result<()> {
-        async fn test_case(input: ArrayImpl, expected: &[Option<i64>]) -> Result<()> {
-            let actual = eval_agg(
-                "(count:int8 $0:int4 distinct)",
-                Arc::new(input),
-                ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
-            )
-            .await?;
-            let actual = actual.as_int64();
-            let actual = actual.iter().collect::<Vec<_>>();
-            assert_eq!(actual, expected);
-            Ok(())
+    #[test]
+    fn distinct_count_int32() {
+        fn test_case(input: impl Array, expected: i64) {
+            let actual = eval_agg("(count:int8 $0:int4 distinct)", input);
+            assert_eq!(actual, Some(expected.into()));
         }
-        let input = I32Array::from_iter([1, 1, 3]);
-        let expected = &[Some(2)];
-        test_case(input.into(), expected).await?;
-        #[allow(clippy::needless_borrow)]
-        let input = I32Array::from_iter(&[]);
-        let expected = &[Some(0)];
-        test_case(input.into(), expected).await?;
-        let input = I32Array::from_iter([None]);
-        let expected = &[Some(0)];
-        test_case(input.into(), expected).await
+        test_case(I32Array::from_iter([1, 1, 3]), 2);
+        test_case(I32Array::from_iter([0; 0]), 0);
+        test_case(I32Array::from_iter([None]), 0);
     }
 }
