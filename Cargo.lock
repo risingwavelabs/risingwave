@@ -5818,6 +5818,7 @@ dependencies = [
  "rusty-fork",
  "ryu",
  "serde",
+ "serde_bytes",
  "serde_default",
  "serde_json",
  "serde_with 2.3.3",
@@ -6181,6 +6182,7 @@ dependencies = [
  "thiserror",
  "tokio-stream",
  "tracing",
+ "tracing-futures",
  "uuid",
  "workspace-hack",
 ]
@@ -7073,6 +7075,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float 2.10.0",
+ "serde",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "416bda436f9aab92e02c8e10d49a15ddd339cea90b6e340fe51ed97abb548294"
+dependencies = [
  "serde",
 ]
 
