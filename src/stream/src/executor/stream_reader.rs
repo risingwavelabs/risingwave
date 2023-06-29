@@ -152,12 +152,13 @@ mod tests {
 
     const TEST_TRANSACTION_ID1: TxnId = 0;
     const TEST_TRANSACTION_ID2: TxnId = 1;
+    const TEST_DML_CHANNEL_INIT_PERMITS: usize = 32768;
 
     #[tokio::test]
     async fn test_pause_and_resume() {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
-        let table_dml_handle = TableDmlHandle::new(vec![]);
+        let table_dml_handle = TableDmlHandle::new(vec![], TEST_DML_CHANNEL_INIT_PERMITS);
 
         let source_stream = table_dml_handle.stream_reader().into_data_stream_for_test();
 

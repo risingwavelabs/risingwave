@@ -50,13 +50,13 @@ pub struct TableDmlHandle {
 
     /// All columns in this table.
     pub column_descs: Vec<ColumnDesc>,
+
+    /// The initial permits of the channel between each [`TableDmlHandle`] and the dml executors.
+    dml_channel_initial_permits: usize,
 }
 
-/// The max chunk permits of the channel between each [`TableDmlHandle`] and the dml executors.
-const DML_MAX_CHUNK_PERMITS: usize = 32 * 1024;
-
 impl TableDmlHandle {
-    pub fn new(column_descs: Vec<ColumnDesc>) -> Self {
+    pub fn new(column_descs: Vec<ColumnDesc>, dml_channel_initial_permits: usize) -> Self {
         let core = TableDmlHandleCore {
             changes_txs: vec![],
         };
@@ -64,6 +64,7 @@ impl TableDmlHandle {
         Self {
             core: RwLock::new(core),
             column_descs,
+            dml_channel_initial_permits,
         }
     }
 
@@ -71,7 +72,7 @@ impl TableDmlHandle {
         let mut core = self.core.write();
         // The `txn_channel` is used to limit the maximum chunk permits to avoid the producer
         // produces chunks too fast and cause an out of memory error.
-        let (tx, rx) = txn_channel(DML_MAX_CHUNK_PERMITS);
+        let (tx, rx) = txn_channel(self.dml_channel_initial_permits);
         core.changes_txs.push(tx);
 
         TableStreamReader { rx }
@@ -291,10 +292,10 @@ mod tests {
     const TEST_TRANSACTION_ID: TxnId = 0;
 
     fn new_table_dml_handle() -> TableDmlHandle {
-        TableDmlHandle::new(vec![ColumnDesc::unnamed(
-            ColumnId::from(0),
-            DataType::Int64,
-        )])
+        TableDmlHandle::new(
+            vec![ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)],
+            32768,
+        )
     }
 
     #[tokio::test]
