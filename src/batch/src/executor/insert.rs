@@ -162,7 +162,7 @@ impl InsertExecutor {
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);
 
-            write_handle.write_chunk(stream_chunk)
+            write_handle.write_chunk(stream_chunk).await
         };
 
         #[for_await]
@@ -270,7 +270,6 @@ mod tests {
     };
     use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::types::{DataType, StructType};
-    use risingwave_common::util::worker_util::WorkerNodeId;
     use risingwave_source::dml_manager::DmlManager;
     use risingwave_storage::hummock::CachePolicy;
     use risingwave_storage::memory::MemoryStateStore;
@@ -282,7 +281,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
-        let dml_manager = Arc::new(DmlManager::new(WorkerNodeId::default()));
+        let dml_manager = Arc::new(DmlManager::for_test());
         let store = MemoryStateStore::new();
 
         // Make struct field

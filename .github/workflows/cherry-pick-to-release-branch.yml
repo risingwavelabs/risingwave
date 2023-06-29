@@ -18,6 +18,6 @@ jobs:
         with:
           pr_branch: 'v0.19.0-rc'
           pr_labels: 'cherry-pick'
-          pr_body: 'Cherry picking #{old_pull_request_id} onto this branch'
+          pr_body: ${{ format('Cherry picking \#{0} onto branch v0.19.0-rc', github.event.number) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
