@@ -162,7 +162,7 @@ impl InsertExecutor {
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);
 
-            write_handle.write_chunk(stream_chunk)
+            write_handle.write_chunk(stream_chunk).await
         };
 
         #[for_await]

@@ -127,12 +127,12 @@ impl DeleteExecutor {
                 yield data_chunk.clone();
             }
             for chunk in builder.append_chunk(data_chunk) {
-                notifiers.push(write_txn_data(chunk)?);
+                notifiers.push(write_txn_data(chunk).await?);
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            notifiers.push(write_txn_data(chunk)?);
+            notifiers.push(write_txn_data(chunk).await?);
         }
 
         notifiers.push(write_handle.end()?);

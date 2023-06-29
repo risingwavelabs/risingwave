@@ -47,6 +47,25 @@ CREATE TABLE t_types (
     timestamp_column TIMESTAMP,
     interval_column INTERVAL,
     jsonb_column JSONB,
+);
+
+CREATE SCHEMA biz;
+CREATE TABLE biz.t_types (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR(100),
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB,
     array_column VARCHAR[],
     array_column2 DECIMAL[]
 );
