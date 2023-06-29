@@ -56,9 +56,7 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
-use crate::hummock::compaction::{
-    CompactStatus, LocalSelectorStatistic, ManualCompactionOption, ScaleCompactorInfo,
-};
+use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCompactionOption};
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
@@ -2092,47 +2090,6 @@ where
 
     pub fn cluster_manager(&self) -> &ClusterManagerRef<S> {
         &self.cluster_manager
-    }
-
-    pub async fn report_scale_compactor_info(&self) {
-        let info = self.get_scale_compactor_info().await;
-        let suggest_scale_out_core = info.scale_out_cores();
-        self.metrics
-            .scale_compactor_core_num
-            .set(suggest_scale_out_core as i64);
-
-        tracing::debug!(
-            "report_scale_compactor_info {:?} suggest_scale_out_core {:?}",
-            info,
-            suggest_scale_out_core
-        );
-    }
-
-    #[named]
-    pub async fn get_scale_compactor_info(&self) -> ScaleCompactorInfo {
-        let total_cpu_core = self.compactor_manager.total_cpu_core_num();
-        let total_running_cpu_core = self.compactor_manager.total_running_cpu_core_num();
-        let (version, configs) = {
-            let guard = read_lock!(self, versioning).await;
-            let c = self.get_compaction_group_map().await;
-            (guard.current_version.clone(), c)
-        };
-        let mut global_info = ScaleCompactorInfo {
-            total_cores: total_cpu_core as u64,
-            running_cores: total_running_cpu_core as u64,
-            ..Default::default()
-        };
-
-        let compaction = read_lock!(self, compaction).await;
-        for (group_id, status) in &compaction.compaction_statuses {
-            if let Some(levels) = version.levels.get(group_id) {
-                let info =
-                    status.get_compaction_info(levels, configs[group_id].compaction_config());
-                global_info.add(&info);
-                tracing::debug!("cg {} info {:?}", group_id, info);
-            }
-        }
-        global_info
     }
 
     fn notify_last_version_delta(&self, versioning: &Versioning) {
