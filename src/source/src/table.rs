@@ -23,11 +23,11 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_connector::source::StreamChunkWithState;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
+
+use crate::txn_channel::{txn_channel, Receiver, Sender};
 
 pub type TableDmlHandleRef = Arc<TableDmlHandle>;
-
-pub type ChangesSender = mpsc::UnboundedSender<(TxnMsg, oneshot::Sender<usize>)>;
 
 #[derive(Debug)]
 pub struct TableDmlHandleCore {
@@ -35,7 +35,7 @@ pub struct TableDmlHandleCore {
     ///
     /// When a `StreamReader` is created, a channel will be created and the sender will be
     /// saved here. The insert statement will take one channel randomly.
-    pub changes_txs: Vec<ChangesSender>,
+    pub changes_txs: Vec<Sender>,
 }
 
 /// [`TableDmlHandle`] is a special internal source to handle table updates from user,
@@ -52,6 +52,9 @@ pub struct TableDmlHandle {
     pub column_descs: Vec<ColumnDesc>,
 }
 
+/// The max chunk permits of the channel between each [`TableDmlHandle`] and the dml executors.
+const DML_MAX_CHUNK_PERMITS: usize = 32 * 1024;
+
 impl TableDmlHandle {
     pub fn new(column_descs: Vec<ColumnDesc>) -> Self {
         let core = TableDmlHandleCore {
@@ -66,8 +69,9 @@ impl TableDmlHandle {
 
     pub fn stream_reader(&self) -> TableStreamReader {
         let mut core = self.core.write();
-        // TODO: use an unbounded channel with permits to limit the buffer size for data chunks.
-        let (tx, rx) = mpsc::unbounded_channel();
+        // The `txn_channel` is used to limit the maximum chunk permits to avoid the producer
+        // produces chunks too fast and cause an out of memory error.
+        let (tx, rx) = txn_channel(DML_MAX_CHUNK_PERMITS);
         core.changes_txs.push(tx);
 
         TableStreamReader { rx }
@@ -89,7 +93,7 @@ impl TableDmlHandle {
                 )));
             }
             let len = guard.changes_txs.len();
-            let tx = guard
+            let sender = guard
                 .changes_txs
                 .get((txn_id % len as u64) as usize)
                 .context("no available table reader in streaming source executors")?
@@ -97,14 +101,14 @@ impl TableDmlHandle {
 
             drop(guard);
 
-            if tx.is_closed() {
+            if sender.is_closed() {
                 // Remove all closed channels.
                 self.core
                     .write()
                     .changes_txs
                     .retain(|sender| !sender.is_closed());
             } else {
-                return Ok(WriteHandle::new(txn_id, tx));
+                return Ok(WriteHandle::new(txn_id, sender));
             }
         }
     }
@@ -143,7 +147,7 @@ enum TxnState {
 /// rollback the transaction.
 pub struct WriteHandle {
     txn_id: TxnId,
-    tx: mpsc::UnboundedSender<(TxnMsg, oneshot::Sender<usize>)>,
+    tx: Sender,
     // Indicate whether `TxnMsg::End` or `TxnMsg::Rollback` have been sent to the write channel.
     txn_state: TxnState,
 }
@@ -157,7 +161,7 @@ impl Drop for WriteHandle {
 }
 
 impl WriteHandle {
-    pub fn new(txn_id: TxnId, tx: mpsc::UnboundedSender<(TxnMsg, oneshot::Sender<usize>)>) -> Self {
+    pub fn new(txn_id: TxnId, tx: Sender) -> Self {
         Self {
             txn_id,
             tx,
@@ -168,18 +172,19 @@ impl WriteHandle {
     pub fn begin(&mut self) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_state, TxnState::Init);
         self.txn_state = TxnState::Begin;
-        self.write_txn_msg(TxnMsg::Begin(self.txn_id))
+        self.write_txn_control_msg(TxnMsg::Begin(self.txn_id))
     }
 
-    pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+    pub async fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_state, TxnState::Begin);
-        self.write_txn_msg(TxnMsg::Data(self.txn_id, chunk))
+        self.write_txn_data_msg(TxnMsg::Data(self.txn_id, chunk))
+            .await
     }
 
     pub fn end(mut self) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_state, TxnState::Begin);
         self.txn_state = TxnState::Committed;
-        self.write_txn_msg(TxnMsg::End(self.txn_id))
+        self.write_txn_control_msg(TxnMsg::End(self.txn_id))
     }
 
     pub fn rollback(mut self) -> Result<oneshot::Receiver<usize>> {
@@ -189,7 +194,7 @@ impl WriteHandle {
     fn rollback_inner(&mut self) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_state, TxnState::Begin);
         self.txn_state = TxnState::Rollback;
-        self.write_txn_msg(TxnMsg::Rollback(self.txn_id))
+        self.write_txn_control_msg(TxnMsg::Rollback(self.txn_id))
     }
 
     /// Asynchronously write txn messages into table. Changes written here will be simply passed to
@@ -197,10 +202,24 @@ impl WriteHandle {
     ///
     /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,
     /// and the `usize` represents the cardinality of this chunk.
-    fn write_txn_msg(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
+    async fn write_txn_data_msg(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_id, txn_msg.txn_id());
         let (notifier_tx, notifier_rx) = oneshot::channel();
-        match self.tx.send((txn_msg, notifier_tx)) {
+        match self.tx.send(txn_msg, notifier_tx).await {
+            Ok(_) => Ok(notifier_rx),
+
+            // It's possible that the source executor is scaled in or migrated, so the channel
+            // is closed. To guarantee the transactional atomicity, bail out.
+            Err(_) => Err(RwError::from("write txn_msg channel closed".to_string())),
+        }
+    }
+
+    /// Same as the `write_txn_data_msg`, but it is not an async function and send control message
+    /// without permit acquiring.
+    fn write_txn_control_msg(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
+        assert_eq!(self.txn_id, txn_msg.txn_id());
+        let (notifier_tx, notifier_rx) = oneshot::channel();
+        match self.tx.send_immediate(txn_msg, notifier_tx) {
             Ok(_) => Ok(notifier_rx),
 
             // It's possible that the source executor is scaled in or migrated, so the channel
@@ -217,7 +236,7 @@ impl WriteHandle {
 #[derive(Debug)]
 pub struct TableStreamReader {
     /// The receiver of the changes channel.
-    rx: mpsc::UnboundedReceiver<(TxnMsg, oneshot::Sender<usize>)>,
+    rx: Receiver,
 }
 
 impl TableStreamReader {
@@ -294,7 +313,7 @@ mod tests {
                     vec![I64Array::from_iter([$i]).into_ref()],
                     None,
                 );
-                write_handle.write_chunk(chunk).unwrap();
+                write_handle.write_chunk(chunk).await.unwrap();
             }};
         }
 
@@ -335,7 +354,7 @@ mod tests {
             vec![I64Array::from_iter([1]).into_ref()],
             None,
         );
-        write_handle.write_chunk(chunk).unwrap();
+        write_handle.write_chunk(chunk).await.unwrap();
 
         assert_matches!(reader.next().await.unwrap()?, txn_msg => {
             let chunk = txn_msg.as_stream_chunk().unwrap();
