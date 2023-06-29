@@ -32,7 +32,9 @@ use crate::parser::unified::avro::{
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{
+    ByteStreamSourceParser, SourceConfigList, SourceStreamChunkRowWriter, WriteGuard,
+};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const BEFORE: &str = "before";
@@ -57,7 +59,11 @@ pub struct DebeziumAvroParserConfig {
 }
 
 impl DebeziumAvroParserConfig {
-    pub async fn new(props: &HashMap<String, String>, schema_location: &str) -> Result<Self> {
+    pub async fn new(
+        props: &HashMap<String, String>,
+        source_config_list: &SourceConfigList,
+    ) -> Result<Self> {
+        let schema_location = &source_config_list.row_schema_location;
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
@@ -335,7 +341,14 @@ mod tests {
         let props = convert_args!(hashmap!(
             "kafka.topic" => "dbserver1.inventory.customers"
         ));
-        let config = DebeziumAvroParserConfig::new(&props, "http://127.0.0.1:8081").await?;
+        let config = DebeziumAvroParserConfig::new(
+            &props,
+            &SourceConfigList {
+                row_schema_location: "http://127.0.0.1:8081".into(),
+                ..Default::default()
+            },
+        )
+        .await?;
         let columns = config
             .map_to_columns()?
             .into_iter()

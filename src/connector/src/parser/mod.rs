@@ -485,6 +485,24 @@ pub enum SpecificParserConfig {
     DebeziumAvro(DebeziumAvroParserConfig),
 }
 
+/// TODO: Not sure what else do we need, so String first
+#[derive(Debug, Clone, Default)]
+pub struct SourceConfigList {
+    pub use_schema_registry: bool,
+    pub row_schema_location: String,
+    pub proto_message_name: String,
+}
+
+impl From<&StreamSourceInfo> for SourceConfigList {
+    fn from(info: &StreamSourceInfo) -> Self {
+        Self {
+            use_schema_registry: info.use_schema_registry,
+            row_schema_location: info.row_schema_location.clone(),
+            proto_message_name: info.proto_message_name.clone(),
+        }
+    }
+}
+
 impl SpecificParserConfig {
     pub fn get_source_format(&self) -> SourceFormat {
         match self {
@@ -517,26 +535,19 @@ impl SpecificParserConfig {
         info: &StreamSourceInfo,
         props: &HashMap<String, String>,
     ) -> Result<Self> {
+        let source_info_config = SourceConfigList::from(info);
         let conf = match format {
             SourceFormat::Csv => SpecificParserConfig::Csv(CsvParserConfig {
                 delimiter: info.csv_delimiter as u8,
                 has_header: info.csv_has_header,
             }),
             SourceFormat::Avro => SpecificParserConfig::Avro(
-                AvroParserConfig::new(
-                    props,
-                    &info.row_schema_location,
-                    info.use_schema_registry,
-                    false,
-                    None,
-                )
-                .await?,
+                AvroParserConfig::new(props, &source_info_config, false, None).await?,
             ),
             SourceFormat::UpsertAvro => SpecificParserConfig::UpsertAvro(
                 AvroParserConfig::new(
                     props,
-                    &info.row_schema_location,
-                    info.use_schema_registry,
+                    &source_info_config,
                     true,
                     if info.upsert_avro_primary_key.is_empty() {
                         None
@@ -547,13 +558,8 @@ impl SpecificParserConfig {
                 .await?,
             ),
             SourceFormat::Protobuf => SpecificParserConfig::Protobuf(
-                ProtobufParserConfig::new(
-                    props,
-                    &info.row_schema_location,
-                    &info.proto_message_name,
-                    info.use_schema_registry,
-                )
-                .await?,
+                ProtobufParserConfig::new(props, &source_info_config, &info.proto_message_name)
+                    .await?,
             ),
             SourceFormat::Json => SpecificParserConfig::Json,
             SourceFormat::UpsertJson => SpecificParserConfig::UpsertJson,
@@ -563,7 +569,7 @@ impl SpecificParserConfig {
             SourceFormat::CanalJson => SpecificParserConfig::CanalJson,
             SourceFormat::Native => SpecificParserConfig::Native,
             SourceFormat::DebeziumAvro => SpecificParserConfig::DebeziumAvro(
-                DebeziumAvroParserConfig::new(props, &info.row_schema_location).await?,
+                DebeziumAvroParserConfig::new(props, &source_info_config).await?,
             ),
             _ => {
                 return Err(RwError::from(ProtocolError(

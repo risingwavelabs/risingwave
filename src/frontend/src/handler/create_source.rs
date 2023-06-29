@@ -23,7 +23,7 @@ use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolErro
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
-    AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
+    AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig, SourceConfigList,
 };
 use risingwave_connector::source::cdc::{
     CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
@@ -67,8 +67,11 @@ async fn extract_avro_table_schema(
 ) -> Result<Vec<ColumnCatalog>> {
     let conf = AvroParserConfig::new(
         with_properties,
-        schema.row_schema_location.0.as_str(),
-        schema.use_schema_registry,
+        &SourceConfigList {
+            row_schema_location: schema.row_schema_location.0.clone(),
+            use_schema_registry: schema.use_schema_registry,
+            ..Default::default()
+        },
         false,
         None,
     )
@@ -90,8 +93,11 @@ async fn extract_upsert_avro_table_schema(
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     let conf = AvroParserConfig::new(
         with_properties,
-        schema.row_schema_location.0.as_str(),
-        schema.use_schema_registry,
+        &SourceConfigList {
+            row_schema_location: schema.row_schema_location.0.clone(),
+            use_schema_registry: schema.use_schema_registry,
+            ..Default::default()
+        },
         true,
         None,
     )
@@ -132,9 +138,14 @@ async fn extract_debezium_avro_table_pk_columns(
     schema: &DebeziumAvroSchema,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
-    let conf =
-        DebeziumAvroParserConfig::new(with_properties, schema.row_schema_location.0.as_str())
-            .await?;
+    let conf = DebeziumAvroParserConfig::new(
+        with_properties,
+        &SourceConfigList {
+            row_schema_location: schema.row_schema_location.0.clone(),
+            ..Default::default()
+        },
+    )
+    .await?;
     Ok(conf.extract_pks()?.drain(..).map(|c| c.name).collect())
 }
 
@@ -143,9 +154,14 @@ async fn extract_debezium_avro_table_schema(
     schema: &DebeziumAvroSchema,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let conf =
-        DebeziumAvroParserConfig::new(with_properties, schema.row_schema_location.0.as_str())
-            .await?;
+    let conf = DebeziumAvroParserConfig::new(
+        with_properties,
+        &SourceConfigList {
+            row_schema_location: schema.row_schema_location.0.clone(),
+            ..Default::default()
+        },
+    )
+    .await?;
     let vec_column_desc = conf.map_to_columns()?;
     let column_catalog = vec_column_desc
         .into_iter()
@@ -164,9 +180,12 @@ async fn extract_protobuf_table_schema(
 ) -> Result<Vec<ColumnCatalog>> {
     let parser = ProtobufParserConfig::new(
         &with_properties,
-        &schema.row_schema_location.0,
+        &SourceConfigList {
+            use_schema_registry: schema.use_schema_registry,
+            row_schema_location: schema.row_schema_location.0.clone(),
+            ..Default::default()
+        },
         &schema.message_name.0,
-        schema.use_schema_registry,
     )
     .await?;
     let column_descs = parser.map_to_columns()?;

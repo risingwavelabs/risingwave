@@ -32,7 +32,9 @@ use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{
+    ByteStreamSourceParser, SourceConfigList, SourceStreamChunkRowWriter, WriteGuard,
+};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -56,15 +58,15 @@ pub struct AvroParserConfig {
 impl AvroParserConfig {
     pub async fn new(
         props: &HashMap<String, String>,
-        schema_location: &str,
-        use_schema_registry: bool,
+        source_config_list: &SourceConfigList,
         enable_upsert: bool,
         upsert_primary_key_column_name: Option<String>,
     ) -> Result<Self> {
+        let schema_location = &source_config_list.row_schema_location;
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
-        if use_schema_registry {
+        if source_config_list.use_schema_registry {
             let kafka_topic = get_kafka_topic(props)?;
             let client = Client::new(url, props)?;
             let resolver = ConfluentSchemaResolver::new(client);
@@ -285,7 +287,7 @@ mod test {
         AvroParserConfig,
     };
     use crate::parser::unified::avro::unix_epoch_days;
-    use crate::parser::SourceStreamChunkBuilder;
+    use crate::parser::{SourceConfigList, SourceStreamChunkBuilder};
     use crate::source::SourceColumnDesc;
 
     fn test_data_path(file_name: &str) -> String {
@@ -350,7 +352,17 @@ mod test {
 
     async fn new_avro_conf_from_local(file_name: &str) -> error::Result<AvroParserConfig> {
         let schema_path = "file://".to_owned() + &test_data_path(file_name);
-        AvroParserConfig::new(&HashMap::new(), schema_path.as_str(), false, false, None).await
+        AvroParserConfig::new(
+            &HashMap::new(),
+            &SourceConfigList {
+                row_schema_location: schema_path.clone(),
+                use_schema_registry: false,
+                ..Default::default()
+            },
+            false,
+            None,
+        )
+        .await
     }
 
     async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {

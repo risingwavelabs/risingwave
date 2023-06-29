@@ -31,7 +31,9 @@ use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{
+    ByteStreamSourceParser, SourceConfigList, SourceStreamChunkRowWriter, WriteGuard,
+};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug, Clone)]
@@ -51,14 +53,14 @@ pub struct ProtobufParserConfig {
 impl ProtobufParserConfig {
     pub async fn new(
         props: &HashMap<String, String>,
-        location: &str,
+        source_config_list: &SourceConfigList,
         message_name: &str,
-        use_schema_registry: bool,
     ) -> Result<Self> {
+        let location = &source_config_list.row_schema_location;
         let url = Url::parse(location)
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
 
-        let schema_bytes = if use_schema_registry {
+        let schema_bytes = if source_config_list.use_schema_registry {
             let kafka_topic = get_kafka_topic(props)?;
             let client = Client::new(url, props)?;
             compile_file_descriptor_from_schema_registry(
@@ -104,7 +106,7 @@ impl ProtobufParserConfig {
         })?;
         Ok(Self {
             message_descriptor,
-            confluent_wire_type: use_schema_registry,
+            confluent_wire_type: source_config_list.use_schema_registry,
         })
     }
 
@@ -408,8 +410,16 @@ mod test {
         let location = schema_dir() + "/simple-schema";
         let message_name = "test.TestRecord";
         println!("location: {}", location);
-        let conf =
-            ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false).await?;
+        let conf = ProtobufParserConfig::new(
+            &HashMap::new(),
+            &SourceConfigList {
+                row_schema_location: location.to_string(),
+                use_schema_registry: false,
+                ..Default::default()
+            },
+            message_name,
+        )
+        .await?;
         let parser = ProtobufParser::new(Vec::default(), conf, Default::default())?;
         let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
@@ -446,8 +456,16 @@ mod test {
         let location = schema_dir() + "/complex-schema";
         let message_name = "test.User";
 
-        let conf =
-            ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false).await?;
+        let conf = ProtobufParserConfig::new(
+            &HashMap::new(),
+            &SourceConfigList {
+                row_schema_location: location.to_string(),
+                use_schema_registry: false,
+                ..Default::default()
+            },
+            message_name,
+        )
+        .await?;
         let columns = conf.map_to_columns().unwrap();
 
         assert_eq!(columns[0].name, "id".to_string());
@@ -486,9 +504,17 @@ mod test {
     async fn test_refuse_recursive_proto_message() {
         let location = schema_dir() + "/proto_recursive/recursive.pb";
         let message_name = "recursive.ComplexRecursiveMessage";
-        let conf = ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false)
-            .await
-            .unwrap();
+        let conf = ProtobufParserConfig::new(
+            &HashMap::new(),
+            &SourceConfigList {
+                row_schema_location: location.to_string(),
+                use_schema_registry: false,
+                ..Default::default()
+            },
+            message_name,
+        )
+        .await
+        .unwrap();
         let columns = conf.map_to_columns();
         // expect error message:
         // "Err(Protocol error: circular reference detected:
