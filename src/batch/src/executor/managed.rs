@@ -26,7 +26,7 @@ use tracing::Instrument;
 use crate::executor::{BoxedExecutor, Executor};
 use crate::task::ShutdownMsg;
 
-/// `ManagerExecutor` build on top of the underlying executor. For now, it do two things:
+/// `ManagedExecutor` build on top of the underlying executor. For now, it does two things:
 /// 1. the duration of performance-critical operations will be traced, such as open/next/close.
 /// 2. receive shutdown signal
 pub struct ManagedExecutor {
@@ -58,9 +58,9 @@ impl Executor for ManagedExecutor {
 
         loop {
             let shutdown = pin!(self.shutdown_rx.changed());
-            let res2 = select(shutdown, child_stream.next().instrument(span.clone())).await;
+            let res = select(shutdown, child_stream.next().instrument(span.clone())).await;
 
-            match res2 {
+            match res {
                 Either::Left((res, _)) => {
                     res.expect("shutdown_rx should not drop before task finish");
                     break;

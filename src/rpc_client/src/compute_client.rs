@@ -155,7 +155,7 @@ impl ComputeClient {
                 task_id: Some(task_id),
                 plan: Some(plan),
                 epoch: Some(epoch),
-                tracing_context: TracingContext::from_span(&tracing::Span::current()).to_protobuf(),
+                tracing_context: TracingContext::from_current_span().to_protobuf(),
             })
             .await?
             .into_inner())

@@ -72,8 +72,6 @@ pub struct QueryExecution {
     shutdown_tx: Sender<QueryMessage>,
     /// Identified by process_id, secret_key. Query in the same session should have same key.
     pub session_id: SessionId,
-
-    span: tracing::Span,
 }
 
 struct QueryRunner {
@@ -96,7 +94,6 @@ impl QueryExecution {
     #[allow(clippy::too_many_arguments)]
     pub fn new(query: Query, session_id: SessionId) -> Self {
         let query = Arc::new(query);
-        let span = tracing::info_span!("distributed_execute", query_id = ?query.query_id);
         let (sender, receiver) = channel(100);
         let state = QueryState::Pending {
             msg_receiver: receiver,
@@ -107,8 +104,6 @@ impl QueryExecution {
             state: RwLock::new(state),
             shutdown_tx: sender,
             session_id,
-
-            span,
         }
     }
 
@@ -133,15 +128,13 @@ impl QueryExecution {
         // Because the snapshot may be released before all stages are scheduled, we only pass a
         // reference of `pinned_snapshot`. Its ownership will be moved into `QueryRunner` so that it
         // can control when to release the snapshot.
-        let stage_executions = self.span.in_scope(|| {
-            self.gen_stage_executions(
-                &pinned_snapshot,
-                context,
-                worker_node_manager,
-                compute_client_pool.clone(),
-                catalog_reader,
-            )
-        });
+        let stage_executions = self.gen_stage_executions(
+            &pinned_snapshot,
+            context,
+            worker_node_manager,
+            compute_client_pool.clone(),
+            catalog_reader,
+        );
 
         match cur_state {
             QueryState::Pending { msg_receiver } => {
@@ -161,7 +154,12 @@ impl QueryExecution {
                     query_metrics,
                 };
 
-                let span = self.span.clone();
+                let span = tracing::info_span!(
+                    "distributed_execute",
+                    query_id = %self.query.query_id,
+                    epoch = ?pinned_snapshot.get_batch_query_epoch(),
+                );
+
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
 
                 // Not trace the error here, it will be processed in scheduler.

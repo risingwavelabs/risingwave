@@ -31,7 +31,6 @@ enum-as-inner = "0.5"
 fixedbitset = "0.4.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-tracing-futures = { version = "0.2", features = ["futures-03"] }
 iana-time-zone = "0.1"
 itertools = "0.10"
 lazy_static = "1"
@@ -78,6 +77,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+tracing-futures = { version = "0.2", features = ["futures-03"] }
 uuid = "1"
 
 [target.'cfg(not(madsim))'.dependencies]

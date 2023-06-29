@@ -136,7 +136,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
                 }),
             }),
             epoch: Some(self.epoch.clone()),
-            tracing_context: TracingContext::none().to_protobuf(), // TODO
+            tracing_context: TracingContext::from_current_span().to_protobuf(),
         };
 
         let prost_exchange_source = PbExchangeSource {

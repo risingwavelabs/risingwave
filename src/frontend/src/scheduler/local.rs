@@ -66,8 +66,6 @@ pub struct LocalQueryExecution {
     auth_context: Arc<AuthContext>,
     cancel_flag: Option<Tripwire<Result<DataChunk, BoxedError>>>,
     worker_node_manager: WorkerNodeSelector,
-
-    span: tracing::Span,
 }
 
 impl LocalQueryExecution {
@@ -85,8 +83,6 @@ impl LocalQueryExecution {
             snapshot.support_barrier_read(),
         );
 
-        let span = tracing::info_span!("local_execute", query_id = %query.query_id, sql);
-
         Self {
             sql,
             query,
@@ -95,7 +91,6 @@ impl LocalQueryExecution {
             auth_context,
             cancel_flag: Some(cancel_flag),
             worker_node_manager,
-            span,
         }
     }
 
@@ -134,8 +129,9 @@ impl LocalQueryExecution {
     }
 
     pub fn run(self) -> BoxedDataChunkStream {
-        let span = self.span.clone();
-        Box::pin(self.run_inner().instrument(span.clone()))
+        let span =
+            tracing::info_span!("local_execute", query_id = %self.query.query_id, sql = self.sql);
+        Box::pin(self.run_inner().instrument(span))
     }
 
     pub fn stream_rows(mut self) -> LocalQueryStream {
@@ -248,7 +244,7 @@ impl LocalQueryExecution {
                 };
                 assert!(sources.is_empty());
 
-                let tracing_context = TracingContext::from_span(&self.span).to_protobuf();
+                let tracing_context = TracingContext::from_current_span().to_protobuf();
 
                 if let Some(table_scan_info) = second_stage.table_scan_info.clone()
                     && let Some(vnode_bitmaps) = table_scan_info.partitions()
