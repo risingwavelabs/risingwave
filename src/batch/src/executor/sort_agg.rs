@@ -218,11 +218,10 @@ impl SortAggExecutor {
         agg_states: &mut [BoxedAggState],
         agg_builders: &mut [ArrayBuilderImpl],
     ) -> Result<()> {
-        agg_states
-            .iter_mut()
-            .zip_eq_fast(agg_builders)
-            .try_for_each(|(state, builder)| state.output(builder))
-            .map_err(Into::into)
+        for (aggregator, builder) in agg_states.iter_mut().zip_eq_fast(agg_builders) {
+            builder.append(aggregator.output()?);
+        }
+        Ok(())
     }
 
     fn create_builders(

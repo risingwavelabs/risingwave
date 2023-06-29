@@ -311,7 +311,6 @@ impl FunctionAttr {
 
     /// Generate build function for aggregate function.
     fn generate_agg_build_fn(&self) -> Result<TokenStream2> {
-        let ret_variant: TokenStream2 = types::variant(&self.ret).parse().unwrap();
         let ret_owned: TokenStream2 = types::owned_type(&self.ret).parse().unwrap();
         let state_type: TokenStream2 = match &self.state {
             Some(state) => state.parse().unwrap(),
@@ -422,16 +421,10 @@ impl FunctionAttr {
                         self.state = #assign_state;
                         Ok(())
                     }
-                    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-                        let ArrayBuilderImpl::#ret_variant(builder) = builder else {
-                            bail!("output type mismatch. expect: {}", stringify!(#ret_variant));
-                        };
+                    fn output(&mut self) -> Result<Datum> {
                         #[allow(clippy::mem_replace_option_with_none)]
-                        match std::mem::replace(&mut self.state, #init_state) {
-                            Some(state) => builder.append(Some(<#ret_owned>::from(state).as_scalar_ref())),
-                            None => builder.append_null(),
-                        }
-                        Ok(())
+                        let state = std::mem::replace(&mut self.state, #init_state);
+                        Ok(state.map(|s| <#ret_owned>::from(s).into()))
                     }
                     fn estimated_size(&self) -> usize {
                         EstimateSize::estimated_size(self)

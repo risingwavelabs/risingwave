@@ -123,18 +123,17 @@ impl Aggregator for PercentileDisc {
         Ok(())
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+    fn output(&mut self) -> Result<Datum> {
         if let Some(fractions) = self.fractions && !self.data.is_empty() {
             let rn = fractions * self.data.len() as f64;
             if fractions == 0.0 {
-                builder.append(Some(self.data[0].clone()));
+                Ok(Some(self.data[0].clone()))
             } else {
-                builder.append(Some(self.data[f64::ceil(rn) as usize - 1].clone()));
+                Ok(Some(self.data[f64::ceil(rn) as usize - 1].clone()))
             }
         } else {
-            builder.append(Datum::None);
+            Ok(None)
         }
-        Ok(())
     }
 
     fn estimated_size(&self) -> usize {

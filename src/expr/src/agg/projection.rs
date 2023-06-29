@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ArrayBuilderImpl, StreamChunk};
-use risingwave_common::types::DataType;
+use risingwave_common::array::StreamChunk;
+use risingwave_common::types::{DataType, Datum};
 
 use super::{Aggregator, BoxedAggState};
 use crate::Result;
@@ -51,8 +51,8 @@ impl Aggregator for Projection {
             .await
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        self.inner.output(builder)
+    fn output(&mut self) -> Result<Datum> {
+        self.inner.output()
     }
 
     fn estimated_size(&self) -> usize {

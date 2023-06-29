@@ -47,14 +47,8 @@ mod tests {
         let mut agg = crate::agg::build(AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
-        let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        let expected = "aaa,bbb,ccc,ddd";
-        assert_eq!(actual, &[Some(expected)]);
+        assert_eq!(agg.output()?, Some("aaa,bbb,ccc,ddd".into()));
         Ok(())
     }
 
@@ -70,14 +64,8 @@ mod tests {
         let mut agg = crate::agg::build(AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
-        let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        let expected = "aaa_cccddd";
-        assert_eq!(actual, &[Some(expected)]);
+        assert_eq!(agg.output()?, Some("aaa_cccddd".into()));
         Ok(())
     }
 
@@ -93,14 +81,8 @@ mod tests {
         let mut agg = crate::agg::build(AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $3:desc $0:desc)",
         ))?;
-        let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        let expected = "ccc_bbb_ddd_aaa";
-        assert_eq!(actual, &[Some(expected)]);
+        assert_eq!(agg.output()?, Some("ccc_bbb_ddd_aaa".into()));
         Ok(())
     }
 }

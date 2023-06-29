@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::array::*;
-use risingwave_common::bail;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
@@ -55,13 +54,9 @@ impl Aggregator for CountStar {
         Ok(())
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        let res = std::mem::replace(&mut self.result, 0);
-        let ArrayBuilderImpl::Int64(b) = builder else {
-            bail!("Unexpected builder for count(*).");
-        };
-        b.append(Some(res));
-        Ok(())
+    fn output(&mut self) -> Result<Datum> {
+        let res = std::mem::take(&mut self.result);
+        Ok(Some(res.into()))
     }
 
     fn estimated_size(&self) -> usize {

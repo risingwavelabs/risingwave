@@ -269,10 +269,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 has_next = true;
                 array_len += 1;
                 key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
-                states
-                    .iter_mut()
-                    .zip_eq_fast(&mut agg_builders)
-                    .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
+                for (aggregator, builder) in states.iter_mut().zip_eq_fast(&mut agg_builders) {
+                    builder.append(aggregator.output()?);
+                }
             }
             if !has_next {
                 break; // exit loop

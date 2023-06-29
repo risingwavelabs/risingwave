@@ -108,7 +108,7 @@ impl Aggregator for PercentileCont {
         Ok(())
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+    fn output(&mut self) -> Result<Datum> {
         if let Some(fractions) = self.fractions && !self.data.is_empty() {
             let rn = fractions * (self.data.len() - 1) as f64;
             let crn = f64::ceil(rn);
@@ -119,11 +119,10 @@ impl Aggregator for PercentileCont {
                 (crn - rn) * self.data[frn as usize]
                     + (rn - frn) * self.data[crn as usize]
             };
-            builder.append(Some(ScalarImpl::Float64(result.into())));
+            Ok(Some(result.into()))
         } else {
-            builder.append(Datum::None);
+            Ok(None)
         }
-        Ok(())
     }
 
     fn estimated_size(&self) -> usize {

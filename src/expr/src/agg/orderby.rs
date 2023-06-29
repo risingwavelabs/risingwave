@@ -14,10 +14,10 @@
 
 use anyhow::anyhow;
 use futures_util::FutureExt;
-use risingwave_common::array::{ArrayBuilderImpl, Op, RowRef, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -98,7 +98,7 @@ impl Aggregator for ProjectionOrderBy {
         Ok(())
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+    fn output(&mut self) -> Result<Datum> {
         // sort
         self.unordered_values_estimated_heap_size = 0;
         let mut rows = std::mem::take(&mut self.unordered_values);
@@ -121,7 +121,7 @@ impl Aggregator for ProjectionOrderBy {
                 .now_or_never()
                 .expect("todo: support async aggregation with orderby")?;
         }
-        self.inner.output(builder)
+        self.inner.output()
     }
 
     fn estimated_size(&self) -> usize {

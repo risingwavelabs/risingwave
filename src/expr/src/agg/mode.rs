@@ -115,9 +115,8 @@ impl Aggregator for Mode {
         Ok(())
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        builder.append(self.cur_mode.clone());
-        Ok(())
+    fn output(&mut self) -> Result<Datum> {
+        Ok(self.cur_mode.clone())
     }
 
     fn estimated_size(&self) -> usize {

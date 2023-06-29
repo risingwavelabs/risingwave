@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use dyn_clone::DynClone;
-use risingwave_common::array::{ArrayBuilderImpl, StreamChunk};
-use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::array::StreamChunk;
+use risingwave_common::types::{DataType, DataTypeName, Datum};
 
 use crate::sig::FuncSigDebug;
 use crate::{ExprError, Result};
@@ -64,9 +64,8 @@ pub trait Aggregator: Send + DynClone + 'static {
         end_row_id: usize,
     ) -> Result<()>;
 
-    /// `output` the aggregator to `ArrayBuilder` with input with type checked at runtime.
-    /// After `output` the aggregator is reset to initial state.
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
+    /// Output the aggregate state and reset to initial state.
+    fn output(&mut self) -> Result<Datum>;
 
     /// The estimated size of the state.
     fn estimated_size(&self) -> usize;

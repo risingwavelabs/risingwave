@@ -41,10 +41,8 @@ impl From<State> for ListValue {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-    use risingwave_common::array::{Array, ListValue, StreamChunk};
+    use risingwave_common::array::{ListValue, StreamChunk};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{DataType, ScalarRef};
 
     use crate::agg::AggCall;
     use crate::Result;
@@ -57,58 +55,28 @@ mod tests {
             + 456
             + 789",
         );
-        let return_type = DataType::List(Box::new(DataType::Int32));
         let mut agg = crate::agg::build(AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
-        let mut builder = return_type.create_array_builder(0);
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.into_list();
-        let actual = actual
-            .iter()
-            .map(|v| v.map(|s| s.to_owned_scalar()))
-            .collect_vec();
+        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
+        let actual = agg.output()?;
         assert_eq!(
             actual,
-            vec![Some(ListValue::new(vec![
-                Some(123.into()),
-                Some(456.into()),
-                Some(789.into())
-            ]))]
+            Some(ListValue::new(vec![Some(123.into()), Some(456.into()), Some(789.into())]).into())
         );
         Ok(())
     }
 
     #[tokio::test]
     async fn test_array_agg_empty() -> Result<()> {
-        let return_type = DataType::List(Box::new(DataType::Int32));
         let mut agg = crate::agg::build(AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
-        let mut builder = return_type.create_array_builder(0);
-        agg.output(&mut builder)?;
 
-        let output = builder.finish();
-        let actual = output.into_list();
-        let actual = actual
-            .iter()
-            .map(|v| v.map(|s| s.to_owned_scalar()))
-            .collect_vec();
-        assert_eq!(actual, vec![None]);
+        assert_eq!(agg.output()?, None);
 
         let chunk = StreamChunk::from_pretty(
             " i
             + .",
         );
-        let mut builder = return_type.create_array_builder(0);
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.into_list();
-        let actual = actual
-            .iter()
-            .map(|v| v.map(|s| s.to_owned_scalar()))
-            .collect_vec();
-        assert_eq!(actual, vec![Some(ListValue::new(vec![None]))]);
-
+        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
+        assert_eq!(agg.output()?, Some(ListValue::new(vec![None]).into()));
         Ok(())
     }
 
@@ -121,27 +89,21 @@ mod tests {
             + 789  2
             + 321  9",
         );
-        let return_type = DataType::List(Box::new(DataType::Int32));
         let mut agg = crate::agg::build(AggCall::from_pretty(
             "(array_agg:int4[] $0:int4 orderby $1:asc $0:desc)",
         ))?;
-        let mut builder = return_type.create_array_builder(0);
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.into_list();
-        let actual = actual
-            .iter()
-            .map(|v| v.map(|s| s.to_owned_scalar()))
-            .collect_vec();
+        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
         assert_eq!(
-            actual,
-            vec![Some(ListValue::new(vec![
-                Some(789.into()),
-                Some(456.into()),
-                Some(123.into()),
-                Some(321.into())
-            ]))]
+            agg.output()?,
+            Some(
+                ListValue::new(vec![
+                    Some(789.into()),
+                    Some(456.into()),
+                    Some(123.into()),
+                    Some(321.into()),
+                ])
+                .into()
+            )
         );
         Ok(())
     }

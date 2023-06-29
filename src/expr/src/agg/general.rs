@@ -213,14 +213,12 @@ mod tests {
         let len = input.len();
         let input_chunk = DataChunk::new(vec![input], len).into();
         let mut agg_state = crate::agg::build(AggCall::from_pretty(pretty)).unwrap();
-        let mut builder = agg_state.return_type().create_array_builder(1);
         agg_state
             .update_multi(&input_chunk, 0, input_chunk.cardinality())
             .now_or_never()
             .unwrap()
             .unwrap();
-        agg_state.output(&mut builder).unwrap();
-        builder.finish().datum_at(0)
+        agg_state.output().unwrap()
     }
 
     #[test]

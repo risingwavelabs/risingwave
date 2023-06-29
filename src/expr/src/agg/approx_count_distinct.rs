@@ -16,7 +16,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use risingwave_common::array::*;
-use risingwave_common::bail;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
@@ -143,16 +142,10 @@ impl Aggregator for ApproxCountDistinct {
         Ok(())
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+    fn output(&mut self) -> Result<Datum> {
         let result = self.calculate_result();
         self.registers = [0; NUM_OF_REGISTERS];
-        match builder {
-            ArrayBuilderImpl::Int64(b) => {
-                b.append(Some(result));
-                Ok(())
-            }
-            _ => bail!("Unexpected builder for count(*)."),
-        }
+        Ok(Some(result.into()))
     }
 
     fn estimated_size(&self) -> usize {
@@ -162,10 +155,8 @@ impl Aggregator for ApproxCountDistinct {
 
 #[cfg(test)]
 mod tests {
-
-    use risingwave_common::array::{
-        ArrayBuilder, ArrayBuilderImpl, I32Array, I64ArrayBuilder, StreamChunk,
-    };
+    use futures_util::FutureExt;
+    use risingwave_common::array::{I32Array, StreamChunk};
     use risingwave_common::types::DataType;
 
     use super::*;
@@ -175,43 +166,20 @@ mod tests {
         DataChunk::new(vec![col], size).into()
     }
 
-    #[tokio::test]
-    async fn test_update_single() {
+    #[test]
+    fn test() {
         let inputs_size = [20000, 10000, 5000];
         let inputs_start = [0, 20000, 30000];
 
         let mut agg = ApproxCountDistinct::new(DataType::Int64);
-        let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
-
-        for i in 0..3 {
-            let data_chunk = generate_chunk(inputs_size[i], inputs_start[i]);
-            for row_id in 0..data_chunk.cardinality() {
-                agg.update_single(&data_chunk, row_id).await.unwrap();
-            }
-            agg.output(&mut builder).unwrap();
-        }
-
-        let array = builder.finish();
-        assert_eq!(array.len(), 3);
-    }
-
-    #[tokio::test]
-    async fn test_update_multi() {
-        let inputs_size = [20000, 10000, 5000];
-        let inputs_start = [0, 20000, 30000];
-
-        let mut agg = ApproxCountDistinct::new(DataType::Int64);
-        let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
         for i in 0..3 {
             let data_chunk = generate_chunk(inputs_size[i], inputs_start[i]);
             agg.update_multi(&data_chunk, 0, data_chunk.cardinality())
-                .await
+                .now_or_never()
+                .unwrap()
                 .unwrap();
-            agg.output(&mut builder).unwrap();
+            agg.output().unwrap();
         }
-
-        let array = builder.finish();
-        assert_eq!(array.len(), 3);
     }
 }

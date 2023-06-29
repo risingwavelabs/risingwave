@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ArrayBuilderImpl, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::{Aggregator, BoxedAggState};
 use crate::expr::ExpressionRef;
@@ -91,8 +91,8 @@ impl Aggregator for Filter {
         }
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        self.inner.output(builder)
+    fn output(&mut self) -> Result<Datum> {
+        self.inner.output()
     }
 
     fn estimated_size(&self) -> usize {
@@ -132,7 +132,7 @@ mod tests {
             Ok(())
         }
 
-        fn output(&mut self, _builder: &mut ArrayBuilderImpl) -> Result<()> {
+        fn output(&mut self) -> Result<Datum> {
             unimplemented!()
         }
 
