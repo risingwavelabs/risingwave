@@ -52,16 +52,34 @@ impl LogStoreBufferInner {
     }
 
     fn add_item(&mut self, item: LogStoreBufferItem) {
-        if let LogStoreBufferItem::StreamChunk(_) = &item {
-            self.stream_chunk_count += 1;
-            if self.stream_chunk_count > self.max_stream_chunk_count {
-                warn!(
-                    "stream chunk count {} exceeds max stream chunk count {}",
-                    self.stream_chunk_count, self.max_stream_chunk_count
-                );
+        if let LogStoreBufferItem::StreamChunk(_) = item {
+            unreachable!("StreamChunk should call try_add_item")
+        }
+        assert!(
+            self.try_add_item(item).is_none(),
+            "call on item other than StreamChunk should always succeed"
+        );
+    }
+
+    /// Try adding a `LogStoreBufferItem` to the buffer. If the stream chunk count exceeds the
+    /// maximum count, it will return the original stream chunk if we are adding a stream chunk.
+    fn try_add_item(&mut self, item: LogStoreBufferItem) -> Option<StreamChunk> {
+        match item {
+            LogStoreBufferItem::StreamChunk(chunk) => {
+                if !self.can_add_stream_chunk() {
+                    Some(chunk)
+                } else {
+                    self.stream_chunk_count += 1;
+                    self.queue
+                        .push_front(LogStoreBufferItem::StreamChunk(chunk));
+                    None
+                }
+            }
+            item => {
+                self.queue.push_front(item);
+                None
             }
         }
-        self.queue.push_front(item);
     }
 
     fn pop_item(&mut self) -> Option<LogStoreBufferItem> {
@@ -137,13 +155,7 @@ impl LogStoreBufferSender {
 
     pub(crate) fn try_add_stream_chunk(&self, chunk: StreamChunk) -> Option<StreamChunk> {
         let mut buffer_inner = self.buffer_inner();
-        if buffer_inner.can_add_stream_chunk() {
-            buffer_inner.add_item(LogStoreBufferItem::StreamChunk(chunk));
-            self.update_notify.notify_waiters();
-            None
-        } else {
-            Some(chunk)
-        }
+        buffer_inner.try_add_item(LogStoreBufferItem::StreamChunk(chunk))
     }
 
     pub(crate) fn barrier(&self, is_checkpoint: bool, next_epoch: u64) {
