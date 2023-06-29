@@ -234,17 +234,18 @@ mod tests {
             _sql: Statement,
             _format: types::Format,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
-            Ok(PgResponse::new_for_stream(
-                StatementType::SELECT,
-                None,
-                futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])]).boxed(),
-                vec![
-                    // 1043 is the oid of varchar type.
-                    // -1 is the type len of varchar type.
-                    PgFieldDescriptor::new("".to_string(), 1043, -1);
-                    1
-                ],
-            ))
+            Ok(PgResponse::builder(StatementType::SELECT)
+                .values(
+                    futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])])
+                        .boxed(),
+                    vec![
+                        // 1043 is the oid of varchar type.
+                        // -1 is the type len of varchar type.
+                        PgFieldDescriptor::new("".to_string(), 1043, -1);
+                        1
+                    ],
+                )
+                .into())
         }
 
         fn parse(
@@ -270,17 +271,18 @@ mod tests {
             self: Arc<Self>,
             _portal: String,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
-            Ok(PgResponse::new_for_stream(
-                StatementType::SELECT,
-                None,
-                futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])]).boxed(),
-                vec![
+            Ok(PgResponse::builder(StatementType::SELECT)
+                .values(
+                    futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])])
+                        .boxed(),
+                    vec![
                     // 1043 is the oid of varchar type.
                     // -1 is the type len of varchar type.
                     PgFieldDescriptor::new("".to_string(), 1043, -1);
                     1
                 ],
-            ))
+                )
+                .into())
         }
 
         fn describe_statement(

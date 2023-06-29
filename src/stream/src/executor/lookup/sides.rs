@@ -101,7 +101,7 @@ pub async fn poll_until_barrier(stream: impl MessageStream, expected_barrier: Ba
     for item in stream {
         match item? {
             Message::Watermark(_) => {
-                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
             }
             c @ Message::Chunk(_) => yield c,
             Message::Barrier(b) => {
@@ -156,10 +156,10 @@ pub async fn align_barrier(left: impl MessageStream, right: impl MessageStream) 
                     break 'inner (SideStatus::RightBarrier, b);
                 }
                 Some(Either::Right(Ok(Message::Watermark(_)))) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
                 Some(Either::Left(Ok(Message::Watermark(_)))) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
                 Some(Either::Left(Err(e))) | Some(Either::Right(Err(e))) => return Err(e),
                 None => {
@@ -238,10 +238,10 @@ pub async fn stream_lookup_arrange_prev_epoch(
                     }
                 }
                 Either::Left(Message::Watermark(_)) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
                 Either::Right(Message::Watermark(_)) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
             }
         }
@@ -253,7 +253,7 @@ pub async fn stream_lookup_arrange_prev_epoch(
                 .context("unexpected close of barrier aligner")??
             {
                 Either::Left(Message::Watermark(_)) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
                 Either::Left(Message::Chunk(msg)) => yield ArrangeMessage::Stream(msg),
                 Either::Left(Message::Barrier(b)) => {
@@ -322,10 +322,10 @@ pub async fn stream_lookup_arrange_this_epoch(
                     break 'inner Status::ArrangeReady;
                 }
                 Either::Left(Message::Watermark(_)) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
                 Either::Right(Message::Watermark(_)) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
             }
         };
@@ -344,10 +344,10 @@ pub async fn stream_lookup_arrange_this_epoch(
                         break;
                     }
                     Either::Left(Message::Watermark(_)) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                     }
                     Either::Right(Message::Watermark(_)) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                     }
                     Either::Right(_) => unreachable!(),
                 }
@@ -376,7 +376,7 @@ pub async fn stream_lookup_arrange_this_epoch(
                         break;
                     }
                     Either::Right(Message::Watermark(_)) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                     }
                 }
             },
