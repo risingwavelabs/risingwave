@@ -31,7 +31,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
-use crate::model::{MetadataModel, Transactional, Worker, INVALID_EXPIRE_AT};
+use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker, INVALID_EXPIRE_AT};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
 
@@ -47,6 +47,7 @@ impl PartialEq<Self> for WorkerKey {
         self.0.eq(&other.0)
     }
 }
+
 impl Eq for WorkerKey {}
 
 impl Hash for WorkerKey {
@@ -232,21 +233,34 @@ where
         let worker_ids: HashSet<_> = worker_ids.into_iter().collect();
 
         let mut core = self.core.write().await;
-
         let mut txn = Transaction::default();
+        let mut var_txns = vec![];
+
         for worker in core.workers.values_mut() {
             if worker_ids.contains(&worker.worker_node.id) {
                 if let Some(property) = worker.worker_node.property.as_mut() {
                     let target = schedulability == Schedulability::Unschedulable;
                     if property.is_unschedulable != target {
-                        property.is_unschedulable = target;
-                        worker.upsert_in_transaction(&mut txn)?;
+                        let mut var_txn = VarTransaction::new(worker);
+                        var_txn
+                            .worker_node
+                            .property
+                            .as_mut()
+                            .unwrap()
+                            .is_unschedulable = target;
+
+                        var_txn.apply_to_txn(&mut txn)?;
+                        var_txns.push(var_txn);
                     }
                 }
             }
         }
 
         self.env.meta_store().txn(txn).await?;
+
+        for var_txn in var_txns {
+            var_txn.commit();
+        }
 
         Ok(())
     }
@@ -728,6 +742,53 @@ mod tests {
                 .unwrap();
         }
         assert_cluster_manager(&cluster_manager, fake_parallelism).await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cluster_manager_schedulability() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+
+        let cluster_manager = Arc::new(
+            ClusterManager::new(env.clone(), Duration::new(0, 0))
+                .await
+                .unwrap(),
+        );
+        let worker_node = cluster_manager
+            .add_worker_node(
+                WorkerType::ComputeNode,
+                HostAddress {
+                    host: "127.0.0.1".to_string(),
+                    port: 1,
+                },
+                AddNodeProperty {
+                    worker_node_parallelism: 1,
+                    is_streaming: true,
+                    is_serving: true,
+                    is_unschedulable: false,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(!worker_node.property.as_ref().unwrap().is_unschedulable);
+
+        cluster_manager
+            .activate_worker_node(worker_node.get_host().unwrap().clone())
+            .await
+            .unwrap();
+
+        cluster_manager
+            .update_schedulability(vec![worker_node.id], Schedulability::Unschedulable)
+            .await
+            .unwrap();
+
+        let worker_nodes = cluster_manager.list_active_streaming_compute_nodes().await;
+
+        let worker_node = &worker_nodes[0];
+
+        assert!(worker_node.property.as_ref().unwrap().is_unschedulable);
 
         Ok(())
     }

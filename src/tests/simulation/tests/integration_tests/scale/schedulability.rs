@@ -13,18 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::time::Duration;
 
 use anyhow::Result;
-use itertools::Itertools;
-use madsim::time::sleep;
-use rand::seq::SliceRandom;
 use risingwave_common::hash::ParallelUnitId;
-use risingwave_pb::common::{ParallelUnit, WorkerNode, WorkerType};
-use risingwave_pb::meta::GetClusterInfoResponse;
-use risingwave_pb::stream_plan::FragmentTypeFlag;
-use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
-use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
+use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_simulation::cluster::{Cluster, Configuration};
 
 #[madsim::test]
 async fn test_cordon_normal() -> Result<()> {
@@ -101,17 +94,29 @@ async fn test_cordon_no_shuffle_failed() -> Result<()> {
         })
         .collect();
 
-    session.run("create table t (v int);").await?;
+    session.run("create table t1 (v int);").await?;
 
     let cordoned_worker = workers.pop().unwrap();
 
     cluster.cordon_worker(cordoned_worker.id).await?;
 
+    session.run("create table t2 (v int);").await?;
+
     let result = session
-        .run("create materialized view mv1 as select * from t;")
+        .run("create materialized view mv1 as select * from t1;")
         .await;
 
     assert!(result.is_err());
+
+    session
+        .run("create materialized view mv2 as select * from t2;")
+        .await?;
+
+    cluster.uncordon_worker(cordoned_worker.id).await?;
+
+    session
+        .run("create materialized view mv1 as select * from t1;")
+        .await?;
 
     Ok(())
 }
