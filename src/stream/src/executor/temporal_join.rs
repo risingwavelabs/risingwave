@@ -384,6 +384,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                 .set(self.right_table.cache.len() as i64);
             match msg? {
                 InternalMessage::Chunk(chunk) => {
+                    // Compact chunk, otherwise the following keys and chunk rows might fail to zip.
+                    let chunk = chunk.compact();
                     let mut builder = StreamChunkBuilder::new(
                         self.chunk_size,
                         &self.schema.data_types(),
