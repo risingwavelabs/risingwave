@@ -156,7 +156,7 @@ impl QueryExecution {
 
                 let span = tracing::info_span!(
                     "distributed_execute",
-                    query_id = %self.query.query_id,
+                    query_id = self.query.query_id.id,
                     epoch = ?pinned_snapshot.get_batch_query_epoch(),
                 );
 

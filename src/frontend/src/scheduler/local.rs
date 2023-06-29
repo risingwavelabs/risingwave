@@ -129,8 +129,11 @@ impl LocalQueryExecution {
     }
 
     pub fn run(self) -> BoxedDataChunkStream {
-        let span =
-            tracing::info_span!("local_execute", query_id = %self.query.query_id, sql = self.sql);
+        let span = tracing::info_span!(
+            "local_execute",
+            query_id = self.query.query_id.id,
+            epoch = ?self.snapshot.get_batch_query_epoch(),
+        );
         Box::pin(self.run_inner().instrument(span))
     }
 

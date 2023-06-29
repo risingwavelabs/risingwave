@@ -219,7 +219,12 @@ impl StageExecution {
                 // Change state before spawn runner.
                 *s = StageState::Started;
 
-                let span = tracing::info_span!("stage", stage_id = self.stage.id, query_id = %self.stage.query_id);
+                let span = tracing::info_span!(
+                    "stage",
+                    "otel.name" = format!("Stage {}-{}", self.stage.query_id.id, self.stage.id),
+                    query_id = self.stage.query_id.id,
+                    stage_id = self.stage.id,
+                );
                 spawn(async move { runner.run(receiver).instrument(span).await });
 
                 tracing::trace!(
