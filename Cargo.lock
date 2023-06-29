@@ -6183,6 +6183,7 @@ dependencies = [
  "thiserror",
  "tokio-stream",
  "tracing",
+ "tracing-futures",
  "uuid",
  "workspace-hack",
 ]
