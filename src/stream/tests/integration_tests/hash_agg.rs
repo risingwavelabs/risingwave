@@ -90,7 +90,7 @@ async fn test_hash_agg_count_sum() {
               +----+---+---+---+---+
             - !barrier 3
         "#]],
-        SnapshotOptions { sort_chunk: true },
+        SnapshotOptions::default().sort_chunk(true),
     );
 }
 
@@ -166,7 +166,7 @@ async fn test_hash_agg_min() {
               +----+---+---+-------+
             - !barrier 3
         "#]],
-        SnapshotOptions { sort_chunk: true },
+        SnapshotOptions::default().sort_chunk(true),
     );
 }
 
@@ -247,7 +247,7 @@ async fn test_hash_agg_min_append_only() {
               +----+---+---+---+
             - !barrier 3
         "#]],
-        SnapshotOptions { sort_chunk: true },
+        SnapshotOptions::default().sort_chunk(true),
     );
 }
 
@@ -389,7 +389,7 @@ async fn test_hash_agg_emit_on_window_close() {
                 val: 20
               - !barrier 6
         "#]],
-        SnapshotOptions { sort_chunk: true },
+        SnapshotOptions::default().sort_chunk(true),
     )
     .await;
 }
