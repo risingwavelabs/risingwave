@@ -112,8 +112,8 @@ pub struct SourceContext {
 impl Default for SourceContext {
     fn default() -> Self {
         Self {
-            source_info: Default::default(),
-            metrics: Arc::new(Default::default()),
+            source_info: SourceInfo::default(),
+            metrics: Arc::new(SourceMetrics::default()),
             source_ctrl_opts: SourceCtrlOpts::for_test(),
             error_suppressor: None,
         }
