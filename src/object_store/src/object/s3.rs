@@ -601,17 +601,22 @@ impl S3ObjectStore {
                 let sdk_config_loader = aws_config::from_env()
                     .retry_config(RetryConfig::standard().with_max_attempts(4));
                 let sdk_config: aws_config::SdkConfig = sdk_config_loader.load().await;
-                let config = match is_force_path_style {
-                    true => aws_sdk_s3::config::Builder::from(&sdk_config)
-                        .endpoint_url(endpoint)
-                        .force_path_style(true)
-                        .build(),
-                    false => aws_sdk_s3::config::Builder::from(&sdk_config)
-                        .endpoint_url(endpoint)
-                        .build(),
+                #[cfg(madsim)]
+                let client = Client::new(&sdk_config);
+                #[cfg(not(madsim))]
+                let client = {
+                    let config = match is_force_path_style {
+                        true => aws_sdk_s3::config::Builder::from(&sdk_config)
+                            .endpoint_url(endpoint)
+                            .force_path_style(true)
+                            .build(),
+                        false => aws_sdk_s3::config::Builder::from(&sdk_config)
+                            .endpoint_url(endpoint)
+                            .build(),
+                    };
+                    Client::from_conf(config)
                 };
-
-                Client::from_conf(config)
+                client
             }
             Err(_) => {
                 // s3
