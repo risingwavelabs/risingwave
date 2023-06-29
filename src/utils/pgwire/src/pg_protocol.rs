@@ -29,7 +29,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
-use tracing::{error, warn};
+use tracing::{error, warn, Instrument};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::ResultCache;
@@ -370,7 +370,11 @@ where
         for stmt in stmts {
             let session = session.clone();
             // execute query
-            let res = session.clone().run_one_query(stmt, Format::Text).await;
+            let res = session
+                .clone()
+                .run_one_query(stmt.clone(), Format::Text)
+                .instrument(tracing::info_span!("run_one_query", %stmt))
+                .await;
             for notice in session.take_notices() {
                 self.stream
                     .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
