@@ -6262,7 +6262,6 @@ dependencies = [
  "itertools",
  "jni",
  "madsim-tokio",
- "once_cell",
  "prost",
  "risingwave_common",
  "risingwave_expr",
