@@ -39,6 +39,7 @@ use futures::future::try_join_all;
 use moka::future::Cache;
 use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
 #[cfg(madsim)]
@@ -152,11 +153,23 @@ pub trait ExtraInfoSource: Send + Sync {
 
 pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
 
+/// Add tracing context to the request from the current tracing span. Used internally by the RPC
+/// `client_method_impl` macros.
+// TODO: use `tonic::Layer` to intercept the request and add tracing context.
+pub fn add_tracing_context<T>(request: T) -> tonic::Request<T> {
+    let mut request = tonic::Request::new(request);
+    request
+        .extensions_mut()
+        .insert(TracingContext::from_current_span());
+    request
+}
+
 #[macro_export]
 macro_rules! rpc_client_method_impl {
     ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
         $(
             pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
+                let request = $crate::add_tracing_context(request);
                 Ok(self
                     .$client
                     .to_owned()
@@ -173,6 +186,7 @@ macro_rules! meta_rpc_client_method_impl {
     ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
         $(
             pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
+                let request = $crate::add_tracing_context(request);
                 let mut client = self.core.read().await.$client.to_owned();
                 match client.$fn_name(request).await {
                     Ok(resp) => Ok(resp.into_inner()),
