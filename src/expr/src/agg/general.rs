@@ -120,6 +120,15 @@ fn count<T>(state: i64, _: T, retract: bool) -> i64 {
     }
 }
 
+#[aggregate("count() -> int64", init_state = "Some(0)")]
+fn count_star(state: i64, retract: bool) -> i64 {
+    if retract {
+        state - 1
+    } else {
+        state + 1
+    }
+}
+
 /// Returns true if all non-null input values are true, otherwise false.
 ///
 /// # Example
@@ -419,6 +428,37 @@ mod tests {
             + .",
         );
         test_agg("(count:int8 $0:int4)", input, Some(0i64.into()));
+    }
+
+    #[test]
+    fn count_star() {
+        // when there is no element, output should be `0`.
+        let input = StreamChunk::from_pretty("i");
+        test_agg("(count:int8)", input, Some(0i64.into()));
+
+        // insert one element to state
+        let input = StreamChunk::from_pretty(
+            " i
+            + 0",
+        );
+        test_agg("(count:int8)", input, Some(1i64.into()));
+
+        // delete one element from state
+        let input = StreamChunk::from_pretty(
+            " i
+            + 0
+            - 0",
+        );
+        test_agg("(count:int8)", input, Some(0i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " i
+            - 0
+            - 0 D
+            + 1
+            - 1",
+        );
+        test_agg("(count:int8)", input, Some((-1i64).into()));
     }
 
     #[test]

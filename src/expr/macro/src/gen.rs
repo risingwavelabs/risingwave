@@ -344,7 +344,7 @@ impl FunctionAttr {
         };
         let fn_name = format_ident!("{}", self.user_fn.name);
         let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
-        let args = quote! { #(#args),* };
+        let args = quote! { #(#args,)* };
         let retract = match self.user_fn.retract {
             true => quote! { matches!(input.ops()[row_id], Op::Delete | Op::UpdateDelete) },
             false => quote! {},
@@ -356,7 +356,7 @@ impl FunctionAttr {
                 quote! { assert_eq!(input.ops()[row_id], Op::Insert, #msg); }
             }
         };
-        let mut next_state = quote! { #fn_name(state, #args, #retract) };
+        let mut next_state = quote! { #fn_name(state, #args #retract) };
         next_state = match self.user_fn.return_type {
             ReturnType::T => quote! { Some(#next_state) },
             ReturnType::Option => next_state,
@@ -364,20 +364,30 @@ impl FunctionAttr {
             ReturnType::ResultOption => quote! { #next_state? },
         };
         if !self.user_fn.arg_option {
-            if self.args.len() > 1 {
-                todo!("multiple arguments are not supported for non-option function");
-            }
-            let first_state = match &self.init_state {
-                Some(_) => quote! { unreachable!() },
-                _ => quote! { Some(v0.into()) },
-            };
-            next_state = quote! {
-                match (state, v0) {
-                    (Some(state), Some(v0)) => #next_state,
-                    (None, Some(v0)) => #first_state,
-                    (state, None) => state,
+            match self.args.len() {
+                0 => {
+                    next_state = quote! {
+                        match state {
+                            Some(state) => #next_state,
+                            None => state,
+                        }
+                    };
                 }
-            };
+                1 => {
+                    let first_state = match &self.init_state {
+                        Some(_) => quote! { unreachable!() },
+                        _ => quote! { Some(v0.into()) },
+                    };
+                    next_state = quote! {
+                        match (state, v0) {
+                            (Some(state), Some(v0)) => #next_state,
+                            (None, Some(v0)) => #first_state,
+                            (state, None) => state,
+                        }
+                    };
+                }
+                _ => todo!("multiple arguments are not supported for non-option function"),
+            }
         }
 
         Ok(quote! {

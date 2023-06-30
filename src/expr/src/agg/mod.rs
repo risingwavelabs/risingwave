@@ -25,7 +25,6 @@ mod def;
 // concrete aggregators
 mod approx_count_distinct;
 mod array_agg;
-mod count_star;
 mod general;
 mod jsonb_agg;
 mod mode;
