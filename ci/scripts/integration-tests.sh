@@ -22,6 +22,8 @@ while getopts 'c:f:' opt; do
 done
 shift $((OPTIND -1))
 
+echo "export INTEGRATION_TEST_CASE=${case}" > env_vars.sh
+
 echo "--- clean up docker containers"
 if [ $(docker ps -aq |wc -l) -gt 0 ]; then
   docker rm -f $(docker ps -aq)
