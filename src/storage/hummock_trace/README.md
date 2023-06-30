@@ -1,7 +1,52 @@
 # Hummock trace and replay
 
-## Tracing
+# Demo
 
+## Step 0: Kill and clean running clusters
+```bash
+./risedev k
+./risedev clean-data
+```
+
+## Step 1: Start a cluster with tracing
+```bash
+USE_HM_TRACE=true ./risedev d hummock-trace
+```
+
+## Step 2: Run an e2e test
+```bash
+./risedev slt-batch -p 4566 -d dev -j 1
+```
+After this, you will see data in the object storage under `.risingwave/data/minio/hummock001`.
+
+## Step 3: Kill the cluster
+The object storage only allows a single server to access it. We must kill the cluster before replaying.
+```bash
+./risedev k
+```
+
+## Step 4: Start MinIO
+```bash
+MINIO_ROOT_PASSWORD=hummockadmin \
+MINIO_ROOT_USER=hummockadmin \
+.risingwave/bin/minio server \
+--address 127.0.0.1:9301 \
+--console-address 127.0.0.1:9400 \
+--config-dir .risingwave/config/minio \
+.risingwave/data/minio
+```
+
+## Step 5: Replay
+```bash
+cargo run --package risingwave_hummock_test --bin replay -- \
+--path .trace/hummock.ht \
+--object-storage minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+--config src/config/risingwave.user.toml
+```
+We are all set!
+
+# Document
+## Trace
 ### Config
 There is a default config file in `src/config/hummock-trace.toml`.
 
