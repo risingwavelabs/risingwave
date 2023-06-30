@@ -20,6 +20,7 @@ use risingwave_common::util::tracing::TracingContext;
 use tower::{Layer, Service};
 use tracing::Instrument;
 
+/// A layer that decorates the inner service with [`TracingExtract`].
 #[derive(Clone, Default)]
 pub struct TracingExtractLayer {
     _private: (),
@@ -39,6 +40,10 @@ impl<S> Layer<S> for TracingExtractLayer {
     }
 }
 
+/// A service wrapper that extracts the [`TracingContext`] from the HTTP headers and uses it to
+/// create a new tracing span for the request handler, if one exists.
+///
+/// See also `TracingInject` in the `rpc_client` crate.
 #[derive(Clone)]
 pub struct TracingExtract<S> {
     inner: S,

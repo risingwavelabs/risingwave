@@ -1,9 +1,24 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::task::{Context, Poll};
 
 use futures::Future;
 use risingwave_common::util::tracing::TracingContext;
 use tower::{Layer, Service};
 
+/// A layer that decorates the inner service with [`TracingInject`].
 #[derive(Clone, Default)]
 pub struct TracingInjectLayer {
     _private: (),
@@ -24,6 +39,10 @@ impl<S> Layer<S> for TracingInjectLayer {
     }
 }
 
+/// A service wrapper that injects the [`TracingContext`] obtained from the current tracing span
+/// into the HTTP headers of the request.
+///
+/// See also `TracingExtract` in the `common_service` crate.
 #[derive(Clone, Debug)]
 pub struct TracingInject<S> {
     inner: S,
@@ -59,10 +78,18 @@ where
     }
 }
 
+/// A wrapper around tonic's `Channel` that injects the [`TracingContext`] obtained from the current
+/// tracing span when making gRPC requests.
 pub type Channel = TracingInject<tonic::transport::Channel>;
 
+/// An extension trait for tonic's `Channel` that wraps it in a [`TracingInject`] service.
 #[easy_ext::ext(TracingInjectedChannelExt)]
 impl tonic::transport::Channel {
+    /// Wraps the channel in a [`TracingInject`] service, so that the [`TracingContext`] obtained
+    /// from the current tracing span is injected into the HTTP headers of the request.
+    ///
+    /// The server can then extract the [`TracingContext`] from the HTTP headers with the
+    /// `TracingExtract` middleware.
     pub fn tracing_injected(self) -> Channel {
         TracingInject { inner: self }
     }

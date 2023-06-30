@@ -1522,9 +1522,10 @@ impl GrpcMetaClient {
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await
-            .map_err(RpcError::TransportError)?;
+            .map_err(RpcError::TransportError)?
+            .tracing_injected();
 
-        Ok(channel.tracing_injected())
+        Ok(channel)
     }
 
     pub(crate) fn retry_strategy_to_bound(

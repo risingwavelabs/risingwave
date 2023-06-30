@@ -44,6 +44,7 @@ impl StreamClient {
             .connect()
             .await?
             .tracing_injected();
+
         Ok(Self(StreamServiceClient::new(channel)))
     }
 }
