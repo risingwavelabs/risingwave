@@ -24,12 +24,12 @@ shift $((OPTIND -1))
 
 echo "export INTEGRATION_TEST_CASE=${case}" > env_vars.sh
 
-echo "--- clean up docker containers"
+echo "--- clean up docker"
 if [ $(docker ps -aq |wc -l) -gt 0 ]; then
   docker rm -f $(docker ps -aq)
-  docker network prune -f
-  docker volume prune -f
 fi
+docker network prune -f
+docker volume prune -f
 
 echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
