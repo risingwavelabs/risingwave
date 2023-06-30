@@ -140,55 +140,6 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    pub(super) async fn read_meta_snapshot(&self) -> Result<Vec<OwnedRow>> {
-        let try_get_date_time = |epoch: u64| {
-            if epoch == 0 {
-                return None;
-            }
-            let time_millis = Epoch::from(epoch).as_unix_millis();
-            Timestamp::with_secs_nsecs(
-                (time_millis / 1000) as i64,
-                (time_millis % 1000 * 1_000_000) as u32,
-            )
-            .map(ScalarImpl::Timestamp)
-            .ok()
-        };
-        let meta_snapshots = self
-            .meta_client
-            .list_meta_snapshots()
-            .await?
-            .into_iter()
-            .map(|s| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int64(s.id as i64)),
-                    Some(ScalarImpl::Int64(s.hummock_version_id as i64)),
-                    Some(ScalarImpl::Int64(s.safe_epoch as i64)),
-                    try_get_date_time(s.safe_epoch),
-                    Some(ScalarImpl::Int64(s.max_committed_epoch as i64)),
-                    try_get_date_time(s.max_committed_epoch),
-                ])
-            })
-            .collect_vec();
-        Ok(meta_snapshots)
-    }
-
-    pub(super) async fn read_ddl_progress(&self) -> Result<Vec<OwnedRow>> {
-        let ddl_grogress = self
-            .meta_client
-            .list_ddl_progress()
-            .await?
-            .into_iter()
-            .map(|s| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int64(s.id as i64)),
-                    Some(ScalarImpl::Utf8(s.statement.into())),
-                    Some(ScalarImpl::Utf8(s.progress.into())),
-                ])
-            })
-            .collect_vec();
-        Ok(ddl_grogress)
-    }
-
     pub(super) fn read_table_stats(&self) -> Result<Vec<OwnedRow>> {
         let catalog = self.catalog_reader.read_guard();
         let table_stats = catalog.table_stats();
