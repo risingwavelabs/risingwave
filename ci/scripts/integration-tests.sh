@@ -33,6 +33,11 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 echo "--- install postgresql"
 sudo yum install -y postgresql
 
+# Check if the variable is set and not empty
+if [ -n "$IMAGE_VERSION" ]; then
+  sed -i "s|risingwave:latest|risingwave:$IMAGE_VERSION|g" docker/docker-compose.yml
+fi
+
 cd integration_tests/scripts
 
 echo "--- case: ${case}, format: ${format}"
