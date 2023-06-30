@@ -27,8 +27,13 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     private String sinkType;
 
+    private final boolean isUpsertSink;
+
     @JsonProperty(value = "force_append_only")
     private Boolean forceAppendOnly;
+
+    @JsonProperty(value = "schema.name")
+    private String schemaName;
 
     @JsonCreator
     public JDBCSinkConfig(
@@ -38,6 +43,11 @@ public class JDBCSinkConfig extends CommonSinkConfig {
         this.jdbcUrl = jdbcUrl;
         this.tableName = tableName;
         this.sinkType = sinkType;
+        this.isUpsertSink = "upsert".equalsIgnoreCase(sinkType);
+    }
+
+    public String getSchemaName() {
+        return schemaName;
     }
 
     public String getJdbcUrl() {
@@ -50,5 +60,9 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     public String getSinkType() {
         return sinkType;
+    }
+
+    public boolean isUpsertSink() {
+        return this.isUpsertSink;
     }
 }
