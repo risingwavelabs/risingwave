@@ -562,7 +562,7 @@ impl SysCatalogReaderImpl {
                 OwnedRow::new(vec![
                     Some(ScalarImpl::Int32(worker.id as i32)),
                     Some(ScalarImpl::Utf8(host.host.clone().into())),
-                    Some(ScalarImpl::Int16(host.port as i16)),
+                    Some(ScalarImpl::Utf8(host.port.to_string().into())),
                     Some(ScalarImpl::Utf8(
                         worker.get_type().unwrap().as_str_name().into(),
                     )),

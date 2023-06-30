@@ -23,7 +23,7 @@ pub const RW_WORKER_NODES_TABLE_NAME: &str = "rw_worker_nodes";
 pub const RW_WORKER_NODES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "id"),
     (DataType::Varchar, "host"),
-    (DataType::Int16, "port"),
+    (DataType::Varchar, "port"),
     (DataType::Varchar, "type"),
     (DataType::Varchar, "state"),
     (DataType::Int32, "parallelism"),
