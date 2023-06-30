@@ -746,6 +746,9 @@ impl DataChunkTestExt for DataChunk {
     fn from_pretty(s: &str) -> Self {
         use crate::types::ScalarImpl;
         fn parse_type(s: &str) -> DataType {
+            if let Some(s) = s.strip_suffix("[]") {
+                return DataType::List(Box::new(parse_type(s)));
+            }
             match s {
                 "B" => DataType::Boolean,
                 "I" => DataType::Int64,

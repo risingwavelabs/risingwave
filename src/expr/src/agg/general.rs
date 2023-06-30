@@ -200,130 +200,462 @@ fn bool_or(state: bool, input: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    extern crate test;
+
     use std::sync::Arc;
 
     use futures_util::FutureExt;
     use risingwave_common::array::*;
-    use risingwave_common::types::{DataType, Datum, Decimal};
+    use risingwave_common::test_utils::{rand_bitmap, rand_stream_chunk};
+    use risingwave_common::types::{Datum, Decimal};
+    use test::Bencher;
 
     use crate::agg::AggCall;
 
-    fn eval_agg(pretty: &str, input: impl Array) -> Datum {
-        let input = Arc::new(input.into());
-        let len = input.len();
-        let input_chunk = DataChunk::new(vec![input], len).into();
+    fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
         let mut agg_state = crate::agg::build(AggCall::from_pretty(pretty)).unwrap();
         agg_state
-            .update_multi(&input_chunk, 0, input_chunk.cardinality())
+            .update_multi(&input, 0, input.capacity())
             .now_or_never()
             .unwrap()
             .unwrap();
-        agg_state.output().unwrap()
+        let actual = agg_state.output().unwrap();
+        assert_eq!(actual, expected);
     }
 
     #[test]
     fn sum_int32() {
-        let input = I32Array::from_iter([1, 2, 3]);
-        let actual = eval_agg("(sum:int8 $0:int4)", input);
-        assert_eq!(actual, Some(6i64.into()));
+        let input = StreamChunk::from_pretty(
+            " i
+            + 3
+            - 1
+            - 3 D
+            + 1 D",
+        );
+        test_agg("(sum:int8 $0:int4)", input, Some(2i64.into()));
     }
 
     #[test]
     fn sum_int64() {
-        let input = I64Array::from_iter([1, 2, 3]);
-        let actual = eval_agg("(sum:decimal $0:int8)", input);
-        assert_eq!(actual, Some(Decimal::from(6).into()));
+        let input = StreamChunk::from_pretty(
+            " I
+            + 3
+            - 1
+            - 3 D
+            + 1 D",
+        );
+        test_agg(
+            "(sum:decimal $0:int8)",
+            input,
+            Some(Decimal::from(2).into()),
+        );
+    }
+
+    #[test]
+    fn sum_float64() {
+        let input = StreamChunk::from_pretty(
+            " F
+            + 1.0
+            + 2.0
+            + 3.0
+            - 4.0",
+        );
+        test_agg("(sum:float8 $0:float8)", input, Some(2.0f64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " F
+            + 1.0
+            + inf
+            + 3.0
+            - 3.0",
+        );
+        test_agg("(sum:float8 $0:float8)", input, Some(f64::INFINITY.into()));
+
+        let input = StreamChunk::from_pretty(
+            " F
+            + 0.0
+            - -inf",
+        );
+        test_agg("(sum:float8 $0:float8)", input, Some(f64::INFINITY.into()));
+
+        let input = StreamChunk::from_pretty(
+            " F
+            + 1.0
+            + nan
+            + 1926.0",
+        );
+        test_agg("(sum:float8 $0:float8)", input, Some(f64::NAN.into()));
+    }
+
+    /// Even if there is no element after some insertions and equal number of deletion operations,
+    /// sum aggregator should output `0` instead of `None`.
+    #[test]
+    fn sum_no_none() {
+        test_agg("(sum:int8 $0:int8)", StreamChunk::from_pretty("I"), None);
+
+        let input = StreamChunk::from_pretty(
+            " I
+            + 2
+            - 1
+            + 1
+            - 2",
+        );
+        test_agg("(sum:int8 $0:int8)", input, Some(0i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " I
+            - 3 D
+            + 1
+            - 3 D
+            - 1",
+        );
+        test_agg("(sum:int8 $0:int8)", input, Some(0i64.into()));
+    }
+
+    #[test]
+    fn min_int64() {
+        let input = StreamChunk::from_pretty(
+            " I
+            + 1  D
+            + 10
+            + .
+            + 5",
+        );
+        test_agg("(min:int8 $0:int8)", input, Some(5i64.into()));
     }
 
     #[test]
     fn min_float32() {
-        let input = F32Array::from_iter([1.0, 2.0, 3.0]);
-        let actual = eval_agg("(min:float4 $0:float4)", input);
-        assert_eq!(actual, Some(1.0f32.into()));
+        let input = StreamChunk::from_pretty(
+            " f
+            + 1.0  D
+            + 10.0
+            + .
+            + 5.0",
+        );
+        test_agg("(min:float4 $0:float4)", input, Some(5.0f32.into()));
     }
 
     #[test]
     fn min_char() {
-        let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg("(min:varchar $0:varchar)", input);
-        assert_eq!(actual, Some("aa".into()));
+        let input = StreamChunk::from_pretty(
+            " T
+            + b
+            + aa",
+        );
+        test_agg("(min:varchar $0:varchar)", input, Some("aa".into()));
     }
 
     #[test]
     fn min_list() {
-        let input = ListArray::from_iter(
-            [
-                Some(I32Array::from_iter([Some(0)]).into()),
-                Some(I32Array::from_iter([Some(1)]).into()),
-                Some(I32Array::from_iter([Some(2)]).into()),
-            ],
-            DataType::Int32,
+        let input = StreamChunk::from_pretty(
+            " i[]
+            + {0}
+            + {1}
+            + {2}",
         );
-        let actual = eval_agg("(min:int4[] $0:int4[])", input);
-        assert_eq!(actual, Some(ListValue::new(vec![Some(0i32.into())]).into()));
+        test_agg(
+            "(min:int4[] $0:int4[])",
+            input,
+            Some(ListValue::new(vec![Some(0i32.into())]).into()),
+        );
+    }
+
+    #[test]
+    fn max_int64() {
+        let input = StreamChunk::from_pretty(
+            " I
+            + 1
+            + 10 D
+            + .
+            + 5",
+        );
+        test_agg("(max:int8 $0:int8)", input, Some(5i64.into()));
     }
 
     #[test]
     fn max_char() {
-        let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg("(max:varchar $0:varchar)", input);
-        assert_eq!(actual, Some("b".into()));
+        let input = StreamChunk::from_pretty(
+            " T
+            + b
+            + aa",
+        );
+        test_agg("(max:varchar $0:varchar)", input, Some("b".into()));
     }
 
     #[test]
     fn count_int32() {
-        fn test_case(input: impl Array, expected: i64) {
-            let actual = eval_agg("(count:int8 $0:int4)", input);
-            assert_eq!(actual, Some(expected.into()));
-        }
-        test_case(I32Array::from_iter([1, 2, 3]), 3);
-        test_case(I32Array::from_iter([0; 0]), 0);
-        test_case(I32Array::from_iter([None]), 0);
+        let input = StreamChunk::from_pretty(
+            " i
+            + 1
+            + 2
+            + 3",
+        );
+        test_agg("(count:int8 $0:int4)", input, Some(3i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " i
+            + 1
+            + .
+            + 3
+            - 1",
+        );
+        test_agg("(count:int8 $0:int4)", input, Some(1i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " i
+            - 1 D
+            - .
+            - 3 D
+            - 1 D",
+        );
+        test_agg("(count:int8 $0:int4)", input, Some(0i64.into()));
+
+        let input = StreamChunk::from_pretty("i");
+        test_agg("(count:int8 $0:int4)", input, Some(0i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " i
+            + .",
+        );
+        test_agg("(count:int8 $0:int4)", input, Some(0i64.into()));
+    }
+
+    #[test]
+    fn bitxor_int64() {
+        let input = StreamChunk::from_pretty(
+            " I
+            + 1
+            - 10 D
+            + .
+            - 5",
+        );
+        test_agg("(bit_xor:int8 $0:int8)", input, Some(4i64.into()));
     }
 
     #[test]
     fn distinct_sum_int32() {
-        let input = I32Array::from_iter([1, 1, 3]);
-        let actual = eval_agg("(sum:int8 $0:int4 distinct)", input);
-        assert_eq!(actual, Some(4i64.into()));
+        let input = StreamChunk::from_pretty(
+            " i
+            + 1
+            + 1
+            + 3",
+        );
+        test_agg("(sum:int8 $0:int4 distinct)", input, Some(4i64.into()));
     }
 
     #[test]
     fn distinct_sum_int64() {
-        let input = I64Array::from_iter([1, 1, 3]);
-        let actual = eval_agg("(sum:decimal $0:int8 distinct)", input);
-        assert_eq!(actual, Some(Decimal::from(4).into()));
+        let input = StreamChunk::from_pretty(
+            " I
+            + 1
+            + 1
+            + 3",
+        );
+        test_agg(
+            "(sum:decimal $0:int8 distinct)",
+            input,
+            Some(Decimal::from(4).into()),
+        );
     }
 
     #[test]
     fn distinct_min_float32() {
-        let input = F32Array::from_iter([1.0, 2.0, 3.0]);
-        let actual = eval_agg("(min:float4 $0:float4 distinct)", input);
-        assert_eq!(actual, Some(1.0f32.into()));
+        let input = StreamChunk::from_pretty(
+            " f
+            + 1.0
+            + 2.0
+            + 3.0",
+        );
+        test_agg(
+            "(min:float4 $0:float4 distinct)",
+            input,
+            Some(1.0f32.into()),
+        );
     }
 
     #[test]
     fn distinct_min_char() {
-        let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg("(min:varchar $0:varchar distinct)", input);
-        assert_eq!(actual, Some("aa".into()));
+        let input = StreamChunk::from_pretty(
+            " T
+            + b
+            + aa",
+        );
+        test_agg(
+            "(min:varchar $0:varchar distinct)",
+            input,
+            Some("aa".into()),
+        );
     }
 
     #[test]
     fn distinct_max_char() {
-        let input = Utf8Array::from_iter(["b", "aa"]);
-        let actual = eval_agg("(max:varchar $0:varchar distinct)", input);
-        assert_eq!(actual, Some("b".into()));
+        let input = StreamChunk::from_pretty(
+            " T
+            + b
+            + aa",
+        );
+        test_agg("(max:varchar $0:varchar distinct)", input, Some("b".into()));
     }
 
     #[test]
     fn distinct_count_int32() {
-        fn test_case(input: impl Array, expected: i64) {
-            let actual = eval_agg("(count:int8 $0:int4 distinct)", input);
-            assert_eq!(actual, Some(expected.into()));
-        }
-        test_case(I32Array::from_iter([1, 1, 3]), 2);
-        test_case(I32Array::from_iter([0; 0]), 0);
-        test_case(I32Array::from_iter([None]), 0);
+        let input = StreamChunk::from_pretty(
+            " i
+            + 1
+            + 1
+            + 3",
+        );
+        test_agg("(count:int8 $0:int4 distinct)", input, Some(2i64.into()));
+
+        let input = StreamChunk::from_pretty("i");
+        test_agg("(count:int8 $0:int4 distinct)", input, Some(0i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " i
+            + .",
+        );
+        test_agg("(count:int8 $0:int4 distinct)", input, Some(0i64.into()));
+    }
+
+    fn bench_i64(
+        b: &mut Bencher,
+        agg_desc: &str,
+        chunk_size: usize,
+        vis_rate: f64,
+        append_only: bool,
+    ) {
+        println!(
+            "benching {} agg, chunk_size={}, vis_rate={}",
+            agg_desc, chunk_size, vis_rate
+        );
+        let bitmap = if vis_rate < 1.0 {
+            Some(rand_bitmap::gen_rand_bitmap(
+                chunk_size,
+                (chunk_size as f64 * vis_rate) as usize,
+                666,
+            ))
+        } else {
+            None
+        };
+        let (ops, data) = rand_stream_chunk::gen_legal_stream_chunk(
+            bitmap.as_ref(),
+            chunk_size,
+            append_only,
+            666,
+        );
+        let vis = match bitmap {
+            Some(bitmap) => Vis::Bitmap(bitmap),
+            None => Vis::Compact(chunk_size),
+        };
+        let chunk = StreamChunk::from_parts(ops, DataChunk::new(vec![Arc::new(data)], vis));
+        let pretty = format!("({agg_desc}:int8 $0:int8)");
+        let mut agg = crate::agg::build(AggCall::from_pretty(pretty)).unwrap();
+        b.iter(|| {
+            agg.update_multi(&chunk, 0, chunk_size)
+                .now_or_never()
+                .unwrap()
+                .unwrap();
+        });
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_without_vis(b: &mut Bencher) {
+        bench_i64(b, "sum", 1024, 1.0, false);
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(b, "sum", 1024, 0.75, false);
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(b, "sum", 1024, 0.5, false);
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(b, "sum", 1024, 0.25, false);
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(b, "sum", 1024, 0.05, false);
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_without_vis(b: &mut Bencher) {
+        bench_i64(b, "count", 1024, 1.0, false);
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(b, "count", 1024, 0.75, false);
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(b, "count", 1024, 0.5, false);
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(b, "count", 1024, 0.25, false);
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(b, "count", 1024, 0.05, false);
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_without_vis(b: &mut Bencher) {
+        bench_i64(b, "min", 1024, 1.0, true);
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(b, "min", 1024, 0.75, true);
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(b, "min", 1024, 0.5, true);
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(b, "min", 1024, 0.25, true);
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(b, "min", 1024, 0.05, true);
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_without_vis(b: &mut Bencher) {
+        bench_i64(b, "max", 1024, 1.0, true);
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(b, "max", 1024, 0.75, true);
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(b, "max", 1024, 0.5, true);
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(b, "max", 1024, 0.25, true);
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(b, "max", 1024, 0.05, true);
     }
 }

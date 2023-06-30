@@ -354,6 +354,7 @@ impl StreamChunkTestExt for StreamChunk {
     /// //     T: str
     /// //    TS: Timestamp
     /// //   SRL: Serial
+    /// //   x[]: array of x
     /// // {i,f}: struct
     /// ```
     fn from_pretty(s: &str) -> Self {
