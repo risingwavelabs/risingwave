@@ -29,8 +29,6 @@ pub static RW_SOURCES_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = Lazy
         (DataType::Varchar, "connector"),
         // [col1, col2]
         (DataType::List(Box::new(DataType::Varchar)), "columns"),
-        // [idx1, idx2]
-        (DataType::List(Box::new(DataType::Int32)), "primary_keys"),
         (DataType::Varchar, "row_format"),
         (DataType::Boolean, "append_only"),
         (DataType::Int32, "connection_id"),

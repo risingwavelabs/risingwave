@@ -410,47 +410,43 @@ impl SysCatalogReaderImpl {
 
         Ok(schemas
             .flat_map(|schema| {
-                schema.iter_source().map(|source| {
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Int32(source.id as i32)),
-                        Some(ScalarImpl::Utf8(source.name.clone().into())),
-                        Some(ScalarImpl::Int32(schema.id() as i32)),
-                        Some(ScalarImpl::Int32(source.owner as i32)),
-                        Some(ScalarImpl::Utf8(
-                            source
-                                .properties
-                                .get(UPSTREAM_SOURCE_KEY)
-                                .cloned()
-                                .unwrap_or("".to_string())
-                                .to_uppercase()
-                                .into(),
-                        )),
-                        Some(ScalarImpl::List(ListValue::new(
-                            source
-                                .columns
-                                .iter()
-                                .map(|c| Some(ScalarImpl::Utf8(c.name().into())))
-                                .collect_vec(),
-                        ))),
-                        Some(ScalarImpl::List(ListValue::new(
-                            source
-                                .pk_col_ids
-                                .iter()
-                                .map(|c| Some(ScalarImpl::Int32(c.get_id())))
-                                .collect_vec(),
-                        ))),
-                        Some(ScalarImpl::Utf8(
-                            source.info.get_row_format().unwrap().as_str_name().into(),
-                        )),
-                        Some(ScalarImpl::Bool(source.append_only)),
-                        source.connection_id.map(|id| ScalarImpl::Int32(id as i32)),
-                        Some(ScalarImpl::Utf8(source.create_sql().into())),
-                        Some(
-                            get_acl_items(&Object::SourceId(source.id), &users, username_map)
-                                .into(),
-                        ),
-                    ])
-                })
+                schema
+                    .iter_source()
+                    .filter(|s| s.associated_table_id.is_none())
+                    .map(|source| {
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Int32(source.id as i32)),
+                            Some(ScalarImpl::Utf8(source.name.clone().into())),
+                            Some(ScalarImpl::Int32(schema.id() as i32)),
+                            Some(ScalarImpl::Int32(source.owner as i32)),
+                            Some(ScalarImpl::Utf8(
+                                source
+                                    .properties
+                                    .get(UPSTREAM_SOURCE_KEY)
+                                    .cloned()
+                                    .unwrap_or("".to_string())
+                                    .to_uppercase()
+                                    .into(),
+                            )),
+                            Some(ScalarImpl::List(ListValue::new(
+                                source
+                                    .columns
+                                    .iter()
+                                    .map(|c| Some(ScalarImpl::Utf8(c.name().into())))
+                                    .collect_vec(),
+                            ))),
+                            Some(ScalarImpl::Utf8(
+                                source.info.get_row_format().unwrap().as_str_name().into(),
+                            )),
+                            Some(ScalarImpl::Bool(source.append_only)),
+                            source.connection_id.map(|id| ScalarImpl::Int32(id as i32)),
+                            Some(ScalarImpl::Utf8(source.create_sql().into())),
+                            Some(
+                                get_acl_items(&Object::SourceId(source.id), &users, username_map)
+                                    .into(),
+                            ),
+                        ])
+                    })
             })
             .collect_vec())
     }
