@@ -62,7 +62,7 @@ pub trait LevelSelector: Sync + Send {
     fn task_type(&self) -> compact_task::TaskType;
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct SelectContext {
     pub level_max_bytes: Vec<u64>,
 
@@ -275,7 +275,8 @@ impl DynamicLevelSelectorCore {
         }
 
         // sort reverse to pick the largest one.
-        ctx.score_levels.sort_by(|a, b| b.0.cmp(&a.0));
+        ctx.score_levels
+            .sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.2.cmp(&b.2)));
         ctx
     }
 
