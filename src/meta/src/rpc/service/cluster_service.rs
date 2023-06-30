@@ -85,11 +85,14 @@ where
         &self,
         req: Request<UpdateWorkerNodeSchedulabilityRequest>,
     ) -> Result<Response<UpdateWorkerNodeSchedulabilityResponse>, Status> {
-        let inner = req.into_inner();
-        let worker_ids = inner.worker_ids;
+        let req = req.into_inner();
+        let schedulability = req.get_schedulability()?;
+        let worker_ids = req.worker_ids;
+
         self.cluster_manager
-            .update_schedulability(&worker_ids, inner.set_is_unschedulable)
+            .update_schedulability(worker_ids, schedulability)
             .await?;
+
         Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
             status: None,
         }))
@@ -129,7 +132,7 @@ where
 
         let node_list = self
             .cluster_manager
-            .list_worker_node(worker_type, worker_states, true)
+            .list_worker_node(worker_type, worker_states)
             .await;
         Ok(Response::new(ListAllNodesResponse {
             status: None,

@@ -28,13 +28,31 @@ import org.postgresql.util.PGobject;
 public class PostgresDialect implements JdbcDialect {
 
     @Override
+    public SchemaTableName createSchemaTableName(String schemaName, String tableName) {
+        if (schemaName == null || schemaName.isBlank()) {
+            schemaName = "public";
+        }
+        return new SchemaTableName(schemaName, tableName);
+    }
+
+    @Override
+    public String getNormalizedTableName(SchemaTableName schemaTableName) {
+        assert schemaTableName.getSchemaName() != null;
+        return quoteIdentifier(schemaTableName.getSchemaName())
+                + '.'
+                + quoteIdentifier(schemaTableName.getTableName());
+    }
+
+    @Override
     public String quoteIdentifier(String identifier) {
         return identifier;
     }
 
     @Override
     public Optional<String> getUpsertStatement(
-            String tableName, List<String> fieldNames, List<String> primaryKeyFields) {
+            SchemaTableName schemaTableName,
+            List<String> fieldNames,
+            List<String> primaryKeyFields) {
         String pkColumns =
                 primaryKeyFields.stream()
                         .map(this::quoteIdentifier)
@@ -44,7 +62,7 @@ public class PostgresDialect implements JdbcDialect {
                         .map(f -> quoteIdentifier(f) + "=EXCLUDED." + quoteIdentifier(f))
                         .collect(Collectors.joining(", "));
         return Optional.of(
-                getInsertIntoStatement(tableName, fieldNames)
+                getInsertIntoStatement(schemaTableName, fieldNames)
                         + " ON CONFLICT ("
                         + pkColumns
                         + ")"
