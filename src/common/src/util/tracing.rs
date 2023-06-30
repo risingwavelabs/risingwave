@@ -32,6 +32,11 @@ impl TracingContext {
         Self(span.context())
     }
 
+    /// Create a new tracing context from the current tracing span considered by the subscriber.
+    pub fn from_current_span() -> Self {
+        Self::from_span(&tracing::Span::current())
+    }
+
     /// Create a no-op tracing context.
     pub fn none() -> Self {
         Self(opentelemetry::Context::new())
