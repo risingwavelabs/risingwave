@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -31,9 +30,8 @@ use crate::parser::unified::avro::{
 };
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::util::get_kafka_topic;
 use crate::parser::{
-    ByteStreamSourceParser, SourceConfigList, SourceStreamChunkRowWriter, WriteGuard,
+    ByteStreamSourceParser, ParserConfigList, SourceStreamChunkRowWriter, WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -59,18 +57,24 @@ pub struct DebeziumAvroParserConfig {
 }
 
 impl DebeziumAvroParserConfig {
-    pub async fn new(
-        props: &HashMap<String, String>,
-        source_config_list: &SourceConfigList,
-    ) -> Result<Self> {
-        let schema_location = &source_config_list.row_schema_location;
+    pub async fn new(parser_config_list: &ParserConfigList) -> Result<Self> {
+        let parser_config = match parser_config_list {
+            ParserConfigList::DebeziumAvro(config) => config,
+            _ => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "wrong parser config list for Debezium Avro",
+                ))))
+            }
+        };
+        let schema_location = &parser_config.row_schema_location;
+        let client_config = &parser_config.client_config;
+        let kafka_topic = &parser_config.topic;
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
-        let kafka_topic = get_kafka_topic(props)?;
-        let client = Client::new(url, props)?;
+        let client = Client::new(url, client_config)?;
         let raw_schema = client
-            .get_schema_by_subject(format!("{}-key", kafka_topic).as_str())
+            .get_schema_by_subject(format!("{}-key", &kafka_topic).as_str())
             .await?;
         let key_schema = Schema::parse_str(&raw_schema.content)
             .map_err(|e| RwError::from(ProtocolError(format!("Avro schema parse error {}", e))))?;
@@ -202,9 +206,11 @@ mod tests {
     use risingwave_common::catalog::ColumnDesc as CatColumnDesc;
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_pb::catalog::StreamSourceInfo;
 
     use super::*;
     use crate::parser::{DebeziumAvroParserConfig, SourceStreamChunkBuilder};
+    use crate::source::SourceFormat;
 
     const DEBEZIUM_AVRO_DATA: &[u8] = b"\x00\x00\x00\x00\x06\x00\x02\xd2\x0f\x0a\x53\x61\x6c\x6c\x79\x0c\x54\x68\x6f\x6d\x61\x73\x2a\x73\x61\x6c\x6c\x79\x2e\x74\x68\x6f\x6d\x61\x73\x40\x61\x63\x6d\x65\x2e\x63\x6f\x6d\x16\x32\x2e\x31\x2e\x32\x2e\x46\x69\x6e\x61\x6c\x0a\x6d\x79\x73\x71\x6c\x12\x64\x62\x73\x65\x72\x76\x65\x72\x31\xc0\xb4\xe8\xb7\xc9\x61\x00\x30\x66\x69\x72\x73\x74\x5f\x69\x6e\x5f\x64\x61\x74\x61\x5f\x63\x6f\x6c\x6c\x65\x63\x74\x69\x6f\x6e\x12\x69\x6e\x76\x65\x6e\x74\x6f\x72\x79\x00\x02\x12\x63\x75\x73\x74\x6f\x6d\x65\x72\x73\x00\x00\x20\x6d\x79\x73\x71\x6c\x2d\x62\x69\x6e\x2e\x30\x30\x30\x30\x30\x33\x8c\x06\x00\x00\x00\x02\x72\x02\x92\xc3\xe8\xb7\xc9\x61\x00";
 
@@ -341,14 +347,12 @@ mod tests {
         let props = convert_args!(hashmap!(
             "kafka.topic" => "dbserver1.inventory.customers"
         ));
-        let config = DebeziumAvroParserConfig::new(
-            &props,
-            &SourceConfigList {
-                row_schema_location: "http://127.0.0.1:8081".into(),
-                ..Default::default()
-            },
-        )
-        .await?;
+        let info = StreamSourceInfo {
+            row_schema_location: "http://127.0.0.1:8081".into(),
+            ..Default::default()
+        };
+        let parser_config = ParserConfigList::from(SourceFormat::DebeziumAvro, &props, &info)?;
+        let config = DebeziumAvroParserConfig::new(&parser_config).await?;
         let columns = config
             .map_to_columns()?
             .into_iter()

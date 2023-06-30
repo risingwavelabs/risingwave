@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -31,9 +30,8 @@ use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::util::get_kafka_topic;
 use crate::parser::{
-    ByteStreamSourceParser, SourceConfigList, SourceStreamChunkRowWriter, WriteGuard,
+    ByteStreamSourceParser, ParserConfigList, SourceStreamChunkRowWriter, WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -56,20 +54,29 @@ pub struct AvroParserConfig {
 }
 
 impl AvroParserConfig {
-    pub async fn new(
-        props: &HashMap<String, String>,
-        source_config_list: &SourceConfigList,
-        enable_upsert: bool,
-        upsert_primary_key_column_name: Option<String>,
-    ) -> Result<Self> {
-        let schema_location = &source_config_list.row_schema_location;
+    pub async fn new(parser_config_list: &ParserConfigList, enable_upsert: bool) -> Result<Self> {
+        let parser_config = match parser_config_list {
+            ParserConfigList::Avro(config) => config,
+            _ => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "wrong parser config list for Debezium Avro",
+                ))))
+            }
+        };
+        let schema_location = &parser_config.row_schema_location;
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
-        if source_config_list.use_schema_registry {
-            let kafka_topic = get_kafka_topic(props)?;
-            let client = Client::new(url, props)?;
+        if parser_config.use_schema_registry {
+            let kafka_topic = &parser_config.topic;
+            let client = Client::new(url, &parser_config.client_config)?;
             let resolver = ConfluentSchemaResolver::new(client);
+            let upsert_primary_key_column_name =
+                if enable_upsert && !parser_config.primary_key.is_empty() {
+                    Some(parser_config.primary_key.clone())
+                } else {
+                    None
+                };
 
             Ok(Self {
                 schema: resolver
@@ -95,7 +102,9 @@ impl AvroParserConfig {
             }
             let schema_content = match url.scheme() {
                 "file" => read_schema_from_local(url.path()),
-                "s3" => read_schema_from_s3(&url, props).await,
+                "s3" => {
+                    read_schema_from_s3(&url, parser_config.aws_auth_props.as_ref().unwrap()).await
+                }
                 "https" | "http" => read_schema_from_http(&url).await,
                 scheme => Err(RwError::from(ProtocolError(format!(
                     "path scheme {} is not supported",
@@ -280,15 +289,17 @@ mod test {
     use risingwave_common::error;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Date, Interval, ScalarImpl};
+    use risingwave_pb::catalog::StreamSourceInfo;
     use url::Url;
 
     use super::{
         read_schema_from_http, read_schema_from_local, read_schema_from_s3, AvroParser,
         AvroParserConfig,
     };
+    use crate::aws_auth::AwsAuthProps;
     use crate::parser::unified::avro::unix_epoch_days;
-    use crate::parser::{SourceConfigList, SourceStreamChunkBuilder};
-    use crate::source::SourceColumnDesc;
+    use crate::parser::{ParserConfigList, SourceStreamChunkBuilder};
+    use crate::source::{SourceColumnDesc, SourceFormat};
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -320,7 +331,12 @@ mod test {
         let mut s3_config_props = HashMap::new();
         s3_config_props.insert("region".to_string(), "ap-southeast-1".to_string());
         let url = Url::parse(&schema_location).unwrap();
-        let schema_content = read_schema_from_s3(&url, &s3_config_props).await;
+        let aws_auth_config = AwsAuthProps::from_pairs(
+            s3_config_props
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str())),
+        );
+        let schema_content = read_schema_from_s3(&url, &aws_auth_config).await;
         assert!(schema_content.is_ok());
         let schema = Schema::parse_str(&schema_content.unwrap());
         assert!(schema.is_ok());
@@ -352,17 +368,13 @@ mod test {
 
     async fn new_avro_conf_from_local(file_name: &str) -> error::Result<AvroParserConfig> {
         let schema_path = "file://".to_owned() + &test_data_path(file_name);
-        AvroParserConfig::new(
-            &HashMap::new(),
-            &SourceConfigList {
-                row_schema_location: schema_path.clone(),
-                use_schema_registry: false,
-                ..Default::default()
-            },
-            false,
-            None,
-        )
-        .await
+        let info = StreamSourceInfo {
+            row_schema_location: schema_path.clone(),
+            use_schema_registry: false,
+            ..Default::default()
+        };
+        let parser_config = ParserConfigList::from(SourceFormat::Avro, &HashMap::new(), &info)?;
+        AvroParserConfig::new(&parser_config, false).await
     }
 
     async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {
