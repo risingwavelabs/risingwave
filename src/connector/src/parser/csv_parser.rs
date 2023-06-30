@@ -20,7 +20,7 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Decimal, ScalarImpl};
 
-use super::ByteStreamSourceParser;
+use super::{ByteStreamSourceParser, ParserConfigList};
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -34,6 +34,23 @@ macro_rules! to_rust_type {
 pub struct CsvParserConfig {
     pub delimiter: u8,
     pub has_header: bool,
+}
+
+impl CsvParserConfig {
+    pub fn new(parser_config_list: &ParserConfigList) -> Result<Self> {
+        let parser_config = match parser_config_list {
+            ParserConfigList::Csv(config) => config,
+            _ => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "wrong parser config list for Csv",
+                ))))
+            }
+        };
+        Ok(Self {
+            delimiter: parser_config.delimiter,
+            has_header: parser_config.has_header,
+        })
+    }
 }
 
 /// Parser for CSV format

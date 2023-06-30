@@ -558,11 +558,8 @@ pub enum ParserConfigList {
 }
 
 // TODO:
-// 1. parse client and topic if use_schema_registry
 // 2. aws_auth_props: should check after s3
-// 3. kafka config error
 // 4. whether to clone
-// 6. option of aws_auth
 //
 // Design goal: one iter of props, extract all we want
 // no matter which format we are considering
@@ -660,10 +657,9 @@ impl SpecificParserConfig {
     ) -> Result<Self> {
         let parser_config_list = ParserConfigList::from(format, props, info)?;
         let conf = match format {
-            SourceFormat::Csv => SpecificParserConfig::Csv(CsvParserConfig {
-                delimiter: info.csv_delimiter as u8,
-                has_header: info.csv_has_header,
-            }),
+            SourceFormat::Csv => {
+                SpecificParserConfig::Csv(CsvParserConfig::new(&parser_config_list)?)
+            }
             SourceFormat::Avro => {
                 SpecificParserConfig::Avro(AvroParserConfig::new(&parser_config_list, false).await?)
             }

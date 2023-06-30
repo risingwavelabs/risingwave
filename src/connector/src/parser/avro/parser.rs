@@ -59,7 +59,7 @@ impl AvroParserConfig {
             ParserConfigList::Avro(config) => config,
             _ => {
                 return Err(RwError::from(ProtocolError(format!(
-                    "wrong parser config list for Debezium Avro",
+                    "wrong parser config list for Avro",
                 ))))
             }
         };
