@@ -481,6 +481,7 @@ impl Compactor {
             let mut min_interval = tokio::time::interval(stream_retry_interval);
             let mut task_progress_interval = tokio::time::interval(task_progress_update_interval);
             let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
+            let mut pending_pull_task_count: u32 = 0;
 
             // This outer loop is to recreate stream.
             'start_stream: loop {
@@ -507,13 +508,15 @@ impl Compactor {
                             "Subscribing to compaction tasks failed with error: {}. Will retry.",
                             e
                         );
+
+                        // rest state when meta meets panic
+                        pending_pull_task_count = 0;
                         continue 'start_stream;
                     }
                 };
 
                 let executor = compactor_context.compaction_executor.clone();
                 let mut last_workload = CompactorWorkload::default();
-                let mut pending_pull_task_count: u32 = 0;
 
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
