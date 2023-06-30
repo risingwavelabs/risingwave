@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use prometheus::HistogramTimer;
@@ -363,6 +365,7 @@ pub struct MonitoredStreamingReader {
     operation_size: usize,
     media_type: &'static str,
     timer: Option<HistogramTimer>,
+    streaming_read_bytes_timeout: Duration,
 }
 
 impl MonitoredStreamingReader {
@@ -370,6 +373,7 @@ impl MonitoredStreamingReader {
         media_type: &'static str,
         handle: BoxedStreamingReader,
         object_store_metrics: Arc<ObjectStoreMetrics>,
+        streaming_read_bytes_timeout: Duration,
     ) -> Self {
         let operation_type = "streaming_read";
         let timer = object_store_metrics
@@ -382,6 +386,7 @@ impl MonitoredStreamingReader {
             operation_size: 0,
             media_type,
             timer: Some(timer),
+            streaming_read_bytes_timeout,
         }
     }
 
@@ -399,10 +404,13 @@ impl MonitoredStreamingReader {
             .with_label_values(&[self.media_type, operation_type])
             .start_timer();
         self.operation_size += data_len;
-        let ret =
+        let ret = tokio::time::timeout(self.streaming_read_bytes_timeout, async {
             self.inner.read_exact(buf).await.map_err(|err| {
                 ObjectError::internal(format!("read_bytes failed, error: {:?}", err))
-            });
+            })
+        })
+        .await
+        .unwrap_or_else(|_| Err(ObjectError::internal("read_bytes timeout")));
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
         ret
     }
@@ -422,6 +430,8 @@ impl Drop for MonitoredStreamingReader {
 pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
+    streaming_read_bytes_timeout: Duration,
+    read_timeout: Duration,
 }
 
 /// Manually dispatch trait methods.
@@ -442,9 +452,19 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
 ///   - `failure-count`
 impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub fn new(store: OS, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
+        let streaming_read_bytes_timeout = Duration::from_millis(from_env_or_default(
+            "RW_OBJECT_STORE_STREAMING_READ_BYTES_TIMEOUT_MS",
+            600000,
+        ));
+        let read_timeout = Duration::from_millis(from_env_or_default(
+            "RW_OBJECT_STORE_READ_TIMEOUT_MS",
+            600000,
+        ));
         Self {
             inner: store,
             object_store_metrics,
+            streaming_read_bytes_timeout,
+            read_timeout,
         }
     }
 
@@ -508,17 +528,20 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
 
-        let res = self
-            .inner
-            .read(path, block_loc)
-            .verbose_instrument_await("object_store_read")
-            .await
-            .map_err(|err| {
-                ObjectError::internal(format!(
-                    "read {:?} in block {:?} failed, error: {:?}",
-                    path, block_loc, err
-                ))
-            });
+        let res = tokio::time::timeout(self.read_timeout, async {
+            self.inner
+                .read(path, block_loc)
+                .verbose_instrument_await("object_store_read")
+                .await
+                .map_err(|err| {
+                    ObjectError::internal(format!(
+                        "read {:?} in block {:?} failed, error: {:?}",
+                        path, block_loc, err
+                    ))
+                })
+        })
+        .await
+        .unwrap_or_else(|_| Err(ObjectError::internal("read timeout")));
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
 
@@ -545,11 +568,14 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
 
-        let res = self
-            .inner
-            .readv(path, block_locs)
-            .verbose_instrument_await("object_store_readv")
-            .await;
+        let res = tokio::time::timeout(self.read_timeout, async {
+            self.inner
+                .readv(path, block_locs)
+                .verbose_instrument_await("object_store_readv")
+                .await
+        })
+        .await
+        .unwrap_or_else(|_| Err(ObjectError::internal("readv timeout")));
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
 
@@ -584,6 +610,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             media_type,
             ret?,
             self.object_store_metrics.clone(),
+            self.streaming_read_bytes_timeout,
         ))
     }
 
@@ -751,7 +778,7 @@ pub async fn parse_remote_object_store(
         ),
         "memory" => {
             if ident == "Meta Backup" {
-                tracing::warn!("You're using in-memory remote object store for {}. This should never be used in production environment.", ident);
+                tracing::warn!("You're using in-memory remote object store for {}. This is not recommended for production environment.", ident);
             } else {
                 tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
             }
@@ -772,4 +799,18 @@ pub async fn parse_remote_object_store(
             )
         }
     }
+}
+
+fn from_env_or_default<T: Copy + FromStr + std::fmt::Display>(env: &str, default: T) -> T {
+    std::env::var(env)
+        .map(|c| {
+            c.parse::<T>().unwrap_or_else(|_| {
+                tracing::warn!("Failed to parse {}, fall back to {}.", env, default);
+                default
+            })
+        })
+        .unwrap_or_else(|_| {
+            tracing::info!("{} is not set, use default {}.", env, default);
+            default
+        })
 }
