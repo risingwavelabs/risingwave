@@ -137,7 +137,7 @@ impl<'a> TryFrom<&'a ExprNode> for ConcatWsExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::ConcatWs);
+        ensure!(prost.get_function_type().unwrap() == Type::ConcatWs);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
@@ -173,7 +173,7 @@ mod tests {
 
     pub fn make_concat_ws_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
         ExprNode {
-            expr_type: ConcatWs as i32,
+            function_type: ConcatWs as i32,
             return_type: Some(PbDataType {
                 type_name: ret as i32,
                 ..Default::default()

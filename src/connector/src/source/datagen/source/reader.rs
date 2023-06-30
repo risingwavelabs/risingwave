@@ -19,7 +19,6 @@ use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
-use risingwave_common::util::iter_util::zip_eq_fast;
 
 use super::generator::DatagenEventGenerator;
 use crate::impl_common_split_reader_logic;
@@ -249,23 +248,23 @@ fn generator_from_data_type(
             ))
         }
         DataType::Struct(struct_type) => {
-            let struct_fields =
-                zip_eq_fast(struct_type.field_names.clone(), struct_type.fields.clone())
-                    .map(|(field_name, data_type)| {
-                        let gen = generator_from_data_type(
-                            data_type,
-                            fields_option_map,
-                            &format!("{}.{}", name, field_name),
-                            split_index,
-                            split_num,
-                            offset,
-                        )?;
-                        Ok((field_name, gen))
-                    })
-                    .collect::<Result<_>>()?;
+            let struct_fields = struct_type
+                .iter()
+                .map(|(field_name, data_type)| {
+                    let gen = generator_from_data_type(
+                        data_type.clone(),
+                        fields_option_map,
+                        &format!("{}.{}", name, field_name),
+                        split_index,
+                        split_num,
+                        offset,
+                    )?;
+                    Ok((field_name.to_string(), gen))
+                })
+                .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields)
         }
-        DataType::List { datatype } => {
+        DataType::List(datatype) => {
             let length_key = format!("fields.{}.length", name);
             let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
             let generator = generator_from_data_type(
@@ -280,11 +279,12 @@ fn generator_from_data_type(
         }
         _ => {
             let kind_key = format!("fields.{}.kind", name);
-            if let Some(kind) = fields_option_map.get(&kind_key) && kind.as_str() == SEQUENCE_FIELD_KIND {
+            if let Some(kind) = fields_option_map.get(&kind_key)
+                && kind.as_str() == SEQUENCE_FIELD_KIND
+            {
                 let start_key = format!("fields.{}.start", name);
                 let end_key = format!("fields.{}.end", name);
-                let start_value =
-                    fields_option_map.get(&start_key).map(|s| s.to_string());
+                let start_value = fields_option_map.get(&start_key).map(|s| s.to_string());
                 let end_value = fields_option_map.get(&end_key).map(|s| s.to_string());
                 FieldGeneratorImpl::with_number_sequence(
                     data_type,
@@ -299,12 +299,7 @@ fn generator_from_data_type(
                 let max_key = format!("fields.{}.max", name);
                 let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
                 let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
-                FieldGeneratorImpl::with_number_random(
-                    data_type,
-                    min_value,
-                    max_value,
-                    random_seed
-                )
+                FieldGeneratorImpl::with_number_random(data_type, min_value, max_value, random_seed)
             }
         }
     }
@@ -312,13 +307,10 @@ fn generator_from_data_type(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::row::Row;
-    use risingwave_common::types::struct_type::StructType;
-    use risingwave_common::types::{ScalarImpl, ToDatumRef};
+    use risingwave_common::types::{ScalarImpl, StructType, ToDatumRef};
 
     use super::*;
 
@@ -342,10 +334,10 @@ mod tests {
             },
             Column {
                 name: "struct".to_string(),
-                data_type: DataType::Struct(Arc::new(StructType {
-                    fields: vec![DataType::Int32],
-                    field_names: vec!["random_int".to_string()],
-                })),
+                data_type: DataType::Struct(StructType::new(vec![(
+                    "random_int".to_string(),
+                    DataType::Int32,
+                )])),
                 is_visible: true,
             },
         ];

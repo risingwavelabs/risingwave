@@ -442,32 +442,10 @@ mod tests {
         CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy,
     };
     use crate::hummock::test_utils::{
-        commit_from_meta_node, generate_test_tables, get_sst_ids,
-        register_sstable_infos_to_compaction_group, setup_compute_env_with_config,
+        commit_from_meta_node, generate_test_sstables_with_table_id, get_sst_ids,
+        register_table_ids_to_compaction_group, setup_compute_env_with_config,
         to_local_sstable_info,
     };
-    use crate::hummock::HummockManager;
-    use crate::storage::MetaStore;
-
-    async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
-    where
-        S: MetaStore,
-    {
-        let original_tables = generate_test_tables(epoch, get_sst_ids(hummock_manager, 2).await);
-        register_sstable_infos_to_compaction_group(
-            hummock_manager,
-            &original_tables,
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
-        commit_from_meta_node(
-            hummock_manager,
-            epoch,
-            to_local_sstable_info(&original_tables),
-        )
-        .await
-        .unwrap();
-    }
 
     fn dummy_compact_task(task_id: u64, input_file_size: u64) -> CompactTask {
         CompactTask {
@@ -476,17 +454,11 @@ mod tests {
                 level_idx: 0,
                 level_type: 0,
                 table_infos: vec![SstableInfo {
-                    object_id: 0,
-                    sst_id: 0,
                     key_range: None,
                     file_size: input_file_size,
                     table_ids: vec![],
-                    meta_offset: 0,
-                    stale_key_count: 0,
-                    total_key_count: 0,
                     uncompressed_file_size: input_file_size,
-                    min_epoch: 0,
-                    max_epoch: 0,
+                    ..Default::default()
                 }],
             }],
             splits: vec![],
@@ -495,6 +467,7 @@ mod tests {
             task_id,
             target_level: 0,
             gc_delete_keys: false,
+            base_level: 0,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
@@ -506,6 +479,7 @@ mod tests {
             target_sub_level_id: 0,
             task_type: compact_task::TaskType::Dynamic as i32,
             split_by_state_table: false,
+            split_weight_by_vnode: 0,
         }
     }
 
@@ -562,11 +536,31 @@ mod tests {
             .level0_tier_compact_file_number(1)
             .max_bytes_for_level_base(1)
             .level0_sub_level_compact_level_count(1)
+            .level0_overlapping_sub_level_compact_level_count(1)
             .build();
         let (_, hummock_manager, _, worker_node) = setup_compute_env_with_config(80, config).await;
         let context_id = worker_node.id;
         let mut compactor_manager = RoundRobinPolicy::new();
-        add_compact_task(hummock_manager.as_ref(), context_id, 1).await;
+        register_table_ids_to_compaction_group(
+            hummock_manager.as_ref(),
+            &[1],
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
+        for epoch in 1..3 {
+            let original_tables = generate_test_sstables_with_table_id(
+                epoch,
+                1,
+                get_sst_ids(hummock_manager.as_ref(), 2).await,
+            );
+            commit_from_meta_node(
+                hummock_manager.as_ref(),
+                epoch,
+                to_local_sstable_info(&original_tables),
+            )
+            .await
+            .unwrap();
+        }
 
         // No compactor available.
         assert!(compactor_manager.next_compactor().is_none());

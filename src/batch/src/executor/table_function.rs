@@ -50,19 +50,15 @@ impl TableFunctionExecutor {
     async fn do_execute(self: Box<Self>) {
         let dummy_chunk = DataChunk::new_dummy(1);
 
-        let mut builder = self
-            .table_function
-            .return_type()
-            .create_array_builder(self.chunk_size);
-        let mut len = 0;
-        for array in self.table_function.eval(&dummy_chunk).await? {
-            len += array.len();
-            builder.append_array(&array);
+        #[for_await]
+        for chunk in self.table_function.eval(&dummy_chunk).await {
+            let chunk = chunk?;
+            // remove the first column and expand the second column if its data type is struct
+            yield match chunk.column_at(1).as_ref() {
+                ArrayImpl::Struct(struct_array) => struct_array.into(),
+                _ => chunk.split_column_at(1).1,
+            };
         }
-        yield match builder.finish() {
-            ArrayImpl::Struct(s) => DataChunk::from(s),
-            array => DataChunk::new(vec![array.into()], len),
-        };
     }
 }
 
@@ -92,7 +88,7 @@ impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
         let table_function = build_from_prost(node.table_function.as_ref().unwrap(), chunk_size)?;
 
         let schema = if let DataType::Struct(fields) = table_function.return_type() {
-            (&*fields).into()
+            (&fields).into()
         } else {
             Schema {
                 // TODO: should be named

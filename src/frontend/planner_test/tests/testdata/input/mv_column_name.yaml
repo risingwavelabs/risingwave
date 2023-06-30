@@ -1,0 +1,45 @@
+- name: is_null
+  sql: |
+    create table t (a int);
+    select a is null from t;
+  expected_outputs:
+  - stream_error
+- name: is_true
+  sql: |
+    create table t (a bool);
+    select a, a is true from t;
+  expected_outputs:
+  - stream_error
+- name: is_null with alias
+  sql: |
+    create table t (a int);
+    select a is null as is_null from t;
+  expected_outputs:
+  - stream_plan
+- name: is_true with alias
+  sql: |
+    create table t (a bool);
+    select a, a is true as is_true from t;
+  expected_outputs:
+  - stream_plan
+- name: column name specified more than once
+  sql: |
+    create table t1 (a int);
+    create table t2 (a int);
+    select * from t1 join t2 on t1.a = t2.a;
+  expected_outputs:
+  - batch_plan
+  - stream_error
+- name: expression name specified more than once
+  sql: |
+    create table t (a int);
+    select count(*), count(a) from t;
+  expected_outputs:
+  - batch_plan
+  - stream_error
+- name: expression column name
+  sql: |
+    create table t (a int);
+    select count(*), max(a) from t;
+  expected_outputs:
+  - stream_plan

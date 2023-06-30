@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::utils::impl_distill_by_unit;
 use super::{
-    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
@@ -117,20 +116,13 @@ impl PlanTreeNodeUnary for LogicalFilter {
 }
 
 impl_plan_tree_node_for_unary! {LogicalFilter}
-
-impl fmt::Display for LogicalFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalFilter")
-    }
-}
+impl_distill_by_unit!(LogicalFilter, core, "LogicalFilter");
 
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
-
-        let mut visitor = CollectInputRef::with_capacity(self.input().schema().len());
-        self.predicate().visit_expr(&mut visitor);
-        let predicate_required_cols: FixedBitSet = visitor.into();
+        let input_col_num = self.input().schema().len();
+        let predicate_required_cols = self.predicate().collect_input_refs(input_col_num);
 
         let mut predicate = self.predicate().clone();
         let input_required_cols = {
@@ -138,10 +130,8 @@ impl ColPrunable for LogicalFilter {
             tmp.union_with(&required_cols_bitset);
             tmp.ones().collect_vec()
         };
-        let mut mapping = ColIndexMapping::with_remaining_columns(
-            &input_required_cols,
-            self.input().schema().len(),
-        );
+        let mut mapping =
+            ColIndexMapping::with_remaining_columns(&input_required_cols, input_col_num);
         predicate = predicate.rewrite_expr(&mut mapping);
 
         let filter =

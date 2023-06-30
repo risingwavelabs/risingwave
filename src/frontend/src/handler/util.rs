@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -33,8 +33,10 @@ use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
+use risingwave_sqlparser::ast::display_comma_separated;
 
-use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
+use crate::catalog::IndexCatalog;
+use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
 use crate::session::SessionImpl;
 
 pin_project! {
@@ -189,6 +191,40 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
         .collect_vec()
 }
 
+pub fn indexes_to_rows(indexes: Vec<Arc<IndexCatalog>>) -> Vec<Row> {
+    indexes
+        .iter()
+        .map(|index| {
+            let index_display = index.display();
+            Row::new(vec![
+                Some(index.name.clone().into()),
+                Some(index.primary_table.name.clone().into()),
+                Some(
+                    format!(
+                        "{}",
+                        display_comma_separated(&index_display.index_columns_with_ordering)
+                    )
+                    .into(),
+                ),
+                Some(
+                    format!(
+                        "{}",
+                        display_comma_separated(&index_display.include_columns)
+                    )
+                    .into(),
+                ),
+                Some(
+                    format!(
+                        "{}",
+                        display_comma_separated(&index_display.distributed_by_columns)
+                    )
+                    .into(),
+                ),
+            ])
+        })
+        .collect_vec()
+}
+
 /// Convert from [`Field`] to [`PgFieldDescriptor`].
 pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
     PgFieldDescriptor::new(
@@ -212,6 +248,13 @@ pub fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
     };
 
     connector == KAFKA_CONNECTOR
+}
+
+#[inline(always)]
+pub fn get_connection_name(with_properties: &BTreeMap<String, String>) -> Option<String> {
+    with_properties
+        .get(CONNECTION_NAME_KEY)
+        .map(|s| s.to_lowercase())
 }
 
 #[cfg(test)]

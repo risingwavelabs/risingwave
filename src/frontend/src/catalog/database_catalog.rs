@@ -24,7 +24,6 @@ use crate::catalog::{DatabaseId, SchemaId, TableId};
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
-    #[expect(dead_code)]
     name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
@@ -100,6 +99,10 @@ impl DatabaseCatalog {
 
     pub fn id(&self) -> DatabaseId {
         self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn owner(&self) -> u32 {

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -20,8 +21,12 @@ use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use tokio::time::Instant;
 use tracing::error;
+use tracing_futures::Instrument;
 
+#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+use super::traced_store::TracedStateStore;
 use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
@@ -31,17 +36,41 @@ use crate::{
     define_local_state_store_associated_type, define_state_store_associated_type,
     define_state_store_read_associated_type,
 };
-
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
+    #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
     inner: Box<S>,
+
+    #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+    inner: Box<TracedStateStore<S>>,
 
     storage_metrics: Arc<MonitoredStorageMetrics>,
 }
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
+        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+        let inner = TracedStateStore::new_global(inner);
+        Self {
+            inner: Box::new(inner),
+            storage_metrics,
+        }
+    }
+
+    #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+    pub fn new_from_local(
+        inner: TracedStateStore<S>,
+        storage_metrics: Arc<MonitoredStorageMetrics>,
+    ) -> Self {
+        Self {
+            inner: Box::new(inner),
+            storage_metrics,
+        }
+    }
+
+    #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
+    pub fn new_from_local(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
         Self {
             inner: Box::new(inner),
             storage_metrics,
@@ -50,7 +79,7 @@ impl<S> MonitoredStateStore<S> {
 }
 
 /// A util function to break the type connection between two opaque return types defined by `impl`.
-fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
+pub(crate) fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
     input
 }
 
@@ -68,7 +97,7 @@ impl<S> MonitoredStateStore<S> {
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
     ) -> StorageResult<MonitoredStateStoreIterStream<'s, St>> {
         // start time takes iterator build time into account
-        let start_time = minstant::Instant::now();
+        let start_time = Instant::now();
         let table_id_label = table_id.to_string();
 
         // wait for iterator creation (e.g. seek)
@@ -93,7 +122,7 @@ impl<S> MonitoredStateStore<S> {
             stats: MonitoredStateStoreIterStats {
                 total_items: 0,
                 total_size: 0,
-                scan_time: minstant::Instant::now(),
+                scan_time: Instant::now(),
                 storage_metrics: self.storage_metrics.clone(),
                 table_id,
             },
@@ -102,6 +131,11 @@ impl<S> MonitoredStateStore<S> {
     }
 
     pub fn inner(&self) -> &S {
+        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+        {
+            self.inner.inner()
+        }
+        #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
         &self.inner
     }
 
@@ -117,10 +151,13 @@ impl<S> MonitoredStateStore<S> {
             .get_duration
             .with_label_values(&[table_id_label.as_str()])
             .start_timer();
+
         let value = get_future
             .verbose_instrument_await("store_get")
+            .instrument(tracing::trace_span!("store_get"))
             .await
             .inspect_err(|e| error!("Failed in get: {:?}", e))?;
+
         timer.observe_duration();
 
         self.storage_metrics
@@ -184,7 +221,11 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
                 .may_exist_duration
                 .with_label_values(&[table_id_label.as_str()])
                 .start_timer();
-            let res = self.inner.may_exist(key_range, read_options).await;
+            let res = self
+                .inner
+                .may_exist(key_range, read_options)
+                .verbose_instrument_await("store_may_exist")
+                .await;
             timer.observe_duration();
             res
         }
@@ -214,9 +255,11 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.delete(key, old_val)
     }
 
-    fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+    fn flush(&mut self, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) -> Self::FlushFuture<'_> {
         // TODO: collect metrics
-        self.inner.flush(delete_ranges)
+        self.inner
+            .flush(delete_ranges)
+            .verbose_instrument_await("store_flush")
     }
 
     fn epoch(&self) -> u64 {
@@ -263,7 +306,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             let sync_result = self
                 .inner
                 .sync(epoch)
-                .instrument_await("store_await_sync")
+                .instrument_await("store_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
@@ -299,7 +342,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
 
     fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
         async move {
-            MonitoredStateStore::new(
+            MonitoredStateStore::new_from_local(
                 self.inner
                     .new_local(option)
                     .instrument_await("store_new_local")
@@ -333,7 +376,7 @@ pub struct MonitoredStateStoreIter<S> {
 struct MonitoredStateStoreIterStats {
     total_items: usize,
     total_size: usize,
-    scan_time: minstant::Instant,
+    scan_time: Instant,
     storage_metrics: Arc<MonitoredStorageMetrics>,
 
     table_id: TableId,
@@ -359,7 +402,7 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
     }
 
     fn into_stream(self) -> impl StateStoreIterItemStream {
-        Self::into_stream_inner(self)
+        Self::into_stream_inner(self).instrument(tracing::trace_span!("store_iter"))
     }
 }
 

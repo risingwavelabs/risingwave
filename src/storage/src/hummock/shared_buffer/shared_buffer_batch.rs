@@ -24,6 +24,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
 
 use crate::hummock::event_handler::LocalInstanceId;
@@ -555,15 +556,11 @@ impl SharedBufferBatch {
         epoch: HummockEpoch,
         sorted_items: Vec<SharedBufferItem>,
         size: usize,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         table_id: TableId,
         instance_id: Option<LocalInstanceId>,
         tracker: Option<MemoryTracker>,
     ) -> Self {
-        let delete_ranges = delete_ranges
-            .into_iter()
-            .map(|(begin_key, end_key)| (Bound::Included(begin_key), Bound::Excluded(end_key)))
-            .collect_vec();
         let inner = SharedBufferBatchInner::new(
             table_id,
             epoch,
@@ -581,6 +578,42 @@ impl SharedBufferBatch {
 
     pub fn get_delete_range_tombstones(&self) -> Vec<MonotonicDeleteEvent> {
         self.inner.monotonic_tombstone_events.clone()
+    }
+
+    pub fn collect_vnodes(&self) -> Vec<usize> {
+        let mut vnodes = Vec::with_capacity(VirtualNode::COUNT);
+        let mut next_vnode_id = 0;
+        while next_vnode_id < VirtualNode::COUNT {
+            let seek_key = TableKey(
+                VirtualNode::from_index(next_vnode_id)
+                    .to_be_bytes()
+                    .to_vec(),
+            );
+            let idx = match self
+                .inner
+                .payload
+                .binary_search_by(|m| (m.0[..]).cmp(seek_key.as_slice()))
+            {
+                Ok(idx) => idx,
+                Err(idx) => idx,
+            };
+            if idx >= self.inner.payload.len() {
+                break;
+            }
+            let item = &self.inner.payload[idx];
+            if item.0.len() <= VirtualNode::SIZE {
+                break;
+            }
+            let current_vnode_id = VirtualNode::from_be_bytes(
+                item.0.as_ref()[..VirtualNode::SIZE]
+                    .try_into()
+                    .expect("slice with incorrect length"),
+            )
+            .to_index();
+            vnodes.push(current_vnode_id);
+            next_vnode_id = current_vnode_id + 1;
+        }
+        vnodes
     }
 }
 
@@ -792,6 +825,10 @@ impl SharedBufferDeleteRangeIterator {
 }
 
 impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
     fn next_extended_user_key(&self) -> PointRange<&[u8]> {
         self.inner.monotonic_tombstone_events[self.next_idx]
             .event_key
@@ -806,21 +843,30 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
         }
     }
 
-    fn next(&mut self) {
-        self.next_idx += 1;
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            self.next_idx += 1;
+            Ok(())
+        }
     }
 
-    fn rewind(&mut self) {
-        self.next_idx = 0;
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move {
+            self.next_idx = 0;
+            Ok(())
+        }
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
-        let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-        self.next_idx = self.inner.monotonic_tombstone_events.partition_point(
-            |MonotonicDeleteEvent { event_key, .. }| {
-                event_key.as_ref().le(&target_extended_user_key)
-            },
-        );
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+        async move {
+            let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
+            self.next_idx = self.inner.monotonic_tombstone_events.partition_point(
+                |MonotonicDeleteEvent { event_key, .. }| {
+                    event_key.as_ref().le(&target_extended_user_key)
+                },
+            );
+            Ok(())
+        }
     }
 
     fn is_valid(&self) -> bool {
@@ -933,8 +979,14 @@ mod tests {
             vec![],
             1,
             vec![
-                (Bytes::from("a"), Bytes::from("c")),
-                (Bytes::from("b"), Bytes::from("d")),
+                (
+                    Bound::Included(Bytes::from("a")),
+                    Bound::Excluded(Bytes::from("c")),
+                ),
+                (
+                    Bound::Included(Bytes::from("b")),
+                    Bound::Excluded(Bytes::from("d")),
+                ),
             ],
             TableId::new(0),
             None,
@@ -1091,9 +1143,18 @@ mod tests {
     async fn test_shared_buffer_batch_delete_range() {
         let epoch = 1;
         let delete_ranges = vec![
-            (Bytes::from(b"aaa".to_vec()), Bytes::from(b"bbb".to_vec())),
-            (Bytes::from(b"ccc".to_vec()), Bytes::from(b"ddd".to_vec())),
-            (Bytes::from(b"ddd".to_vec()), Bytes::from(b"eee".to_vec())),
+            (
+                Bound::Included(Bytes::from(b"aaa".to_vec())),
+                Bound::Excluded(Bytes::from(b"bbb".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"ccc".to_vec())),
+                Bound::Excluded(Bytes::from(b"ddd".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"ddd".to_vec())),
+                Bound::Excluded(Bytes::from(b"eee".to_vec())),
+            ),
         ];
         let shared_buffer_batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
@@ -1358,9 +1419,18 @@ mod tests {
         let table_id = TableId { table_id: 1004 };
         let epoch = 1;
         let delete_ranges = vec![
-            (Bytes::from(b"111".to_vec()), Bytes::from(b"222".to_vec())),
-            (Bytes::from(b"555".to_vec()), Bytes::from(b"777".to_vec())),
-            (Bytes::from(b"aaa".to_vec()), Bytes::from(b"ddd".to_vec())),
+            (
+                Bound::Included(Bytes::from(b"111".to_vec())),
+                Bound::Excluded(Bytes::from(b"222".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"555".to_vec())),
+                Bound::Excluded(Bytes::from(b"777".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"aaa".to_vec())),
+                Bound::Excluded(Bytes::from(b"ddd".to_vec())),
+            ),
         ];
         let shared_buffer_items1: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (
@@ -1390,9 +1460,18 @@ mod tests {
 
         let epoch = 2;
         let delete_ranges = vec![
-            (Bytes::from(b"444".to_vec()), Bytes::from(b"555".to_vec())),
-            (Bytes::from(b"888".to_vec()), Bytes::from(b"999".to_vec())),
-            (Bytes::from(b"bbb".to_vec()), Bytes::from(b"ccc".to_vec())),
+            (
+                Bound::Included(Bytes::from(b"444".to_vec())),
+                Bound::Excluded(Bytes::from(b"555".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"888".to_vec())),
+                Bound::Excluded(Bytes::from(b"999".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"bbb".to_vec())),
+                Bound::Excluded(Bytes::from(b"ccc".to_vec())),
+            ),
         ];
         let shared_buffer_items2: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (

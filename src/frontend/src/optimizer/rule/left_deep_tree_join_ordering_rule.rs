@@ -50,7 +50,7 @@ mod tests {
     use crate::utils::Condition;
 
     #[tokio::test]
-    async fn test_heuristic_join_reorder_from_multijoin() {
+    async fn test_heuristic_join_ordering_from_multijoin() {
         // Converts a join graph
         // A-B C
         //

@@ -21,6 +21,7 @@ use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
+use tokio::time::Instant;
 
 use super::error::StreamExecutorError;
 use super::exchange::input::BoxedInput;
@@ -116,7 +117,7 @@ impl MergeExecutor {
         let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
         // Channels that're blocked by the barrier to align.
-        let mut start_time = minstant::Instant::now();
+        let mut start_time = Instant::now();
         pin_mut!(select_all);
         while let Some(msg) = select_all.next().await {
             self.metrics
@@ -235,7 +236,7 @@ impl MergeExecutor {
             }
 
             yield msg;
-            start_time = minstant::Instant::now();
+            start_time = Instant::now();
         }
     }
 }

@@ -53,6 +53,8 @@ pub const PG_DATABASE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Boolean, "datallowconn"),
     // -1
     (DataType::Int32, "datconnlimit"),
+    // 1663
+    (DataType::Int32, "dattablespace"),
     // null
     (DataType::Varchar, "datacl"),
 ];
@@ -68,6 +70,7 @@ pub fn new_pg_database_row(id: u32, name: &str) -> OwnedRow {
         Some(ScalarImpl::Bool(false)),
         Some(ScalarImpl::Bool(true)),
         Some(ScalarImpl::Int32(-1)),
+        Some(ScalarImpl::Int32(1663)),
         None,
     ])
 }

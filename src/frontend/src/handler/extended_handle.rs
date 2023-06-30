@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
+use std::fmt::Formatter;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -49,6 +51,19 @@ pub enum Portal {
     PureStatement(Statement),
 }
 
+impl std::fmt::Display for Portal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self {
+            Portal::Portal(portal) => write!(
+                f,
+                "{}, params = {:?}",
+                portal.statement, portal.bound_result.parsed_params
+            ),
+            Portal::PureStatement(stmt) => write!(f, "{}", stmt),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct PortalResult {
     pub statement: Statement,
@@ -68,11 +83,10 @@ pub fn handle_parse(
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_parse(handler_args, statement, specific_param_types),
-        Statement::CreateView {
-            query,
-            ..
-        } => {
+        | Statement::Update { .. } => {
+            query::handle_parse(handler_args, statement, specific_param_types)
+        }
+        Statement::CreateView { query, .. } => {
             if have_parameter_in_query(query) {
                 return Err(ErrorCode::NotImplemented(
                     "CREATE VIEW with parameters".to_string(),
@@ -82,15 +96,13 @@ pub fn handle_parse(
             }
             Ok(PrepareStatement::PureStatement(statement))
         }
-        Statement::CreateTable {
-            query,
-            ..
-        } => {
+        Statement::CreateTable { query, .. } => {
             if let Some(query) = query && have_parameter_in_query(query) {
                 Err(ErrorCode::NotImplemented(
                     "CREATE TABLE AS SELECT with parameters".to_string(),
                     None.into(),
-                ).into())
+                )
+                .into())
             } else {
                 Ok(PrepareStatement::PureStatement(statement))
             }
@@ -100,7 +112,8 @@ pub fn handle_parse(
                 Err(ErrorCode::NotImplemented(
                     "CREATE SINK AS SELECT with parameters".to_string(),
                     None.into(),
-                ).into())
+                )
+                .into())
             } else {
                 Ok(PrepareStatement::PureStatement(statement))
             }
@@ -127,13 +140,15 @@ pub fn handle_bind(
                 bound,
                 param_types,
                 dependent_relations,
+                ..
             } = bound_result;
 
-            let new_bound = bound.bind_parameter(params, param_formats)?;
+            let (new_bound, parsed_params) = bound.bind_parameter(params, param_formats)?;
             let new_bound_result = BoundResult {
                 stmt_type,
                 must_dist,
                 param_types,
+                parsed_params: Some(parsed_params),
                 dependent_relations,
                 bound: new_bound,
             };
@@ -144,10 +159,7 @@ pub fn handle_bind(
             }))
         }
         PrepareStatement::PureStatement(stmt) => {
-            assert!(
-                params.is_empty(),
-                "params should be empty for pure statement"
-            );
+            // Jdbc might send set statements in a prepare statement, so params could be not empty.
             Ok(Portal::PureStatement(stmt))
         }
     }

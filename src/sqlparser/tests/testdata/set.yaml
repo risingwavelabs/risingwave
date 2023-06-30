@@ -6,9 +6,7 @@
 - input: SET TIME ZONE "Asia/Shanghai"
   formatted_sql: SET TIME ZONE "Asia/Shanghai"
 - input: SET TIME ZONE 'Asia/Shanghai'
-  error_msg: |-
-    sql parser error: Expected a value, found: EOF at the end
-    Near "SET TIME ZONE 'Asia/Shanghai'"
+  formatted_sql: SET TIME ZONE 'Asia/Shanghai'
 - input: SET TIME ZONE "UTC"
   formatted_sql: SET TIME ZONE "UTC"
 - input: SET TIME ZONE UTC

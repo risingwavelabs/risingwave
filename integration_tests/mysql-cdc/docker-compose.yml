@@ -36,7 +36,7 @@ services:
   mysql:
     image: mysql:8.0
     ports:
-      - "3306:3306"
+      - "8306:3306"
     environment:
       - MYSQL_ROOT_PASSWORD=123456
       - MYSQL_USER=mysqluser
@@ -52,17 +52,12 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: connector-node
-  datagen:
-    image: mysql:8.0
+  datagen_tpch:
+    image: ghcr.io/risingwavelabs/go-tpc:v0.1
     depends_on: 
       - mysql
-    command:
-      - /bin/sh
-      - -c
-      - "mysql -p123456 -h mysql mydb < mysql_prepare.sql"
-    volumes:
-      - "./mysql_prepare.sql:/mysql_prepare.sql"      
-    container_name: datagen
+    command: tpch prepare --sf 1 --threads 4 -H mysql -U root -p '123456' -D mydb -P 3306
+    container_name: datagen_tpch
     restart: on-failure
 volumes:
   compute-node-0:

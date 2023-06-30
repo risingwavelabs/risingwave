@@ -107,7 +107,7 @@ fn build_is_not_null_expr(_: DataType, children: Vec<BoxedExpression>) -> Result
 mod tests {
     use std::str::FromStr;
 
-    use risingwave_common::array::{ArrayBuilder, DataChunk, DecimalArrayBuilder};
+    use risingwave_common::array::{Array, ArrayBuilder, DataChunk, DecimalArrayBuilder};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, Decimal};
 
@@ -128,7 +128,7 @@ mod tests {
             builder.finish()
         };
 
-        let input_chunk = DataChunk::new(vec![input_array.into()], 3);
+        let input_chunk = DataChunk::new(vec![input_array.into_ref()], 3);
         let result_array = expr.eval(&input_chunk).await.unwrap();
         assert_eq!(3, result_array.len());
         for (i, v) in expected_eval_result.iter().enumerate() {

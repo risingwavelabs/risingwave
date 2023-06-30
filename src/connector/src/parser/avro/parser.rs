@@ -19,23 +19,21 @@ use std::sync::Arc;
 
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Reader, Schema};
-use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::schema_resolver::*;
-use super::util::{extract_inner_field_schema, from_avro_value};
+use super::util::avro_schema_to_column_descs;
 use crate::common::UpsertMessage;
-use crate::impl_common_parser_logic;
-use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
+use crate::parser::unified::upsert::UpsertChangeEvent;
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
-
-impl_common_parser_logic!(AvroParser);
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct AvroParser {
@@ -114,35 +112,16 @@ impl AvroParserConfig {
         }
     }
 
-    pub fn extract_pks(&self) -> Result<Vec<ColumnDesc>> {
-        if let Some(Schema::Record { fields, .. }) = self.key_schema.as_deref() {
-            let mut index = 0;
-            let fields = fields
-                .iter()
-                .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
-                .collect::<Result<Vec<_>>>()?;
-            Ok(fields)
-        } else {
-            Err(RwError::from(InternalError(
-                "schema invalid, record required".into(),
-            )))
-        }
+    pub fn extract_pks(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+        avro_schema_to_column_descs(
+            self.key_schema
+                .as_deref()
+                .ok_or_else(|| anyhow::format_err!("key schema is required"))?,
+        )
     }
 
-    pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
-        // there must be a record at top level
-        if let Schema::Record { fields, .. } = self.schema.as_ref() {
-            let mut index = 0;
-            let fields = fields
-                .iter()
-                .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
-                .collect::<Result<Vec<_>>>()?;
-            Ok(fields)
-        } else {
-            Err(RwError::from(InternalError(
-                "schema invalid, record required".into(),
-            )))
-        }
+    pub fn map_to_columns(&self) -> anyhow::Result<Vec<ColumnDesc>> {
+        avro_schema_to_column_descs(self.schema.as_ref())
     }
 }
 
@@ -174,17 +153,41 @@ impl AvroParser {
         self.key_schema.is_some()
     }
 
+    async fn parse_avro_value(
+        &self,
+        payload: &[u8],
+        reader_schema: Option<&Schema>,
+    ) -> anyhow::Result<Option<Value>> {
+        // parse payload to avro value
+        // if use confluent schema, get writer schema from confluent schema registry
+        if let Some(resolver) = &self.schema_resolver {
+            let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
+            let writer_schema = resolver.get(schema_id).await?;
+            Ok(Some(from_avro_datum(
+                writer_schema.as_ref(),
+                &mut raw_payload,
+                reader_schema,
+            )?))
+        } else if let Some(schema) = reader_schema {
+            let mut reader = Reader::with_schema(schema, payload)?;
+            match reader.next() {
+                Some(Ok(v)) => Ok(Some(v)),
+                Some(Err(e)) => Err(e)?,
+                None => {
+                    anyhow::bail!("avro parse unexpected eof")
+                }
+            }
+        } else {
+            unreachable!("both schema_resolver and reader_schema not exist");
+        }
+    }
+
     pub(crate) async fn parse_inner(
         &self,
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        enum Op {
-            Insert,
-            Delete,
-        }
-
-        let (_payload, op) = if self.is_enable_upsert() {
+        let (raw_key, raw_value) = if self.is_enable_upsert() {
             let msg: UpsertMessage<'_> = bincode::deserialize(&payload).map_err(|e| {
                 RwError::from(ProtocolError(format!(
                     "extract payload err {:?}, you may need to check the 'upsert' parameter",
@@ -192,98 +195,69 @@ impl AvroParser {
                 )))
             })?;
             if !msg.record.is_empty() {
-                (msg.record, Op::Insert)
+                (Some(msg.primary_key), Some(msg.record))
             } else {
-                (msg.primary_key, Op::Delete)
+                (Some(msg.primary_key), None)
             }
         } else {
-            (Cow::from(&payload), Op::Insert)
+            (None, Some(Cow::from(&payload)))
         };
 
-        // parse payload to avro value
-        // if use confluent schema, get writer schema from confluent schema registry
-        let avro_value = if let Some(resolver) = &self.schema_resolver {
-            let (schema_id, mut raw_payload) = extract_schema_id(&_payload)?;
-            let writer_schema = resolver.get(schema_id).await?;
-            let reader_schema = if matches!(op, Op::Delete) {
-                self.key_schema.as_deref()
-            } else {
-                Some(&*self.schema)
-            };
-            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, reader_schema)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
+        let avro_value = if let Some(payload) = raw_value {
+            self.parse_avro_value(payload.as_ref(), Some(&*self.schema))
+                .await?
         } else {
-            let mut reader = Reader::with_schema(&self.schema, &payload as &[u8])
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-            match reader.next() {
-                Some(Ok(v)) => v,
-                Some(Err(e)) => return Err(RwError::from(ProtocolError(e.to_string()))),
-                None => {
-                    return Err(RwError::from(ProtocolError(
-                        "avro parse unexpected eof".to_string(),
-                    )));
-                }
-            }
+            None
+        };
+        let avro_key = if let Some(payload) = raw_key {
+            self.parse_avro_value(payload.as_ref(), self.key_schema.as_deref())
+                .await?
+        } else {
+            None
         };
 
-        // the avro can be a key or a value
-        if let Value::Record(fields) = avro_value {
-            let fill = |column: &SourceColumnDesc| {
-                let tuple = match fields.iter().find(|val| column.name.eq(&val.0)) {
-                    None => return Ok(None),
-                    Some(tup) => tup,
-                };
-
-                let field_schema = extract_inner_field_schema(&self.schema, Some(&column.name))?;
-                from_avro_value(tuple.1.clone(), field_schema).map_err(|e| {
-                    tracing::error!(
-                        "failed to process value ({}): {}",
-                        String::from_utf8_lossy(&payload),
-                        e
-                    );
-                    e
-                })
-            };
-            match op {
-                Op::Insert => writer.insert(fill),
-                Op::Delete => writer.delete(fill),
-            }
-        } else if self.upsert_primary_key_column_name.is_some()
-            && matches!(op, Op::Delete)
-            && matches!(
-                avro_value,
-                Value::Boolean(_)
-                    | Value::String(_)
-                    | Value::Int(_)
-                    | Value::Long(_)
-                    | Value::Float(_)
-                    | Value::Decimal(_)
-                    | Value::Date(_)
-                    | Value::TimestampMillis(_)
-                    | Value::TimestampMicros(_)
-                    | Value::Duration(_)
-            )
-        {
-            writer.delete(|desc| {
-                if &desc.name != self.upsert_primary_key_column_name.as_ref().unwrap() {
-                    Ok(None)
-                } else {
-                    from_avro_value(avro_value.clone(), self.key_schema.as_deref().unwrap())
-                        .map_err(|e| {
-                            tracing::error!(
-                                "failed to process value ({}): {}",
-                                String::from_utf8_lossy(&payload),
-                                e
-                            );
-                            e
-                        })
-                }
-            })
-        } else {
-            Err(RwError::from(ProtocolError(
-                "avro parse unexpected value".to_string(),
-            )))
+        let mut accessor: UpsertChangeEvent<AvroAccess<'_, '_>, AvroAccess<'_, '_>> =
+            UpsertChangeEvent::default();
+        if let Some(key) = &avro_key {
+            accessor = accessor.with_key(AvroAccess::new(
+                key,
+                AvroParseOptions {
+                    schema: self.key_schema.as_deref(),
+                    ..Default::default()
+                },
+            ));
         }
+
+        if let Some(value) = &avro_value {
+            accessor = accessor.with_value(AvroAccess::new(
+                value,
+                AvroParseOptions::default().with_schema(&self.schema),
+            ));
+        }
+
+        if let Some(pk) = &self.upsert_primary_key_column_name {
+            accessor = accessor.with_key_as_column_name(pk);
+        }
+
+        apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
+    }
+}
+
+impl ByteStreamSourceParser for AvroParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 
@@ -291,7 +265,10 @@ impl AvroParser {
 mod test {
     use std::collections::HashMap;
     use std::env;
+    use std::fs::OpenOptions;
+    use std::io::Write;
     use std::ops::Sub;
+    use std::path::PathBuf;
 
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
@@ -307,13 +284,24 @@ mod test {
         read_schema_from_http, read_schema_from_local, read_schema_from_s3, AvroParser,
         AvroParserConfig,
     };
-    use crate::parser::avro::util::unix_epoch_days;
+    use crate::parser::unified::avro::unix_epoch_days;
     use crate::parser::SourceStreamChunkBuilder;
     use crate::source::SourceColumnDesc;
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
         curr_dir.into_string().unwrap() + "/src/test_data/" + file_name
+    }
+
+    fn e2e_file_path(file_name: &str) -> String {
+        let curr_dir = env::current_dir().unwrap().into_os_string();
+        let binding = PathBuf::from(curr_dir);
+        let dir = binding.parent().unwrap().parent().unwrap();
+        dir.join("scripts/source/test_data/")
+            .join(file_name)
+            .to_str()
+            .unwrap()
+            .to_string()
     }
 
     #[tokio::test]
@@ -377,7 +365,7 @@ mod test {
             .unwrap();
         let schema = &avro_parser.schema;
         let record = build_avro_data(schema);
-        assert_eq!(record.fields.len(), 10);
+        assert_eq!(record.fields.len(), 11);
         let mut writer = Writer::with_codec(schema, Vec::new(), Codec::Snappy);
         writer.append(record.clone()).unwrap();
         let flush = writer.flush().unwrap();
@@ -428,6 +416,9 @@ mod test {
                     let micros = Some(ScalarImpl::Int64(micros));
                     assert_eq!(row[i], micros);
                 }
+                Value::Bytes(bytes) => {
+                    assert_eq!(row[i], Some(ScalarImpl::Bytea(bytes.into_boxed_slice())));
+                }
                 Value::Duration(duration) => {
                     let months = u32::from(duration.months()) as i32;
                     let days = u32::from(duration.days()) as i32;
@@ -456,6 +447,7 @@ mod test {
             SourceColumnDesc::simple("birthday", DataType::Timestamptz, ColumnId::from(7)),
             SourceColumnDesc::simple("anniversary", DataType::Timestamptz, ColumnId::from(8)),
             SourceColumnDesc::simple("passed", DataType::Interval, ColumnId::from(9)),
+            SourceColumnDesc::simple("bytes", DataType::Bytea, ColumnId::from(10)),
         ]
     }
 
@@ -467,6 +459,7 @@ mod test {
             Schema::Float => Some(Value::Float(32_f32)),
             Schema::Double => Some(Value::Double(64_f64)),
             Schema::Boolean => Some(Value::Boolean(true)),
+            Schema::Bytes => Some(Value::Bytes(vec![1, 2, 3, 4, 5])),
 
             Schema::Date => {
                 let original_date = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
@@ -535,7 +528,7 @@ mod test {
             .await
             .unwrap();
         let columns = conf.map_to_columns().unwrap();
-        assert_eq!(columns.len(), 10);
+        assert_eq!(columns.len(), 11);
         println!("{:?}", columns);
     }
 
@@ -614,5 +607,32 @@ mod test {
             }
             _ => unreachable!(),
         }
+    }
+
+    // run this script when updating `simple-schema.avsc`, the script will generate new value in
+    // `avro_bin.1`
+    #[ignore]
+    #[tokio::test]
+    async fn update_avro_payload() {
+        let conf = new_avro_conf_from_local("simple-schema.avsc")
+            .await
+            .unwrap();
+        let mut writer = Writer::new(&conf.schema, Vec::new());
+        let record = build_avro_data(&conf.schema);
+        writer.append(record).unwrap();
+        let encoded = writer.into_inner().unwrap();
+        println!("path = {:?}", e2e_file_path("avro_bin.1"));
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(e2e_file_path("avro_bin.1"))
+            .unwrap();
+        file.write_all(encoded.as_slice()).unwrap();
+        println!(
+            "encoded = {:?}",
+            String::from_utf8_lossy(encoded.as_slice())
+        );
     }
 }

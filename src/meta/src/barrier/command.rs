@@ -19,7 +19,6 @@ use futures::future::try_join_all;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -35,6 +34,7 @@ use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
+use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
@@ -116,7 +116,9 @@ pub enum Command {
     ///
     /// Barriers from which actors should be collected, and the post behavior of this command are
     /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
-    RescheduleFragment(HashMap<FragmentId, Reschedule>),
+    RescheduleFragment {
+        reschedules: HashMap<FragmentId, Reschedule>,
+    },
 
     /// `ReplaceTable` command generates a `Update` barrier with the given `merge_updates`. This is
     /// essentially switching the downstream of the old table fragments to the new ones, and
@@ -159,7 +161,7 @@ impl Command {
             Command::CancelStreamingJob(table_fragments) => {
                 CommandChanges::DropTables(std::iter::once(table_fragments.table_id()).collect())
             }
-            Command::RescheduleFragment(reschedules) => {
+            Command::RescheduleFragment { reschedules, .. } => {
                 let to_add = reschedules
                     .values()
                     .flat_map(|r| r.added_actors.iter().copied())
@@ -210,8 +212,8 @@ pub struct CommandContext<S: MetaStore> {
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
     pub info: Arc<BarrierActorInfo>,
 
-    pub prev_epoch: Epoch,
-    pub curr_epoch: Epoch,
+    pub prev_epoch: TracedEpoch,
+    pub curr_epoch: TracedEpoch,
 
     pub command: Command,
 
@@ -226,8 +228,8 @@ impl<S: MetaStore> CommandContext<S> {
         fragment_manager: FragmentManagerRef<S>,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
-        prev_epoch: Epoch,
-        curr_epoch: Epoch,
+        prev_epoch: TracedEpoch,
+        curr_epoch: TracedEpoch,
         command: Command,
         checkpoint: bool,
         source_manager: SourceManagerRef<S>,
@@ -319,7 +321,7 @@ where
                 }))
             }
 
-            Command::RescheduleFragment(reschedules) => {
+            Command::RescheduleFragment { reschedules, .. } => {
                 let mut dispatcher_update = HashMap::new();
                 for (_fragment_id, reschedule) in reschedules.iter() {
                     for &(upstream_fragment_id, dispatcher_id) in
@@ -477,6 +479,24 @@ where
         }
     }
 
+    /// For `CancelStreamingJob`, returns the table id of the target table.
+    pub fn table_to_cancel(&self) -> Option<TableId> {
+        match &self.command {
+            Command::CancelStreamingJob(table_fragments) => Some(table_fragments.table_id()),
+            _ => None,
+        }
+    }
+
+    /// For `CreateStreamingJob`, returns the table id of the target table.
+    pub fn table_to_create(&self) -> Option<TableId> {
+        match &self.command {
+            Command::CreateStreamingJob {
+                table_fragments, ..
+            } => Some(table_fragments.table_id()),
+            _ => None,
+        }
+    }
+
     /// Clean up actors in CNs if needed, used by drop, cancel and reschedule commands.
     async fn clean_up(
         &self,
@@ -523,7 +543,7 @@ where
                 // execution of the next command of `Update`, as some newly created operators may
                 // immediately initialize their states on that barrier.
                 Some(Mutation::Pause(..)) => {
-                    self.wait_epoch_commit(self.prev_epoch.0).await?;
+                    self.wait_epoch_commit(self.prev_epoch.value().0).await?;
                 }
 
                 _ => {}
@@ -595,9 +615,9 @@ where
                     .await;
             }
 
-            Command::RescheduleFragment(reschedules) => {
+            Command::RescheduleFragment { reschedules } => {
                 let mut node_dropped_actors = HashMap::new();
-                for table_fragments in self.fragment_manager.list_table_fragments().await? {
+                for table_fragments in self.fragment_manager.list_table_fragments().await {
                     for fragment_id in table_fragments.fragments.keys() {
                         if let Some(reschedule) = reschedules.get(fragment_id) {
                             for actor_id in &reschedule.removed_actors {

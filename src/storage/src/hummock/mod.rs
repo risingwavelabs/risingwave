@@ -20,7 +20,6 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
@@ -84,8 +83,6 @@ use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
-use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::version::HummockVersionReader;
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
@@ -126,8 +123,6 @@ pub struct HummockStorage {
 
     read_version_mapping: Arc<ReadVersionMappingType>,
 
-    tracing: Arc<risingwave_tracing::RwTracingService>,
-
     backup_reader: BackupReaderRef,
 
     /// current_epoch < min_current_epoch cannot be read.
@@ -146,7 +141,6 @@ impl HummockStorage {
         notification_client: impl NotificationClient,
         filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
-        tracing: Arc<risingwave_tracing::RwTracingService>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
@@ -193,7 +187,6 @@ impl HummockStorage {
             compactor_metrics.clone(),
             sstable_object_id_manager.clone(),
             filter_key_extractor_manager.clone(),
-            CompactorRuntimeConfig::default(),
         ));
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -203,6 +196,7 @@ impl HummockStorage {
             event_rx,
             pinned_version,
             compactor_context.clone(),
+            state_store_metrics.clone(),
         );
 
         let instance = Self {
@@ -220,7 +214,6 @@ impl HummockStorage {
                 shutdown_sender: event_tx,
             }),
             read_version_mapping: hummock_event_handler.read_version_mapping(),
-            tracing,
             backup_reader,
             min_current_epoch,
             write_limiter,
@@ -237,6 +230,7 @@ impl HummockStorage {
             .send(HummockEvent::RegisterReadVersion {
                 table_id: option.table_id,
                 new_read_version_sender: tx,
+                is_replicated: option.is_replicated,
             })
             .unwrap();
 
@@ -247,7 +241,6 @@ impl HummockStorage {
             self.hummock_version_reader.clone(),
             self.hummock_event_sender.clone(),
             self.buffer_tracker.get_memory_limiter().clone(),
-            self.tracing.clone(),
             self.write_limiter.clone(),
             option,
         )
@@ -289,7 +282,6 @@ impl HummockStorage {
                 version_update_payload::Payload::PinnedVersion(version),
             ))
             .unwrap();
-
         loop {
             if self.pinned_version.load().id() >= version_id {
                 break;
@@ -335,7 +327,6 @@ impl HummockStorage {
             notification_client,
             Arc::new(FilterKeyExtractorManager::default()),
             Arc::new(HummockStateStoreMetrics::unused()),
-            Arc::new(risingwave_tracing::RwTracingService::disabled()),
             Arc::new(CompactorMetrics::unused()),
         )
         .await
@@ -347,6 +338,18 @@ impl HummockStorage {
 
     pub fn version_reader(&self) -> &HummockVersionReader {
         &self.hummock_version_reader
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn wait_version_update(&self, old_id: u64) -> u64 {
+        use tokio::task::yield_now;
+        loop {
+            let cur_id = self.pinned_version.load().id();
+            if cur_id > old_id {
+                return cur_id;
+            }
+            yield_now().await;
+        }
     }
 }
 
@@ -362,9 +365,14 @@ pub async fn get_from_sstable_info(
 
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
-    if let Some(hash) = dist_key_hash && !hit_sstable_bloom_filter(sstable.value(), hash, local_stats) {
+    if let Some(hash) = dist_key_hash
+        && !hit_sstable_bloom_filter(sstable.value(), hash, local_stats)
+    {
         if !read_options.ignore_range_tombstone {
-            let delete_epoch = get_min_delete_range_epoch_from_sstable(sstable.value().as_ref(), full_key.user_key);
+            let delete_epoch = get_min_delete_range_epoch_from_sstable(
+                sstable.value().as_ref(),
+                full_key.user_key,
+            );
             if delete_epoch <= full_key.epoch {
                 return Ok(Some((HummockValue::Delete, delete_epoch)));
             }

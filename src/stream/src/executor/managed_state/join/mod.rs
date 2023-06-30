@@ -30,12 +30,13 @@ use risingwave_common::row;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::cache::{new_with_hasher_in, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
@@ -84,7 +85,7 @@ impl<R: Row> JoinRow<R> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, EstimateSize)]
 pub struct EncodedJoinRow {
     pub compacted_row: CompactedRow,
     degree: DegreeType,
@@ -104,17 +105,17 @@ impl EncodedJoinRow {
     }
 }
 
-impl EstimateSize for EncodedJoinRow {
-    fn estimated_heap_size(&self) -> usize {
-        self.compacted_row.row.len()
-    }
-}
-
 /// Memcomparable encoding.
 type PkType = Vec<u8>;
 
 pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = Box<JoinEntryState>;
+
+impl EstimateSize for HashValueType {
+    fn estimated_heap_size(&self) -> usize {
+        self.as_ref().estimated_heap_size()
+    }
+}
 
 /// The wrapper for [`JoinEntryState`] which should be `Some` most of the time in the hash table.
 ///
@@ -125,7 +126,7 @@ struct HashValueWrapper(Option<HashValueType>);
 
 impl EstimateSize for HashValueWrapper {
     fn estimated_heap_size(&self) -> usize {
-        0
+        self.0.estimated_heap_size()
     }
 }
 
@@ -312,7 +313,15 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        let cache = new_with_hasher_in(watermark_epoch, PrecomputedBuildHasher, alloc);
+        let metrics_info = MetricsInfo::new(
+            metrics.clone(),
+            join_table_id,
+            actor_id,
+            &format!("hash join {}", side),
+        );
+
+        let cache =
+            new_with_hasher_in(watermark_epoch, metrics_info, PrecomputedBuildHasher, alloc);
 
         Self {
             inner: cache,

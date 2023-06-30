@@ -54,7 +54,7 @@ impl BrokerAddrRewriter {
         role: PrivateLinkContextRole,
         broker_rewrite_map: Option<HashMap<String, String>>,
     ) -> anyhow::Result<Self> {
-        tracing::debug!("[{}] rewrite map {:?}", role, broker_rewrite_map);
+        tracing::info!("[{}] rewrite map {:?}", role, broker_rewrite_map);
         let rewrite_map: anyhow::Result<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
             .map_or(Ok(BTreeMap::new()), |addr_map| {
                 addr_map

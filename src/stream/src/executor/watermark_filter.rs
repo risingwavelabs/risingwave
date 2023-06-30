@@ -20,10 +20,10 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::{
-    build, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
+    build_func, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
 };
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
@@ -122,7 +122,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let mut current_watermark =
             Self::get_global_max_watermark(&table, watermark_type.clone()).await?;
 
-        let mut last_checkpoint_watermark = watermark_type.min();
+        let mut last_checkpoint_watermark = watermark_type.min_value();
 
         yield Message::Watermark(Watermark::new(
             event_time_col_idx,
@@ -156,12 +156,18 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     )?;
 
                     // NULL watermark should not be considered.
-                    let max_watermark = watermark_array.iter().flatten().max();
+                    let max_watermark = watermark_array
+                        .iter()
+                        .flatten()
+                        .max_by(DefaultOrd::default_cmp);
 
                     if let Some(max_watermark) = max_watermark {
                         // Assign a new watermark.
-                        current_watermark =
-                            cmp::max(current_watermark, max_watermark.into_scalar_impl());
+                        current_watermark = cmp::max_by(
+                            current_watermark,
+                            max_watermark.into_scalar_impl(),
+                            DefaultOrd::default_cmp,
+                        );
                     }
 
                     let pred_output = watermark_filter_expr
@@ -184,7 +190,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     if watermark.col_idx == event_time_col_idx {
                         tracing::warn!("WatermarkFilterExecutor received a watermark on the event it is filtering.");
                         let watermark = watermark.val;
-                        if watermark > current_watermark {
+                        if current_watermark.default_cmp(&watermark).is_lt() {
                             current_watermark = watermark;
                             yield Message::Watermark(Watermark::new(
                                 event_time_col_idx,
@@ -236,7 +242,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         event_time_col_idx: usize,
         watermark: ScalarImpl,
     ) -> ExprResult<BoxedExpression> {
-        build(
+        build_func(
             Type::GreaterThanOrEqual,
             DataType::Boolean,
             vec![
@@ -273,8 +279,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let watermark = watermarks
             .into_iter()
             .flatten()
-            .max()
-            .unwrap_or_else(|| watermark_type.min());
+            .max_by(DefaultOrd::default_cmp)
+            .unwrap_or_else(|| watermark_type.min_value());
 
         Ok(watermark)
     }
@@ -401,7 +407,7 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(WATERMARK_TYPE.min()),
+            watermark!(WATERMARK_TYPE.min_value()),
         );
 
         // push the 1st chunk

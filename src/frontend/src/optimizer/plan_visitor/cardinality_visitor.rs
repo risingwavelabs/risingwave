@@ -19,7 +19,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{DefaultBehavior, DefaultValue, PlanVisitor};
 use crate::catalog::system_catalog::pg_catalog::PG_NAMESPACE_TABLE_NAME;
-use crate::optimizer::plan_node::generic::Limit;
+use crate::optimizer::plan_node::generic::TopNLimit;
 use crate::optimizer::plan_node::{self, PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanRef;
 use crate::optimizer::property::Cardinality;
@@ -61,8 +61,8 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
         let input = self.visit(plan.input());
 
         match plan.limit_attr() {
-            Limit::Simple(limit) => input.sub(plan.offset() as usize).min(limit as usize),
-            Limit::WithTies(limit) => {
+            TopNLimit::Simple(limit) => input.sub(plan.offset() as usize).min(limit as usize),
+            TopNLimit::WithTies(limit) => {
                 assert_eq!(plan.offset(), 0, "ties with offset is not supported yet");
                 input.min((limit as usize)..)
             }
@@ -81,8 +81,15 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
 
         // We don't have UNIQUE key now. So we hack here to support some complex queries on
         // system tables.
-        if let Some(scan) = input.as_logical_scan() && scan.is_sys_table() && scan.table_name() == PG_NAMESPACE_TABLE_NAME {
-            let nspname = scan.output_col_idx().iter().find(|i| scan.table_desc().columns[**i].name == "nspname").unwrap();
+        if let Some(scan) = input.as_logical_scan()
+            && scan.is_sys_table()
+            && scan.table_name() == PG_NAMESPACE_TABLE_NAME
+        {
+            let nspname = scan
+                .output_col_idx()
+                .iter()
+                .find(|i| scan.table_desc().columns[**i].name == "nspname")
+                .unwrap();
             unique_keys.push([*nspname].into_iter().collect());
         }
 

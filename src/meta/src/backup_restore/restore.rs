@@ -29,7 +29,7 @@ use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBa
 use crate::dispatch_meta_store;
 use crate::hummock::model::CompactionGroup;
 use crate::manager::model::SystemParamsModel;
-use crate::model::{MetadataModel, TableFragments};
+use crate::model::{ClusterId, MetadataModel, TableFragments};
 use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 
 /// Command-line arguments for restore.
@@ -125,6 +125,17 @@ async fn restore_system_param_model<S: MetaStore, T: SystemParamsModel + Send + 
     Ok(())
 }
 
+async fn restore_cluster_id<S: MetaStore>(
+    meta_store: &S,
+    cluster_id: ClusterId,
+) -> BackupResult<()> {
+    if ClusterId::from_meta_store(meta_store).await?.is_some() {
+        return Err(BackupError::NonemptyMetaStorage);
+    }
+    cluster_id.put_at_meta_store(meta_store).await?;
+    Ok(())
+}
+
 async fn restore_default_cf<S: MetaStore>(
     meta_store: &S,
     snapshot: &MetaSnapshot,
@@ -175,6 +186,7 @@ async fn restore_metadata<S: MetaStore>(meta_store: S, snapshot: MetaSnapshot) -
     restore_metadata_model(&meta_store, &snapshot.metadata.function).await?;
     restore_metadata_model(&meta_store, &snapshot.metadata.connection).await?;
     restore_system_param_model(&meta_store, &[snapshot.metadata.system_param]).await?;
+    restore_cluster_id(&meta_store, snapshot.metadata.cluster_id.into()).await?;
     Ok(())
 }
 

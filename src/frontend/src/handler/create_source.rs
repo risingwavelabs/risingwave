@@ -18,9 +18,7 @@ use std::sync::LazyLock;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{
-    columns_extend, is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, ROW_ID_COLUMN_ID,
-};
+use risingwave_common::catalog::{is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId};
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -40,24 +38,24 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
-    AvroSchema, CreateSourceStatement, DebeziumAvroSchema, ProtobufSchema, SourceSchema,
-    SourceWatermark,
+    self, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema,
+    ProtobufSchema, SourceSchema, SourceWatermark,
 };
 
-use super::create_table::bind_sql_table_column_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
-    bind_sql_column_constraints, bind_sql_columns, ColumnIdGenerator,
+    bind_pk_names, bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns,
+    ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
-use crate::WithOptions;
+use crate::utils::resolve_connection_in_with_option;
+use crate::{bind_data_type, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
@@ -89,7 +87,7 @@ async fn extract_avro_table_schema(
 async fn extract_upsert_avro_table_schema(
     schema: &AvroSchema,
     with_properties: &HashMap<String, String>,
-) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>)> {
+) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     let conf = AvroParserConfig::new(
         with_properties,
         schema.row_schema_location.0.as_str(),
@@ -99,7 +97,10 @@ async fn extract_upsert_avro_table_schema(
     )
     .await?;
     let vec_column_desc = conf.map_to_columns()?;
-    let vec_pk_desc = conf.extract_pks()?;
+
+    let vec_pk_desc = conf.extract_pks().map_err(|e| RwError::from(ErrorCode::InternalError(
+            format!("Kafka message key schema is invalid. Record type is required, or specify a primary key column to bypass the primary key detection. {:?}", e)
+        )))?;
     let pks = vec_pk_desc
         .into_iter()
         .map(|desc| {
@@ -113,7 +114,7 @@ async fn extract_upsert_avro_table_schema(
                     )))
                 })
         })
-        .map_ok(|desc| ColumnId::new(desc.column_id))
+        .map_ok(|desc| desc.name.clone())
         .collect::<Result<Vec<_>>>()?;
     Ok((
         vec_column_desc
@@ -126,6 +127,7 @@ async fn extract_upsert_avro_table_schema(
         pks,
     ))
 }
+
 async fn extract_debezium_avro_table_pk_columns(
     schema: &DebeziumAvroSchema,
     with_properties: &HashMap<String, String>,
@@ -133,7 +135,7 @@ async fn extract_debezium_avro_table_pk_columns(
     let conf =
         DebeziumAvroParserConfig::new(with_properties, schema.row_schema_location.0.as_str())
             .await?;
-    conf.get_pk_names()
+    Ok(conf.extract_pks()?.drain(..).map(|c| c.name).collect())
 }
 
 // Map an Avro schema to a relational schema and return the pk_column_ids.
@@ -178,363 +180,370 @@ async fn extract_protobuf_table_schema(
         .collect_vec())
 }
 
-#[inline(always)]
-fn get_connection_name(with_properties: &HashMap<String, String>) -> Option<String> {
-    with_properties
-        .get(CONNECTION_NAME_KEY)
-        .map(|s| s.to_lowercase())
+fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
+    columns
+        .iter()
+        .filter(|c| {
+            c.options
+                .iter()
+                .all(|option| !matches!(option.option, ColumnOption::GeneratedColumns(_)))
+        })
+        .cloned()
+        .collect()
 }
 
-pub(crate) async fn resolve_source_schema(
-    source_schema: SourceSchema,
-    columns: &mut Vec<ColumnCatalog>,
-    with_properties: &mut HashMap<String, String>,
-    row_id_index: &mut Option<usize>,
-    pk_column_ids: &mut Vec<ColumnId>,
-    is_materialized: bool,
-) -> Result<StreamSourceInfo> {
-    validate_compatibility(&source_schema, with_properties)?;
-    check_nexmark_schema(with_properties, *row_id_index, columns)?;
+/// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
+/// return `(columns, pk_names, source info)`
+pub(crate) async fn try_bind_columns_from_source(
+    source_schema: &SourceSchema,
+    sql_defined_pk_names: Vec<String>,
+    sql_defined_columns: &[ColumnDef],
+    with_properties: &HashMap<String, String>,
+) -> Result<(Option<Vec<ColumnCatalog>>, Vec<String>, StreamSourceInfo)> {
+    let sql_defined_pk = !sql_defined_pk_names.is_empty();
+    let sql_defined_schema = !sql_defined_columns.is_empty();
+    let is_kafka: bool = is_kafka_connector(with_properties);
 
-    let is_kafka = is_kafka_connector(with_properties);
-
-    let source_info = match &source_schema {
+    Ok(match source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            let (expected_column_len, expected_row_id_index) = if is_kafka && !is_materialized {
-                // The first column is `_rw_kafka_timestamp`.
-                (2, 1)
-            } else {
-                (1, 0)
-            };
-            if columns.len() != expected_column_len
-                || *pk_column_ids != vec![ROW_ID_COLUMN_ID]
-                || *row_id_index != Some(expected_row_id_index)
-            {
+            if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string(),
-                )));
-            }
-
-            columns_extend(
-                columns,
-                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
-            );
-
-            StreamSourceInfo {
-                row_format: RowFormatType::Protobuf as i32,
-                row_schema_location: protobuf_schema.row_schema_location.0.clone(),
-                use_schema_registry: protobuf_schema.use_schema_registry,
-                proto_message_name: protobuf_schema.message_name.0.clone(),
-                ..Default::default()
-            }
+                    "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string())));
+            };
+            (
+                Some(
+                    extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
+                ),
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::Protobuf as i32,
+                    row_schema_location: protobuf_schema.row_schema_location.0.clone(),
+                    use_schema_registry: protobuf_schema.use_schema_registry,
+                    proto_message_name: protobuf_schema.message_name.0.clone(),
+                    ..Default::default()
+                },
+            )
         }
-
         SourceSchema::Avro(avro_schema) => {
-            let (expected_column_len, expected_row_id_index) = if is_kafka && !is_materialized {
-                // The first column is `_rw_kafka_timestamp`.
-                (2, 1)
-            } else {
-                (1, 0)
-            };
-            if columns.len() != expected_column_len
-                || *pk_column_ids != vec![ROW_ID_COLUMN_ID]
-                || *row_id_index != Some(expected_row_id_index)
-            {
+            if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string(),
-                )));
+                    "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
-
-            columns_extend(
-                columns,
-                extract_avro_table_schema(avro_schema, with_properties).await?,
-            );
-            StreamSourceInfo {
-                row_format: RowFormatType::Avro as i32,
-
-                row_schema_location: avro_schema.row_schema_location.0.clone(),
-                use_schema_registry: avro_schema.use_schema_registry,
-                proto_message_name: "".to_owned(),
-                ..Default::default()
-            }
+            (
+                Some(extract_avro_table_schema(avro_schema, with_properties).await?),
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::Avro as i32,
+                    row_schema_location: avro_schema.row_schema_location.0.clone(),
+                    use_schema_registry: avro_schema.use_schema_registry,
+                    proto_message_name: "".to_owned(),
+                    ..Default::default()
+                },
+            )
         }
-
         SourceSchema::UpsertAvro(avro_schema) => {
-            let mut upsert_avro_primary_key = Default::default();
-            if row_id_index.is_none() {
-                // user specify pk(s)
-                if columns.len() != pk_column_ids.len() || pk_column_ids.len() != 1 {
+            if sql_defined_schema {
+                return Err(RwError::from(ProtocolError(
+                    "User-defined schema is not allowed with row format upsert avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
+            }
+
+            if sql_defined_pk {
+                if sql_defined_pk_names.len() != 1 {
                     return Err(RwError::from(ProtocolError(
-                        "You can specify single primary key column or leave the columns and primary key fields empty.".to_string(),
+                        "upsert avro supports only one primary key column.".to_string(),
                     )));
                 }
-                let pk_name = columns[0].column_desc.name.clone();
+                let columns = extract_avro_table_schema(avro_schema, with_properties).await?;
 
-                *columns = extract_avro_table_schema(avro_schema, with_properties).await?;
-                let pk_col = columns
-                    .iter()
-                    .find(|col| col.column_desc.name == pk_name)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(format!(
-                            "Primary key {pk_name} is not found."
-                        )))
-                    })?;
-
-                *pk_column_ids = vec![pk_col.column_id()];
-                upsert_avro_primary_key = pk_name;
+                let upsert_avro_primary_key = sql_defined_pk_names[0].clone();
+                (
+                    Some(columns),
+                    sql_defined_pk_names,
+                    StreamSourceInfo {
+                        row_format: RowFormatType::UpsertAvro as i32,
+                        row_schema_location: avro_schema.row_schema_location.0.clone(),
+                        use_schema_registry: avro_schema.use_schema_registry,
+                        upsert_avro_primary_key,
+                        ..Default::default()
+                    },
+                )
             } else {
-                // contains row_id, user specify some columns without pk
-                if !(*pk_column_ids == vec![ROW_ID_COLUMN_ID] && columns.len() == 1) {
-                    return Err(RwError::from(ProtocolError(
-                        "UPSERT AVRO will automatically extract the schema from the Avro schema. You can specify single primary key column or leave the columns and primary key fields empty.".to_string(),
-                )));
-                }
-                let (columns_extracted, pks_extracted) =
+                let (columns, pk_from_avro) =
                     extract_upsert_avro_table_schema(avro_schema, with_properties).await?;
-
-                *columns = columns_extracted;
-                *pk_column_ids = pks_extracted;
-            }
-
-            StreamSourceInfo {
-                row_format: RowFormatType::UpsertAvro as i32,
-                row_schema_location: avro_schema.row_schema_location.0.clone(),
-                use_schema_registry: avro_schema.use_schema_registry,
-                upsert_avro_primary_key,
-                ..Default::default()
+                (
+                    Some(columns),
+                    pk_from_avro,
+                    StreamSourceInfo {
+                        row_format: RowFormatType::UpsertAvro as i32,
+                        row_schema_location: avro_schema.row_schema_location.0.clone(),
+                        use_schema_registry: avro_schema.use_schema_registry,
+                        ..Default::default()
+                    },
+                )
             }
         }
+        SourceSchema::DebeziumAvro(avro_schema) => {
+            if sql_defined_schema {
+                return Err(RwError::from(ProtocolError(
+                    "User-defined schema is not allowed with row format debezium avro.".to_string(),
+                )));
+            }
+            let full_columns =
+                extract_debezium_avro_table_schema(avro_schema, with_properties).await?;
 
-        SourceSchema::Json => StreamSourceInfo {
-            row_format: RowFormatType::Json as i32,
-            ..Default::default()
-        },
-        SourceSchema::UpsertJson => StreamSourceInfo {
-            row_format: RowFormatType::UpsertJson as i32,
-            ..Default::default()
-        },
+            let pk_names = if sql_defined_pk {
+                sql_defined_pk_names
+            } else {
+                let pk_names =
+                    extract_debezium_avro_table_pk_columns(avro_schema, with_properties).await?;
+                // extract pk(s) from schema registry
+                for pk_name in &pk_names {
+                    full_columns
+                        .iter()
+                        .find(|c: &&ColumnCatalog| c.name().eq(pk_name))
+                        .ok_or_else(|| {
+                            RwError::from(ProtocolError(format!(
+                                "avro's key column {} not exists in avro's row schema",
+                                pk_name
+                            )))
+                        })?;
+                }
+                pk_names
+            };
+            (
+                Some(full_columns),
+                pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::DebeziumAvro as i32,
+                    row_schema_location: avro_schema.row_schema_location.0.clone(),
+                    ..Default::default()
+                },
+            )
+        }
 
+        SourceSchema::DebeziumJson => {
+            if !sql_defined_pk {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+            (
+                None,
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::DebeziumJson as i32,
+                    ..Default::default()
+                },
+            )
+        }
+        SourceSchema::UpsertJson => {
+            if !sql_defined_pk {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format upsert_json."
+                        .to_string(),
+                )));
+            }
+            (
+                None,
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::UpsertJson as i32,
+                    ..Default::default()
+                },
+            )
+        }
         SourceSchema::Maxwell => {
-            // return err if user has not specified a pk
-            if row_id_index.is_some() {
+            if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with row format maxwell."
                         .to_string(),
                 )));
             }
-
-            StreamSourceInfo {
-                row_format: RowFormatType::Maxwell as i32,
-                ..Default::default()
-            }
+            (
+                None,
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::Maxwell as i32,
+                    ..Default::default()
+                },
+            )
         }
-
-        SourceSchema::DebeziumJson => {
-            // return err if user has not specified a pk
-            if row_id_index.is_some() {
-                return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format debezium."
-                        .to_string(),
-                )));
-            }
-
-            StreamSourceInfo {
-                row_format: RowFormatType::DebeziumJson as i32,
-                ..Default::default()
-            }
-        }
-        SourceSchema::DebeziumMongoJson => {
-            if columns.is_empty() {
-                let mut col_id_gen = ColumnIdGenerator::new_initial();
-                let pk_id = col_id_gen.generate("_id");
-                columns.push(ColumnCatalog {
-                    column_desc: ColumnDesc {
-                        data_type: DataType::Varchar,
-                        column_id: pk_id,
-                        name: "_id".to_string(),
-                        field_descs: vec![],
-                        type_name: "".to_string(),
-                        generated_column: None,
-                    },
-                    is_hidden: false,
-                });
-                columns.push(ColumnCatalog {
-                    column_desc: ColumnDesc {
-                        data_type: DataType::Jsonb,
-                        column_id: col_id_gen.generate("payload"),
-                        name: "payload".to_string(),
-                        field_descs: vec![],
-                        type_name: "".to_string(),
-                        generated_column: None,
-                    },
-                    is_hidden: false,
-                });
-                pk_column_ids.push(pk_id);
-                row_id_index.take();
-            }
-
-            // return err if user has not specified a pk
-            if row_id_index.is_some() {
-                return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format debezium."
-                        .to_string(),
-                )));
-            }
-            'check_pk: {
-                if pk_column_ids.len() == 1 {
-                    let pk_column = columns
-                        .iter()
-                        .find(|col| col.column_id() == pk_column_ids[0])
-                        .unwrap();
-                    if pk_column.name() == "_id"
-                        && matches!(
-                            pk_column.data_type(),
-                            DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64
-                        )
-                    {
-                        break 'check_pk;
-                    }
-                }
-                return Err(RwError::from(ProtocolError(
-                    "Primary key must named as `_id` with supported datatypes (Jsonb Varchar Int32 Int64)."
-                        .to_string(),
-                )));
-            }
-            let _ = columns
-                .iter()
-                .find(|col| col.name() == "payload" && matches!(col.data_type(), DataType::Jsonb))
-                .ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                "A column named as `payload` with supported datatypes Jsonb must exist in table."
-                    .to_string(),
-            ))
-                })?;
-
-            StreamSourceInfo {
-                row_format: RowFormatType::DebeziumMongoJson as i32,
-                ..Default::default()
-            }
-        }
-
         SourceSchema::CanalJson => {
-            // return err if user has not specified a pk
-            if row_id_index.is_some() {
+            if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with row format cannal_json."
                         .to_string(),
                 )));
             }
-
-            StreamSourceInfo {
-                row_format: RowFormatType::CanalJson as i32,
-                ..Default::default()
-            }
+            (
+                None,
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::CanalJson as i32,
+                    ..Default::default()
+                },
+            )
         }
+        SourceSchema::Csv(csv_info) => {
+            if is_kafka && csv_info.has_header {
+                return Err(RwError::from(ProtocolError(
+                    "CSV HEADER is not supported when creating table with Kafka connector"
+                        .to_owned(),
+                )));
+            }
+            (
+                None,
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::Csv as i32,
+                    csv_delimiter: csv_info.delimiter as i32,
+                    csv_has_header: csv_info.has_header,
+                    ..Default::default()
+                },
+            )
+        }
+        SourceSchema::Json => (
+            None,
+            sql_defined_pk_names,
+            StreamSourceInfo {
+                row_format: RowFormatType::Json as i32,
+                ..Default::default()
+            },
+        ),
+        SourceSchema::Native => (
+            None,
+            sql_defined_pk_names,
+            StreamSourceInfo {
+                row_format: RowFormatType::Native as i32,
+                ..Default::default()
+            },
+        ),
+        SourceSchema::Bytes => {
+            if !sql_defined_schema || sql_defined_columns.len() != 1 {
+                return Err(RwError::from(ProtocolError(
+                    "BYTES format only accepts one column".to_string(),
+                )));
+            }
 
-        SourceSchema::Csv(csv_info) => StreamSourceInfo {
-            row_format: RowFormatType::Csv as i32,
-            csv_delimiter: csv_info.delimiter as i32,
-            csv_has_header: csv_info.has_header,
-            ..Default::default()
-        },
-
-        SourceSchema::Native => StreamSourceInfo {
-            row_format: RowFormatType::Native as i32,
-            ..Default::default()
-        },
-
-        SourceSchema::DebeziumAvro(avro_schema) => {
-            // no row_id, so user specify pk(s)
-            if row_id_index.is_none() {
-                // user specify no only pk columns
-                if columns.len() != pk_column_ids.len() {
+            match sql_defined_columns[0].data_type {
+                Some(ast::DataType::Bytea) => {}
+                _ => {
                     return Err(RwError::from(ProtocolError(
-                        "User can only specify primary key columns when creating table with row
-                        format debezium_avro."
-                            .to_owned(),
+                        "BYTES format only accepts BYTEA type".to_string(),
+                    )))
+                }
+            }
+
+            (
+                None,
+                sql_defined_pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::Bytes as i32,
+                    ..Default::default()
+                },
+            )
+        }
+        SourceSchema::DebeziumMongoJson => {
+            let mut columns = vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Varchar,
+                        column_id: 0.into(),
+                        name: "_id".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                        generated_or_default_column: None,
+                    },
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Jsonb,
+                        column_id: 0.into(),
+                        name: "payload".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                        generated_or_default_column: None,
+                    },
+                    is_hidden: false,
+                },
+            ];
+            if sql_defined_schema {
+                let non_generated_sql_defined_columns =
+                    non_generated_sql_columns(sql_defined_columns);
+                if non_generated_sql_defined_columns.len() != 2
+                    && non_generated_sql_defined_columns[0].name.real_value() != columns[0].name()
+                    && non_generated_sql_defined_columns[1].name.real_value() != columns[1].name()
+                {
+                    return Err(RwError::from(ProtocolError(
+                        "the not generated columns of the source with row format DebeziumMongoJson
+                         must be (_id [Jsonb | Varchar | Int32 | Int64], payload jsonb)."
+                            .to_string(),
                     )));
                 }
-
-                let full_columns =
-                    extract_debezium_avro_table_schema(avro_schema, with_properties).await?;
-                pk_column_ids.clear();
-                for pk_column in columns.as_slice() {
-                    let real_pk_column = full_columns
-                        .iter()
-                        .find(|c| c.name().eq(pk_column.name()))
-                        .ok_or_else(|| {
-                            RwError::from(ProtocolError(format!(
-                                "pk column {} not exists in avro schema",
-                                pk_column.name()
-                            )))
-                        })?;
-                    pk_column_ids.push(real_pk_column.column_id());
+                if let Some(key_data_type) = &non_generated_sql_defined_columns[0].data_type {
+                    let key_data_type = bind_data_type(key_data_type)?;
+                    match key_data_type {
+                        DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64 => {
+                            columns[0].column_desc.data_type = key_data_type;
+                        }
+                        _ => {
+                            return Err(RwError::from(ProtocolError(
+                                "the `_id` column of the source with row format DebeziumMongoJson
+                             must be [Jsonb | Varchar | Int32 | Int64]"
+                                    .to_string(),
+                            )));
+                        }
+                    }
                 }
-                columns.clear();
-                columns.extend(full_columns);
+                if let Some(value_data_type) = &non_generated_sql_defined_columns[1].data_type {
+                    if !matches!(bind_data_type(value_data_type)?, DataType::Jsonb) {
+                        return Err(RwError::from(ProtocolError(
+                            "the `payload` column of the source with row format DebeziumMongoJson
+                             must be Jsonb datatype"
+                                .to_string(),
+                        )));
+                    }
+                }
+            }
+            let pk_names = if sql_defined_pk {
+                sql_defined_pk_names
             } else {
-                // user specify some columns without pk
-                if columns.len() != 1 || *pk_column_ids != vec![ROW_ID_COLUMN_ID] {
-                    return Err(RwError::from(ProtocolError(
-                        "User can only specify primary key columns when creating table with row
-                        format debezium_avro."
-                            .to_owned(),
-                    )));
-                }
+                vec!["_id".to_string()]
+            };
 
-                *row_id_index = None;
-                columns.clear();
-                pk_column_ids.clear();
-
-                let full_columns =
-                    extract_debezium_avro_table_schema(avro_schema, with_properties).await?;
-                let pk_names =
-                    extract_debezium_avro_table_pk_columns(avro_schema, with_properties).await?;
-                // extract pk(s) from schema registry
-                for pk_name in &pk_names {
-                    let pk_column_id = full_columns
-                        .iter()
-                        .find(|c| c.name().eq(pk_name))
-                        .ok_or_else(|| {
-                            RwError::from(ProtocolError(format!(
-                                "pk column {} not exists in avro schema",
-                                pk_name
-                            )))
-                        })?
-                        .column_desc
-                        .column_id;
-                    pk_column_ids.push(pk_column_id);
-                }
-                columns.extend(full_columns);
-            }
-
-            StreamSourceInfo {
-                row_format: RowFormatType::DebeziumAvro as i32,
-                row_schema_location: avro_schema.row_schema_location.0.clone(),
-                ..Default::default()
-            }
+            (
+                Some(columns),
+                pk_names,
+                StreamSourceInfo {
+                    row_format: RowFormatType::DebeziumMongoJson as i32,
+                    ..Default::default()
+                },
+            )
         }
-    };
-
-    Ok(source_info)
+    })
 }
 
 // Add a hidden column `_rw_kafka_timestamp` to each message from Kafka source.
 fn check_and_add_timestamp_column(
     with_properties: &HashMap<String, String>,
-    column_descs: &mut Vec<ColumnDesc>,
-    col_id_gen: &mut ColumnIdGenerator,
+    columns: &mut Vec<ColumnCatalog>,
 ) {
     if is_kafka_connector(with_properties) {
-        let kafka_timestamp_column = ColumnDesc {
-            data_type: DataType::Timestamptz,
-            column_id: col_id_gen.generate(KAFKA_TIMESTAMP_COLUMN_NAME),
-            name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-            generated_column: None,
+        let kafka_timestamp_column = ColumnCatalog {
+            column_desc: ColumnDesc {
+                data_type: DataType::Timestamptz,
+                column_id: ColumnId::placeholder(),
+                name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
+                field_descs: vec![],
+                type_name: "".to_string(),
+                generated_or_default_column: None,
+            },
+
+            is_hidden: true,
         };
-        column_descs.push(kafka_timestamp_column);
+        columns.push(kafka_timestamp_column);
     }
 }
 
@@ -567,16 +576,16 @@ pub(super) fn bind_source_watermark(
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType>>> = LazyLock::new(
     || {
         convert_args!(hashmap!(
-                KAFKA_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
-                PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
-                KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
-                GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
-                NEXMARK_CONNECTOR => vec![RowFormatType::Native],
-                DATAGEN_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Json],
+                KAFKA_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro, RowFormatType::Bytes],
+                PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
+                KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
+                GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::Bytes],
+                NEXMARK_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Bytes],
+                DATAGEN_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Json, RowFormatType::Bytes],
                 S3_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json],
-                MYSQL_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
-                POSTGRES_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
-                CITUS_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
+                MYSQL_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson, RowFormatType::Bytes],
+                POSTGRES_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson, RowFormatType::Bytes],
+                CITUS_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson, RowFormatType::Bytes],
         ))
     },
 );
@@ -595,10 +604,11 @@ fn source_shema_to_row_format(source_schema: &SourceSchema) -> RowFormatType {
         SourceSchema::CanalJson => RowFormatType::CanalJson,
         SourceSchema::Csv(_) => RowFormatType::Csv,
         SourceSchema::Native => RowFormatType::Native,
+        SourceSchema::Bytes => RowFormatType::Bytes,
     }
 }
 
-fn validate_compatibility(
+pub fn validate_compatibility(
     source_schema: &SourceSchema,
     props: &mut HashMap<String, String>,
 ) -> Result<()> {
@@ -653,7 +663,13 @@ fn validate_compatibility(
     Ok(())
 }
 
-fn check_nexmark_schema(
+/// Performs early stage checking in frontend to see if the schema of the given `columns` is
+/// compatible with the connector extracted from the properties. Currently this only works for
+/// `nexmark` connector since it's in chunk format.
+///
+/// One should only call this function after all properties of all columns are resolved, like
+/// generated column descriptors.
+pub(super) fn check_source_schema(
     props: &HashMap<String, String>,
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
@@ -683,9 +699,21 @@ fn check_nexmark_schema(
         }
     };
 
+    // Ignore the generated columns and map the index of row_id column.
+    let user_defined_columns = columns.iter().filter(|c| !c.is_generated());
+    let row_id_index = if let Some(index) = row_id_index {
+        let col_id = columns[index].column_id();
+        user_defined_columns
+            .clone()
+            .position(|c| c.column_id() == col_id)
+            .unwrap()
+            .into()
+    } else {
+        None
+    };
+
     let expected = get_event_data_types_with_names(event_type, row_id_index);
-    let user_defined = columns
-        .iter()
+    let user_defined = user_defined_columns
         .map(|c| {
             (
                 c.column_desc.name.to_ascii_lowercase(),
@@ -695,9 +723,9 @@ fn check_nexmark_schema(
         .collect_vec();
 
     if expected != user_defined {
+        let cmp = pretty_assertions::Comparison::new(&expected, &user_defined);
         return Err(RwError::from(ProtocolError(format!(
-            "The shema of the nexmark source must specify all columns in order, expected {:?}, but get {:?}",
-            expected, user_defined
+            "The schema of the nexmark source must specify all columns in order:\n{cmp}",
         ))));
     }
     Ok(())
@@ -723,17 +751,30 @@ pub async fn handle_create_source(
     }
 
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
+    validate_compatibility(&stmt.source_schema, &mut with_properties)?;
+
+    ensure_table_constraints_supported(&stmt.constraints)?;
+    let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
+
+    let (columns_from_resolve_source, pk_names, source_info) = try_bind_columns_from_source(
+        &stmt.source_schema,
+        pk_names,
+        &stmt.columns,
+        &with_properties,
+    )
+    .await?;
+    let columns_from_sql = bind_sql_columns(&stmt.columns)?;
+
+    let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);
+
+    check_and_add_timestamp_column(&with_properties, &mut columns);
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
+    for c in &mut columns {
+        c.column_desc.column_id = col_id_gen.generate(c.name())
+    }
 
-    let mut column_descs = bind_sql_columns(stmt.columns.clone(), &mut col_id_gen)?;
-
-    check_and_add_timestamp_column(&with_properties, &mut column_descs, &mut col_id_gen);
-
-    let (mut columns, mut pk_column_ids, mut row_id_index) =
-        bind_sql_table_column_constraints(column_descs, stmt.columns.clone(), stmt.constraints)?;
-
-    if row_id_index.is_none() {
+    if !pk_names.is_empty() {
         return Err(ErrorCode::InvalidInputSyntax(
             "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
                 .to_owned(),
@@ -741,15 +782,7 @@ pub async fn handle_create_source(
         .into());
     }
 
-    let source_info = resolve_source_schema(
-        stmt.source_schema,
-        &mut columns,
-        &mut with_properties,
-        &mut row_id_index,
-        &mut pk_column_ids,
-        false,
-    )
-    .await?;
+    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names)?;
 
     debug_assert!(is_column_ids_dedup(&columns));
 
@@ -760,37 +793,17 @@ pub async fn handle_create_source(
 
     bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
 
-    if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
-        // TODO(yuhao): allow delete from a non append only source
-        return Err(RwError::from(ErrorCode::BindError(
-            "Generated columns are only allowed in an append only source.".to_string(),
-        )));
-    }
+    check_source_schema(&with_properties, row_id_index, &columns)?;
 
     let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
-    let connection_name = get_connection_name(&with_properties);
-    let is_kafka_connector = is_kafka_connector(&with_properties);
+    // resolve privatelink connection for Kafka source
     let mut with_options = WithOptions::new(with_properties);
-    let connection_id = match connection_name {
-        Some(connection_name) => {
-            let connection = session
-                .get_connection_by_name(schema_name, &connection_name)
-                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
-            if !is_kafka_connector {
-                return Err(RwError::from(ErrorCode::ProtocolError(
-                    "Create source with connection is only supported for kafka connectors."
-                        .to_string(),
-                )));
-            }
-            resolve_private_link_connection(&connection, with_options.inner_mut())?;
-            Some(connection.id)
-        }
-        None => None,
-    };
+    let connection_id =
+        resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
     let definition = handler_args.normalized_sql;
 
     let source = PbSource {
@@ -834,7 +847,7 @@ pub mod tests {
         let sql = format!(
             r#"CREATE SOURCE t
     WITH (connector = 'kinesis')
-    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+    ROW FORMAT PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;

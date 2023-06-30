@@ -32,6 +32,9 @@ pub struct StorageOpts {
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
     pub shared_buffer_capacity_mb: usize,
+    /// The shared buffer will start flushing data to object when the ratio of memory usage to the
+    /// shared buffer capacity exceed such ratio.
+    pub shared_buffer_flush_ratio: f32,
     /// The threshold for the number of immutable memtables to merge to a new imm.
     pub imm_merge_threshold: usize,
     /// Remote directory for storing data and metadata objects.
@@ -45,9 +48,6 @@ pub struct StorageOpts {
     /// Percent of the ratio of high priority data in block-cache
     pub high_priority_ratio: usize,
     pub disable_remote_compactor: bool,
-    pub enable_local_spill: bool,
-    /// Local object store root. We should call `get_local_object_store` to get the object store.
-    pub local_object_store: String,
     /// Number of tasks shared buffer can upload in parallel.
     pub share_buffer_upload_concurrency: usize,
     /// Capacity of sstable meta cache.
@@ -95,6 +95,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .share_buffer_compaction_worker_threads_number,
             shared_buffer_capacity_mb: s.shared_buffer_capacity_mb,
+            shared_buffer_flush_ratio: c.storage.shared_buffer_flush_ratio,
             imm_merge_threshold: c.storage.imm_merge_threshold,
             data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
@@ -102,8 +103,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             block_cache_capacity_mb: s.block_cache_capacity_mb,
             meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             disable_remote_compactor: c.storage.disable_remote_compactor,
-            enable_local_spill: c.storage.enable_local_spill,
-            local_object_store: c.storage.local_object_store.to_string(),
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
             compactor_memory_limit_mb: s.compactor_memory_limit_mb,
             sstable_id_remote_fetch_number: c.storage.sstable_id_remote_fetch_number,

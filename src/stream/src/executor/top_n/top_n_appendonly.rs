@@ -36,37 +36,9 @@ use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Waterm
 pub type AppendOnlyTopNExecutor<S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerAppendOnlyTopNExecutor<S, WITH_TIES>>;
 
-impl<S: StateStore> AppendOnlyTopNExecutor<S, false> {
+impl<S: StateStore, const WITH_TIES: bool> AppendOnlyTopNExecutor<S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new_without_ties(
-        input: Box<dyn Executor>,
-        ctx: ActorContextRef,
-        storage_key: Vec<ColumnOrder>,
-        offset_and_limit: (usize, usize),
-        order_by: Vec<ColumnOrder>,
-        executor_id: u64,
-        state_table: StateTable<S>,
-    ) -> StreamResult<Self> {
-        let info = input.info();
-
-        Ok(TopNExecutorWrapper {
-            input,
-            ctx,
-            inner: InnerAppendOnlyTopNExecutor::new(
-                info,
-                storage_key,
-                offset_and_limit,
-                order_by,
-                executor_id,
-                state_table,
-            )?,
-        })
-    }
-}
-
-impl<S: StateStore> AppendOnlyTopNExecutor<S, true> {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_with_ties(
+    pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
         storage_key: Vec<ColumnOrder>,
@@ -126,8 +98,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
 
-        let cache_key_serde =
-            create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &[]);
+        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &[]);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
         let data_types = schema.data_types();
 
@@ -291,7 +262,7 @@ mod tests {
         .await;
 
         let top_n_executor = Box::new(
-            AppendOnlyTopNExecutor::new_without_ties(
+            AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
                 storage_key,
@@ -373,7 +344,7 @@ mod tests {
         .await;
 
         let top_n_executor = Box::new(
-            AppendOnlyTopNExecutor::new_without_ties(
+            AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
                 storage_key(),

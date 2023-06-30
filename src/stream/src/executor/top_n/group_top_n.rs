@@ -29,6 +29,7 @@ use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
 use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
@@ -54,7 +55,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         let info = input.info();
         Ok(TopNExecutorWrapper {
             input,
-            ctx,
+            ctx: ctx.clone(),
             inner: InnerGroupTopNExecutor::new(
                 info,
                 storage_key,
@@ -64,6 +65,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
                 group_by,
                 state_table,
                 watermark_epoch,
+                ctx,
             )?,
         })
     }
@@ -91,6 +93,8 @@ pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bo
 
     /// Used for serializing pk into CacheKey.
     cache_key_serde: CacheKeySerde,
+
+    ctx: ActorContextRef,
 }
 
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K, S, WITH_TIES> {
@@ -104,13 +108,20 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        ctx: ActorContextRef,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
             pk_indices, schema, ..
         } = input_info;
 
-        let cache_key_serde =
-            create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &group_by);
+        let metrics_info = MetricsInfo::new(
+            ctx.streaming_metrics.clone(),
+            state_table.table_id(),
+            ctx.id,
+            "GroupTopN",
+        );
+
+        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
@@ -124,8 +135,9 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
-            caches: GroupTopNCache::new(watermark_epoch),
+            caches: GroupTopNCache::new(watermark_epoch, metrics_info),
             cache_key_serde,
+            ctx,
         })
     }
 }
@@ -135,8 +147,8 @@ pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
-        let cache = new_unbounded(watermark_epoch);
+    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = new_unbounded(watermark_epoch, metrics_info);
         Self { data: cache }
     }
 }
@@ -166,17 +178,27 @@ where
         let mut res_rows = Vec::with_capacity(self.limit);
         let chunk = chunk.compact();
         let keys = K::build(&self.group_by, chunk.data_chunk())?;
-
+        let table_id_str = self.managed_state.state_table.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
         for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq_debug(keys.iter()) {
             // The pk without group by
             let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
             let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
 
             let group_key = row_ref.project(&self.group_by);
-
+            self.ctx
+                .streaming_metrics
+                .group_top_n_total_query_cache_count
+                .with_label_values(&[&table_id_str, &actor_id_str])
+                .inc();
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
+                self.ctx
+                    .streaming_metrics
+                    .group_top_n_cache_miss_count
+                    .with_label_values(&[&table_id_str, &actor_id_str])
+                    .inc();
                 let mut topn_cache =
                     TopNCache::new(self.offset, self.limit, self.schema().data_types());
                 self.managed_state
@@ -184,6 +206,7 @@ where
                     .await?;
                 self.caches.push(group_cache_key.clone(), topn_cache);
             }
+
             let mut cache = self.caches.get_mut(group_cache_key).unwrap();
 
             // apply the chunk to state table
@@ -208,7 +231,11 @@ where
                 }
             }
         }
-
+        self.ctx
+            .streaming_metrics
+            .group_top_n_cached_entry_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .set(self.caches.len() as i64);
         generate_output(res_rows, res_ops, self.schema())
     }
 

@@ -31,10 +31,10 @@ use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::{load_config, BatchConfig};
+use risingwave_common::config::{load_config, BatchConfig, MetaConfig};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::session_config::ConfigMap;
+use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -52,16 +52,17 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
+use thiserror::Error;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::info;
 
-use crate::binder::{Binder, BoundStatement};
+use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
+use crate::catalog::{check_schema_writable, CatalogError, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
@@ -111,6 +112,7 @@ pub struct FrontendEnv {
     source_metrics: Arc<SourceMetrics>,
 
     batch_config: BatchConfig,
+    meta_config: MetaConfig,
 
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
@@ -157,6 +159,7 @@ impl FrontendEnv {
             sessions_map: Arc::new(Mutex::new(HashMap::new())),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
+            meta_config: MetaConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
         }
@@ -173,6 +176,7 @@ impl FrontendEnv {
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
         let batch_config = config.batch;
+        let meta_config = config.meta;
 
         let frontend_address: HostAddr = opts
             .advertise_addr
@@ -190,15 +194,17 @@ impl FrontendEnv {
             opts.meta_addr.clone().as_str(),
             WorkerType::Frontend,
             &frontend_address,
-            0,
-            &config.meta,
+            Default::default(),
+            &meta_config,
         )
         .await?;
+
+        let worker_id = meta_client.worker_id();
+        info!("Assigned worker node id {}", worker_id);
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-            Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![],
         );
         let mut join_handles = vec![heartbeat_join_handle];
@@ -322,6 +328,7 @@ impl FrontendEnv {
                 frontend_metrics,
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
                 batch_config,
+                meta_config,
                 source_metrics,
                 creating_streaming_job_tracker,
             },
@@ -386,6 +393,10 @@ impl FrontendEnv {
         &self.batch_config
     }
 
+    pub fn meta_config(&self) -> &MetaConfig {
+        &self.meta_config
+    }
+
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.source_metrics.clone()
     }
@@ -418,6 +429,8 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: RwLock<ConfigMap>,
+    /// buffer the Notices to users,
+    notices: RwLock<Vec<String>>,
 
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
@@ -426,6 +439,23 @@ pub struct SessionImpl {
     /// This flag is set only when current query is executed in local mode, and used to cancel
     /// local query.
     current_query_cancel_flag: Mutex<Option<Trigger>>,
+}
+
+#[derive(Error, Debug)]
+pub enum CheckRelationError {
+    #[error("{0}")]
+    Resolve(#[from] ResolveQualifiedNameError),
+    #[error("{0}")]
+    Catalog(#[from] CatalogError),
+}
+
+impl From<CheckRelationError> for RwError {
+    fn from(e: CheckRelationError) -> Self {
+        match e {
+            CheckRelationError::Resolve(e) => e.into(),
+            CheckRelationError::Catalog(e) => e.into(),
+        }
+    }
 }
 
 impl SessionImpl {
@@ -442,6 +472,7 @@ impl SessionImpl {
             config_map: Default::default(),
             id,
             current_query_cancel_flag: Mutex::new(None),
+            notices: Default::default(),
         }
     }
 
@@ -459,6 +490,7 @@ impl SessionImpl {
             // Mock session use non-sense id.
             id: (0, 0),
             current_query_cancel_flag: Mutex::new(None),
+            notices: Default::default(),
         }
     }
 
@@ -487,14 +519,32 @@ impl SessionImpl {
     }
 
     pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
-        self.config_map.write().set(key, value)
+        struct Nop;
+
+        impl ConfigReporter for Nop {
+            fn report_status(&mut self, _key: &str, _new_val: String) {}
+        }
+
+        self.config_map.write().set(key, value, Nop)
+    }
+
+    pub fn set_config_report(
+        &self,
+        key: &str,
+        value: Vec<String>,
+        reporter: impl ConfigReporter,
+    ) -> Result<()> {
+        self.config_map.write().set(key, value, reporter)
     }
 
     pub fn session_id(&self) -> SessionId {
         self.id
     }
 
-    pub fn check_relation_name_duplicated(&self, name: ObjectName) -> Result<()> {
+    pub fn check_relation_name_duplicated(
+        &self,
+        name: ObjectName,
+    ) -> std::result::Result<(), CheckRelationError> {
         let db_name = self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
@@ -510,9 +560,9 @@ impl SessionImpl {
             };
             (schema_name, relation_name)
         };
-        catalog_reader
-            .check_relation_name_duplicated(db_name, &schema_name, &relation_name)
-            .map_err(RwError::from)
+        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name)?;
+
+        Ok(())
     }
 
     pub fn check_connection_name_duplicated(&self, name: ObjectName) -> Result<()> {
@@ -601,6 +651,10 @@ impl SessionImpl {
         tripwire
     }
 
+    fn clear_notices(&self) {
+        *self.notices.write() = vec![];
+    }
+
     pub fn cancel_current_query(&self) {
         let mut flag_guard = self.current_query_cancel_flag.lock().unwrap();
         if let Some(trigger) = flag_guard.take() {
@@ -612,10 +666,12 @@ impl SessionImpl {
             info!("Trying to cancel query in distributed mode.");
             self.env.query_manager().cancel_queries_in_session(self.id)
         }
+        self.clear_notices()
     }
 
     pub fn cancel_current_creating_job(&self) {
         self.env.creating_streaming_job_tracker.abort_jobs(self.id);
+        self.clear_notices()
     }
 
     /// This function only used for test now.
@@ -634,10 +690,11 @@ impl SessionImpl {
             ));
         }
         if stmts.len() > 1 {
-            return Ok(PgResponse::empty_result_with_notice(
-                pgwire::pg_response::StatementType::EMPTY,
-                "cannot insert multiple commands into statement".to_string(),
-            ));
+            return Ok(
+                PgResponse::builder(pgwire::pg_response::StatementType::EMPTY)
+                    .notice("cannot insert multiple commands into statement")
+                    .into(),
+            );
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {
@@ -645,11 +702,12 @@ impl SessionImpl {
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
+                const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
                 loop {
                     match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
-                            target: "risingwave_frontend_slow_query_log",
+                            target: SLOW_QUERY_LOG,
                             sql,
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),
@@ -662,6 +720,20 @@ impl SessionImpl {
         .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
         Ok(rsp)
     }
+
+    pub fn notice_to_user(&self, str: impl Into<String>) {
+        let notice = str.into();
+        tracing::trace!("notice to user:{}", notice);
+        self.notices.write().push(notice);
+    }
+
+    pub fn is_barrier_read(&self) -> bool {
+        match self.config().get_visible_mode() {
+            VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
+            VisibilityMode::All => true,
+            VisibilityMode::Checkpoint => false,
+        }
+    }
 }
 
 pub struct SessionManagerImpl {
@@ -671,7 +743,7 @@ pub struct SessionManagerImpl {
     number: AtomicI32,
 }
 
-impl SessionManager<PgResponseStream, PrepareStatement, Portal> for SessionManagerImpl {
+impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
     fn connect(
@@ -686,7 +758,7 @@ impl SessionManager<PgResponseStream, PrepareStatement, Portal> for SessionManag
             .map_err(|_| {
                 Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Not found database name: {}", database),
+                    format!("database \"{}\" does not exist", database),
                 ))
             })?
             .id();
@@ -809,10 +881,13 @@ impl SessionManagerImpl {
     }
 }
 
-#[async_trait::async_trait]
-impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
-    /// A copy of run_statement but exclude the parser part so each run must be at most one
-    /// statement. The str sql use the to_string of AST. Consider Reuse later.
+impl Session for SessionImpl {
+    type Portal = Portal;
+    type PreparedStatement = PrepareStatement;
+    type ValuesStream = PgResponseStream;
+
+    /// A copy of `run_statement` but exclude the parser part so each run must be at most one
+    /// statement. The str sql use the `to_string` of AST. Consider Reuse later.
     async fn run_one_query(
         self: Arc<Self>,
         stmt: Statement,
@@ -913,7 +988,7 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
         })
     }
 
-    fn describe_portral(
+    fn describe_portal(
         self: Arc<Self>,
         portal: Portal,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
@@ -921,6 +996,15 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
             Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
+    }
+
+    fn set_config(&self, key: &str, value: Vec<String>) -> std::result::Result<(), BoxedError> {
+        Self::set_config(self, key, value).map_err(Into::into)
+    }
+
+    fn take_notices(self: Arc<Self>) -> Vec<String> {
+        let inner = &mut (*self.notices.write());
+        std::mem::take(inner)
     }
 }
 

@@ -210,7 +210,7 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
             return Some(command);
         }
 
-        let ddl_epoch = command.context.curr_epoch;
+        let ddl_epoch = command.context.curr_epoch.value();
         for &actor in &actors {
             self.actor_map.insert(actor, ddl_epoch);
         }
@@ -278,7 +278,10 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
     ) -> Option<TrackingCommand<S>> {
         let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
-            panic!("no tracked progress for actor {}, is it already finished?", actor);
+            panic!(
+                "no tracked progress for actor {}, is it already finished?",
+                actor
+            );
         };
 
         let new_state = if progress.done {

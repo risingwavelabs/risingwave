@@ -581,7 +581,7 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
     fn ingest_batch(
         &self,
         mut kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
@@ -589,12 +589,15 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
 
             let mut delete_keys = BTreeSet::new();
             for del_range in delete_ranges {
-                let fullkey_start =
-                    FullKey::new(write_options.table_id, TableKey(del_range.0), epoch);
-                let fullkey_end =
-                    FullKey::new(write_options.table_id, TableKey(del_range.1), epoch);
                 for (key, _) in self.inner.range(
-                    (Bound::Included(fullkey_start), Bound::Excluded(fullkey_end)),
+                    (
+                        del_range.0.map(|table_key| {
+                            FullKey::new(write_options.table_id, TableKey(table_key), epoch)
+                        }),
+                        del_range.1.map(|table_key| {
+                            FullKey::new(write_options.table_id, TableKey(table_key), epoch)
+                        }),
+                    ),
                     None,
                 )? {
                     delete_keys.insert(key.user_key.table_key.0);

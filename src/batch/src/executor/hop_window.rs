@@ -16,7 +16,6 @@ use std::num::NonZeroUsize;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -192,9 +191,9 @@ impl HopWindowExecutor {
                         if idx < window_start_col_index {
                             Some(data_chunk.column_at(idx).clone())
                         } else if idx == window_start_col_index {
-                            Some(Column::new(window_start_col.clone().unwrap()))
+                            Some(window_start_col.clone().unwrap())
                         } else if idx == window_end_col_index {
-                            Some(Column::new(window_end_col.clone().unwrap()))
+                            Some(window_end_col.clone().unwrap())
                         } else {
                             None
                         }

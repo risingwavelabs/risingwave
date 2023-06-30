@@ -57,6 +57,11 @@
         "size": 12
       },
       "logicalType": "duration"
+    },
+    {
+      "name": "bytes",
+      "type": "bytes",
+      "default": null
     }
   ]
 }

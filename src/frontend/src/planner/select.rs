@@ -32,7 +32,7 @@ use crate::expr::{
 use crate::optimizer::plan_node::generic::{Agg, Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalDedup, LogicalOverAgg, LogicalProject, LogicalProjectSet,
+    LogicalAgg, LogicalApply, LogicalDedup, LogicalOverWindow, LogicalProject, LogicalProjectSet,
     LogicalTopN, LogicalValues, PlanAggCall, PlanRef,
 };
 use crate::optimizer::property::Order;
@@ -112,7 +112,7 @@ impl Planner {
             (root, select_items) = self.substitute_subqueries(root, select_items)?;
         }
         if select_items.iter().any(|e| e.has_window_function()) {
-            (root, select_items) = LogicalOverAgg::create(root, select_items)?;
+            (root, select_items) = LogicalOverWindow::create(root, select_items)?;
         }
 
         let original_select_items_len = select_items.len();
@@ -150,11 +150,7 @@ impl Planner {
 
         let need_restore_select_items = select_items.len() > original_select_items_len;
 
-        if select_items.iter().any(|e| e.has_table_function()) {
-            root = LogicalProjectSet::create(root, select_items)
-        } else {
-            root = LogicalProject::create(root, select_items);
-        }
+        root = LogicalProjectSet::create(root, select_items);
 
         if matches!(&distinct, BoundDistinct::DistinctOn(_)) {
             root = if order.is_empty() {
@@ -162,7 +158,7 @@ impl Planner {
                 // clause now.
                 LogicalDedup::new(root, distinct_list_index_to_select_items_index).into()
             } else {
-                LogicalTopN::with_group(
+                LogicalTopN::new(
                     root,
                     1,
                     0,
@@ -184,10 +180,10 @@ impl Planner {
 
         if let BoundDistinct::Distinct = distinct {
             let fields = root.schema().fields();
-            let group_key = if let Some(field) = fields.get(0) && field.name == "projected_row_id"  {
+            let group_key = if let Some(field) = fields.get(0) && field.name == "projected_row_id" {
                 // Do not group by projected_row_id hidden column.
                 (1..fields.len()).collect()
-            }else {
+            } else {
                 (0..fields.len()).collect()
             };
             root = Agg::new(vec![], group_key, root).into();
@@ -230,7 +226,7 @@ impl Planner {
                 .group_by::<_, 3>(|expr| match expr {
                     ExprImpl::Subquery(_) => 0,
                     ExprImpl::FunctionCall(func_call)
-                        if func_call.get_expr_type() == ExprType::Not
+                        if func_call.func_type() == ExprType::Not
                             && matches!(func_call.inputs()[0], ExprImpl::Subquery(_)) =>
                     {
                         1

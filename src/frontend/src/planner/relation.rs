@@ -15,6 +15,7 @@
 use std::rc::Rc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 
@@ -22,10 +23,10 @@ use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, TableFunction};
+use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, LogicalSource,
-    LogicalTableFunction, PlanRef,
+    LogicalTableFunction, LogicalValues, PlanRef,
 };
 use crate::planner::Planner;
 
@@ -42,7 +43,7 @@ impl Planner {
             Relation::Join(join) => self.plan_join(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
-            Relation::TableFunction(tf) => self.plan_table_function(*tf),
+            Relation::TableFunction(tf) => self.plan_table_function(tf),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             Relation::Share(share) => self.plan_share(*share),
         }
@@ -77,7 +78,7 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        Ok(LogicalSource::with_catalog(Rc::new(source.catalog), false, self.ctx()).into())
+        Ok(LogicalSource::with_catalog(Rc::new(source.catalog), false, self.ctx())?.into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
@@ -115,8 +116,18 @@ impl Planner {
         }
     }
 
-    pub(super) fn plan_table_function(&mut self, table_function: TableFunction) -> Result<PlanRef> {
-        Ok(LogicalTableFunction::new(table_function, self.ctx()).into())
+    pub(super) fn plan_table_function(&mut self, table_function: ExprImpl) -> Result<PlanRef> {
+        // TODO: maybe we can unify LogicalTableFunction with LogicalValues
+        match table_function {
+            ExprImpl::TableFunction(tf) => Ok(LogicalTableFunction::new(*tf, self.ctx()).into()),
+            expr => {
+                let schema = Schema {
+                    // TODO: should be named
+                    fields: vec![Field::unnamed(expr.return_type())],
+                };
+                Ok(LogicalValues::create(vec![vec![expr]], schema, self.ctx()))
+            }
+        }
     }
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
@@ -242,7 +253,9 @@ impl Planner {
     ) -> Result<PlanRef> {
         let input = self.plan_relation(input)?;
         let mut args = args.into_iter();
-        let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) = args.next_tuple() else {
+        let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) =
+            args.next_tuple()
+        else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
 

@@ -15,19 +15,22 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
-use super::{stream, GenericPlanNode, GenericPlanRef};
+use super::{stream, DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::{FunctionalDependencySet, Order, OrderDisplay};
 use crate::TableCatalog;
+
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TopN<PlanRef> {
     pub input: PlanRef,
-    pub limit_attr: Limit,
+    pub limit_attr: TopNLimit,
     pub offset: u64,
     pub order: Order,
     pub group_key: Vec<usize>,
@@ -64,11 +67,8 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
 
         let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
         column_orders.iter().for_each(|order| {
-            if !order_cols.contains(&order.column_index) {
-                internal_table_catalog_builder
-                    .add_order_column(order.column_index, order.order_type);
-                order_cols.insert(order.column_index);
-            }
+            internal_table_catalog_builder.add_order_column(order.column_index, order.order_type);
+            order_cols.insert(order.column_index);
         });
 
         stream_key.iter().for_each(|idx| {
@@ -91,11 +91,15 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
 impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
     pub fn with_group(
         input: PlanRef,
-        limit_attr: Limit,
+        limit_attr: TopNLimit,
         offset: u64,
         order: Order,
         group_key: Vec<usize>,
     ) -> Self {
+        if limit_attr.with_ties() {
+            assert!(offset == 0, "WITH TIES is not supported with OFFSET");
+        }
+
         Self {
             input,
             limit_attr,
@@ -105,7 +109,11 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
         }
     }
 
-    pub fn without_group(input: PlanRef, limit_attr: Limit, offset: u64, order: Order) -> Self {
+    pub fn without_group(input: PlanRef, limit_attr: TopNLimit, offset: u64, order: Order) -> Self {
+        if limit_attr.with_ties() {
+            assert!(offset == 0, "WITH TIES is not supported with OFFSET");
+        }
+
         Self {
             input,
             limit_attr,
@@ -116,28 +124,53 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
     }
 
     pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        self.fmt_with_name_and_force(f, name, false).finish()
+    }
+
+    pub(crate) fn fmt_with_name_and_force<'a, 'b>(
+        &self,
+        f: &'b mut fmt::Formatter<'a>,
+        name: &str,
+        force_group_keys: bool,
+    ) -> fmt::DebugStruct<'b, 'a> {
         let mut builder = f.debug_struct(name);
         let input_schema = self.input.schema();
-        builder.field(
-            "order",
-            &format!(
-                "{}",
-                OrderDisplay {
-                    order: &self.order,
-                    input_schema
-                }
-            ),
-        );
+        let ord = OrderDisplay {
+            order: &self.order,
+            input_schema,
+        };
+        builder.field("order", &format!("{}", ord));
         builder
             .field("limit", &self.limit_attr.limit())
             .field("offset", &self.offset);
         if self.limit_attr.with_ties() {
             builder.field("with_ties", &true);
         }
-        if !self.group_key.is_empty() {
+        if force_group_keys || !self.group_key.is_empty() {
             builder.field("group_key", &self.group_key);
         }
-        builder.finish()
+        builder
+    }
+}
+
+impl<PlanRef: GenericPlanRef> DistillUnit for TopN<PlanRef> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
+        let mut vec = Vec::with_capacity(5);
+        let input_schema = self.input.schema();
+        let order_d = Pretty::display(&OrderDisplay {
+            order: &self.order,
+            input_schema,
+        });
+        vec.push(("order", order_d));
+        vec.push(("limit", Pretty::debug(&self.limit_attr.limit())));
+        vec.push(("offset", Pretty::debug(&self.offset)));
+        if self.limit_attr.with_ties() {
+            vec.push(("with_ties", Pretty::debug(&true)));
+        }
+        if !self.group_key.is_empty() {
+            vec.push(("group_key", Pretty::debug(&self.group_key)));
+        }
+        childless_record(name, vec)
     }
 }
 
@@ -147,7 +180,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.input.logical_pk().to_vec())
+        // We can use the group key as the stream key when there is at most one record for each
+        // value of the group key.
+        if self.limit_attr.max_one_row() {
+            Some(self.group_key.clone())
+        } else {
+            Some(self.input.logical_pk().to_vec())
+        }
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -161,7 +200,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
 
 /// [`Limit`] is used to specify the number of records to return.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum Limit {
+pub enum TopNLimit {
     /// The number of records returned is exactly the same as the number after `LIMIT` in the SQL
     /// query.
     Simple(u64),
@@ -171,7 +210,7 @@ pub enum Limit {
     WithTies(u64),
 }
 
-impl Limit {
+impl TopNLimit {
     pub fn new(limit: u64, with_ties: bool) -> Self {
         if with_ties {
             Self::WithTies(limit)
@@ -182,15 +221,15 @@ impl Limit {
 
     pub fn limit(&self) -> u64 {
         match self {
-            Limit::Simple(limit) => *limit,
-            Limit::WithTies(limit) => *limit,
+            TopNLimit::Simple(limit) => *limit,
+            TopNLimit::WithTies(limit) => *limit,
         }
     }
 
     pub fn with_ties(&self) -> bool {
         match self {
-            Limit::Simple(_) => false,
-            Limit::WithTies(_) => true,
+            TopNLimit::Simple(_) => false,
+            TopNLimit::WithTies(_) => true,
         }
     }
 
@@ -198,8 +237,8 @@ impl Limit {
     /// `WITH TIES` satisfies this condition.
     pub fn max_one_row(&self) -> bool {
         match self {
-            Limit::Simple(limit) => *limit == 1,
-            Limit::WithTies(_) => false,
+            TopNLimit::Simple(limit) => *limit == 1,
+            TopNLimit::WithTies(_) => false,
         }
     }
 }

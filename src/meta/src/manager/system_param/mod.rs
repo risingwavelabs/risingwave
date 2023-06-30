@@ -14,18 +14,20 @@
 
 pub mod model;
 
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use risingwave_common::system_param::reader::SystemParamsReader;
-use risingwave_common::system_param::set_system_param;
+use risingwave_common::system_param::{check_missing_params, set_system_param};
 use risingwave_common::{for_all_undeprecated_params, key_of};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
+use tracing::info;
 
 use self::model::SystemParamsModel;
 use super::NotificationManagerRef;
@@ -37,7 +39,9 @@ pub type SystemParamsManagerRef<S> = Arc<SystemParamsManager<S>>;
 
 pub struct SystemParamsManager<S: MetaStore> {
     meta_store: Arc<S>,
+    // Notify workers and local subscribers of parameter change.
     notification_manager: NotificationManagerRef<S>,
+    // Cached parameters.
     params: RwLock<SystemParams>,
 }
 
@@ -47,16 +51,20 @@ impl<S: MetaStore> SystemParamsManager<S> {
         meta_store: Arc<S>,
         notification_manager: NotificationManagerRef<S>,
         init_params: SystemParams,
+        cluster_first_launch: bool,
     ) -> MetaResult<Self> {
-        let persisted = SystemParams::get(meta_store.as_ref()).await?;
-
-        let params = if let Some(persisted) = persisted {
+        let params = if cluster_first_launch {
+            init_params
+        } else if let Some(persisted) = SystemParams::get(meta_store.as_ref()).await? {
             merge_params(persisted, init_params)
         } else {
-            init_params
+            return Err(MetaError::system_param(
+                "cluster is not newly created but no system parameters can be found",
+            ));
         };
 
-        SystemParams::insert(&params, meta_store.as_ref()).await?;
+        info!("system parameters: {:?}", params);
+        check_missing_params(&params).map_err(|e| anyhow!(e))?;
 
         Ok(Self {
             meta_store,
@@ -97,6 +105,14 @@ impl<S: MetaStore> SystemParamsManager<S> {
         self.notify_workers(params).await;
 
         Ok(())
+    }
+
+    /// Flush the cached params to meta store.
+    pub async fn flush_params(&self) -> MetaResult<()> {
+        Ok(
+            SystemParams::insert(self.params.read().await.deref(), self.meta_store.as_ref())
+                .await?,
+        )
     }
 
     // Periodically sync params to worker nodes.
@@ -141,23 +157,28 @@ impl<S: MetaStore> SystemParamsManager<S> {
 }
 
 // For each field in `persisted` and `init`
-// 1. Some, None: Params not from CLI need not be validated. Use persisted value.
+// 1. Some, None: The persisted field is deprecated, so just ignore it.
 // 2. Some, Some: Check equality and warn if they differ.
 // 3. None, Some: A new version of RW cluster is launched for the first time and newly introduced
 // params are not set. Use init value.
-// 4. None, None: Impossible.
+// 4. None, None: A new version of RW cluster is launched for the first time and newly introduced
+// params are not set. The new field is not initialized either, just leave it as `None`.
 macro_rules! impl_merge_params {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         fn merge_params(mut persisted: SystemParams, init: SystemParams) -> SystemParams {
             $(
                 match (persisted.$field.as_ref(), init.$field) {
                     (Some(persisted), Some(init)) => {
                         if persisted != &init {
-                            tracing::warn!("System parameters \"{:?}\" from CLI and config file ({}) differ from persisted ({})", key_of!($field), init, persisted);
+                            tracing::warn!(
+                                "The initializing value of \"{:?}\" ({}) differ from persisted ({}), using persisted value",
+                                key_of!($field),
+                                init,
+                                persisted
+                            );
                         }
                     },
                     (None, Some(init)) => persisted.$field = Some(init),
-                    (None, None) => unreachable!(),
                     _ => {},
                 }
             )*

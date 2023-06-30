@@ -22,7 +22,7 @@ use crate::expr::{ExprImpl, ExprMutator, ExprRewriter, ExprVisitor};
 /// A sort expression in the `ORDER BY` clause.
 ///
 /// See also [`bind_order_by_expr`](`crate::binder::Binder::bind_order_by_expr`).
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct OrderByExpr {
     pub expr: ExprImpl,
     pub order_type: OrderType,
@@ -36,7 +36,7 @@ impl Display for OrderByExpr {
 }
 
 /// See [`OrderByExpr`].
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct OrderBy {
     pub sort_exprs: Vec<OrderByExpr>,
 }

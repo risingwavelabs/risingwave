@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::next_key;
 
@@ -26,7 +28,7 @@ pub struct WriteBatch<'a, S: StateStoreWrite> {
 
     batch: Vec<(Bytes, StorageValue)>,
 
-    delete_ranges: Vec<(Bytes, Bytes)>,
+    delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
 
     write_options: WriteOptions,
 }
@@ -66,14 +68,16 @@ impl<'a, S: StateStoreWrite> WriteBatch<'a, S> {
     pub fn delete_prefix(&mut self, prefix: impl AsRef<[u8]>) {
         let start_key = Bytes::from(prefix.as_ref().to_owned());
         let end_key = Bytes::from(next_key(&start_key));
-        self.delete_ranges.push((start_key, end_key));
+        self.delete_ranges
+            .push((Bound::Included(start_key), Bound::Excluded(end_key)));
     }
 
     /// Delete all keys in this range.
-    pub fn delete_range(&mut self, start: impl AsRef<[u8]>, end: impl AsRef<[u8]>) {
-        let start_key = Bytes::from(start.as_ref().to_owned());
-        let end_key = Bytes::from(end.as_ref().to_owned());
-        self.delete_ranges.push((start_key, end_key));
+    pub fn delete_range(&mut self, start: Bound<impl AsRef<[u8]>>, end: Bound<impl AsRef<[u8]>>) {
+        self.delete_ranges.push((
+            start.map(|start| Bytes::from(start.as_ref().to_owned())),
+            end.map(|end| Bytes::from(end.as_ref().to_owned())),
+        ));
     }
 
     /// Reserves capacity for at least `additional` more key-value pairs to be inserted in the

@@ -152,7 +152,7 @@ where
 {
     fn clone(&self) -> Self {
         match self {
-            TieredCache::NoneCache(_) => TieredCache::NoneCache(PhantomData::default()),
+            TieredCache::NoneCache(_) => TieredCache::NoneCache(PhantomData),
             #[cfg(target_os = "linux")]
             TieredCache::FileCache(file_cache) => TieredCache::FileCache(file_cache.clone()),
         }
@@ -165,7 +165,7 @@ where
     V: TieredCacheValue,
 {
     pub fn none() -> Self {
-        Self::NoneCache(PhantomData::default())
+        Self::NoneCache(PhantomData)
     }
 
     #[cfg(target_os = "linux")]

@@ -17,10 +17,11 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use itertools::Itertools;
 use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc_on_unix, hash};
-use risingwave_expr::function::aggregate::{AggCall, AggKind};
-use risingwave_expr::vector_op::agg::AggStateFactory;
+use risingwave_expr::agg;
+use risingwave_expr::agg::{AggCall, AggKind};
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
@@ -46,6 +47,7 @@ fn create_agg_call(
         distinct: false,
         order_by: vec![],
         filter: None,
+        direct_args: vec![],
     }
 }
 
@@ -72,9 +74,9 @@ fn create_hash_agg_executor(
         return_type,
     )];
 
-    let agg_factories: Vec<_> = agg_calls
+    let agg_init_states: Vec<_> = agg_calls
         .iter()
-        .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(AggStateFactory::new))
+        .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(agg::build))
         .try_collect()
         .unwrap();
 
@@ -86,19 +88,21 @@ fn create_hash_agg_executor(
     let fields = group_key_types
         .iter()
         .cloned()
-        .chain(agg_factories.iter().map(|fac| fac.get_return_type()))
+        .chain(agg_init_states.iter().map(|fac| fac.return_type()))
         .map(Field::unnamed)
         .collect_vec();
     let schema = Schema { fields };
 
     Box::new(HashAggExecutor::<hash::Key64>::new(
-        agg_factories,
+        agg_init_states,
         group_key_columns,
         group_key_types,
         schema,
         input,
         "HashAggExecutor".to_string(),
         CHUNK_SIZE,
+        MemoryContext::none(),
+        None,
     ))
 }
 

@@ -4,6 +4,7 @@ The Grafana dashboard is generated with grafanalib. You'll need
 
 - Python
 - grafanalib
+- jsonmerge
 - jq: [instruction here](https://stedolan.github.io/jq/download/)
 
 Preferably installed in a local Python virtual env (venv).
@@ -38,6 +39,17 @@ For example, we can use the following query to generate dashboard json used in o
 DASHBOARD_NAMESPACE_FILTER_ENABLED=true \
 DASHBOARD_RISINGWAVE_NAME_FILTER_ENABLED=true \
 DASHBOARD_SOURCE_UID=<source_uid> \
+DASHBOARD_UID=<dashboard_uid> \
+DASHBOARD_VERSION=<version> \
+./generate.sh
+```
+
+If you want to use multi-prometheus as the variable:
+
+```bash
+DASHBOARD_NAMESPACE_FILTER_ENABLED=true \
+DASHBOARD_RISINGWAVE_NAME_FILTER_ENABLED=true \
+DASHBOARD_DYNAMIC_SOURCE=true \
 DASHBOARD_UID=<dashboard_uid> \
 DASHBOARD_VERSION=<version> \
 ./generate.sh

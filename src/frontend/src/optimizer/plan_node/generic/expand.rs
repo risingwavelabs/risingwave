@@ -15,12 +15,14 @@
 use std::fmt;
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
-use super::{GenericPlanNode, GenericPlanRef};
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 
 /// [`Expand`] expand one row multiple times according to `column_subsets` and also keep
@@ -100,8 +102,30 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
     }
 }
 
+impl<PlanRef: GenericPlanRef> DistillUnit for Expand<PlanRef> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
+        childless_record(name, vec![("column_subsets", self.column_subsets_pretty())])
+    }
+}
+
 impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
-    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
+    fn column_subsets_pretty<'a>(&self) -> Pretty<'a> {
+        Pretty::Array(
+            self.column_subsets
+                .iter()
+                .map(|subset| {
+                    subset
+                        .iter()
+                        .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
+                        .map(|d| Pretty::display(&d))
+                        .collect()
+                })
+                .map(Pretty::Array)
+                .collect(),
+        )
+    }
+
+    fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
         self.column_subsets
             .iter()
             .map(|subset| {

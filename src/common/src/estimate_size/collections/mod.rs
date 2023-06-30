@@ -15,20 +15,22 @@
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
-use super::EstimateSize;
+use super::{EstimateSize, KvSize};
 
+mod heap;
 pub mod lru;
+pub use heap::*;
 
 pub struct MutGuard<'a, V: EstimateSize> {
     inner: &'a mut V,
     // The size of the original value
     original_val_size: usize,
     // The total size of a collection
-    total_size: &'a mut usize,
+    total_size: &'a mut KvSize,
 }
 
 impl<'a, V: EstimateSize> MutGuard<'a, V> {
-    pub fn new(inner: &'a mut V, total_size: &'a mut usize) -> Self {
+    pub fn new(inner: &'a mut V, total_size: &'a mut KvSize) -> Self {
         let original_val_size = inner.estimated_size();
         Self {
             inner,
@@ -40,10 +42,8 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
 
 impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
     fn drop(&mut self) {
-        *self.total_size = self
-            .total_size
-            .saturating_add(self.inner.estimated_size())
-            .saturating_sub(self.original_val_size);
+        self.total_size.add_size(self.inner.estimated_size());
+        self.total_size.sub_size(self.original_val_size);
     }
 }
 
@@ -66,11 +66,11 @@ pub struct UnsafeMutGuard<V: EstimateSize> {
     // The size of the original value
     original_val_size: usize,
     // The total size of a collection
-    total_size: NonNull<usize>,
+    total_size: NonNull<KvSize>,
 }
 
 impl<V: EstimateSize> UnsafeMutGuard<V> {
-    pub fn new(inner: &mut V, total_size: &mut usize) -> Self {
+    pub fn new(inner: &mut V, total_size: &mut KvSize) -> Self {
         let original_val_size = inner.estimated_size();
         Self {
             inner: inner.into(),

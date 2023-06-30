@@ -261,21 +261,21 @@ SELECT array_cat(ARRAY[1,2], ARRAY[3,4]) AS "{1,2,3,4}";
 SELECT array_cat(ARRAY[1,2], ARRAY[[3,4],[5,6]]) AS "{{1,2},{3,4},{5,6}}";
 SELECT array_cat(ARRAY[[3,4],[5,6]], ARRAY[1,2]) AS "{{3,4},{5,6},{1,2}}";
 
---@ SELECT array_position(ARRAY[1,2,3,4,5], 4);
---@ SELECT array_position(ARRAY[5,3,4,2,1], 4);
---@ SELECT array_position(ARRAY[[1,2],[3,4]], 3);
---@ SELECT array_position(ARRAY['sun','mon','tue','wed','thu','fri','sat'], 'mon');
---@ SELECT array_position(ARRAY['sun','mon','tue','wed','thu','fri','sat'], 'sat');
---@ SELECT array_position(ARRAY['sun','mon','tue','wed','thu','fri','sat'], NULL);
---@ SELECT array_position(ARRAY['sun','mon','tue','wed','thu',NULL,'fri','sat'], NULL);
---@ SELECT array_position(ARRAY['sun','mon','tue','wed','thu',NULL,'fri','sat'], 'sat');
---@ 
---@ SELECT array_positions(NULL, 10);
---@ SELECT array_positions(NULL, NULL::int);
+SELECT array_position(ARRAY[1,2,3,4,5], 4);
+SELECT array_position(ARRAY[5,3,4,2,1], 4);
+SELECT array_position(ARRAY[[1,2],[3,4]], 3);
+SELECT array_position(ARRAY['sun','mon','tue','wed','thu','fri','sat'], 'mon');
+SELECT array_position(ARRAY['sun','mon','tue','wed','thu','fri','sat'], 'sat');
+SELECT array_position(ARRAY['sun','mon','tue','wed','thu','fri','sat'], NULL);
+SELECT array_position(ARRAY['sun','mon','tue','wed','thu',NULL,'fri','sat'], NULL);
+SELECT array_position(ARRAY['sun','mon','tue','wed','thu',NULL,'fri','sat'], 'sat');
+
+SELECT array_positions(NULL, 10);
+SELECT array_positions(NULL, NULL::int);
 SELECT array_positions(ARRAY[1,2,3,4,5,6,1,2,3,4,5,6], 4);
 SELECT array_positions(ARRAY[[1,2],[3,4]], 4);
---@ SELECT array_positions(ARRAY[1,2,3,4,5,6,1,2,3,4,5,6], NULL);
---@ SELECT array_positions(ARRAY[1,2,3,NULL,5,6,1,2,3,NULL,5,6], NULL);
+SELECT array_positions(ARRAY[1,2,3,4,5,6,1,2,3,4,5,6], NULL);
+SELECT array_positions(ARRAY[1,2,3,NULL,5,6,1,2,3,NULL,5,6], NULL);
 --@ SELECT array_length(array_positions(ARRAY(SELECT 'AAAAAAAAAAAAAAAAAAAAAAAAA'::text || i % 10
 --@                                           FROM generate_series(1,100) g(i)),
 --@                                   'AAAAAAAAAAAAAAAAAAAAAAAAA5'), 1);
@@ -296,15 +296,15 @@ SELECT array_positions(ARRAY[[1,2],[3,4]], 4);
 
 --@ SELECT array_position('[2:4]={1,2,3}'::int[], 1);
 --@ SELECT array_positions('[2:4]={1,2,3}'::int[], 1);
---@ 
---@ SELECT
---@     array_position(ids, (1, 1)),
---@     array_positions(ids, (1, 1))
---@         FROM
---@ (VALUES
---@     (ARRAY[(0, 0), (1, 1)]),
---@     (ARRAY[(1, 1)])
---@ ) AS f (ids);
+
+SELECT
+    array_position(ids, (1, 1)),
+    array_positions(ids, (1, 1))
+        FROM
+(VALUES
+    (ARRAY[(0, 0), (1, 1)]),
+    (ARRAY[(1, 1)])
+) AS f (ids);
 
 -- operators
 --@ SELECT a FROM arrtest WHERE b = ARRAY[[[113,142],[1,147]]];
@@ -574,9 +574,9 @@ select array_to_string(array[1,2,3,4,NULL,6], NULL);
 
 --@ select array_to_string(string_to_array('1|2|3', '|'), '|');
 
---@ select array_length(array[1,2,3], 1);
---@ select array_length(array[[1,2,3], [4,5,6]], 0);
---@ select array_length(array[[1,2,3], [4,5,6]], 1);
+select array_length(array[1,2,3], 1);
+select array_length(array[[1,2,3], [4,5,6]], 0);
+select array_length(array[[1,2,3], [4,5,6]], 1);
 --@ select array_length(array[[1,2,3], [4,5,6]], 2);
 --@ select array_length(array[[1,2,3], [4,5,6]], 3);
 
@@ -620,17 +620,17 @@ select unnest(array[1,2,3,null,4,null,null,5,6]::text[]);
 select abs(unnest(array[1,2,null,-3]));
 select array_remove(array[1,2,2,3], 2);
 select array_remove(array[1,2,2,3], 5);
---@ select array_remove(array[1,NULL,NULL,3], NULL);
+select array_remove(array[1,NULL,NULL,3], NULL);
 select array_remove(array['A','CC','D','C','RR'], 'RR');
 select array_remove(array[1.0, 2.1, 3.3], 1);
 select array_remove('{{1,2,2},{1,4,3}}', 2); -- not allowed
 select array_remove(array['X','X','X'], 'X') = '{}';
---@ select array_replace(array[1,2,5,4],5,3);
---@ select array_replace(array[1,2,5,4],5,NULL);
---@ select array_replace(array[1,2,NULL,4,NULL],NULL,5);
---@ select array_replace(array['A','B','DD','B'],'B','CC');
---@ select array_replace(array[1,NULL,3],NULL,NULL);
---@ select array_replace(array['AB',NULL,'CDE'],NULL,'12');
+select array_replace(array[1,2,5,4],5,3);
+select array_replace(array[1,2,5,4],5,NULL);
+select array_replace(array[1,2,NULL,4,NULL],NULL,5);
+select array_replace(array['A','B','DD','B'],'B','CC');
+select array_replace(array[1,NULL,3],NULL,NULL);
+select array_replace(array['AB',NULL,'CDE'],NULL,'12');
 
 -- array(select array-value ...)
 --@ select array(select array[i,i/2] from generate_series(1,5) i);

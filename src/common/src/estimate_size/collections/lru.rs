@@ -19,13 +19,13 @@ use std::hash::{BuildHasher, Hash};
 use lru::{DefaultHasher, KeyRef, LruCache};
 
 use super::{MutGuard, UnsafeMutGuard};
-use crate::estimate_size::EstimateSize;
+use crate::estimate_size::{EstimateSize, KvSize};
 
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
 /// Should be used with `GlobalMemoryManager`.
 pub struct EstimatedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     inner: LruCache<K, V, S, A>,
-    total_size: usize,
+    kv_heap_size: KvSize,
 }
 
 impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
@@ -34,16 +34,14 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     pub fn with_hasher_in(hasher: S, alloc: A) -> Self {
         Self {
             inner: LruCache::unbounded_with_hasher_in(hasher, alloc),
-            total_size: 0,
+            kv_heap_size: KvSize::new(),
         }
     }
 
     /// Evict epochs lower than the watermark
     pub fn evict_by_epoch(&mut self, epoch: u64) {
         while let Some((key, value)) = self.inner.pop_lru_by_epoch(epoch) {
-            self.total_size = self
-                .total_size
-                .saturating_sub(key.estimated_size() + value.estimated_size());
+            self.kv_heap_size.sub(&key, &value);
         }
     }
 
@@ -61,21 +59,14 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         self.inner.iter().map(|(_k, v)| v)
     }
 
-    pub fn put(&mut self, k: K, v: V) -> Option<V> {
-        self.total_size = self
-            .total_size
-            .saturating_add(k.estimated_size() + v.estimated_size());
-        self.inner.put(k, v)
-    }
-
     pub fn get_mut(&mut self, k: &K) -> Option<MutGuard<'_, V>> {
         let v = self.inner.get_mut(k);
-        v.map(|inner| MutGuard::new(inner, &mut self.total_size))
+        v.map(|inner| MutGuard::new(inner, &mut self.kv_heap_size))
     }
 
     pub fn get_mut_unsafe(&mut self, k: &K) -> Option<UnsafeMutGuard<V>> {
         let v = self.inner.get_mut(k);
-        v.map(|inner| UnsafeMutGuard::new(inner, &mut self.total_size))
+        v.map(|inner| UnsafeMutGuard::new(inner, &mut self.kv_heap_size))
     }
 
     pub fn get<Q>(&mut self, k: &Q) -> Option<&V>
@@ -88,14 +79,18 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
     pub fn peek_mut(&mut self, k: &K) -> Option<MutGuard<'_, V>> {
         let v = self.inner.peek_mut(k);
-        v.map(|inner| MutGuard::new(inner, &mut self.total_size))
+        v.map(|inner| MutGuard::new(inner, &mut self.kv_heap_size))
     }
 
     pub fn push(&mut self, k: K, v: V) -> Option<(K, V)> {
-        self.total_size = self
-            .total_size
-            .saturating_add(k.estimated_size() + v.estimated_size());
-        self.inner.push(k, v)
+        self.kv_heap_size.add(&k, &v);
+
+        let old_kv = self.inner.push(k, v);
+
+        if let Some((old_key, old_val)) = &old_kv {
+            self.kv_heap_size.sub(old_key, old_val);
+        }
+        old_kv
     }
 
     pub fn contains<Q>(&self, k: &Q) -> bool
@@ -123,7 +118,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize> EstimatedLruCache<K, V> {
     pub fn unbounded() -> Self {
         Self {
             inner: LruCache::unbounded(),
-            total_size: 0,
+            kv_heap_size: KvSize::new(),
         }
     }
 }
@@ -132,7 +127,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher> EstimatedLruC
     pub fn unbounded_with_hasher(hasher: S) -> Self {
         Self {
             inner: LruCache::unbounded_with_hasher(hasher),
-            total_size: 0,
+            kv_heap_size: KvSize::new(),
         }
     }
 }
@@ -143,7 +138,17 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Allocator 
     pub fn unbounded_with_hasher_in(hasher: S, allocator: A) -> Self {
         Self {
             inner: LruCache::unbounded_with_hasher_in(hasher, allocator),
-            total_size: 0,
+            kv_heap_size: KvSize::new(),
         }
+    }
+}
+
+impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
+    EstimateSize for EstimatedLruCache<K, V, S, A>
+{
+    fn estimated_heap_size(&self) -> usize {
+        // TODO: Add lru cache internal size
+        // https://github.com/risingwavelabs/risingwave/issues/9713
+        self.kv_heap_size.size()
     }
 }

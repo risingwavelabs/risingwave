@@ -27,8 +27,8 @@ pub use block_iterator::*;
 mod bloom;
 mod xor_filter;
 pub use bloom::BloomFilterBuilder;
-pub use xor_filter::XorFilterBuilder;
 use xor_filter::XorFilterReader;
+pub use xor_filter::{Xor16FilterBuilder, Xor8FilterBuilder};
 pub mod builder;
 pub use builder::*;
 pub mod writer;
@@ -307,13 +307,10 @@ impl Sstable {
                 right_exclusive: false,
             }),
             file_size: self.meta.estimated_size as u64,
-            table_ids: vec![],
             meta_offset: self.meta.meta_offset,
-            stale_key_count: 0,
             total_key_count: self.meta.key_count as u64,
             uncompressed_file_size: self.meta.estimated_size as u64,
-            min_epoch: 0,
-            max_epoch: 0,
+            ..Default::default()
         }
     }
 }

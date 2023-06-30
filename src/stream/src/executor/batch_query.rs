@@ -129,12 +129,7 @@ mod test {
         for msg in stream {
             let msg: Message = msg.unwrap();
             let chunk = msg.as_chunk().unwrap();
-            let data = *chunk
-                .column_at(0)
-                .array_ref()
-                .datum_at(0)
-                .unwrap()
-                .as_int32();
+            let data = *chunk.column_at(0).datum_at(0).unwrap().as_int32();
             assert_eq!(data, (batch_cnt * test_batch_size) as i32);
             batch_cnt += 1;
         }

@@ -26,6 +26,8 @@
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
+#![feature(return_position_impl_trait_in_trait)]
+#![feature(async_fn_in_trait)]
 
 use std::time::Duration;
 
@@ -33,6 +35,7 @@ use duration_str::parse_std;
 use risingwave_pb::connector_service::SinkPayloadFormat;
 use serde::de;
 
+pub mod aws_auth;
 pub mod aws_utils;
 pub mod error;
 mod macros;

@@ -23,9 +23,12 @@ use madsim::rand::thread_rng;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
 use risingwave_common::hash::ParallelUnitId;
+use risingwave_pb::common::{HostAddress, WorkerNode};
+use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
-use risingwave_pb::meta::GetClusterInfoResponse;
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
 use risingwave_pb::stream_plan::StreamNode;
 
 use self::predicate::BoxedPredicate;
@@ -33,6 +36,9 @@ use crate::cluster::Cluster;
 
 /// Predicates used for locating fragments.
 pub mod predicate {
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
+    use risingwave_pb::stream_plan::DispatcherType;
+
     use super::*;
 
     trait Predicate = Fn(&PbFragment) -> bool + Send + 'static;
@@ -96,10 +102,14 @@ pub mod predicate {
 
     /// The fragment is able to be rescheduled. Used for locating random fragment.
     pub fn can_reschedule() -> BoxedPredicate {
-        // The rescheduling of no-shuffle downstreams must be derived from the upstream
-        // `Materialize`, not specified by the user.
-        let p =
-            |f: &PbFragment| no_identity_contains("Chain")(f) && no_identity_contains("Lookup")(f);
+        let p = |f: &PbFragment| {
+            // The rescheduling of no-shuffle downstreams must be derived from the most upstream
+            // fragment. So if a fragment has no-shuffle upstreams, it cannot be rescheduled.
+            !any(root(f), &|n| {
+                let Some(NodeBody::Merge(merge)) = &n.node_body else { return false };
+                merge.upstream_dispatcher_type() == DispatcherType::NoShuffle
+            })
+        };
         Box::new(p)
     }
 
@@ -279,10 +289,70 @@ impl Cluster {
         self.locate_one_fragment([predicate::id(id)]).await
     }
 
+    pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
+        let response = self
+            .ctl
+            .spawn(async move {
+                risingwave_ctl::cmd_impl::meta::get_cluster_info(
+                    &risingwave_ctl::common::CtlContext::default(),
+                )
+                .await
+            })
+            .await??;
+        Ok(response)
+    }
+
+    // update node schedulability
+    async fn update_worker_node_schedulability(
+        &self,
+        worker_ids: Vec<u32>,
+        target: Schedulability,
+    ) -> Result<()> {
+        let worker_ids = worker_ids
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect_vec();
+
+        let _ = self
+            .ctl
+            .spawn(async move {
+                risingwave_ctl::cmd_impl::scale::update_schedulability(
+                    &risingwave_ctl::common::CtlContext::default(),
+                    worker_ids,
+                    target,
+                )
+                .await
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn cordon_worker(&self, id: u32) -> Result<()> {
+        self.update_worker_node_schedulability(vec![id], Schedulability::Unschedulable)
+            .await
+    }
+
+    pub async fn uncordon_worker(&self, id: u32) -> Result<()> {
+        self.update_worker_node_schedulability(vec![id], Schedulability::Schedulable)
+            .await
+    }
+
     /// Reschedule with the given `plan`. Check the document of
     /// [`risingwave_ctl::cmd_impl::meta::reschedule`] for more details.
     pub async fn reschedule(&mut self, plan: impl Into<String>) -> Result<()> {
         let plan = plan.into();
+
+        let revision = self
+            .ctl
+            .spawn(async move {
+                let r = risingwave_ctl::cmd_impl::meta::get_cluster_info(
+                    &risingwave_ctl::common::CtlContext::default(),
+                )
+                .await?;
+
+                Ok::<_, anyhow::Error>(r.revision)
+            })
+            .await??;
 
         self.ctl
             .spawn(async move {
@@ -292,11 +362,43 @@ impl Cluster {
                     "reschedule",
                     "--plan",
                     plan.as_ref(),
+                    "--revision",
+                    &format!("{}", revision),
                 ]);
                 risingwave_ctl::start(opts).await
             })
             .await??;
 
         Ok(())
+    }
+
+    pub async fn get_reschedule_plan(&self, policy: PbPolicy) -> Result<GetReschedulePlanResponse> {
+        let revision = self
+            .ctl
+            .spawn(async move {
+                let r = risingwave_ctl::cmd_impl::meta::get_cluster_info(
+                    &risingwave_ctl::common::CtlContext::default(),
+                )
+                .await?;
+
+                Ok::<_, anyhow::Error>(r.revision)
+            })
+            .await??;
+
+        let resp = self
+            .ctl
+            .spawn(async move {
+                let r = risingwave_ctl::cmd_impl::meta::get_reschedule_plan(
+                    &risingwave_ctl::common::CtlContext::default(),
+                    policy,
+                    revision,
+                )
+                .await?;
+
+                Ok::<_, anyhow::Error>(r)
+            })
+            .await??;
+
+        Ok(resp)
     }
 }

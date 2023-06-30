@@ -13,10 +13,9 @@
 // limitations under the License.
 
 use super::HashKey;
-use crate::array::serial_array::Serial;
 use crate::hash;
 use crate::hash::{HeapNullBitmap, NullBitmap, StackNullBitmap, MAX_GROUP_KEYS_ON_STACK};
-use crate::types::DataType;
+use crate::types::{DataType, Serial};
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

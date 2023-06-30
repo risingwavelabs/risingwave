@@ -16,24 +16,29 @@ use std::backtrace::Backtrace;
 use std::io;
 use std::marker::{Send, Sync};
 
+use aws_sdk_s3::operation::get_object::GetObjectError;
+use aws_sdk_s3::operation::head_object::HeadObjectError;
+use aws_sdk_s3::primitives::ByteStreamError;
 use risingwave_common::error::BoxedError;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
+
+use crate::object::Error;
 
 #[derive(Error, Debug)]
 enum ObjectErrorInner {
     #[error(transparent)]
     S3(BoxedError),
-
     #[error("disk error: {msg}")]
     Disk {
         msg: String,
         #[source]
         inner: io::Error,
     },
-
     #[error(transparent)]
-    Opendal(BoxedError),
+    Opendal(opendal::Error),
+    #[error(transparent)]
+    Mem(crate::object::mem::Error),
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -71,44 +76,66 @@ impl ObjectError {
         ObjectErrorInner::Disk { msg, inner: err }.into()
     }
 
-    pub fn opendal(err: impl Into<BoxedError>) -> Self {
-        ObjectErrorInner::Opendal(err.into()).into()
-    }
-
-    pub fn s3(err: impl Into<BoxedError>) -> Self {
-        ObjectErrorInner::S3(err.into()).into()
+    /// Tells whether the error indicates the target object is not found.
+    pub fn is_object_not_found_error(&self) -> bool {
+        match &self.inner {
+            ObjectErrorInner::S3(e) => {
+                if let Some(aws_smithy_http::result::SdkError::ServiceError(err)) =
+                    e.downcast_ref::<aws_smithy_http::result::SdkError<GetObjectError>>()
+                {
+                    return matches!(err.err(), GetObjectError::NoSuchKey(_));
+                }
+                if let Some(aws_smithy_http::result::SdkError::ServiceError(err)) =
+                    e.downcast_ref::<aws_smithy_http::result::SdkError<HeadObjectError>>()
+                {
+                    return matches!(err.err(), HeadObjectError::NotFound(_));
+                }
+            }
+            ObjectErrorInner::Opendal(e) => {
+                return matches!(e.kind(), opendal::ErrorKind::NotFound);
+            }
+            ObjectErrorInner::Disk { msg: _msg, inner } => {
+                return matches!(inner.kind(), io::ErrorKind::NotFound);
+            }
+            ObjectErrorInner::Mem(e) => {
+                return e.is_object_not_found_error();
+            }
+            _ => {}
+        };
+        false
     }
 }
 
-impl<E> From<aws_sdk_s3::types::SdkError<E>> for ObjectError
+impl<E> From<aws_sdk_s3::error::SdkError<E>> for ObjectError
 where
     E: std::error::Error + Sync + Send + 'static,
 {
-    fn from(e: aws_sdk_s3::types::SdkError<E>) -> Self {
+    fn from(e: aws_sdk_s3::error::SdkError<E>) -> Self {
         ObjectErrorInner::S3(e.into()).into()
     }
 }
 
-impl From<aws_smithy_http::byte_stream::Error> for ObjectError {
-    fn from(e: aws_smithy_http::byte_stream::Error) -> Self {
-        ObjectErrorInner::S3(e.into()).into()
-    }
-}
 impl From<opendal::Error> for ObjectError {
     fn from(e: opendal::Error) -> Self {
-        ObjectErrorInner::Opendal(e.into()).into()
-    }
-}
-
-impl From<io::Error> for ObjectError {
-    fn from(e: io::Error) -> Self {
-        ObjectErrorInner::Opendal(e.into()).into()
+        ObjectErrorInner::Opendal(e).into()
     }
 }
 
 impl From<RecvError> for ObjectError {
     fn from(e: RecvError) -> Self {
         ObjectErrorInner::Internal(e.to_string()).into()
+    }
+}
+
+impl From<ByteStreamError> for ObjectError {
+    fn from(e: ByteStreamError) -> Self {
+        ObjectErrorInner::Internal(e.to_string()).into()
+    }
+}
+
+impl From<crate::object::mem::Error> for ObjectError {
+    fn from(e: Error) -> Self {
+        ObjectErrorInner::Mem(e).into()
     }
 }
 

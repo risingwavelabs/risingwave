@@ -1,5 +1,5 @@
 [profile.default]
-retries = 5
+retries = 0
 slow-timeout = { period = "5s" }
 status-level = "all"
 final-status-level = "slow"

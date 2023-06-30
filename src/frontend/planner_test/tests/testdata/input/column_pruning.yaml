@@ -1,0 +1,104 @@
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select v1 from t
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - logical_plan
+- name: filter
+  sql: |
+    create table t (v1 bigint, v2 double precision, v3 int);
+    select v1 from t where v2 > 2
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+- name: join
+  sql: |
+    create table t1 (v1 int, v2 int, v3 int);
+    create table t2 (v1 int, v2 int, v3 int);
+    select t1.v1, t2.v1 from t1 join t2 on t1.v2 = t2.v2;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+- name: agg
+  sql: |
+    create table t (v1 bigint, v2 double precision, v3 int);
+    select count(v1) from t where v2 > 2
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - logical_plan
+- name: top n
+  sql: |
+    create table t (v1 int, v2 int, v3 int);
+    select v3 from (select * from t order by v3, v2 limit 2) as s;
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - logical_plan
+- name: constant
+  sql: |
+    create table t (v1 bigint, v2 double precision, v3 int);
+    select 1 from t
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+- name: constant + filter
+  sql: |
+    create table t (v1 bigint, v2 double precision, v3 int);
+    select 1 from t where v2>1
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - logical_plan
+- name: constant agg
+  sql: |
+    create table t (v1 bigint, v2 double precision, v3 int);
+    select count(1) from t
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - logical_plan
+- name: constant agg + filter
+  sql: |
+    create table t (v1 bigint, v2 double precision, v3 int);
+    select count(1) from t where v2>1
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - logical_plan
+- name: join + filter
+  sql: |
+    create table t1 (v1 int, v2 int, v3 int);
+    create table t2 (v1 int, v2 int, v3 int);
+    select t1.v1, t2.v1 from t1 join t2 on t1.v2 = t2.v2 where t1.v3 < 1;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+- name: project set
+  sql: |
+    create table t(v1 int, v2 int, v3 int, v4 int, arr int[]);
+    with cte as (select v1, v2, v3, unnest(arr) as arr_unnested from t) select * from cte where v1=10 AND v2=20 AND v3=30 AND arr_unnested=30;
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - logical_plan
+- name: over window
+  sql: |
+    create table t(x int, y int, z int, w int);
+    SELECT rank FROM (
+        SELECT x, y, z, row_number() OVER (PARTITION BY x ORDER BY y) AS rank FROM t
+    )
+    WHERE z > 0 and y > 0 and x > 0 and rank <= 3;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+- name: mixed
+  sql: |
+    create table t (v1 bigint, v2 double precision, v3 int);
+    select count(1), count(v1) from t where v2>1
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+- name: hop window, time_col not selected
+  sql: |
+    create table t1 (a int, b int, created_at timestamp);
+    select a, window_end from hop(t1, created_at, interval '15' minute, interval '30' minute)
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+  - logical_plan
+  - optimized_logical_plan_for_batch

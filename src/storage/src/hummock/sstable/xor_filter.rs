@@ -12,19 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
-use xorf::{Filter, Xor16};
+use xorf::{Filter, Xor16, Xor8};
 
 use super::{FilterBuilder, Sstable};
 
-pub struct XorFilterBuilder {
+const FOOTER_XOR8: u8 = 254;
+const FOOTER_XOR16: u8 = 255;
+
+pub struct Xor16FilterBuilder {
     key_hash_entries: Vec<u64>,
 }
 
-impl XorFilterBuilder {
+pub struct Xor8FilterBuilder {
+    key_hash_entries: Vec<u64>,
+}
+
+impl Xor8FilterBuilder {
     pub fn new(capacity: usize) -> Self {
         let key_hash_entries = if capacity > 0 {
             Vec::with_capacity(capacity)
@@ -35,7 +40,18 @@ impl XorFilterBuilder {
     }
 }
 
-impl FilterBuilder for XorFilterBuilder {
+impl Xor16FilterBuilder {
+    pub fn new(capacity: usize) -> Self {
+        let key_hash_entries = if capacity > 0 {
+            Vec::with_capacity(capacity)
+        } else {
+            vec![]
+        };
+        Self { key_hash_entries }
+    }
+}
+
+impl FilterBuilder for Xor16FilterBuilder {
     fn add_key(&mut self, key: &[u8], table_id: u32) {
         self.key_hash_entries
             .push(Sstable::hash_for_bloom_filter(key, table_id));
@@ -46,11 +62,9 @@ impl FilterBuilder for XorFilterBuilder {
     }
 
     fn finish(&mut self) -> Vec<u8> {
-        let xor_filter = Xor16::from(
-            &HashSet::<u64>::from_iter(std::mem::take(&mut self.key_hash_entries).into_iter())
-                .into_iter()
-                .collect_vec(),
-        );
+        self.key_hash_entries.sort();
+        self.key_hash_entries.dedup();
+        let xor_filter = Xor16::from(&self.key_hash_entries);
         let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() * 2 + 1);
         buf.put_u64_le(xor_filter.seed);
         buf.put_u32_le(xor_filter.block_length as u32);
@@ -59,18 +73,52 @@ impl FilterBuilder for XorFilterBuilder {
             .iter()
             .for_each(|x| buf.put_u16_le(*x));
         // We add an extra byte so we can distinguish bloom filter and xor filter by the last
-        // byte(255 indicates a xor filter and others indicate a bloom filter).
-        buf.put_u8(255);
+        // byte(255 indicates a xor16 filter, 254 indicates a xor8 filter and others indicate a
+        // bloom filter).
+        buf.put_u8(FOOTER_XOR16);
         buf
     }
 
     fn create(_fpr: f64, capacity: usize) -> Self {
-        XorFilterBuilder::new(capacity)
+        Xor16FilterBuilder::new(capacity)
     }
 }
 
+impl FilterBuilder for Xor8FilterBuilder {
+    fn add_key(&mut self, key: &[u8], table_id: u32) {
+        self.key_hash_entries
+            .push(Sstable::hash_for_bloom_filter(key, table_id));
+    }
+
+    fn finish(&mut self) -> Vec<u8> {
+        self.key_hash_entries.sort();
+        self.key_hash_entries.dedup();
+        let xor_filter = Xor8::from(&self.key_hash_entries);
+        let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() + 1);
+        buf.put_u64_le(xor_filter.seed);
+        buf.put_u32_le(xor_filter.block_length as u32);
+        buf.put_slice(xor_filter.fingerprints.as_ref());
+        // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
+        buf.put_u8(FOOTER_XOR8);
+        buf
+    }
+
+    fn approximate_len(&self) -> usize {
+        self.key_hash_entries.len() * 4
+    }
+
+    fn create(_fpr: f64, capacity: usize) -> Self {
+        Xor8FilterBuilder::new(capacity)
+    }
+}
+
+pub enum XorFilter {
+    Xor8(Xor8),
+    Xor16(Xor16),
+}
+
 pub struct XorFilterReader {
-    filter: Xor16,
+    filter: XorFilter,
 }
 
 impl XorFilterReader {
@@ -78,37 +126,58 @@ impl XorFilterReader {
     pub fn new(buf: Vec<u8>) -> Self {
         if buf.len() <= 1 {
             return Self {
-                filter: Xor16 {
+                filter: XorFilter::Xor16(Xor16 {
                     seed: 0,
                     block_length: 0,
                     fingerprints: vec![].into_boxed_slice(),
-                },
+                }),
             };
         }
-        let buf = &mut &buf[..];
-        let xor_filter_seed = buf.get_u64_le();
-        let xor_filter_block_length = buf.get_u32_le();
-        // is correct even when there is an extra 0xff byte in the end of buf
-        let len = buf.len() / 2;
-        let xor_filter_fingerprints = (0..len)
-            .map(|_| buf.get_u16_le())
-            .collect_vec()
-            .into_boxed_slice();
-        Self {
-            filter: Xor16 {
+
+        let kind = *buf.last().unwrap();
+        let filter = if kind == FOOTER_XOR16 {
+            let buf = &mut &buf[..];
+            let xor_filter_seed = buf.get_u64_le();
+            let xor_filter_block_length = buf.get_u32_le();
+            // is correct even when there is an extra 0xff byte in the end of buf
+            let len = buf.len() / 2;
+            let xor_filter_fingerprints = (0..len)
+                .map(|_| buf.get_u16_le())
+                .collect_vec()
+                .into_boxed_slice();
+            XorFilter::Xor16(Xor16 {
                 seed: xor_filter_seed,
                 block_length: xor_filter_block_length as usize,
                 fingerprints: xor_filter_fingerprints,
-            },
-        }
+            })
+        } else {
+            let mbuf = &mut &buf[..];
+            let xor_filter_seed = mbuf.get_u64_le();
+            let xor_filter_block_length = mbuf.get_u32_le();
+            // is correct even when there is an extra 0xff byte in the end of buf
+            let end_pos = buf.len() - 1;
+            let xor_filter_fingerprints = buf[(8 + 4)..end_pos].to_vec().into_boxed_slice();
+            XorFilter::Xor8(Xor8 {
+                seed: xor_filter_seed,
+                block_length: xor_filter_block_length as usize,
+                fingerprints: xor_filter_fingerprints,
+            })
+        };
+        Self { filter }
     }
 
     pub fn estimate_size(&self) -> usize {
-        self.filter.fingerprints.len() * std::mem::size_of::<u16>()
+        match &self.filter {
+            XorFilter::Xor8(filter) => filter.fingerprints.len(),
+            XorFilter::Xor16(filter) => filter.fingerprints.len() * std::mem::size_of::<u16>(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.filter.block_length == 0
+        match &self.filter {
+            XorFilter::Xor8(filter) => filter.block_length == 0,
+            XorFilter::Xor16(filter) => filter.block_length == 0,
+        }
     }
 
     /// Judges whether the hash value is in the table with the given false positive rate.
@@ -122,18 +191,30 @@ impl XorFilterReader {
         if self.is_empty() {
             true
         } else {
-            self.filter.contains(&h)
+            match &self.filter {
+                XorFilter::Xor8(filter) => filter.contains(&h),
+                XorFilter::Xor16(filter) => filter.contains(&h),
+            }
         }
     }
 }
 
 impl Clone for XorFilterReader {
     fn clone(&self) -> Self {
-        Self {
-            filter: Xor16 {
-                seed: self.filter.seed,
-                block_length: self.filter.block_length,
-                fingerprints: self.filter.fingerprints.clone(),
+        match &self.filter {
+            XorFilter::Xor8(filter) => Self {
+                filter: XorFilter::Xor8(Xor8 {
+                    seed: filter.seed,
+                    block_length: filter.block_length,
+                    fingerprints: filter.fingerprints.clone(),
+                }),
+            },
+            XorFilter::Xor16(filter) => Self {
+                filter: XorFilter::Xor16(Xor16 {
+                    seed: filter.seed,
+                    block_length: filter.block_length,
+                    fingerprints: filter.fingerprints.clone(),
+                }),
             },
         }
     }

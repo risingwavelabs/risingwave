@@ -46,14 +46,15 @@ for filename in $kafka_data_files; do
 
     # always ok
     echo "Drop topic $topic"
-    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic "$topic" --delete || true
+    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server message_queue:29092 --topic "$topic" --delete || true
 
     echo "Recreate topic $topic with partition $partition"
-    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic "$topic" --create --partitions "$partition") &
+    "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server message_queue:29092 --topic "$topic" --create --partitions "$partition") &
 done
 wait
 
 echo "Fulfill kafka topics"
+python3 -m pip install requests fastavro confluent_kafka
 for filename in $kafka_data_files; do
     ([ -e "$filename" ]
     base=$(basename "$filename")
@@ -62,9 +63,11 @@ for filename in $kafka_data_files; do
     echo "Fulfill kafka topic $topic with data from $base"
     # binary data, one message a file, filename/topic ends with "bin"
     if [[ "$topic" = *bin ]]; then
-        ${KCAT_BIN} -P -b 127.0.0.1:29092 -t "$topic" "$filename"
+        ${KCAT_BIN} -P -b message_queue:29092 -t "$topic" "$filename"
+    elif [[ "$topic" = *avro_json ]]; then 
+        python3 source/avro_producer.py "message_queue:29092" "http://message_queue:8081" "$filename"
     else
-        cat "$filename" | ${KCAT_BIN} -P -b 127.0.0.1:29092 -t "$topic"
+        cat "$filename" | ${KCAT_BIN} -P -K ^  -b message_queue:29092 -t "$topic"
     fi
     ) &
 done

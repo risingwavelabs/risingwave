@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use anyhow::anyhow;
-use risingwave_common::array::JsonbVal;
+use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
 use crate::source::{SplitId, SplitMetaData};

@@ -1,0 +1,44 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 int, v2 int);
+
+statement ok
+create table t2 (v1 int, v3 int);
+
+statement ok
+insert into t1 values(1, 2),(1, 2);
+
+statement ok
+insert into t2 values(1, 2),(1, 2);
+
+query II
+select * from t1 intersect select * from t2
+----
+1 2
+
+query I
+select 1 intersect select 1
+----
+1
+
+query I
+select 1 intersect select 2
+----
+
+query I
+select null intersect select null
+----
+NULL
+
+query I
+select 1 as a intersect select 1 intersect select 1
+----
+1
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

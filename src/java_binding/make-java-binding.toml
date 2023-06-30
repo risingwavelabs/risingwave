@@ -1,4 +1,5 @@
 [tasks.gen-java-binding-header]
+category = "RiseDev - Java Binding"
 description = "Generate the java binding C header file"
 script = '''
 #!/usr/bin/env bash
@@ -7,25 +8,19 @@ cd java
 javac -h . -cp java-binding/src/main/java/ java-binding/src/main/java/com/risingwave/java/binding/Binding.java
 '''
 
-[tasks.build-java-binding-rust]
-description = "Build the java binding rust code"
-script = '''
-#!/usr/bin/env bash
-set -ex
-cargo build -p risingwave_java_binding
-'''
-
-[tasks.build-java-binding-java]
+[tasks.build-java-binding]
+category = "RiseDev - Java Binding"
 description = "Build the java binding java code"
 script = '''
 #!/usr/bin/env bash
 set -ex
 cd java
-mvn clean install --no-transfer-progress --pl java-binding-integration-test --am -DskipTests=true
+mvn install --no-transfer-progress --pl java-binding-integration-test --am -DskipTests=true
 mvn dependency:copy-dependencies --no-transfer-progress --pl java-binding-integration-test
 '''
 
 [tasks.start-java-binding-demo-cluster]
+category = "RiseDev - Java Binding"
 description = "Start the RisingWave cluster for java binding demo"
 script = '''
 #!/usr/bin/env bash
@@ -38,6 +33,7 @@ ${RISINGWAVE_ROOT}/risedev d java-binding-demo
 '''
 
 [tasks.kill-java-binding-demo-cluster]
+category = "RiseDev - Java Binding"
 description = "Kill the RisingWave cluster for java binding demo"
 script = '''
 #!/usr/bin/env bash
@@ -50,6 +46,7 @@ ${RISINGWAVE_ROOT}/risedev k > /dev/null
 '''
 
 [tasks.ingest-data-and-run-java-binding]
+category = "RiseDev - Java Binding"
 description = "Ingest test data and run java binding demo"
 script = '''
 #!/usr/bin/env bash
@@ -69,20 +66,20 @@ bash ${RUST_JAVA_BINDING_ROOT}/run_demo.sh
 '''
 
 [tasks.run-java-binding-demo]
+category = "RiseDev - Java Binding"
 description = "Run the java binding demo"
 dependencies = [
-    "build-java-binding-rust",
-    "build-java-binding-java",
+    "build-java-binding",
     "start-java-binding-demo-cluster",
     "ingest-data-and-run-java-binding",
     "kill-java-binding-demo-cluster"
 ]
 
 [tasks.run-java-binding-stream-chunk-demo]
+category = "RiseDev - Java Binding"
 description = "Run the java binding stream chunk demo"
 dependencies = [
-    "build-java-binding-rust",
-    "build-java-binding-java",
+    "build-java-binding",
 ]
 script = '''
 #!/usr/bin/env bash
@@ -94,7 +91,5 @@ cd ${RISINGWAVE_ROOT}/java
 
 (cd ${RISINGWAVE_ROOT} && cargo run --bin data-chunk-payload-generator) | \
     java -cp "./java-binding-integration-test/target/dependency/*:./java-binding-integration-test/target/classes" \
-     -Djava.library.path=${RISINGWAVE_ROOT}/target/debug  com.risingwave.java.binding.StreamChunkDemo
-
-
+    com.risingwave.java.binding.StreamChunkDemo
 '''

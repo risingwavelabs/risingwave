@@ -103,7 +103,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
-                        self.delete_range_iter.next_until(full_key.user_key);
+                        self.delete_range_iter.next_until(full_key.user_key).await?;
                         if self.delete_range_iter.current_epoch() >= epoch {
                             self.stats.skip_delete_key_count += 1;
                         } else {
@@ -170,12 +170,12 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     epoch: self.read_epoch,
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
-                self.delete_range_iter.seek(begin_key.as_ref());
+                self.delete_range_iter.seek(begin_key.as_ref()).await?;
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => {
                 self.iterator.rewind().await?;
-                self.delete_range_iter.rewind();
+                self.delete_range_iter.rewind().await?;
             }
         };
 
@@ -206,7 +206,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             epoch: self.read_epoch,
         };
         self.iterator.seek(full_key).await?;
-        self.delete_range_iter.seek(full_key.user_key);
+        self.delete_range_iter.seek(full_key.user_key).await?;
 
         // Handle multi-version
         self.last_key = FullKey::default();

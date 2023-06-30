@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use std::env;
-use std::sync::Arc;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, Date, Datum, Interval, ScalarImpl, Time, Timestamp};
+use risingwave_common::types::{
+    DataType, Date, Datum, Interval, ScalarImpl, StructType, Time, Timestamp,
+};
+use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::{memcmp_encoding, value_encoding};
 
@@ -42,7 +43,7 @@ impl Case {
     }
 }
 
-fn key_serialization(datum: &Datum) -> Vec<u8> {
+fn key_serialization(datum: &Datum) -> MemcmpEncoded {
     let result = memcmp_encoding::encode_value(
         datum.as_ref().map(ScalarImpl::as_scalar_ref_impl),
         OrderType::default(),
@@ -117,20 +118,12 @@ fn bench_encoding(c: &mut Criterion) {
         // encoding.
         Case::new(
             "Struct of Bool (len = 100)",
-            DataType::Struct(Arc::new(StructType::new(vec![
-                (
-                    DataType::Boolean,
-                    "".to_string()
-                );
-                100
-            ]))),
+            DataType::Struct(StructType::new(vec![("", DataType::Boolean); 100])),
             ScalarImpl::Struct(StructValue::new(vec![Some(ScalarImpl::Bool(true)); 100])),
         ),
         Case::new(
             "List of Bool (len = 100)",
-            DataType::List {
-                datatype: Box::new(DataType::Boolean),
-            },
+            DataType::List(Box::new(DataType::Boolean)),
             ScalarImpl::List(ListValue::new(vec![Some(ScalarImpl::Bool(true)); 100])),
         ),
     ];

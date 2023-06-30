@@ -26,18 +26,22 @@ use super::{MemoryControl, MemoryControlStats};
 /// based on jemalloc statistics.
 #[derive(Debug)]
 pub struct JemallocMemoryControl {
+    threshold_stable: usize,
     threshold_graceful: usize,
     threshold_aggressive: usize,
 }
 
 impl JemallocMemoryControl {
     const THRESHOLD_AGGRESSIVE: f64 = 0.9;
-    const THRESHOLD_GRACEFUL: f64 = 0.7;
+    const THRESHOLD_GRACEFUL: f64 = 0.8;
+    const THRESHOLD_STABLE: f64 = 0.7;
 
     pub fn new(total_memory: usize) -> Self {
+        let threshold_stable = (total_memory as f64 * Self::THRESHOLD_STABLE) as usize;
         let threshold_graceful = (total_memory as f64 * Self::THRESHOLD_GRACEFUL) as usize;
         let threshold_aggressive = (total_memory as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
         Self {
+            threshold_stable,
             threshold_graceful,
             threshold_aggressive,
         }
@@ -53,8 +57,10 @@ impl MemoryControl for JemallocMemoryControl {
         _stream_manager: Arc<LocalStreamManager>,
         watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats {
-        let jemalloc_allocated_mib =
-            advance_jemalloc_epoch(prev_memory_stats.jemalloc_allocated_mib);
+        let (jemalloc_allocated_mib, jemalloc_active_mib) = advance_jemalloc_epoch(
+            prev_memory_stats.jemalloc_allocated_mib,
+            prev_memory_stats.jemalloc_active_mib,
+        );
 
         // Streaming memory control
         //
@@ -63,6 +69,7 @@ impl MemoryControl for JemallocMemoryControl {
 
         let (lru_watermark_step, lru_watermark_time_ms, lru_physical_now) = calculate_lru_watermark(
             jemalloc_allocated_mib,
+            self.threshold_stable,
             self.threshold_graceful,
             self.threshold_aggressive,
             interval_ms,
@@ -73,6 +80,7 @@ impl MemoryControl for JemallocMemoryControl {
 
         MemoryControlStats {
             jemalloc_allocated_mib,
+            jemalloc_active_mib,
             lru_watermark_step,
             lru_watermark_time_ms,
             lru_physical_now_ms: lru_physical_now,
@@ -80,23 +88,34 @@ impl MemoryControl for JemallocMemoryControl {
     }
 }
 
-fn advance_jemalloc_epoch(prev_jemalloc_allocated_mib: usize) -> usize {
+fn advance_jemalloc_epoch(
+    prev_jemalloc_allocated_mib: usize,
+    prev_jemalloc_active_mib: usize,
+) -> (usize, usize) {
     use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
     let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
-    let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
-
     if let Err(e) = jemalloc_epoch_mib.advance() {
         tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
     }
-    jemalloc_allocated_mib.read().unwrap_or_else(|e| {
-        tracing::warn!("Jemalloc read allocated failed! {:?}", e);
-        prev_jemalloc_allocated_mib
-    })
+
+    let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
+    let jemalloc_active_mib = jemalloc_stats::active::mib().unwrap();
+    (
+        jemalloc_allocated_mib.read().unwrap_or_else(|e| {
+            tracing::warn!("Jemalloc read allocated failed! {:?}", e);
+            prev_jemalloc_allocated_mib
+        }),
+        jemalloc_active_mib.read().unwrap_or_else(|e| {
+            tracing::warn!("Jemalloc read active failed! {:?}", e);
+            prev_jemalloc_active_mib
+        }),
+    )
 }
 
 fn calculate_lru_watermark(
     cur_used_memory_bytes: usize,
+    threshold_stable: usize,
     threshold_graceful: usize,
     threshold_aggressive: usize,
     interval_ms: u32,
@@ -121,9 +140,12 @@ fn calculate_lru_watermark(
     //     last_step.
     //   - Otherwise, we set the step to last_step * 2.
 
-    let mut step = if cur_used_memory_bytes < threshold_graceful {
-        // Do not evict if the memory usage is lower than `threshold_graceful`
+    let mut step = if cur_used_memory_bytes < threshold_stable {
+        // Do not evict if the memory usage is lower than `threshold_stable`
         0
+    } else if cur_used_memory_bytes < threshold_graceful {
+        // Evict in equal speed of time before `threshold_graceful`
+        1
     } else if cur_used_memory_bytes < threshold_aggressive {
         // Gracefully evict
         if last_used_memory_bytes > cur_used_memory_bytes {

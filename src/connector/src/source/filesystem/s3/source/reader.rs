@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::pin::pin;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -26,11 +27,12 @@ use tokio::io::BufReader;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
-use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
-use crate::parser::{ByteStreamSourceParser, ByteStreamSourceParserImpl, ParserConfig};
-use crate::source::base::{SplitMetaData, SplitReader, MAX_CHUNK_SIZE};
+use crate::aws_auth::AwsAuthProps;
+use crate::aws_utils::{default_conn_config, s3_client};
+use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
+use crate::source::base::{SplitMetaData, SplitReader};
 use crate::source::filesystem::file_common::FsSplit;
-use crate::source::filesystem::nd_streaming::NdByteStreamWrapper;
+use crate::source::filesystem::nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitImpl,
@@ -59,6 +61,7 @@ impl S3FileReader {
     ) {
         let actor_id = source_ctx.source_info.actor_id.to_string();
         let source_id = source_ctx.source_info.source_id.to_string();
+        let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
 
         let object_name = split.name.clone();
@@ -69,7 +72,7 @@ impl S3FileReader {
             byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
         );
 
-        let reader = Box::pin(BufReader::new(stream_reader));
+        let reader = pin!(BufReader::new(stream_reader));
 
         let stream = ReaderStream::with_capacity(reader, STREAM_READER_CAPACITY);
 
@@ -89,7 +92,7 @@ impl S3FileReader {
             offset += len;
             batch_size += len;
             batch.push(msg);
-            if batch.len() >= MAX_CHUNK_SIZE {
+            if batch.len() >= max_chunk_size {
                 source_ctx
                     .metrics
                     .partition_input_bytes
@@ -152,8 +155,9 @@ impl SplitReader for S3FileReader {
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let config = AwsConfigV2::from(HashMap::from(props.clone()));
-        let sdk_config = config.load_config(None).await;
+        let config = AwsAuthProps::from(&props);
+
+        let sdk_config = config.build_config().await?;
 
         let bucket_name = props.bucket_name;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
@@ -202,9 +206,9 @@ impl S3FileReader {
                 parser,
                 ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
             ) {
-                NdByteStreamWrapper::new(parser).into_stream(Box::pin(data_stream))
+                parser.into_stream(nd_streaming::split_stream(data_stream))
             } else {
-                parser.into_stream(Box::pin(data_stream))
+                parser.into_stream(data_stream)
             };
             #[for_await]
             for msg in msg_stream {

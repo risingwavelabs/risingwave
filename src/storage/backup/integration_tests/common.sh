@@ -6,15 +6,15 @@ set -eo pipefail
 [ -n "${BACKUP_TEST_RW_ALL_IN_ONE}" ]
 
 function stop_cluster() {
-  cargo make k 1>/dev/null 2>&1 || true
+  cargo make --allow-private k 1>/dev/null 2>&1 || true
 }
 
 function clean_all_data {
-  cargo make clean-data 1>/dev/null 2>&1
+  cargo make --allow-private clean-data 1>/dev/null 2>&1
 }
 
 function clean_etcd_data() {
-  cargo make clean-etcd-data 1>/dev/null 2>&1
+  cargo make --allow-private clean-etcd-data 1>/dev/null 2>&1
 }
 
 function start_cluster() {
@@ -99,12 +99,12 @@ function execute_sql_and_expect() {
 }
 
 function get_max_committed_epoch() {
-  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
+  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
   echo "${mce}"
 }
 
 function get_safe_epoch() {
-  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
+  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
   echo "${safe_epoch}"
 }
 

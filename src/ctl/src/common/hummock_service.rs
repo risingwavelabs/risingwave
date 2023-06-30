@@ -109,7 +109,6 @@ For `./risedev apply-compose-deploy` users,
         let (heartbeat_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(1000),
-            Duration::from_secs(600),
             vec![],
         );
         self.heartbeat_handle = Some(heartbeat_handle);
@@ -138,7 +137,6 @@ For `./risedev apply-compose-deploy` users,
             metrics.state_store_metrics.clone(),
             metrics.object_store_metrics.clone(),
             TieredCacheMetricsBuilder::unused(),
-            Arc::new(risingwave_tracing::RwTracingService::disabled()),
             metrics.storage_metrics.clone(),
             metrics.compactor_metrics.clone(),
         )

@@ -16,6 +16,6 @@ include ./catalog/*.slt.part
 include ./functions/*.slt.part
 
 statement ok
-SET QUERY_MODE TO distributed;
+SET QUERY_MODE TO auto;
 
 # This test should not be running in parallel mode

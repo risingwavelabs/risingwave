@@ -14,27 +14,4 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
-#[cfg(enable_task_local_alloc)]
-use risingwave_common::enable_task_local_jemalloc_on_unix;
-
-#[cfg(enable_task_local_alloc)]
-enable_task_local_jemalloc_on_unix!();
-
-#[cfg(not(enable_task_local_alloc))]
-use risingwave_common::enable_jemalloc_on_unix;
-
-#[cfg(not(enable_task_local_alloc))]
-enable_jemalloc_on_unix!();
-
-#[cfg_attr(coverage, no_coverage)]
-fn main() {
-    use clap::Parser;
-
-    let opts = risingwave_compute::ComputeNodeOpts::parse();
-
-    risingwave_rt::init_risingwave_logger(
-        risingwave_rt::LoggerSettings::new().enable_tokio_console(false),
-    );
-
-    risingwave_rt::main_okk(risingwave_compute::start(opts))
-}
+risingwave_cmd::main!(compute);

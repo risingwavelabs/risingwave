@@ -32,6 +32,12 @@ impl<P: Hash> Hash for Share<P> {
     }
 }
 
+impl<PlanRef: GenericPlanRef> Share<PlanRef> {
+    pub fn replace_input(&self, plan: PlanRef) {
+        *self.input.borrow_mut() = plan;
+    }
+}
+
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Share<PlanRef> {
     fn schema(&self) -> Schema {
         self.input.borrow().schema().clone()

@@ -98,14 +98,21 @@ impl Collector for ProcessCollector {
                 return Vec::new();
             }
         };
+        let stat = match p.stat() {
+            Ok(stat) => stat,
+            Err(..) => {
+                // we can't get the stat, so there's no stats to gather
+                return Vec::new();
+            }
+        };
 
         // memory
-        self.vsize.set(p.stat.vsize as i64);
-        self.rss.set(p.stat.rss * *PAGESIZE);
+        self.vsize.set(stat.vsize as i64);
+        self.rss.set(stat.rss as i64 * *PAGESIZE);
 
         // cpu
         let cpu_total_mfs = {
-            let total = (p.stat.utime + p.stat.stime) / *CLOCK_TICK;
+            let total = (stat.utime + stat.stime) / *CLOCK_TICK;
             let past = self.cpu_total.get();
             self.cpu_total.inc_by(total - past);
             self.cpu_total.collect()

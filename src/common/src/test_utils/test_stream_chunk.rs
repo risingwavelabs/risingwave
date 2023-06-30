@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use itertools::Itertools;
 
-use crate::array::column::Column;
-use crate::array::{F32Array, I32Array, I64Array, Op, StreamChunk};
+use crate::array::{I32Array, Op, StreamChunk};
 use crate::catalog::{Field, Schema};
 use crate::row::OwnedRow;
+use crate::test_prelude::StreamChunkTestExt;
 use crate::types::{DataType, Datum, ScalarImpl};
 
 pub trait TestStreamChunk {
@@ -82,10 +84,7 @@ impl BigStreamChunk {
             .into_iter()
             .collect();
 
-        let col = {
-            let array = I32Array::from_iter(std::iter::repeat(114_514).take(capacity));
-            Column::from(array)
-        };
+        let col = Arc::new(I32Array::from_iter(std::iter::repeat(114_514).take(capacity)).into());
 
         let chunk = StreamChunk::new(ops, vec![col], Some(visibility));
 
@@ -119,28 +118,15 @@ pub struct WhatEverStreamChunk;
 
 impl TestStreamChunk for WhatEverStreamChunk {
     fn stream_chunk(&self) -> StreamChunk {
-        let ops = vec![
-            Op::Insert,
-            Op::Delete,
-            Op::Insert,
-            Op::UpdateDelete,
-            Op::UpdateInsert,
-        ];
-        let visibility = Some(vec![true, true, false, true, true].into_iter().collect());
-        let col1 = Column::from(crate::array!(
-            I32Array,
-            [Some(1), Some(2), None, Some(3), Some(4)],
-        ));
-        let col2 = Column::from(crate::array!(
-            F32Array,
-            [Some(4.0), None, Some(3.5), Some(2.2), Some(1.8)],
-        ));
-        let col3 = Column::from(crate::array!(
-            I64Array,
-            [Some(5), Some(6), Some(7), Some(8), Some(9)],
-        ));
-        let cols = vec![col1, col2, col3];
-        StreamChunk::new(ops, cols, visibility)
+        StreamChunk::from_pretty(
+            "   i    f       I
+            +   1    4.0     5
+            -   2    .       6
+            +   .    3.5     7 D
+            U-  3    2.2     8
+            U+  4    1.8     9
+        ",
+        )
     }
 
     fn cardinality(&self) -> usize {

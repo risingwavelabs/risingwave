@@ -32,7 +32,7 @@ impl Binder {
             Value::Boolean(b) => self.bind_bool(b),
             // Both null and string literal will be treated as `unknown` during type inference.
             // See [`ExprImpl::is_unknown`].
-            Value::Null => Ok(Literal::new(None, DataType::Varchar)),
+            Value::Null => Ok(Literal::new_untyped(None)),
             Value::Interval {
                 value,
                 leading_field,
@@ -46,10 +46,7 @@ impl Binder {
     }
 
     pub(super) fn bind_string(&mut self, s: String) -> Result<Literal> {
-        Ok(Literal::new(
-            Some(ScalarImpl::Utf8(s.into())),
-            DataType::Varchar,
-        ))
+        Ok(Literal::new_untyped(Some(s)))
     }
 
     fn bind_bool(&mut self, b: bool) -> Result<Literal> {
@@ -111,9 +108,7 @@ impl Binder {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             exprs,
-            DataType::List {
-                datatype: Box::new(element_type),
-            },
+            DataType::List(Box::new(element_type)),
         )
         .into();
         Ok(expr)
@@ -125,14 +120,12 @@ impl Binder {
                 ExprType::Array,
                 vec![],
                 // Treat `array[]` as `varchar[]` temporarily before applying cast.
-                DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                },
+                DataType::List(Box::new(DataType::Varchar)),
             )
             .into();
             return lhs.cast_explicit(ty).map_err(Into::into);
         }
-        let inner_type = if let DataType::List { datatype } = &ty {
+        let inner_type = if let DataType::List(datatype) = &ty {
             *datatype.clone()
         } else {
             return Err(ErrorCode::BindError(format!(
@@ -154,9 +147,7 @@ impl Binder {
     pub(super) fn bind_array_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr_inner(obj)?;
         match obj.return_type() {
-            DataType::List {
-                datatype: return_type,
-            } => Ok(FunctionCall::new_unchecked(
+            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayAccess,
                 vec![obj, self.bind_expr_inner(index)?],
                 *return_type,
@@ -192,14 +183,10 @@ impl Binder {
                 .cast_implicit(DataType::Int32)?,
         };
         match obj.return_type() {
-            DataType::List {
-                datatype: return_type,
-            } => Ok(FunctionCall::new_unchecked(
+            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayRangeAccess,
                 vec![obj, start, end],
-                DataType::List {
-                    datatype: return_type,
-                },
+                DataType::List(return_type),
             )
             .into()),
             data_type => Err(ErrorCode::BindError(format!(
@@ -241,7 +228,7 @@ fn unescape_c_style(s: &str) -> Result<String> {
         for _ in 0..len {
             if let Some(c) = chars.peek() && c.is_ascii_hexdigit() {
                 unicode_seq.push(chars.next().unwrap());
-            }else{
+            } else {
                 break;
             }
         }
@@ -285,7 +272,7 @@ fn unescape_c_style(s: &str) -> Result<String> {
         for _ in 0..2 {
             if let Some(c) = chars.peek() && matches!(*c, '0'..='7') {
                 unicode_seq.push(chars.next().unwrap());
-            }else{
+            } else {
                 break;
             }
         }
@@ -430,15 +417,13 @@ mod tests {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11)],
-            DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
+            DataType::List(Box::new(DataType::Int32)),
         )
         .into();
         let expr_pb = expr.to_expr_proto();
         let expr = build_from_prost(&expr_pb).unwrap();
         match expr.return_type() {
-            DataType::List { datatype } => {
+            DataType::List(datatype) => {
                 assert_eq!(datatype, Box::new(DataType::Int32));
             }
             _ => panic!("unexpected type"),
@@ -450,9 +435,7 @@ mod tests {
         let array_expr = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11), ExprImpl::literal_int(22)],
-            DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
+            DataType::List(Box::new(DataType::Int32)),
         )
         .into();
 

@@ -20,13 +20,16 @@ use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
+use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
+use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
     ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
 
 use super::utils::MemoryTracker;
@@ -113,6 +116,26 @@ pub enum CachePolicy {
 impl Default for CachePolicy {
     fn default() -> Self {
         CachePolicy::Fill(CachePriority::High)
+    }
+}
+
+impl From<TracedCachePolicy> for CachePolicy {
+    fn from(policy: TracedCachePolicy) -> Self {
+        match policy {
+            TracedCachePolicy::Disable => Self::Disable,
+            TracedCachePolicy::Fill(priority) => Self::Fill(priority.into()),
+            TracedCachePolicy::NotFill => Self::NotFill,
+        }
+    }
+}
+
+impl From<CachePolicy> for TracedCachePolicy {
+    fn from(policy: CachePolicy) -> Self {
+        match policy {
+            CachePolicy::Disable => Self::Disable,
+            CachePolicy::Fill(priority) => Self::Fill(priority.into()),
+            CachePolicy::NotFill => Self::NotFill,
+        }
     }
 }
 
@@ -242,10 +265,11 @@ impl SstableStore {
             let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
 
             async move {
-                if use_tiered_cache && let Some(holder) = tiered_cache
-                    .get(&(object_id, block_index as u64))
-                    .await
-                    .map_err(HummockError::tiered_cache)?
+                if use_tiered_cache
+                    && let Some(holder) = tiered_cache
+                        .get(&(object_id, block_index as u64))
+                        .await
+                        .map_err(HummockError::tiered_cache)?
                 {
                     // TODO(MrCroxx): `into_owned()` may perform buffer copy, eliminate it later.
                     return Ok(holder.into_owned());
@@ -316,7 +340,7 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
-        let obj_prefix = self.store.get_object_prefix(object_id, true);
+        let obj_prefix = self.store.get_object_prefix(object_id);
         format!(
             "{}/{}{}.{}",
             self.path, obj_prefix, object_id, OBJECT_SUFFIX
@@ -380,7 +404,7 @@ impl SstableStore {
                         size: (sst.file_size - sst.meta_offset) as usize,
                     };
                     async move {
-                        let now = minstant::Instant::now();
+                        let now = Instant::now();
                         let buf = store
                             .read(&meta_path, Some(loc))
                             .await
@@ -505,13 +529,19 @@ pub type SstableStoreRef = Arc<SstableStore>;
 pub struct HummockMemoryCollector {
     sstable_store: SstableStoreRef,
     limiter: Arc<MemoryLimiter>,
+    storage_memory_config: StorageMemoryConfig,
 }
 
 impl HummockMemoryCollector {
-    pub fn new(sstable_store: SstableStoreRef, limiter: Arc<MemoryLimiter>) -> Self {
+    pub fn new(
+        sstable_store: SstableStoreRef,
+        limiter: Arc<MemoryLimiter>,
+        storage_memory_config: StorageMemoryConfig,
+    ) -> Self {
         Self {
             sstable_store,
             limiter,
+            storage_memory_config,
         }
     }
 }
@@ -528,6 +558,21 @@ impl MemoryCollector for HummockMemoryCollector {
     fn get_uploading_memory_usage(&self) -> u64 {
         self.limiter.get_memory_usage()
     }
+
+    fn get_meta_cache_memory_usage_ratio(&self) -> f64 {
+        self.sstable_store.get_meta_memory_usage() as f64
+            / (self.storage_memory_config.meta_cache_capacity_mb * 1024 * 1024) as f64
+    }
+
+    fn get_block_cache_memory_usage_ratio(&self) -> f64 {
+        self.sstable_store.block_cache.size() as f64
+            / (self.storage_memory_config.block_cache_capacity_mb * 1024 * 1024) as f64
+    }
+
+    fn get_uploading_memory_usage_ratio(&self) -> f64 {
+        self.limiter.get_memory_usage() as f64
+            / (self.storage_memory_config.shared_buffer_capacity_mb * 1024 * 1024) as f64
+    }
 }
 
 pub struct SstableWriterOptions {
@@ -537,11 +582,21 @@ pub struct SstableWriterOptions {
     pub policy: CachePolicy,
 }
 
-pub trait SstableWriterFactory: Send + Sync {
+impl Default for SstableWriterOptions {
+    fn default() -> Self {
+        Self {
+            capacity_hint: None,
+            tracker: None,
+            policy: CachePolicy::NotFill,
+        }
+    }
+}
+#[async_trait::async_trait]
+pub trait SstableWriterFactory: Send {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
 
-    fn create_sst_writer(
-        &self,
+    async fn create_sst_writer(
+        &mut self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer>;
@@ -557,11 +612,12 @@ impl BatchSstableWriterFactory {
     }
 }
 
+#[async_trait::async_trait]
 impl SstableWriterFactory for BatchSstableWriterFactory {
     type Writer = BatchUploadWriter;
 
-    fn create_sst_writer(
-        &self,
+    async fn create_sst_writer(
+        &mut self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
@@ -763,16 +819,17 @@ impl StreamingSstableWriterFactory {
     }
 }
 
+#[async_trait::async_trait]
 impl SstableWriterFactory for StreamingSstableWriterFactory {
     type Writer = StreamingUploadWriter;
 
-    fn create_sst_writer(
-        &self,
+    async fn create_sst_writer(
+        &mut self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
         let path = self.sstable_store.get_sst_data_path(object_id);
-        let uploader = self.sstable_store.store.streaming_upload(&path)?;
+        let uploader = self.sstable_store.store.streaming_upload(&path).await?;
         Ok(StreamingUploadWriter::new(
             object_id,
             self.sstable_store.clone(),

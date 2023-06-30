@@ -17,10 +17,12 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
+use super::utils::{childless_record, Distill};
 use super::{
     ColPrunable, ExprRewritable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
     PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
@@ -58,14 +60,25 @@ pub struct LogicalMultiJoin {
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }
 
+impl Distill for LogicalMultiJoin {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let fields = (self.inputs.iter())
+            .flat_map(|input| input.schema().fields.clone())
+            .collect();
+        let input_schema = Schema { fields };
+        let cond = Pretty::display(&ConditionDisplay {
+            condition: self.on(),
+            input_schema: &input_schema,
+        });
+        childless_record("LogicalMultiJoin", vec![("on", cond)])
+    }
+}
 impl fmt::Display for LogicalMultiJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "LogicalMultiJoin {{ on: {} }}", {
-            let fields = self
-                .inputs
-                .iter()
+            let fields = (self.inputs.iter())
                 .flat_map(|input| input.schema().fields.clone())
-                .collect_vec();
+                .collect();
             let input_schema = Schema { fields };
             format!(
                 "{}",
@@ -491,7 +504,7 @@ impl LogicalMultiJoin {
     /// 2. Second, for every isolated node will create connection to every other nodes.
     /// 3. Third, select and merge one node for a iteration, and use a bfs policy for which node the
     ///    selected node merged with.
-    ///   i. The select node mentioned above is the node with least numer of relations and the
+    ///   i. The select node mentioned above is the node with least number of relations and the
     ///      lowerst join tree.
     ///   ii. nodes with a join tree higher than the temporal optimal join tree will be pruned.
     pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
@@ -547,7 +560,13 @@ impl LogicalMultiJoin {
                 continue;
             }
 
-            let mut relations = nodes.get_mut(&n_id).unwrap().relations.clone();
+            let mut relations = nodes
+                .get_mut(&n_id)
+                .unwrap()
+                .relations
+                .iter()
+                .cloned()
+                .collect_vec();
             relations.sort_by(|a, b| {
                 let a = nodes.get(a).unwrap();
                 let b = nodes.get(b).unwrap();
@@ -556,46 +575,32 @@ impl LogicalMultiJoin {
                     other => other,
                 }
             });
-            relations.dedup();
-            nodes.get_mut(&n_id).unwrap().relations = relations;
 
-            for merge_node_id in &nodes.get(&n_id).unwrap().relations {
+            for merge_node_id in &relations {
                 let mut nodes = nodes.clone();
                 let n = nodes.remove(&n_id).unwrap();
 
                 for adj_node_id in &n.relations {
                     if adj_node_id != merge_node_id {
-                        let n_id_pos = nodes
-                            .get(adj_node_id)
-                            .unwrap()
-                            .relations
-                            .iter()
-                            .position(|adj_rel| *adj_rel == n_id)
-                            .unwrap();
-
                         let adj_node = nodes.get_mut(adj_node_id).unwrap();
-                        adj_node.relations.swap_remove(n_id_pos);
-                        adj_node.relations.push(*merge_node_id);
+                        adj_node.relations.remove(&n_id);
+                        adj_node.relations.insert(*merge_node_id);
                         let merge_node = nodes.get_mut(merge_node_id).unwrap();
-                        merge_node.relations.push(*adj_node_id);
+                        merge_node.relations.insert(*adj_node_id);
                     }
                 }
 
-                let idx = nodes
-                    .get(merge_node_id)
-                    .unwrap()
-                    .relations
-                    .iter()
-                    .position(|merge_rel| *merge_rel == n_id)
-                    .unwrap();
-
                 let merge_node = nodes.get_mut(merge_node_id).unwrap();
-                merge_node.relations.swap_remove(idx);
+                merge_node.relations.remove(&n_id);
                 let l_tree = n.join_tree.clone();
                 let r_tree = std::mem::take(&mut merge_node.join_tree);
                 let new_height = usize::max(l_tree.height, r_tree.height) + 1;
 
-                if let Some(min_height) = optimized_bushy_tree.as_ref().map(|(t, _)| t.join_tree.height) && min_height < new_height {
+                if let Some(min_height) = optimized_bushy_tree
+                    .as_ref()
+                    .map(|(t, _)| t.join_tree.height)
+                    && min_height < new_height
+                {
                     continue;
                 }
 
@@ -618,7 +623,7 @@ impl LogicalMultiJoin {
                     .into_iter()
                     .fold(optimized_bushy_tree, |chain, n| GraphNode {
                         id: n.id,
-                        relations: vec![],
+                        relations: BTreeSet::default(),
                         join_tree: JoinTreeNode {
                             height: chain.join_tree.height.max(n.join_tree.height) + 1,
                             idx: None,
@@ -667,7 +672,7 @@ impl LogicalMultiJoin {
         let mut nodes: BTreeMap<_, _> = (0..self.inputs.len())
             .map(|idx| GraphNode {
                 id: idx,
-                relations: vec![],
+                relations: BTreeSet::default(),
                 join_tree: JoinTreeNode {
                     idx: Some(idx),
                     left: None,
@@ -685,8 +690,8 @@ impl LogicalMultiJoin {
             .split_by_input_col_nums(&self.input_col_nums(), true);
 
         for ((src, dst), _) in eq_join_conditions {
-            nodes.get_mut(&src).unwrap().relations.push(dst);
-            nodes.get_mut(&dst).unwrap().relations.push(src);
+            nodes.get_mut(&src).unwrap().relations.insert(dst);
+            nodes.get_mut(&dst).unwrap().relations.insert(src);
         }
 
         Ok((nodes, condition))
@@ -796,8 +801,7 @@ struct JoinTreeNode {
 struct GraphNode {
     id: usize,
     join_tree: JoinTreeNode,
-    // use BTreeSet for deterministic
-    relations: Vec<usize>,
+    relations: BTreeSet<usize>,
 }
 
 impl ToStream for LogicalMultiJoin {

@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ExpandNode;
 
+use super::stream::StreamPlanRef;
+use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -54,6 +54,7 @@ impl StreamExpand {
             &logical,
             dist,
             input.append_only(),
+            input.emit_on_window_close(),
             watermark_columns,
         );
         StreamExpand { base, logical }
@@ -61,12 +62,6 @@ impl StreamExpand {
 
     pub fn column_subsets(&self) -> &[Vec<usize>] {
         &self.logical.column_subsets
-    }
-}
-
-impl fmt::Display for StreamExpand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamExpand")
     }
 }
 
@@ -83,6 +78,7 @@ impl PlanTreeNodeUnary for StreamExpand {
 }
 
 impl_plan_tree_node_for_unary! { StreamExpand }
+impl_distill_by_unit!(StreamExpand, logical, "StreamExpand");
 
 impl StreamNode for StreamExpand {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {

@@ -19,8 +19,6 @@ use std::path::Path;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-#[cfg(madsim)]
-use rand_chacha::ChaChaRng;
 use regex::Regex;
 use risingwave_sqlparser::ast::{
     Cte, Expr, FunctionArgExpr, Join, Query, Select, SetExpr, Statement, TableFactor,

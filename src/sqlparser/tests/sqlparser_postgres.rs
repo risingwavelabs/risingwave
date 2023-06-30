@@ -52,7 +52,7 @@ fn parse_create_table_with_defaults() {
                         None,
                         vec![ColumnOptionDef {
                             name: None,
-                            option: ColumnOption::Default(verified_expr(
+                            option: ColumnOption::DefaultColumns(verified_expr(
                                 "nextval(public.customer_customer_id_seq)"
                             ))
                         }],
@@ -101,7 +101,9 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::Default(Expr::Value(Value::Boolean(true))),
+                                option: ColumnOption::DefaultColumns(Expr::Value(Value::Boolean(
+                                    true
+                                ))),
                             },
                             ColumnOptionDef {
                                 name: None,
@@ -116,7 +118,9 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::Default(verified_expr("CAST(now() AS TEXT)"))
+                                option: ColumnOption::DefaultColumns(verified_expr(
+                                    "CAST(now() AS TEXT)"
+                                ))
                             },
                             ColumnOptionDef {
                                 name: None,
@@ -131,7 +135,7 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::Default(verified_expr("now()")),
+                                option: ColumnOption::DefaultColumns(verified_expr("now()")),
                             },
                             ColumnOptionDef {
                                 name: None,

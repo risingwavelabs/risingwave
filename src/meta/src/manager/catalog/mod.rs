@@ -86,13 +86,37 @@ macro_rules! commit_meta {
         }
     };
 }
-pub(crate) use commit_meta;
+
+/// `commit_meta_with_trx` is similar to `commit_meta`, but it accepts an external trx (transaction)
+/// and commits it.
+macro_rules! commit_meta_with_trx {
+    ($manager:expr, $trx:ident, $($val_txn:expr),*) => {
+        {
+            async {
+                // Apply the change in `ValTransaction` to trx
+                $(
+                    $val_txn.apply_to_txn(&mut $trx)?;
+                )*
+                // Commit to meta store
+                $manager.env.meta_store().txn($trx).await?;
+                // Upon successful commit, commit the change to in-mem meta
+                $(
+                    $val_txn.commit();
+                )*
+                MetaResult::Ok(())
+            }.await
+        }
+    };
+}
+
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
+pub(crate) use {commit_meta, commit_meta_with_trx};
 
 use crate::manager::catalog::utils::{
-    alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
+    alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,
+    refcnt_inc_connection, ReplaceTableExprRewriter,
 };
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
@@ -220,7 +244,12 @@ where
     pub async fn drop_database(
         &self,
         database_id: DatabaseId,
-    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>, Vec<SourceId>)> {
+    ) -> MetaResult<(
+        NotificationVersion,
+        Vec<StreamingJobId>,
+        Vec<SourceId>,
+        Vec<Connection>,
+    )> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -262,6 +291,7 @@ where
         }
 
         let database = databases.remove(database_id);
+        let connections_dropped;
         if let Some(database) = database {
             let schemas_to_drop = drop_by_database_id!(schemas, database_id);
             let sources_to_drop = drop_by_database_id!(sources, database_id);
@@ -271,6 +301,7 @@ where
             let views_to_drop = drop_by_database_id!(views, database_id);
             let functions_to_drop = drop_by_database_id!(functions, database_id);
             let connections_to_drop = drop_by_database_id!(connections, database_id);
+            connections_dropped = connections_to_drop.clone();
 
             let objects = std::iter::once(Object::DatabaseId(database_id))
                 .chain(
@@ -293,7 +324,19 @@ where
                 .collect_vec();
             let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
-            commit_meta!(self, databases, schemas, sources, sinks, tables, indexes, views, users)?;
+            commit_meta!(
+                self,
+                databases,
+                schemas,
+                sources,
+                sinks,
+                tables,
+                indexes,
+                views,
+                users,
+                connections,
+                functions
+            )?;
 
             std::iter::once(database.owner)
                 .chain(schemas_to_drop.iter().map(|schema| schema.owner))
@@ -308,6 +351,11 @@ where
                 .chain(indexes_to_drop.iter().map(|index| index.owner))
                 .chain(views_to_drop.iter().map(|view| view.owner))
                 .chain(functions_to_drop.iter().map(|function| function.owner))
+                .chain(
+                    connections_to_drop
+                        .iter()
+                        .map(|connection| connection.owner),
+                )
                 .for_each(|owner_id| user_core.decrease_ref(owner_id));
 
             // Update relation ref count.
@@ -324,7 +372,6 @@ where
             for connection in &connections_to_drop {
                 database_core.relation_ref_count.remove(&connection.id);
             }
-            // FIXME: resolve function refer count.
             for user in users_need_update {
                 self.notify_frontend(Operation::Update, Info::User(user))
                     .await;
@@ -350,7 +397,12 @@ where
                 .map(|source| source.id)
                 .collect_vec();
 
-            Ok((version, catalog_deleted_ids, source_deleted_ids))
+            Ok((
+                version,
+                catalog_deleted_ids,
+                source_deleted_ids,
+                connections_dropped,
+            ))
         } else {
             Err(MetaError::catalog_id_not_found("database", database_id))
         }
@@ -388,7 +440,10 @@ where
         Ok(version)
     }
 
-    pub async fn drop_connection(&self, conn_id: ConnectionId) -> MetaResult<NotificationVersion> {
+    pub async fn drop_connection(
+        &self,
+        conn_id: ConnectionId,
+    ) -> MetaResult<(NotificationVersion, Connection)> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         database_core.ensure_connection_id(conn_id)?;
@@ -418,9 +473,9 @@ where
                 user_core.decrease_ref(connection.owner);
 
                 let version = self
-                    .notify_frontend(Operation::Delete, Info::Connection(connection))
+                    .notify_frontend(Operation::Delete, Info::Connection(connection.clone()))
                     .await;
-                Ok(version)
+                Ok((version, connection))
             }
         }
     }
@@ -777,6 +832,7 @@ where
         &self,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
+        fragment_manager: FragmentManagerRef<S>,
     ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -794,6 +850,28 @@ where
                 .map(|(index_id, index)| (*index_id, index.index_table_id))
                 .unzip();
 
+            let mut index_internal_table_ids = Vec::with_capacity(index_table_ids.len());
+            for index_table_id in &index_table_ids {
+                let internal_table_ids = match fragment_manager
+                    .select_table_fragments_by_table_id(&(index_table_id.into()))
+                    .await
+                    .map(|fragments| fragments.internal_table_ids())
+                {
+                    Ok(v) => v,
+                    // Handle backwards compat with no state persistence.
+                    Err(_) => vec![],
+                };
+
+                // 1 should be used by table scan.
+                if internal_table_ids.len() == 1 {
+                    index_internal_table_ids.push(internal_table_ids[0]);
+                } else {
+                    // backwards compatibility with indexes
+                    // without backfill state persisted.
+                    assert_eq!(internal_table_ids.len(), 0);
+                }
+            }
+
             if let Some(ref_count) = database_core.relation_ref_count.get(&table_id).cloned() {
                 if ref_count > index_ids.len() {
                     return Err(MetaError::permission_denied(format!(
@@ -810,6 +888,14 @@ where
             let index_tables = index_table_ids
                 .iter()
                 .map(|index_table_id| tables.remove(*index_table_id).unwrap())
+                .collect_vec();
+            let index_internal_tables = index_internal_table_ids
+                .iter()
+                .map(|index_internal_table_id| {
+                    tables
+                        .remove(*index_internal_table_id)
+                        .expect("internal index table should exist")
+                })
                 .collect_vec();
             for index_table in &index_tables {
                 if let Some(ref_count) = database_core.relation_ref_count.get(&index_table.id) {
@@ -832,6 +918,7 @@ where
             let users_need_update = {
                 let table_to_drop_ids = index_table_ids
                     .iter()
+                    .chain(&index_internal_table_ids)
                     .chain(&internal_table_ids)
                     .chain([&table_id])
                     .collect_vec();
@@ -881,6 +968,7 @@ where
                                 internal_tables
                                     .into_iter()
                                     .chain(index_tables.into_iter())
+                                    .chain(index_internal_tables.into_iter())
                                     .map(|internal_table| Relation {
                                         relation_info: RelationInfo::Table(internal_table).into(),
                                     }),
@@ -919,6 +1007,7 @@ where
         &self,
         index_id: IndexId,
         index_table_id: TableId,
+        internal_table_ids: Vec<TableId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -945,11 +1034,23 @@ where
                     table.name, ref_count
                 ))),
                 None => {
+                    let internal_tables = internal_table_ids
+                        .iter()
+                        .map(|internal_table_id| {
+                            tables
+                                .remove(*internal_table_id)
+                                .expect("internal table should exist")
+                        })
+                        .collect_vec();
+
                     let dependent_relations = table.dependent_relations.clone();
 
-                    let objects = &[Object::TableId(table.id)];
+                    let objects = iter::once(table.id)
+                        .chain(internal_table_ids)
+                        .map(Object::TableId)
+                        .collect_vec();
 
-                    let users_need_update = Self::update_user_privileges(&mut users, objects);
+                    let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
                     commit_meta!(self, tables, indexes, users)?;
 
@@ -976,7 +1077,12 @@ where
                                     Relation {
                                         relation_info: RelationInfo::Index(index).into(),
                                     },
-                                ],
+                                ]
+                                .into_iter()
+                                .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                                    relation_info: RelationInfo::Table(internal_table).into(),
+                                }))
+                                .collect_vec(),
                             }),
                         )
                         .await;
@@ -1294,14 +1400,7 @@ where
             database_core.mark_creating(&key);
             user_core.increase_ref(source.owner);
             // We have validate the status of connection before starting the procedure.
-            if let Some(connection_id) = source.connection_id {
-                if let Some(_conn) = database_core.get_connection(connection_id) {
-                    // TODO(weili): wait for yezizp to refactor ref cnt
-                    database_core.increase_ref_count(connection_id);
-                } else {
-                    bail!("connection {} not found.", connection_id);
-                }
-            }
+            refcnt_inc_connection(database_core, source.connection_id)?;
             Ok(())
         }
     }
@@ -1356,10 +1455,7 @@ where
 
         database_core.unmark_creating(&key);
         user_core.decrease_ref(source.owner);
-        if let Some(connection_id) = source.connection_id {
-            // TODO(weili): wait for yezizp to refactor ref cnt
-            database_core.decrease_ref_count(connection_id);
-        }
+        refcnt_dec_connection(database_core, source.connection_id);
         Ok(())
     }
 
@@ -1385,10 +1481,7 @@ where
                 commit_meta!(self, sources, users)?;
 
                 user_core.decrease_ref(source.owner);
-                if let Some(connection_id) = source.connection_id {
-                    // TODO(weili): wait for yezizp to refactor ref cnt
-                    database_core.decrease_ref_count(connection_id);
-                }
+                refcnt_dec_connection(database_core, source.connection_id);
 
                 for user in users_need_update {
                     self.notify_frontend(Operation::Update, Info::User(user))
@@ -1431,6 +1524,9 @@ where
             ensure!(table.dependent_relations.is_empty());
             // source and table
             user_core.increase_ref_count(source.owner, 2);
+
+            // We have validate the status of connection before starting the procedure.
+            refcnt_inc_connection(database_core, source.connection_id)?;
             Ok(())
         }
     }
@@ -1518,6 +1614,7 @@ where
         database_core.unmark_creating(&table_key);
         database_core.unmark_creating_streaming_job(table.id);
         user_core.decrease_ref_count(source.owner, 2); // source and table
+        refcnt_dec_connection(database_core, source.connection_id);
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
@@ -1527,6 +1624,7 @@ where
         source_id: SourceId,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
+        fragment_manager: FragmentManagerRef<S>,
     ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
         trace!(%source_id, %table_id, ?internal_table_ids, "drop table with source");
         let core = &mut *self.core.lock().await;
@@ -1559,6 +1657,30 @@ where
                     .filter(|(_, index)| index.primary_table_id == table_id)
                     .map(|(index_id, index)| (*index_id, index.index_table_id))
                     .unzip();
+
+                let mut index_internal_table_ids = Vec::with_capacity(index_table_ids.len());
+
+                for index_table_id in &index_table_ids {
+                    let internal_table_ids = match fragment_manager
+                        .select_table_fragments_by_table_id(&(index_table_id.into()))
+                        .await
+                        .map(|fragments| fragments.internal_table_ids())
+                    {
+                        Ok(v) => v,
+                        // Handle backwards compat with no state persistence.
+                        Err(_) => vec![],
+                    };
+
+                    // 1 should be used by table scan.
+                    if internal_table_ids.len() == 1 {
+                        index_internal_table_ids.push(internal_table_ids[0]);
+                    } else {
+                        // backwards compatibility with indexes
+                        // without backfill state persisted.
+                        assert_eq!(internal_table_ids.len(), 0);
+                    }
+                }
+
                 if let Some(ref_count) = database_core.relation_ref_count.get(&table_id).cloned() {
                     // Indexes are dependent on table. We can drop table only if its `ref_count` is
                     // strictly equal to number of indexes.
@@ -1584,6 +1706,14 @@ where
                     .iter()
                     .map(|index_table_id| tables.remove(*index_table_id).unwrap())
                     .collect_vec();
+                let index_internal_tables = index_internal_table_ids
+                    .iter()
+                    .map(|index_internal_table_id| {
+                        tables
+                            .remove(*index_internal_table_id)
+                            .expect("internal index table should exist")
+                    })
+                    .collect_vec();
                 for index_table in &index_tables {
                     if let Some(ref_count) = database_core.relation_ref_count.get(&index_table.id) {
                         return Err(MetaError::permission_denied(format!(
@@ -1603,12 +1733,19 @@ where
                     .into_iter()
                     .chain(internal_table_ids.iter().map(|id| Object::TableId(*id)))
                     .chain(index_table_ids.iter().map(|id| Object::TableId(*id)))
+                    .chain(
+                        index_internal_table_ids
+                            .iter()
+                            .map(|id| Object::TableId(*id)),
+                    )
                     .collect_vec();
 
                 let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
                 // Commit point
                 commit_meta!(self, tables, sources, indexes, users)?;
+
+                refcnt_dec_connection(database_core, source.connection_id);
 
                 indexes_removed.iter().for_each(|index| {
                     user_core.decrease_ref_count(index.owner, 2); // index table and index
@@ -1643,6 +1780,7 @@ where
                                     internal_tables
                                         .into_iter()
                                         .chain(index_tables.into_iter())
+                                        .chain(index_internal_tables.into_iter())
                                         .map(|internal_table| Relation {
                                             relation_info: RelationInfo::Table(internal_table)
                                                 .into(),
@@ -1731,6 +1869,7 @@ where
 
     pub async fn finish_create_index_procedure(
         &self,
+        internal_tables: Vec<Table>,
         index: &Index,
         table: &Table,
     ) -> MetaResult<NotificationVersion> {
@@ -1753,7 +1892,9 @@ where
 
         indexes.insert(index.id, index.clone());
         tables.insert(table.id, table.clone());
-
+        for table in &internal_tables {
+            tables.insert(table.id, table.clone());
+        }
         commit_meta!(self, indexes, tables)?;
 
         let version = self
@@ -1767,7 +1908,12 @@ where
                         Relation {
                             relation_info: RelationInfo::Index(index.to_owned()).into(),
                         },
-                    ],
+                    ]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
                 }),
             )
             .await;
@@ -1800,14 +1946,7 @@ where
             }
             user_core.increase_ref(sink.owner);
             // We have validate the status of connection before starting the procedure.
-            if let Some(connection_id) = sink.connection_id {
-                if let Some(_conn) = database_core.get_connection(connection_id) {
-                    // TODO(siyuan): wait for yezizp to refactor ref cnt
-                    database_core.increase_ref_count(connection_id);
-                } else {
-                    bail!("connection {} not found.", connection_id);
-                }
-            }
+            refcnt_inc_connection(database_core, sink.connection_id)?;
             Ok(())
         }
     }
@@ -1875,10 +2014,7 @@ where
             database_core.decrease_ref_count(dependent_relation_id);
         }
         user_core.decrease_ref(sink.owner);
-        if let Some(connection_id) = sink.connection_id {
-            // TODO(siyuan): wait for yezizp to refactor ref cnt
-            database_core.decrease_ref_count(connection_id);
-        }
+        refcnt_dec_connection(database_core, sink.connection_id);
     }
 
     pub async fn drop_sink(

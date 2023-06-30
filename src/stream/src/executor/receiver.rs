@@ -18,6 +18,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
 use super::ActorContextRef;
@@ -119,7 +120,7 @@ impl Executor for ReceiverExecutor {
 
         let stream = #[try_stream]
         async move {
-            let mut start_time = minstant::Instant::now();
+            let mut start_time = Instant::now();
             while let Some(msg) = self.input.next().await {
                 self.metrics
                     .actor_input_buffer_blocking_duration_ns
@@ -196,7 +197,7 @@ impl Executor for ReceiverExecutor {
                 };
 
                 yield msg;
-                start_time = minstant::Instant::now();
+                start_time = Instant::now();
             }
         };
 

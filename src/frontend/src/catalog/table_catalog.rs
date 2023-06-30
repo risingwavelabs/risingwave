@@ -24,8 +24,11 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::DefaultColumnDesc;
 
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
+use crate::expr::ExprImpl;
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -99,6 +102,9 @@ pub struct TableCatalog {
 
     /// The fragment id of the `Materialize` operator for this table.
     pub fragment_id: FragmentId,
+
+    /// The fragment id of the `DML` operator for this table.
+    pub dml_fragment_id: Option<FragmentId>,
 
     /// An optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution.
@@ -364,6 +370,7 @@ impl TableCatalog {
             owner: self.owner,
             properties: self.properties.inner().clone().into_iter().collect(),
             fragment_id: self.fragment_id,
+            dml_fragment_id: self.dml_fragment_id,
             vnode_col_index: self.vnode_col_index.map(|i| i as _),
             row_id_index: self.row_id_index.map(|i| i as _),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
@@ -388,6 +395,26 @@ impl TableCatalog {
             .iter()
             .filter(|c| c.is_generated())
             .map(|c| c.name())
+    }
+
+    pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
+        self.columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.is_default())
+            .map(|(i, c)| {
+                if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
+                    c.column_desc.generated_or_default_column.clone().unwrap()
+                {
+                    (
+                        i,
+                        ExprImpl::from_expr_proto(&expr.unwrap())
+                            .expect("expr in default columns corrupted"),
+                    )
+                } else {
+                    unreachable!()
+                }
+            })
     }
 
     pub fn has_generated_column(&self) -> bool {
@@ -442,6 +469,7 @@ impl From<PbTable> for TableCatalog {
             owner: tb.owner,
             properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
+            dml_fragment_id: tb.dml_fragment_id,
             vnode_col_index: tb.vnode_col_index.map(|x| x as usize),
             row_id_index: tb.row_id_index.map(|x| x as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
@@ -524,6 +552,7 @@ mod tests {
                 String::from("300"),
             )]),
             fragment_id: 0,
+            dml_fragment_id: None,
             value_indices: vec![0],
             definition: "".into(),
             read_prefix_len_hint: 0,
@@ -561,7 +590,7 @@ mod tests {
                                 ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
                             type_name: ".test.Country".to_string(),
-                            generated_column: None,
+                            generated_or_default_column: None,
                         },
                         is_hidden: false
                     }
@@ -576,6 +605,7 @@ mod tests {
                     String::from("300")
                 )])),
                 fragment_id: 0,
+                dml_fragment_id: None,
                 vnode_col_index: None,
                 row_id_index: None,
                 value_indices: vec![0],

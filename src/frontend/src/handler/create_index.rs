@@ -24,11 +24,13 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{PbIndex, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::CatalogError;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
@@ -36,7 +38,7 @@ use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMa
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::SessionImpl;
+use crate::session::{CheckRelationError, SessionImpl};
 use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn gen_create_index_plan(
@@ -46,7 +48,7 @@ pub(crate) fn gen_create_index_plan(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
-    distributed_by: Vec<Ident>,
+    distributed_by: Vec<ast::Expr>,
 ) -> Result<(PlanRef, PbTable, PbIndex)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -127,7 +129,7 @@ pub(crate) fn gen_create_index_plan(
     };
 
     for column in distributed_by {
-        let expr_impl = binder.bind_expr(risingwave_sqlparser::ast::Expr::Identifier(column))?;
+        let expr_impl = binder.bind_expr(column)?;
         distributed_columns_expr.push(expr_impl);
     }
 
@@ -159,6 +161,7 @@ pub(crate) fn gen_create_index_plan(
         .into_iter()
         .filter(|expr| match expr {
             ExprImpl::InputRef(input_ref) => set.insert(input_ref.index),
+            ExprImpl::FunctionCall(_) => true,
             _ => unreachable!(),
         })
         .collect_vec();
@@ -243,7 +246,7 @@ pub(crate) fn gen_create_index_plan(
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Index:");
-        ctx.trace(plan.explain_to_string().unwrap());
+        ctx.trace(plan.explain_to_string());
     }
 
     Ok((plan, index_table_prost, index_prost))
@@ -346,7 +349,7 @@ fn assemble_materialize(
                 .name
                 .clone(),
             ExprImpl::FunctionCall(func) => {
-                let func_name = func.get_expr_type().as_str_name().to_string();
+                let func_name = func.func_type().as_str_name().to_string();
                 let mut name = func_name.clone();
                 while !col_names.insert(name.clone()) {
                     count += 1;
@@ -394,22 +397,23 @@ pub async fn handle_create_index(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
-    distributed_by: Vec<Ident>,
+    distributed_by: Vec<ast::Expr>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
     let (graph, index_table, index) = {
         {
-            if let Err(e) = session.check_relation_name_duplicated(index_name.clone()) {
-                if if_not_exists {
-                    return Ok(PgResponse::empty_result_with_notice(
-                        StatementType::CREATE_INDEX,
-                        format!("relation \"{}\" already exists, skipping", index_name),
-                    ));
-                } else {
-                    return Err(e);
+            match session.check_relation_name_duplicated(index_name.clone()) {
+                Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name)))
+                    if if_not_exists =>
+                {
+                    return Ok(PgResponse::builder(StatementType::CREATE_INDEX)
+                        .notice(format!("relation \"{}\" already exists, skipping", name))
+                        .into());
                 }
-            }
+                Err(e) => return Err(e.into()),
+                Ok(_) => {}
+            };
         }
 
         let context = OptimizerContext::from_handler_args(handler_args);

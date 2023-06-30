@@ -48,3 +48,5 @@ steps:
             - BINARY_NAME
             - BUILDKITE_SOURCE
             - GITHUB_TOKEN
+            - BUILDKITE_COMMIT
+            - BUILDKITE_TAG

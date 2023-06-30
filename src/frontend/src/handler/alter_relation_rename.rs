@@ -176,6 +176,15 @@ pub async fn handle_rename_source(
         let reader = session.env().catalog_reader().read_guard();
         let (source, schema_name) =
             reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
+
+        // For `CREATE TABLE WITH (connector = '...')`, users should call `ALTER TABLE` instead.
+        if source.associated_table_id.is_some() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Use `ALTER TABLE` to alter a table with connector.".to_owned(),
+            )
+            .into());
+        }
+
         session.check_privilege_for_drop_alter(schema_name, &**source)?;
         source.id
     };

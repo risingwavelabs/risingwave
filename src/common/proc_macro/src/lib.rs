@@ -62,7 +62,9 @@ pub fn override_config(input: TokenStream) -> TokenStream {
     gen.into()
 }
 
-#[proc_macro_derive(EstimateSize)]
+/// `EstimateSize` can be derived if when all the fields in a
+/// struct or enum can implemented `EstimateSize`.
+#[proc_macro_derive(EstimateSize, attributes(estimate_size))]
 pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
     // Construct a representation of Rust code as a syntax tree
     // that we can manipulate
@@ -146,7 +148,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
                             field_idents.push(field_ident);
 
                             field_cmds.push(quote! {
-                                total += EstimateSize::estimated_heap_size(#field_ident);
+                                total += #field_ident.estimated_heap_size();
                             })
                         }
 
@@ -192,19 +194,36 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
                 return gen.into();
             }
 
-            let mut cmds = Vec::with_capacity(data_struct.fields.len());
+            let mut field_cmds = Vec::with_capacity(data_struct.fields.len());
 
-            for field in data_struct.fields.iter() {
-                // Check if the value should be ignored. If so skip it.
-                if has_nested_flag_attribute_list(&field.attrs, "estimate_size", "ignore") {
-                    continue;
+            match data_struct.fields {
+                syn::Fields::Unnamed(unnamed_fields) => {
+                    for (i, field) in unnamed_fields.unnamed.iter().enumerate() {
+                        // Check if the value should be ignored. If so skip it.
+                        if has_nested_flag_attribute_list(&field.attrs, "estimate_size", "ignore") {
+                            continue;
+                        }
+
+                        let idx = syn::Index::from(i);
+                        field_cmds.push(quote! {
+                            total += EstimateSize::estimated_heap_size(&self.#idx);
+                        })
+                    }
                 }
+                syn::Fields::Named(named_fields) => {
+                    for field in named_fields.named.iter() {
+                        // Check if the value should be ignored. If so skip it.
+                        if has_nested_flag_attribute_list(&field.attrs, "estimate_size", "ignore") {
+                            continue;
+                        }
 
-                let ident = field.ident.as_ref().unwrap();
-
-                cmds.push(quote! {
-                    total += EstimateSize::estimated_heap_size(&self.#ident);
-                })
+                        let field_ident = field.ident.as_ref().unwrap();
+                        field_cmds.push(quote! {
+                            total += &self.#field_ident.estimated_heap_size();
+                        })
+                    }
+                }
+                syn::Fields::Unit => {}
             }
 
             // Build the trait implementation
@@ -213,7 +232,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
                     fn estimated_heap_size(&self) -> usize {
                         let mut total = 0;
 
-                        #(#cmds)*;
+                        #(#field_cmds)*;
 
                         total
                     }

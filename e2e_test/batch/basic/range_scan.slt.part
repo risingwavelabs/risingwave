@@ -132,6 +132,15 @@ SELECT * FROM orders_count_by_user_3 WHERE user_id >= 43 AND user_id < 100;
 43 1111 1
 43 2222 1
 
+query III rowsort
+SELECT * FROM orders_count_by_user_3 WHERE user_id > 40 AND user_id < 100 AND user_id in (42,43);
+----
+42 1111 1
+42 2222 2
+42 3333 1
+43 1111 1
+43 2222 1
+
 query III
 SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date = 2222;
 ----
@@ -179,6 +188,10 @@ query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id = 9999 and date is null;
 ----
 9999 NULL 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user WHERE user_id = 9999 and date is null and date <= 3333;
+----
 
 
 query III rowsort

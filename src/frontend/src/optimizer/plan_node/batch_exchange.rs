@@ -14,10 +14,12 @@
 
 use std::fmt;
 
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order, OrderDisplay};
@@ -41,18 +43,33 @@ impl BatchExchange {
 
 impl fmt::Display for BatchExchange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let input_schema = self.input.schema();
         write!(
             f,
             "BatchExchange {{ order: {}, dist: {} }}",
             OrderDisplay {
                 order: &self.base.order,
-                input_schema: self.input.schema()
+                input_schema
             },
             DistributionDisplay {
                 distribution: &self.base.dist,
-                input_schema: self.input.schema()
+                input_schema
             }
         )
+    }
+}
+impl Distill for BatchExchange {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let input_schema = self.input.schema();
+        let order = Pretty::display(&OrderDisplay {
+            order: &self.base.order,
+            input_schema,
+        });
+        let dist = Pretty::display(&DistributionDisplay {
+            distribution: &self.base.dist,
+            input_schema,
+        });
+        childless_record("BatchExchange", vec![("order", order), ("dist", dist)])
     }
 }
 

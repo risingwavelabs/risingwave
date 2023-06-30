@@ -25,30 +25,23 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use picker::{
-    LevelCompactionPicker, ManualCompactionPicker, MinOverlappingPicker, TierCompactionPicker,
-};
+use picker::{LevelCompactionPicker, ManualCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
+    can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
 };
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{
-    CompactTask, CompactionConfig, GetScaleCompactorResponse, InputLevel, KeyRange, LevelType,
-};
+use risingwave_pb::hummock::{CompactTask, CompactionConfig, KeyRange, LevelType};
 
 pub use crate::hummock::compaction::level_selector::{
     default_level_selector, DynamicLevelSelector, DynamicLevelSelectorCore, LevelSelector,
     ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
+use crate::hummock::compaction::picker::{CompactionInput, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
-
-// we assume that every core could compact data with 50MB/s, and when there has been 32GB data
-// waiting to compact, a new compactor-node with 8-core could consume this data with in 2 minutes.
-const COMPACTION_BYTES_PER_CORE: u64 = 4 * 1024 * 1024 * 1024;
 
 pub struct CompactStatus {
     pub(crate) compaction_group_id: CompactionGroupId,
@@ -80,26 +73,9 @@ impl Clone for CompactStatus {
     }
 }
 
-pub struct CompactionInput {
-    pub input_levels: Vec<InputLevel>,
-    pub target_level: usize,
-    pub target_sub_level_id: u64,
-}
-
-impl CompactionInput {
-    pub fn add_pending_task(&self, task_id: u64, level_handlers: &mut [LevelHandler]) {
-        for level in &self.input_levels {
-            level_handlers[level.level_idx as usize].add_pending_task(
-                task_id,
-                self.target_level,
-                &level.table_infos,
-            );
-        }
-    }
-}
-
 pub struct CompactionTask {
     pub input: CompactionInput,
+    pub base_level: usize,
     pub compression_algorithm: String,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
@@ -163,6 +139,7 @@ impl CompactStatus {
             // only gc delete keys in last level because there may be older version in more bottom
             // level.
             gc_delete_keys: target_level_id == self.level_handlers.len() - 1,
+            base_level: ret.base_level as u32,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id: group.group_id,
             existing_table_ids: vec![],
@@ -174,13 +151,17 @@ impl CompactStatus {
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
             split_by_state_table: group.compaction_config.split_by_state_table,
+            split_weight_by_vnode: group.compaction_config.split_weight_by_vnode,
         };
         Some(compact_task)
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
-        if task.input_ssts.len() != 2
-            || task.input_ssts[0].level_type != LevelType::Nonoverlapping as i32
+        if task.input_ssts.len() == 1 {
+            return task.input_ssts[0].level_idx == 0
+                && can_concat(&task.input_ssts[0].table_infos);
+        } else if task.input_ssts.len() != 2
+            || task.input_ssts[0].level_type() != LevelType::Nonoverlapping
         {
             return false;
         }
@@ -199,6 +180,17 @@ impl CompactStatus {
         }
 
         false
+    }
+
+    pub fn is_trivial_reclaim(task: &CompactTask) -> bool {
+        let exist_table_ids = HashSet::<u32>::from_iter(task.existing_table_ids.clone());
+        task.input_ssts.iter().all(|level| {
+            level.table_infos.iter().all(|sst| {
+                sst.table_ids
+                    .iter()
+                    .all(|table_id| !exist_table_ids.contains(table_id))
+            })
+        })
     }
 
     /// Declares a task as either succeeded, failed or canceled.
@@ -223,20 +215,6 @@ impl CompactStatus {
 
     pub fn compaction_group_id(&self) -> CompactionGroupId {
         self.compaction_group_id
-    }
-
-    pub fn get_compaction_info(
-        &self,
-        levels: &Levels,
-        compaction_config: Arc<CompactionConfig>,
-    ) -> ScaleCompactorInfo {
-        let dynamic_core = DynamicLevelSelectorCore::new(compaction_config);
-        let waiting_compaction_bytes = dynamic_core.compact_pending_bytes_needed(levels);
-        ScaleCompactorInfo {
-            running_cores: 0,
-            total_cores: 0,
-            waiting_compaction_bytes,
-        }
     }
 }
 
@@ -265,14 +243,6 @@ impl Default for ManualCompactionOption {
             level: 1,
         }
     }
-}
-
-#[derive(Default)]
-pub struct LocalPickerStatistic {
-    skip_by_write_amp_limit: u64,
-    skip_by_count_limit: u64,
-    skip_by_pending_files: u64,
-    skip_by_overlapping: u64,
 }
 
 #[derive(Default)]
@@ -316,49 +286,6 @@ impl LocalSelectorStatistic {
     }
 }
 
-pub trait CompactionPicker {
-    fn pick_compaction(
-        &mut self,
-        levels: &Levels,
-        level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput>;
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct ScaleCompactorInfo {
-    pub running_cores: u64,
-    pub total_cores: u64,
-    pub waiting_compaction_bytes: u64,
-}
-
-impl ScaleCompactorInfo {
-    pub fn add(&mut self, other: &ScaleCompactorInfo) {
-        self.running_cores += other.running_cores;
-        self.total_cores += other.total_cores;
-        self.waiting_compaction_bytes += other.waiting_compaction_bytes;
-    }
-
-    pub fn scale_out_cores(&self) -> u64 {
-        let mut scale_cores = self.waiting_compaction_bytes / COMPACTION_BYTES_PER_CORE;
-        if self.running_cores < self.total_cores {
-            scale_cores = scale_cores.saturating_sub(self.total_cores - self.running_cores);
-        }
-        scale_cores
-    }
-}
-
-impl From<ScaleCompactorInfo> for GetScaleCompactorResponse {
-    fn from(info: ScaleCompactorInfo) -> Self {
-        GetScaleCompactorResponse {
-            suggest_cores: info.total_cores,
-            running_cores: info.running_cores,
-            total_cores: info.total_cores,
-            waiting_compaction_bytes: info.waiting_compaction_bytes,
-        }
-    }
-}
-
 pub fn create_compaction_task(
     compaction_config: &CompactionConfig,
     input: CompactionInput,
@@ -367,6 +294,12 @@ pub fn create_compaction_task(
 ) -> CompactionTask {
     let target_file_size = if input.target_level == 0 {
         compaction_config.target_file_size_base
+    } else if input.target_level == base_level {
+        // This is just a temporary optimization measure. We hope to reduce the size of SST as much
+        // as possible to reduce the amount of data blocked by a single task during compaction,
+        // but too many files will increase computing overhead.
+        // TODO: remove it after can reduce configuration `target_file_size_base`.
+        compaction_config.target_file_size_base / 4
     } else {
         assert!(input.target_level >= base_level);
         let step = (input.target_level - base_level) / 2;
@@ -379,6 +312,7 @@ pub fn create_compaction_task(
             base_level,
             input.target_level,
         ),
+        base_level,
         input,
         target_file_size,
         compaction_task_type,

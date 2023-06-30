@@ -366,6 +366,16 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             JoinType::Unspecified => unreachable!(),
         }
     }
+
+    pub fn concat_schema(&self) -> Schema {
+        Schema::new(
+            [
+                self.left.schema().fields.clone(),
+                self.right.schema().fields.clone(),
+            ]
+            .concat(),
+        )
+    }
 }
 
 /// Try to split and pushdown `predicate` into a into a join condition and into the inputs of the

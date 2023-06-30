@@ -151,7 +151,7 @@ macro_rules! impl_has_variant {
 
 impl_has_variant! {
     LogicalApply,
-    LogicalOverAgg,
+    LogicalOverWindow,
     LogicalScan,
     LogicalSource,
     BatchExchange,

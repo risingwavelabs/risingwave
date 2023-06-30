@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Hdfs;
 use opendal::Operator;
 
@@ -28,7 +29,10 @@ impl OpendalObjectStore {
         // NOTE: the root must be absolute path.
         builder.root(&root);
 
-        let op: Operator = Operator::create(builder)?.finish();
+        let op: Operator = Operator::new(builder)?
+            .layer(LoggingLayer::default())
+            .layer(RetryLayer::default())
+            .finish();
         Ok(Self {
             op,
             engine_type: EngineType::Hdfs,

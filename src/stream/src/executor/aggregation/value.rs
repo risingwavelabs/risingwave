@@ -16,14 +16,16 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::Datum;
-use risingwave_expr::function::aggregate::AggCall;
+use risingwave_expr::agg::AggCall;
 
 use crate::executor::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
 use crate::executor::error::StreamExecutorResult;
 
 /// A wrapper around [`StreamingAggImpl`], which maintains aggregation result as a value in memory.
 /// Agg executors will get the result and store it in result state table.
+#[derive(EstimateSize)]
 pub struct ValueState {
     /// Upstream column indices of agg arguments.
     arg_indices: Vec<usize>,
@@ -80,25 +82,13 @@ impl ValueState {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I64Array, Op};
-    use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_expr::function::aggregate::{AggArgs, AggKind};
+    use risingwave_common::types::ScalarImpl;
 
     use super::*;
 
-    fn create_test_count_agg() -> AggCall {
-        AggCall {
-            kind: AggKind::Count,
-            args: AggArgs::Unary(DataType::Int64, 0),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        }
-    }
-
     #[tokio::test]
     async fn test_managed_value_state_count() {
-        let agg_call = create_test_count_agg();
+        let agg_call = AggCall::from_pretty("(count:int8 $0:int8)");
         let mut state = ValueState::new(&agg_call, None).unwrap();
 
         // apply a batch and get the output
@@ -127,20 +117,9 @@ mod tests {
         assert_eq!(state.get_output(), Some(ScalarImpl::Int64(4)));
     }
 
-    fn create_test_max_agg_append_only() -> AggCall {
-        AggCall {
-            kind: AggKind::Max,
-            args: AggArgs::Unary(DataType::Int64, 0),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        }
-    }
-
     #[tokio::test]
     async fn test_managed_value_state_append_only_max() {
-        let agg_call = create_test_max_agg_append_only();
+        let agg_call = AggCall::from_pretty("(max:int8 $0:int8)");
         let mut state = ValueState::new(&agg_call, None).unwrap();
 
         // apply a batch and get the output

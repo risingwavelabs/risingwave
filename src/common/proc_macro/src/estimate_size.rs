@@ -143,7 +143,7 @@ pub fn add_trait_bounds(mut generics: syn::Generics, ignored: &[String]) -> syn:
             if found {
                 continue;
             }
-            type_param.bounds.push(syn::parse_quote!(EstimateSize));
+            // type_param.bounds.push(syn::parse_quote!(EstimateSize));
         }
     }
     generics

@@ -15,15 +15,17 @@
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Op};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, DatumRef};
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use smallvec::SmallVec;
 
 use super::minput_agg_impl::MInputAggregator;
 use crate::common::cache::{StateCache, StateCacheFiller};
 
 /// Cache key type.
-type CacheKey = Vec<u8>;
+type CacheKey = MemcmpEncoded;
 
 // TODO(yuchao): May extract common logic here to `struct [Data/Stream]ChunkRef` if there's other
 // usage in the future. https://github.com/risingwavelabs/risingwave/pull/5908#discussion_r1002896176
@@ -75,7 +77,7 @@ impl<'a> Iterator for StateCacheInputBatch<'a> {
                         .map(|col_idx| self.columns[*col_idx].value_at(self.idx)),
                     &mut key,
                 );
-                key
+                key.into()
             };
             let value = self
                 .arg_col_indices
@@ -91,7 +93,7 @@ impl<'a> Iterator for StateCacheInputBatch<'a> {
 }
 
 /// Trait that defines the interface of state table cache for stateful streaming agg.
-pub trait AggStateCache {
+pub trait AggStateCache: EstimateSize {
     /// Check if the cache is synced with state table.
     fn is_synced(&self) -> bool;
 
@@ -120,12 +122,14 @@ pub trait AggStateCacheFiller {
 
 /// A generic implementation of [`AggStateCache`] that combines a [`StateCache`] and an
 /// [`MInputAggregator`].
+#[derive(EstimateSize)]
 pub struct GenericAggStateCache<C, A>
 where
     C: StateCache<Key = CacheKey, Value = A::Value>,
     A: MInputAggregator,
 {
     state_cache: C,
+    #[estimate_size(ignore)]
     aggregator: A,
 }
 

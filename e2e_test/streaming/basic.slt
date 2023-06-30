@@ -130,4 +130,20 @@ statement ok
 drop materialized view mv 
 
 statement ok
-drop table t 
+drop table t
+
+statement ok
+create table t (v1 int, v2 int);
+
+statement ok
+create materialized view if not exists mv as select count(*) from t;
+
+statement ok
+create materialized view if not exists mv as select count(*) from t;
+
+statement ok
+drop materialized view mv
+
+statement ok
+drop table t
+

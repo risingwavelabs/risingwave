@@ -15,25 +15,27 @@
 use std::collections::HashSet;
 
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::estimate_size::{EstimateSize, KvSize, VecWithKvSize};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 
 use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::task::AtomicU64Ref;
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
-    data: ManagedLruCache<OwnedRow, HashSet<OwnedRow>>,
+    data: ManagedLruCache<OwnedRow, LookupEntryState>,
 }
 
 impl LookupCache {
     /// Lookup a row in cache. If not found, return `None`.
-    pub fn lookup(&mut self, key: &OwnedRow) -> Option<&HashSet<OwnedRow>> {
+    pub fn lookup(&mut self, key: &OwnedRow) -> Option<&LookupEntryState> {
         self.data.get(key)
     }
 
     /// Update a key after lookup cache misses.
-    pub fn batch_update(&mut self, key: OwnedRow, value: impl Iterator<Item = OwnedRow>) {
-        self.data.push(key, value.collect());
+    pub fn batch_update(&mut self, key: OwnedRow, value: VecWithKvSize<OwnedRow>) {
+        self.data.push(key, LookupEntryState::new(value));
     }
 
     /// Apply a batch from the arrangement side
@@ -58,6 +60,10 @@ impl LookupCache {
         self.data.evict()
     }
 
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
     /// Update the current epoch.
     pub fn update_epoch(&mut self, epoch: u64) {
         self.data.update_epoch(epoch);
@@ -68,8 +74,55 @@ impl LookupCache {
         self.data.clear();
     }
 
-    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
-        let cache = new_unbounded(watermark_epoch);
+    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = new_unbounded(watermark_epoch, metrics_info);
         Self { data: cache }
+    }
+}
+
+#[derive(Default)]
+pub struct LookupEntryState {
+    inner: HashSet<OwnedRow>,
+    kv_heap_size: KvSize,
+}
+
+impl EstimateSize for LookupEntryState {
+    fn estimated_heap_size(&self) -> usize {
+        // TODO: Add hashset internal size.
+        // https://github.com/risingwavelabs/risingwave/issues/9713
+        self.kv_heap_size.size()
+    }
+}
+
+impl LookupEntryState {
+    /// Insert into the cache.
+    fn insert(&mut self, value: OwnedRow) {
+        let kv_heap_size = self.kv_heap_size.add_val(&value);
+        if self.inner.insert(value) {
+            self.kv_heap_size.set(kv_heap_size);
+        } else {
+            panic!("inserting a duplicated value");
+        }
+    }
+
+    /// Delete from the cache.
+    fn remove(&mut self, value: &OwnedRow) {
+        if self.inner.remove(value) {
+            self.kv_heap_size.sub_val(value);
+        } else {
+            panic!("value {:?} should be in the cache", value);
+        }
+    }
+
+    fn new(value: VecWithKvSize<OwnedRow>) -> Self {
+        let kv_heap_size = value.get_kv_size();
+        Self {
+            inner: HashSet::from_iter(value.into_iter()),
+            kv_heap_size: KvSize::with_size(kv_heap_size),
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &OwnedRow> {
+        self.inner.iter()
     }
 }

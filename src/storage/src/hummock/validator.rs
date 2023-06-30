@@ -46,9 +46,9 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
         );
         let holder = match sstable_store.sstable(&sst, unused.borrow_mut()).await {
             Ok(holder) => holder,
-            Err(err) => {
+            Err(_err) => {
                 // One reasonable cause is the SST has been vacuumed.
-                tracing::warn!("Skip sanity check for SST {}. {}", sst.get_object_id(), err);
+                tracing::info!("Skip sanity check for SST {}.", sst.get_object_id());
                 continue;
             }
         };
@@ -64,8 +64,8 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             }),
         );
         let mut previous_key: Option<FullKey<Vec<u8>>> = None;
-        if let Err(err) = iter.rewind().await {
-            tracing::warn!("Skip sanity check for SST {}. {}", sst.get_object_id(), err);
+        if let Err(_err) = iter.rewind().await {
+            tracing::info!("Skip sanity check for SST {}.", sst.get_object_id());
         }
         while iter.is_valid() {
             key_counts += 1;
@@ -96,11 +96,10 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
                 }
             }
             previous_key = Some(current_key);
-            if let Err(err) = iter.next().await {
-                tracing::warn!(
-                    "Skip remaining sanity check for SST {}. {}",
+            if let Err(_err) = iter.next().await {
+                tracing::info!(
+                    "Skip remaining sanity check for SST {}",
                     sst.get_object_id(),
-                    err
                 );
                 break;
             }

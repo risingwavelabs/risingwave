@@ -45,7 +45,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         );
 
         let prost_condition = node.get_condition()?;
-        let comparator = prost_condition.get_expr_type()?;
+        let comparator = prost_condition.get_function_type()?;
         if !matches!(
             comparator,
             GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual

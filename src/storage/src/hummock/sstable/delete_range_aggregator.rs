@@ -14,16 +14,19 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
-use super::{DeleteRangeTombstone, MonotonicDeleteEvent};
+#[cfg(any(test, feature = "test"))]
+use super::DeleteRangeTombstone;
+use super::MonotonicDeleteEvent;
 use crate::hummock::iterator::DeleteRangeIterator;
 use crate::hummock::sstable_store::TableHolder;
-use crate::hummock::Sstable;
+use crate::hummock::{HummockResult, Sstable};
 
 pub struct SortedBoundary {
     sequence: HummockEpoch,
@@ -127,6 +130,7 @@ impl CompactionDeleteRangesBuilder {
     /// can be transformed into events below:
     /// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
     /// -epoch3> }`
+    #[cfg(any(test, feature = "test"))]
     pub(crate) fn build_events(
         delete_tombstones: &Vec<DeleteRangeTombstone>,
     ) -> Vec<CompactionDeleteRangeEvent> {
@@ -216,7 +220,7 @@ impl CompactionDeleteRanges {
         }
     }
 
-    /// the `largest_user_key` always mean that
+    /// the `largest_user_key` is always exclusive
     pub(crate) fn get_tombstone_between(
         &self,
         smallest_user_key: UserKey<&[u8]>,
@@ -246,7 +250,6 @@ impl CompactionDeleteRanges {
             idx += 1;
         }
         while idx < self.events.len() {
-            // TODO: replace it with Bound
             if !extended_largest_user_key.is_empty()
                 && self.events[idx].0.as_ref().ge(&extended_largest_user_key)
             {
@@ -308,7 +311,9 @@ impl CompactionDeleteRangeIterator {
         epoch: HummockEpoch,
     ) -> HummockEpoch {
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-        while let Some((extended_user_key, ..)) = self.events.events.get(self.seek_idx) && extended_user_key.as_ref().le(&target_extended_user_key) {
+        while let Some((extended_user_key, ..)) = self.events.events.get(self.seek_idx)
+            && extended_user_key.as_ref().le(&target_extended_user_key)
+        {
             self.apply(self.seek_idx);
             self.seek_idx += 1;
         }
@@ -351,9 +356,26 @@ impl SstableDeleteRangeIterator {
     pub fn new(table: TableHolder) -> Self {
         Self { table, next_idx: 0 }
     }
+
+    /// Retrieves whether `next_extended_user_key` is the last range of this SST file.
+    ///
+    /// Note:
+    /// - Before calling this function, makes sure the iterator `is_valid`.
+    /// - This function should return immediately.
+    ///
+    /// # Panics
+    /// This function will panic if the iterator is invalid.
+    pub fn is_last_range(&self) -> bool {
+        debug_assert!(self.next_idx < self.table.value().meta.monotonic_tombstone_events.len());
+        self.next_idx + 1 == self.table.value().meta.monotonic_tombstone_events.len()
+    }
 }
 
 impl DeleteRangeIterator for SstableDeleteRangeIterator {
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
     fn next_extended_user_key(&self) -> PointRange<&[u8]> {
         self.table.value().meta.monotonic_tombstone_events[self.next_idx]
             .event_key
@@ -368,24 +390,33 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
         }
     }
 
-    fn next(&mut self) {
-        self.next_idx += 1;
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            self.next_idx += 1;
+            Ok(())
+        }
     }
 
-    fn rewind(&mut self) {
-        self.next_idx = 0;
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move {
+            self.next_idx = 0;
+            Ok(())
+        }
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
-        let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-        self.next_idx = self
-            .table
-            .value()
-            .meta
-            .monotonic_tombstone_events
-            .partition_point(|MonotonicDeleteEvent { event_key, .. }| {
-                event_key.as_ref().le(&target_extended_user_key)
-            });
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'_> {
+        async move {
+            let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
+            self.next_idx = self
+                .table
+                .value()
+                .meta
+                .monotonic_tombstone_events
+                .partition_point(|MonotonicDeleteEvent { event_key, .. }| {
+                    event_key.as_ref().le(&target_extended_user_key)
+                });
+            Ok(())
+        }
     }
 
     fn is_valid(&self) -> bool {

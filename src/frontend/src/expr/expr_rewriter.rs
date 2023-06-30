@@ -16,6 +16,7 @@ use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
     TableFunction, UserDefinedFunction, WindowFunction,
 };
+use crate::expr::Now;
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
 /// Implementations can override a subset of methods and perform transformation on some particular
@@ -33,6 +34,7 @@ pub trait ExprRewriter {
             ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
             ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
             ExprImpl::Parameter(inner) => self.rewrite_parameter(*inner),
+            ExprImpl::Now(inner) => self.rewrite_now(*inner),
         }
     }
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
@@ -44,14 +46,14 @@ pub trait ExprRewriter {
         FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
-        let (func_type, inputs, distinct, order_by, filter) = agg_call.decompose();
+        let (func_type, inputs, distinct, order_by, filter, direct_args) = agg_call.decompose();
         let inputs = inputs
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         let order_by = order_by.rewrite_expr(self);
         let filter = filter.rewrite_expr(self);
-        AggCall::new(func_type, inputs, distinct, order_by, filter)
+        AggCall::new(func_type, inputs, distinct, order_by, filter, direct_args)
             .unwrap()
             .into()
     }
@@ -119,5 +121,8 @@ pub trait ExprRewriter {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         UserDefinedFunction { args, catalog }.into()
+    }
+    fn rewrite_now(&mut self, now: Now) -> ExprImpl {
+        now.into()
     }
 }

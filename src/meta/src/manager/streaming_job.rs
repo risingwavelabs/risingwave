@@ -53,6 +53,16 @@ impl StreamingJob {
         }
     }
 
+    /// Set the fragment id where the table dml is received.
+    pub fn set_dml_fragment_id(&mut self, id: Option<FragmentId>) {
+        match self {
+            Self::Table(_, table) => {
+                table.dml_fragment_id = id;
+            }
+            Self::MaterializedView(_) | Self::Index(_, _) | Self::Sink(_) => {}
+        }
+    }
+
     pub fn id(&self) -> u32 {
         match self {
             Self::MaterializedView(table) => table.id,
@@ -108,7 +118,7 @@ impl StreamingJob {
         }
     }
 
-    pub fn mview_definition(&self) -> String {
+    pub fn definition(&self) -> String {
         match self {
             Self::MaterializedView(table) => table.definition.clone(),
             Self::Table(_, table) => table.definition.clone(),

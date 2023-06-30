@@ -35,8 +35,7 @@ impl RewriteExprsRecursive for BoundJoin {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         self.left.rewrite_exprs_recursive(rewriter);
         self.right.rewrite_exprs_recursive(rewriter);
-        let dummy = ExprImpl::literal_bool(true);
-        self.cond = rewriter.rewrite_expr(std::mem::replace(&mut self.cond, dummy));
+        self.cond = rewriter.rewrite_expr(self.cond.take());
     }
 }
 

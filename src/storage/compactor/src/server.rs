@@ -16,7 +16,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::config::{extract_storage_memory_config, load_config};
+use parking_lot::RwLock;
+use risingwave_common::config::{
+    extract_storage_memory_config, load_config, AsyncStackTraceOption,
+};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -26,10 +29,10 @@ use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::filter_key_extractor::{FilterKeyExtractorManager, RemoteTableAccessor};
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
@@ -46,7 +49,7 @@ use tokio::task::JoinHandle;
 use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
-use crate::rpc::CompactorServiceImpl;
+use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
 use crate::CompactorOpts;
 
@@ -72,7 +75,7 @@ pub async fn compactor_serve(
         &opts.meta_address,
         WorkerType::Compactor,
         &advertise_addr,
-        0,
+        Default::default(),
         &config.meta,
     )
     .await
@@ -102,7 +105,7 @@ pub async fn compactor_serve(
         &storage_memory_config,
     )));
     let total_memory_available_bytes =
-        (resource_util::memory::total_memory_available_bytes() as f64 * 0.9) as usize;
+        (resource_util::memory::total_memory_available_bytes() as f64 * 0.8) as usize;
     let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
@@ -165,16 +168,25 @@ pub async fn compactor_serve(
     // In a compact operation, the size of the output files will not be larger than the input files.
     // So we can limit the input memory with the output memory limit
     let output_memory_limiter = Arc::new(MemoryLimiter::new(input_limit_bytes));
-    let max_concurrent_task_number = storage_opts.max_concurrent_compaction_task_number;
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         sstable_store.clone(),
         output_memory_limiter.clone(),
+        storage_memory_config,
     ));
     monitor_cache(memory_collector, &registry).unwrap();
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
     ));
+    let await_tree_config = match &config.streaming.async_stack_trace {
+        AsyncStackTraceOption::Off => None,
+        c => await_tree::ConfigBuilder::default()
+            .verbose(c.is_verbose().unwrap())
+            .build()
+            .ok(),
+    };
+    let await_tree_reg =
+        await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
     let compactor_context = Arc::new(CompactorContext {
         storage_opts,
         hummock_meta_client: hummock_meta_client.clone(),
@@ -188,15 +200,12 @@ pub async fn compactor_serve(
         output_memory_limiter,
         sstable_object_id_manager: sstable_object_id_manager.clone(),
         task_progress_manager: Default::default(),
-        compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
-            max_concurrent_task_number,
-        })),
+        await_tree_reg: await_tree_reg.clone(),
     });
     let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-            Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![sstable_object_id_manager],
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
@@ -221,13 +230,13 @@ pub async fn compactor_serve(
         tracing::info!("Telemetry didn't start due to config");
     }
 
+    let compactor_srv = CompactorServiceImpl::default();
+    let monitor_srv = MonitorServiceImpl::new(await_tree_reg);
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
-            .add_service(CompactorServiceServer::new(CompactorServiceImpl::new(
-                compactor_context,
-                meta_client.clone(),
-            )))
+            .add_service(CompactorServiceServer::new(compactor_srv))
+            .add_service(MonitorServiceServer::new(monitor_srv))
             .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},

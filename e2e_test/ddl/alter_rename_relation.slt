@@ -26,6 +26,16 @@ CREATE SOURCE src (v INT) WITH (
 ) ROW FORMAT JSON;
 
 statement ok
+CREATE TABLE msrc (v INT) WITH (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) ROW FORMAT JSON;
+
+statement ok
 CREATE VIEW v1 AS ( SELECT * FROM t_as WHERE id = 1);
 
 statement ok
@@ -162,6 +172,22 @@ SHOW CREATE MATERIALIZED VIEW mv4;
 ----
 public.mv4 CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM src1 AS src
 
+# should use `ALTER TABLE` to alter a table with connector
+statement error ALTER TABLE
+ALTER SOURCE msrc RENAME TO msrc1;
+
+statement ok
+ALTER TABLE msrc RENAME TO msrc1;
+
+query TT
+SHOW CREATE TABLE msrc1;
+----
+public.msrc1 CREATE TABLE msrc1 (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '10', datagen.rows.per.second = '15', datagen.split.num = '1') ROW FORMAT JSON
+
+# the underlying source cannot have the same name with other sources
+statement error source .+ exists
+ALTER TABLE msrc1 RENAME TO src1;
+
 statement ok
 DROP SINK sink1;
 
@@ -185,6 +211,9 @@ DROP VIEW v2;
 
 statement ok
 DROP MATERIALIZED VIEW mv4;
+
+statement ok
+DROP TABLE msrc1;
 
 statement ok
 DROP SOURCE src1;

@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::FilterNode;
 
+use super::stream::StreamPlanRef;
+use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanBase;
@@ -39,6 +39,7 @@ impl StreamFilter {
             &logical,
             dist,
             input.append_only(),
+            input.emit_on_window_close(),
             input.watermark_columns().clone(),
         );
         StreamFilter { base, logical }
@@ -46,12 +47,6 @@ impl StreamFilter {
 
     pub fn predicate(&self) -> &Condition {
         &self.logical.predicate
-    }
-}
-
-impl fmt::Display for StreamFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamFilter")
     }
 }
 
@@ -68,6 +63,7 @@ impl PlanTreeNodeUnary for StreamFilter {
 }
 
 impl_plan_tree_node_for_unary! { StreamFilter }
+impl_distill_by_unit!(StreamFilter, logical, "StreamFilter");
 
 impl StreamNode for StreamFilter {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {

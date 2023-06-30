@@ -384,16 +384,24 @@ impl TableFragments {
         map
     }
 
+    pub fn worker_parallel_units(&self) -> HashMap<WorkerId, HashSet<ParallelUnitId>> {
+        let mut map = HashMap::new();
+        for actor_status in self.actor_status.values() {
+            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id)
+                .or_insert_with(HashSet::new)
+                .insert(actor_status.get_parallel_unit().unwrap().id);
+        }
+        map
+    }
+
     pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
         for fragment in self.fragments.values_mut() {
-            if fragment.vnode_mapping.is_some() {
-                if let Some(ref mut mapping) = fragment.vnode_mapping {
-                    mapping.data.iter_mut().for_each(|id| {
-                        if migrate_map.contains_key(id) {
-                            *id = migrate_map.get(id).unwrap().id;
-                        }
-                    });
-                }
+            if let Some(mapping) = &mut fragment.vnode_mapping {
+                mapping.data.iter_mut().for_each(|id| {
+                    if migrate_map.contains_key(id) {
+                        *id = migrate_map.get(id).unwrap().id;
+                    }
+                });
             }
         }
     }

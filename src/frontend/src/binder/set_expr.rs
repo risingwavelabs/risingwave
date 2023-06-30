@@ -58,6 +58,16 @@ pub enum BoundSetOperation {
     Intersect,
 }
 
+impl From<SetOperator> for BoundSetOperation {
+    fn from(value: SetOperator) -> Self {
+        match value {
+            SetOperator::Union => BoundSetOperation::Union,
+            SetOperator::Intersect => BoundSetOperation::Intersect,
+            SetOperator::Except => BoundSetOperation::Except,
+        }
+    }
+}
+
 impl BoundSetExpr {
     /// The schema returned by this [`BoundSetExpr`].
 
@@ -123,7 +133,7 @@ impl Binder {
                 right,
             } => {
                 match op {
-                    SetOperator::Union => {
+                    SetOperator::Union | SetOperator::Intersect | SetOperator::Except => {
                         let left = Box::new(self.bind_set_expr(*left)?);
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
@@ -131,9 +141,10 @@ impl Binder {
                         let right = Box::new(self.bind_set_expr(*right)?);
 
                         if left.schema().fields.len() != right.schema().fields.len() {
-                            return Err(ErrorCode::InvalidInputSyntax(
-                                "each UNION query must have the same number of columns".to_string(),
-                            )
+                            return Err(ErrorCode::InvalidInputSyntax(format!(
+                                "each {} query must have the same number of columns",
+                                op
+                            ))
                             .into());
                         }
 
@@ -145,13 +156,27 @@ impl Binder {
                         {
                             if a.data_type != b.data_type {
                                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                                    "UNION types {} of column {} is different from types {} of column {}",
+                                    "{} types {} of column {} is different from types {} of column {}",
+                                    op,
                                     a.data_type.prost_type_name().as_str_name(),
                                     a.name,
                                     b.data_type.prost_type_name().as_str_name(),
                                     b.name,
                                 ))
                                     .into());
+                            }
+                        }
+
+                        if all {
+                            match op {
+                                SetOperator::Union => {}
+                                SetOperator::Intersect | SetOperator::Except => {
+                                    return Err(ErrorCode::NotImplemented(
+                                        format!("{} all", op),
+                                        None.into(),
+                                    )
+                                    .into())
+                                }
                             }
                         }
 
@@ -162,17 +187,12 @@ impl Binder {
                         self.context = BindContext::default();
                         self.context.cte_to_relation = new_context.cte_to_relation;
                         Ok(BoundSetExpr::SetOperation {
-                            op: BoundSetOperation::Union,
+                            op: op.into(),
                             all,
                             left,
                             right,
                         })
                     }
-                    SetOperator::Intersect | SetOperator::Except => Err(ErrorCode::NotImplemented(
-                        format!("set expr: {:?}", op),
-                        None.into(),
-                    )
-                    .into()),
                 }
             }
         }

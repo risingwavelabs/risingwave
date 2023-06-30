@@ -127,7 +127,12 @@ impl HummockStorage {
                     let read_guard = self.read_version_mapping.read();
                     read_guard
                         .get(&table_id)
-                        .map(|v| v.values().cloned().collect_vec())
+                        .map(|v| {
+                            v.values()
+                                .filter(|v| !v.read_arc().is_replicated())
+                                .cloned()
+                                .collect_vec()
+                        })
                         .unwrap_or(Vec::new())
                 };
 
@@ -136,7 +141,11 @@ impl HummockStorage {
                 if read_version_vec.is_empty() {
                     (Vec::default(), Vec::default(), (**pinned_version).clone())
                 } else {
-                    read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
+                    let (imm_vec, sst_vec) =
+                        read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?;
+                    let committed_version = (**pinned_version).clone();
+
+                    (imm_vec, sst_vec, committed_version)
                 }
             };
 
@@ -293,20 +302,22 @@ impl StateStore for HummockStorage {
             );
             let sealed_epoch = self.seal_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch > sealed_epoch {
-                return Err(HummockError::read_current_epoch(format!(
-                    "Cannot read when cluster is under recovery. read {} > max seal epoch {}",
-                    read_current_epoch, sealed_epoch
-                ))
-                .into());
+                tracing::warn!(
+                    "invalid barrier read {} > max seal epoch {}",
+                    read_current_epoch,
+                    sealed_epoch
+                );
+                return Err(HummockError::read_current_epoch().into());
             }
 
             let min_current_epoch = self.min_current_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch < min_current_epoch {
-                return Err(HummockError::read_current_epoch(format!(
-                    "Cannot read when cluster is under recovery. read {} < min current epoch {}",
-                    read_current_epoch, min_current_epoch
-                ))
-                .into());
+                tracing::warn!(
+                    "invalid barrier read {} < min current epoch {}",
+                    read_current_epoch,
+                    min_current_epoch
+                );
+                return Err(HummockError::read_current_epoch().into());
             }
         }
         Ok(())

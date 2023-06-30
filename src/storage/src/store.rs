@@ -23,6 +23,9 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
+use risingwave_hummock_trace::{
+    TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions, TracedWriteOptions,
+};
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
@@ -177,7 +180,7 @@ pub trait StateStoreWrite: StaticSendSync {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_>;
 
@@ -284,7 +287,7 @@ pub trait LocalStateStore: StaticSendSync {
     /// than the given `epoch` will be deleted.
     fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
 
-    fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_>;
+    fn flush(&mut self, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) -> Self::FlushFuture<'_>;
 
     fn epoch(&self) -> u64;
 
@@ -328,6 +331,22 @@ impl PrefetchOptions {
     }
 }
 
+impl From<TracedPrefetchOptions> for PrefetchOptions {
+    fn from(value: TracedPrefetchOptions) -> Self {
+        Self {
+            exhaust_iter: value.exhaust_iter,
+        }
+    }
+}
+
+impl From<PrefetchOptions> for TracedPrefetchOptions {
+    fn from(value: PrefetchOptions) -> Self {
+        Self {
+            exhaust_iter: value.exhaust_iter,
+        }
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.
@@ -343,6 +362,34 @@ pub struct ReadOptions {
     /// Read from historical hummock version of meta snapshot backup.
     /// It should only be used by `StorageTable` for batch query.
     pub read_version_from_backup: bool,
+}
+
+impl From<TracedReadOptions> for ReadOptions {
+    fn from(value: TracedReadOptions) -> Self {
+        Self {
+            prefix_hint: value.prefix_hint.map(|b| b.into()),
+            ignore_range_tombstone: value.ignore_range_tombstone,
+            prefetch_options: value.prefetch_options.into(),
+            cache_policy: value.cache_policy.into(),
+            retention_seconds: value.retention_seconds,
+            table_id: value.table_id.into(),
+            read_version_from_backup: value.read_version_from_backup,
+        }
+    }
+}
+
+impl From<ReadOptions> for TracedReadOptions {
+    fn from(value: ReadOptions) -> Self {
+        Self {
+            prefix_hint: value.prefix_hint.map(|b| b.into()),
+            ignore_range_tombstone: value.ignore_range_tombstone,
+            prefetch_options: value.prefetch_options.into(),
+            cache_policy: value.cache_policy.into(),
+            retention_seconds: value.retention_seconds,
+            table_id: value.table_id.into(),
+            read_version_from_backup: value.read_version_from_backup,
+        }
+    }
 }
 
 pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
@@ -363,6 +410,15 @@ pub struct WriteOptions {
     pub table_id: TableId,
 }
 
+impl From<TracedWriteOptions> for WriteOptions {
+    fn from(value: TracedWriteOptions) -> Self {
+        Self {
+            epoch: value.epoch,
+            table_id: value.table_id.into(),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
@@ -375,9 +431,57 @@ pub struct NewLocalOptions {
     /// `update` and `delete` should match the original stored value.
     pub is_consistent_op: bool,
     pub table_option: TableOption,
+
+    /// Indicate if this is replicated. If it is, we should not
+    /// upload its ReadVersions.
+    pub is_replicated: bool,
+}
+
+impl From<TracedNewLocalOptions> for NewLocalOptions {
+    fn from(value: TracedNewLocalOptions) -> Self {
+        Self {
+            table_id: value.table_id.into(),
+            is_consistent_op: value.is_consistent_op,
+            table_option: value.table_option.into(),
+            is_replicated: value.is_replicated,
+        }
+    }
+}
+
+impl From<NewLocalOptions> for TracedNewLocalOptions {
+    fn from(value: NewLocalOptions) -> Self {
+        Self {
+            table_id: value.table_id.into(),
+            is_consistent_op: value.is_consistent_op,
+            table_option: value.table_option.into(),
+            is_replicated: value.is_replicated,
+        }
+    }
 }
 
 impl NewLocalOptions {
+    pub fn new(table_id: TableId, is_consistent_op: bool, table_option: TableOption) -> Self {
+        NewLocalOptions {
+            table_id,
+            is_consistent_op,
+            table_option,
+            is_replicated: false,
+        }
+    }
+
+    pub fn new_replicated(
+        table_id: TableId,
+        is_consistent_op: bool,
+        table_option: TableOption,
+    ) -> Self {
+        NewLocalOptions {
+            table_id,
+            is_consistent_op,
+            table_option,
+            is_replicated: true,
+        }
+    }
+
     pub fn for_test(table_id: TableId) -> Self {
         Self {
             table_id,
@@ -385,6 +489,7 @@ impl NewLocalOptions {
             table_option: TableOption {
                 retention_seconds: None,
             },
+            is_replicated: false,
         }
     }
 }

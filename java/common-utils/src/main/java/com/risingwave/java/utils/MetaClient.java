@@ -29,6 +29,7 @@ import com.risingwave.proto.Hummock.PinVersionResponse;
 import com.risingwave.proto.Hummock.UnpinVersionBeforeRequest;
 import com.risingwave.proto.HummockManagerServiceGrpc.HummockManagerServiceBlockingStub;
 import com.risingwave.proto.Meta.AddWorkerNodeRequest;
+import com.risingwave.proto.Meta.AddWorkerNodeRequest.Property;
 import com.risingwave.proto.Meta.AddWorkerNodeResponse;
 import com.risingwave.proto.Meta.HeartbeatRequest;
 import io.grpc.Grpc;
@@ -95,7 +96,12 @@ public class MetaClient implements AutoCloseable {
                         .setWorkerType(WorkerType.RISE_CTL)
                         .setHost(
                                 HostAddress.newBuilder().setHost("127.0.0.1").setPort(8880).build())
-                        .setWorkerNodeParallelism(0)
+                        .setProperty(
+                                Property.newBuilder()
+                                        .setIsStreaming(false)
+                                        .setIsServing(false)
+                                        .setWorkerNodeParallelism(0)
+                                        .build())
                         .build();
         AddWorkerNodeResponse resp = clusterStub.addWorkerNode(req);
 

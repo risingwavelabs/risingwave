@@ -215,6 +215,10 @@ impl ArrayBuilder for BytesArrayBuilder {
         }
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> BytesArray {
         BytesArray {
             bitmap: (self.bitmap).finish(),

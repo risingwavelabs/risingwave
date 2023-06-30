@@ -15,8 +15,7 @@
 use std::fmt::Debug;
 use std::io::Write;
 
-use super::{F32, F64};
-use crate::array::serial_array::Serial;
+use super::{Serial, F32, F64};
 use crate::array::ArrayResult;
 
 pub trait NativeType:

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
@@ -22,6 +23,33 @@ use risingwave_sqlparser::ast::{
     TableAlias, TableFactor, TableWithJoins,
 };
 use risingwave_sqlparser::parser::Parser;
+
+use crate::manager::{ConnectionId, DatabaseManager};
+
+pub fn refcnt_inc_connection(
+    database_mgr: &mut DatabaseManager,
+    connection_id: Option<ConnectionId>,
+) -> anyhow::Result<()> {
+    if let Some(connection_id) = connection_id {
+        if let Some(_conn) = database_mgr.get_connection(connection_id) {
+            // TODO(weili): wait for yezizp to refactor ref cnt
+            database_mgr.increase_ref_count(connection_id);
+        } else {
+            bail!("connection {} not found.", connection_id);
+        }
+    }
+    Ok(())
+}
+
+pub fn refcnt_dec_connection(
+    database_mgr: &mut DatabaseManager,
+    connection_id: Option<ConnectionId>,
+) {
+    if let Some(connection_id) = connection_id {
+        // TODO: wait for yezizp to refactor ref cnt
+        database_mgr.decrease_ref_count(connection_id);
+    }
+}
 
 /// `alter_relation_rename` renames a relation to a new name in its `Create` statement, and returns
 /// the updated definition raw sql. Note that the `definition` must be a `Create` statement and the
@@ -216,7 +244,13 @@ impl QueryRewriter<'_> {
                 FunctionArgExpr::Expr(expr) | FunctionArgExpr::ExprQualifiedWildcard(expr, _) => {
                     self.visit_expr(expr)
                 }
-                FunctionArgExpr::QualifiedWildcard(_) | FunctionArgExpr::Wildcard => {}
+                FunctionArgExpr::QualifiedWildcard(_)
+                | FunctionArgExpr::WildcardOrWithExcept(None) => {}
+                FunctionArgExpr::WildcardOrWithExcept(Some(exprs)) => {
+                    for expr in exprs {
+                        self.visit_expr(expr);
+                    }
+                }
             },
         }
     }
@@ -238,6 +272,8 @@ impl QueryRewriter<'_> {
             | Expr::IsNotTrue(expr)
             | Expr::IsFalse(expr)
             | Expr::IsNotFalse(expr)
+            | Expr::IsUnknown(expr)
+            | Expr::IsNotUnknown(expr)
             | Expr::InList { expr, .. }
             | Expr::SomeOp(expr)
             | Expr::AllOp(expr)
@@ -316,7 +352,12 @@ impl QueryRewriter<'_> {
             SelectItem::UnnamedExpr(expr)
             | SelectItem::ExprQualifiedWildcard(expr, _)
             | SelectItem::ExprWithAlias { expr, .. } => self.visit_expr(expr),
-            SelectItem::QualifiedWildcard(_) | SelectItem::Wildcard => {}
+            SelectItem::QualifiedWildcard(_) | SelectItem::WildcardOrWithExcept(None) => {}
+            SelectItem::WildcardOrWithExcept(Some(exprs)) => {
+                for expr in exprs {
+                    self.visit_expr(expr);
+                }
+            }
         }
     }
 }
@@ -335,6 +376,7 @@ impl ReplaceTableExprRewriter {
             RexNode::Constant(_) => {}
             RexNode::Udf(udf) => self.rewrite_udf(udf),
             RexNode::FuncCall(function_call) => self.rewrite_function_call(function_call),
+            RexNode::Now(_) => {}
         }
     }
 

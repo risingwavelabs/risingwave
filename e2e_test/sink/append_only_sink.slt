@@ -16,6 +16,15 @@ create sink s3 from t with (connector = 'blackhole', type = 'append-only', force
 statement error Cannot force the sink to be append-only
 create sink s4 from t with (connector = 'blackhole', type = 'upsert', force_append_only = 'true');
 
+statement error
+create sink invalid_sink_type from t with (connector = 'blackhole', type = 'invalid');
+
+statement error `force_append_only` must be true or false
+create sink invalid_force_append_only from t with (connector = 'blackhole', force_append_only = 'invalid');
+
+statement error invalid connector type: invalid
+create sink invalid_connector from t with (connector = 'invalid');
+
 statement ok
 drop sink s1
 

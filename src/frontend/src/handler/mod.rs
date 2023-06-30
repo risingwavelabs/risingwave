@@ -21,7 +21,7 @@ use futures::{Stream, StreamExt};
 use pgwire::pg_response::StatementType::{
     ABORT, BEGIN, COMMIT, ROLLBACK, SET_TRANSACTION, START_TRANSACTION,
 };
-use pgwire::pg_response::{PgResponse, RowSetResult};
+use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
@@ -72,7 +72,10 @@ mod show;
 pub mod util;
 pub mod variable;
 
-/// The [`PgResponse`] used by Risingwave.
+/// The [`PgResponseBuilder`] used by RisingWave.
+pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
+
+/// The [`PgResponse`] used by RisingWave.
 pub type RwPgResponse = PgResponse<PgResponseStream>;
 
 pub enum PgResponseStream {
@@ -169,6 +172,8 @@ pub async fn handle(
 ) -> Result<RwPgResponse> {
     session.clear_cancel_query_flag();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
+    const IGNORE_NOTICE: &str = "Ignored temporarily. See details in https://github.com/risingwavelabs/risingwave/issues/2541";
+
     match stmt {
         Statement::Explain {
             statement,
@@ -278,51 +283,65 @@ pub async fn handle(
             object_name,
             if_exists,
             drop_mode,
-        }) => match object_type {
-            ObjectType::Table => {
-                drop_table::handle_drop_table(handler_args, object_name, if_exists).await
-            }
-            ObjectType::MaterializedView => {
-                drop_mv::handle_drop_mv(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Index => {
-                drop_index::handle_drop_index(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Source => {
-                drop_source::handle_drop_source(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Sink => {
-                drop_sink::handle_drop_sink(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Database => {
-                drop_database::handle_drop_database(
-                    handler_args,
-                    object_name,
-                    if_exists,
-                    drop_mode.into(),
-                )
-                .await
-            }
-            ObjectType::Schema => {
-                drop_schema::handle_drop_schema(
-                    handler_args,
-                    object_name,
-                    if_exists,
-                    drop_mode.into(),
-                )
-                .await
-            }
-            ObjectType::User => {
-                drop_user::handle_drop_user(handler_args, object_name, if_exists, drop_mode.into())
+        }) => {
+            if let AstOption::Some(DropMode::Cascade) = drop_mode {
+                return Err(
+                    ErrorCode::NotImplemented("DROP CASCADE".to_string(), None.into()).into(),
+                );
+            };
+            match object_type {
+                ObjectType::Table => {
+                    drop_table::handle_drop_table(handler_args, object_name, if_exists).await
+                }
+                ObjectType::MaterializedView => {
+                    drop_mv::handle_drop_mv(handler_args, object_name, if_exists).await
+                }
+                ObjectType::Index => {
+                    drop_index::handle_drop_index(handler_args, object_name, if_exists).await
+                }
+                ObjectType::Source => {
+                    drop_source::handle_drop_source(handler_args, object_name, if_exists).await
+                }
+                ObjectType::Sink => {
+                    drop_sink::handle_drop_sink(handler_args, object_name, if_exists).await
+                }
+                ObjectType::Database => {
+                    drop_database::handle_drop_database(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        drop_mode.into(),
+                    )
                     .await
+                }
+                ObjectType::Schema => {
+                    drop_schema::handle_drop_schema(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        drop_mode.into(),
+                    )
+                    .await
+                }
+                ObjectType::User => {
+                    drop_user::handle_drop_user(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        drop_mode.into(),
+                    )
+                    .await
+                }
+                ObjectType::View => {
+                    drop_view::handle_drop_view(handler_args, object_name, if_exists).await
+                }
+                ObjectType::Connection => {
+                    drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
+                        .await
+                }
             }
-            ObjectType::View => {
-                drop_view::handle_drop_view(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Connection => {
-                drop_connection::handle_drop_connection(handler_args, object_name, if_exists).await
-            }
-        },
+        }
+        // XXX: should we reuse Statement::Drop for DROP FUNCTION?
         Statement::DropFunction {
             if_exists,
             func_desc,
@@ -334,6 +353,7 @@ pub async fn handle(
         | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
         Statement::CreateView {
             materialized,
+            if_not_exists,
             name,
             columns,
             query,
@@ -348,17 +368,19 @@ pub async fn handle(
                 )
                 .into());
             }
-            if emit_mode == Some(EmitMode::OnWindowClose) {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE MATERIALIZED VIEW EMIT ON WINDOW CLOSE".to_string(),
-                    None.into(),
-                )
-                .into());
-            }
             if materialized {
-                create_mv::handle_create_mv(handler_args, name, *query, columns).await
+                create_mv::handle_create_mv(
+                    handler_args,
+                    if_not_exists,
+                    name,
+                    *query,
+                    columns,
+                    emit_mode,
+                )
+                .await
             } else {
-                create_view::handle_create_view(handler_args, name, columns, *query).await
+                create_view::handle_create_view(handler_args, if_not_exists, name, columns, *query)
+                    .await
             }
         }
         Statement::Flush => flush::handle_flush(handler_args).await,
@@ -449,31 +471,19 @@ pub async fn handle(
         // final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.
         // 2. Some client e.g. psycopg2 will use this statement.
-        // TODO: Track issues #2595 #2541
-        Statement::StartTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
-            START_TRANSACTION,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::BEGIN { .. } => Ok(PgResponse::empty_result_with_notice(
-            BEGIN,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::Abort { .. } => Ok(PgResponse::empty_result_with_notice(
-            ABORT,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::Commit { .. } => Ok(PgResponse::empty_result_with_notice(
-            COMMIT,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::Rollback { .. } => Ok(PgResponse::empty_result_with_notice(
-            ROLLBACK,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::SetTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
-            SET_TRANSACTION,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
+        // TODO: Tracking issues #2595 #2541
+        Statement::StartTransaction { .. } => Ok(PgResponse::builder(START_TRANSACTION)
+            .notice(IGNORE_NOTICE)
+            .into()),
+        Statement::BEGIN { .. } => Ok(PgResponse::builder(BEGIN).notice(IGNORE_NOTICE).into()),
+        Statement::Abort { .. } => Ok(PgResponse::builder(ABORT).notice(IGNORE_NOTICE).into()),
+        Statement::Commit { .. } => Ok(PgResponse::builder(COMMIT).notice(IGNORE_NOTICE).into()),
+        Statement::Rollback { .. } => {
+            Ok(PgResponse::builder(ROLLBACK).notice(IGNORE_NOTICE).into())
+        }
+        Statement::SetTransaction { .. } => Ok(PgResponse::builder(SET_TRANSACTION)
+            .notice(IGNORE_NOTICE)
+            .into()),
         _ => Err(
             ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
         ),

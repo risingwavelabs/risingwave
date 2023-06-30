@@ -414,6 +414,7 @@ impl Drop for BatchMetricsWithTaskLabelsInner {
 pub struct BatchManagerMetrics {
     pub task_num: IntGauge,
     pub batch_total_mem: TrAdderGauge,
+    pub batch_heartbeat_worker_num: IntGauge,
 }
 
 impl BatchManagerMetrics {
@@ -424,14 +425,23 @@ impl BatchManagerMetrics {
             "Total number of memory usage for batch tasks.",
         )
         .unwrap();
+        let batch_heartbeat_worker_num = IntGauge::new(
+            "batch_heartbeat_worker_num",
+            "Total number of heartbeat worker for batch tasks.",
+        )
+        .unwrap();
 
         registry.register(Box::new(task_num.clone())).unwrap();
         registry
             .register(Box::new(batch_total_mem.clone()))
             .unwrap();
+        registry
+            .register(Box::new(batch_heartbeat_worker_num.clone()))
+            .unwrap();
         Self {
             task_num,
             batch_total_mem,
+            batch_heartbeat_worker_num,
         }
     }
 

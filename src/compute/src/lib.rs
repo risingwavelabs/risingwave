@@ -19,6 +19,7 @@
 #![feature(let_chains)]
 #![feature(result_option_inspect)]
 #![feature(lint_reasons)]
+#![feature(impl_trait_in_assoc_type)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
@@ -30,14 +31,18 @@ pub mod rpc;
 pub mod server;
 pub mod telemetry;
 
-use clap::Parser;
-use risingwave_common::config::AsyncStackTraceOption;
+use clap::{Parser, ValueEnum};
+use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
-use risingwave_common_proc_macro::OverrideConfig;
+use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The worker node that executes query plans and handles data ingestion and output"
+)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
@@ -84,6 +89,10 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     pub parallelism: usize,
 
+    /// Decides whether the compute node can be used for streaming and serving.
+    #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
+    pub role: Role,
+
     #[clap(flatten)]
     override_config: OverrideConfigOpts,
 }
@@ -104,15 +113,36 @@ struct OverrideConfigOpts {
     #[override_opts(path = storage.file_cache.dir)]
     pub file_cache_dir: Option<String>,
 
-    /// Enable reporting tracing information to jaeger.
-    #[clap(long, env = "RW_ENABLE_JAEGER_TRACING", default_missing_value = None)]
-    #[override_opts(path = streaming.enable_jaeger_tracing)]
-    pub enable_jaeger_tracing: Option<bool>,
-
     /// Enable async stack tracing through `await-tree` for risectl.
     #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
+}
+
+#[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
+pub enum Role {
+    Serving,
+    Streaming,
+    #[default]
+    Both,
+}
+
+impl Role {
+    pub fn for_streaming(&self) -> bool {
+        match self {
+            Role::Serving => false,
+            Role::Streaming => true,
+            Role::Both => true,
+        }
+    }
+
+    pub fn for_serving(&self) -> bool {
+        match self {
+            Role::Serving => true,
+            Role::Streaming => false,
+            Role::Both => true,
+        }
+    }
 }
 
 fn validate_opts(opts: &ComputeNodeOpts) {
@@ -143,7 +173,10 @@ use std::pin::Pin;
 use crate::server::compute_node_serve;
 
 /// Start compute node
-pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: ComputeNodeOpts,
+    registry: prometheus::Registry,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
@@ -165,7 +198,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         tracing::info!("advertise addr is {}", advertise_addr);
 
         let (join_handle_vec, _shutdown_send) =
-            compute_node_serve(listen_addr, advertise_addr, opts).await;
+            compute_node_serve(listen_addr, advertise_addr, opts, registry).await;
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();
@@ -179,4 +212,8 @@ fn default_total_memory_bytes() -> usize {
 
 fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
+}
+
+fn default_role() -> Role {
+    Role::Both
 }

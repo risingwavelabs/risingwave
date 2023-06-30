@@ -17,8 +17,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
-use risingwave_storage::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_meta::hummock::test_utils::{
     setup_compute_env, update_filter_key_extractor_for_table_ids,
@@ -29,6 +27,7 @@ use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::HummockVersion;
+use risingwave_storage::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTracker;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
@@ -76,7 +75,6 @@ pub async fn prepare_local_version_manager(
         Arc::new(CompactorMetrics::unused()),
         sstable_object_id_manager,
         filter_key_extractor_manager,
-        CompactorRuntimeConfig::default(),
     ));
 
     LocalVersionManager::new(pinned_version, compactor_context, buffer_tracker)

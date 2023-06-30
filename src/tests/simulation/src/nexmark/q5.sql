@@ -10,8 +10,8 @@ SELECT AuctionBids.auction, AuctionBids.num FROM (
     FROM
         HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
     GROUP BY
-        bid.auction,
-        window_start
+        window_start,
+        bid.auction
 ) AS AuctionBids
 JOIN (
     SELECT

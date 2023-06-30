@@ -164,6 +164,10 @@ impl ArrayBuilder for BoolArrayBuilder {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> BoolArray {
         BoolArray {
             bitmap: self.bitmap.finish(),
@@ -179,7 +183,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::array::{read_bool_array, NULL_VAL_FOR_HASH};
+    use crate::array::{ArrayImpl, NULL_VAL_FOR_HASH};
     use crate::util::iter_util::ZipEqFast;
 
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
@@ -228,7 +232,9 @@ mod tests {
             let array = helper_test_builder(v.clone());
 
             let encoded = array.to_protobuf();
-            let decoded = read_bool_array(&encoded, num_bits).unwrap().into_bool();
+            let decoded = ArrayImpl::from_protobuf(&encoded, num_bits)
+                .unwrap()
+                .into_bool();
 
             let equal = array
                 .iter()

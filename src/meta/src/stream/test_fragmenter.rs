@@ -26,7 +26,7 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::Type;
 use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
+use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
@@ -46,7 +46,7 @@ use crate::MetaResult;
 
 fn make_inputref(idx: u32) -> ExprNode {
     ExprNode {
-        expr_type: InputRef as i32,
+        function_type: Type::Unspecified as i32,
         return_type: Some(DataType {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
@@ -72,6 +72,7 @@ fn make_sum_aggcall(idx: u32) -> AggCall {
         distinct: false,
         order_by: vec![],
         filter: None,
+        direct_args: vec![],
     }
 }
 
@@ -247,7 +248,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     let filter_node = StreamNode {
         node_body: Some(NodeBody::Filter(FilterNode {
             search_condition: Some(ExprNode {
-                expr_type: GreaterThan as i32,
+                function_type: GreaterThan as i32,
                 return_type: Some(DataType {
                     type_name: TypeName::Boolean as i32,
                     ..Default::default()
@@ -265,7 +266,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // simple agg node
     let simple_agg_node = StreamNode {
-        node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
+        node_body: Some(NodeBody::SimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             is_append_only: false,
@@ -277,7 +278,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fields: vec![], // TODO: fill this later
         stream_key: vec![0, 1],
         operator_id: 3,
-        identity: "GlobalSimpleAggExecutor".to_string(),
+        identity: "SimpleAggExecutor".to_string(),
         ..Default::default()
     };
 
@@ -308,7 +309,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // agg node
     let simple_agg_node_1 = StreamNode {
-        node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
+        node_body: Some(NodeBody::SimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             is_append_only: false,
@@ -320,7 +321,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![exchange_node_1],
         stream_key: vec![0, 1],
         operator_id: 5,
-        identity: "GlobalSimpleAggExecutor".to_string(),
+        identity: "SimpleAggExecutor".to_string(),
         ..Default::default()
     };
 
@@ -333,7 +334,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             select_list: vec![
                 ExprNode {
                     rex_node: Some(RexNode::FuncCall(function_call_1)),
-                    expr_type: Add as i32,
+                    function_type: Add as i32,
                     return_type: Some(DataType {
                         type_name: TypeName::Int64 as i32,
                         ..Default::default()
@@ -429,6 +430,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
             )
         })
         .collect();
+
     let worker_nodes = std::iter::once((
         0,
         WorkerNode {
@@ -437,9 +439,11 @@ fn make_cluster_info() -> StreamingClusterInfo {
         },
     ))
     .collect();
+    let unschedulable_parallel_units = Default::default();
     StreamingClusterInfo {
         worker_nodes,
         parallel_units,
+        unschedulable_parallel_units,
     }
 }
 
@@ -456,7 +460,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let actor_graph_builder = ActorGraphBuilder::new(
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
-        Some(NonZeroUsize::new(parallel_degree).unwrap()),
+        NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
     let ActorGraphBuildResult { graph, .. } = actor_graph_builder
         .generate_graph(env.id_gen_manager_ref(), &job)

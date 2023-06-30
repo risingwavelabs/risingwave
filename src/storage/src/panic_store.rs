@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
+use std::ops::Bound;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -62,7 +63,7 @@ impl StateStoreWrite for PanicStateStore {
     fn ingest_batch(
         &self,
         _kv_pairs: Vec<(Bytes, StorageValue)>,
-        _delete_ranges: Vec<(Bytes, Bytes)>,
+        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         _write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
@@ -115,7 +116,10 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    fn flush(&mut self, _delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+    fn flush(
+        &mut self,
+        _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+    ) -> Self::FlushFuture<'_> {
         async {
             panic!("should not operate on the panic state store!");
         }

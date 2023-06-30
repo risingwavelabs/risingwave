@@ -8,6 +8,7 @@ cargo run --bin parser-test-apply
 '''
 
 [tasks.apply-parser-test]
+private = true
 description = "Generate parser test data"
 dependencies = [
   "update-parser-test"

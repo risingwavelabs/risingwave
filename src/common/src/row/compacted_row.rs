@@ -21,7 +21,7 @@ use crate::util::value_encoding;
 
 /// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
 /// Executors need to serialize Row into `CompactedRow` before writing into cache.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, EstimateSize)]
 pub struct CompactedRow {
     pub row: Bytes,
 }
@@ -46,11 +46,5 @@ impl<R: Row> From<R> for CompactedRow {
         Self {
             row: row.value_serialize_bytes(),
         }
-    }
-}
-
-impl EstimateSize for CompactedRow {
-    fn estimated_heap_size(&self) -> usize {
-        self.row.estimated_heap_size()
     }
 }

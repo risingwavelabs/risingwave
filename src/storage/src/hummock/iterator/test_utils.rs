@@ -52,14 +52,9 @@ macro_rules! assert_bytes_eq {
 pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
-    mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::Hybrid {
-        local: Box::new(ObjectStoreImpl::InMem(
-            InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
-        )),
-        remote: Box::new(ObjectStoreImpl::InMem(
-            InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
-        )),
-    }))
+    mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::InMem(
+        InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
+    )))
 }
 
 pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {

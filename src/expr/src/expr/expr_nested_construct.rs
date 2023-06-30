@@ -15,9 +15,8 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, ListArrayBuilder, ListValue, StructArrayBuilder,
+    ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, ListArrayBuilder, ListValue, StructArray,
     StructValue,
 };
 use risingwave_common::row::OwnedRow;
@@ -46,13 +45,10 @@ impl Expression for NestedConstructExpression {
             columns.push(e.eval_checked(input).await?);
         }
 
-        if let DataType::Struct(_) = &self.data_type {
-            let mut builder =
-                StructArrayBuilder::with_type(input.capacity(), self.data_type.clone());
-            builder.append_array_refs(columns, input.capacity());
-            Ok(Arc::new(ArrayImpl::Struct(builder.finish())))
+        if let DataType::Struct(ty) = &self.data_type {
+            let array = StructArray::new(ty.clone(), columns, input.vis().to_bitmap());
+            Ok(Arc::new(ArrayImpl::Struct(array)))
         } else if let DataType::List { .. } = &self.data_type {
-            let columns = columns.into_iter().map(Column::new).collect();
             let chunk = DataChunk::new(columns, input.vis().clone());
             let mut builder = ListArrayBuilder::with_type(input.capacity(), self.data_type.clone());
             for row in chunk.rows_with_holes() {
@@ -77,7 +73,7 @@ impl Expression for NestedConstructExpression {
         }
         if let DataType::Struct { .. } = &self.data_type {
             Ok(Some(StructValue::new(datums).to_scalar_value()))
-        } else if let DataType::List { datatype: _ } = &self.data_type {
+        } else if let DataType::List(_) = &self.data_type {
             Ok(Some(ListValue::new(datums).to_scalar_value()))
         } else {
             Err(ExprError::UnsupportedFunction(
@@ -100,7 +96,7 @@ impl<'a> TryFrom<&'a ExprNode> for NestedConstructExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!([Type::Array, Type::Row].contains(&prost.get_expr_type().unwrap()));
+        ensure!([Type::Array, Type::Row].contains(&prost.get_function_type().unwrap()));
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
@@ -127,9 +123,7 @@ mod tests {
     #[tokio::test]
     async fn test_eval_array_expr() {
         let expr = NestedConstructExpression {
-            data_type: DataType::List {
-                datatype: DataType::Int32.into(),
-            },
+            data_type: DataType::List(DataType::Int32.into()),
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 
@@ -140,9 +134,7 @@ mod tests {
     #[tokio::test]
     async fn test_eval_row_array_expr() {
         let expr = NestedConstructExpression {
-            data_type: DataType::List {
-                datatype: DataType::Int32.into(),
-            },
+            data_type: DataType::List(DataType::Int32.into()),
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 

@@ -63,6 +63,10 @@ pub const SYSTEM_SCHEMAS: [&str; 3] = [
     RW_CATALOG_SCHEMA_NAME,
 ];
 
+pub fn is_system_schema(schema_name: &str) -> bool {
+    SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
+}
+
 pub const ROWID_PREFIX: &str = "_row_id";
 
 pub fn row_id_column_name() -> String {
@@ -89,7 +93,7 @@ pub fn row_id_column_desc() -> ColumnDesc {
         name: row_id_column_name(),
         field_descs: vec![],
         type_name: "".to_string(),
-        generated_column: None,
+        generated_or_default_column: None,
     }
 }
 

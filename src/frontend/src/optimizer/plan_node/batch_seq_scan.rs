@@ -16,6 +16,7 @@ use std::fmt;
 use std::ops::Bound;
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
@@ -24,36 +25,36 @@ use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::PbColumnDesc;
 
-use super::{ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
+use super::utils::{childless_record, Distill};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSeqScan {
     pub base: PlanBase,
-    logical: LogicalScan,
+    logical: generic::Scan,
     scan_ranges: Vec<ScanRange>,
 }
 
 impl BatchSeqScan {
-    fn new_inner(logical: LogicalScan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
-        let ctx = logical.base.ctx.clone();
+    fn new_inner(logical: generic::Scan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
         let order = if scan_ranges.len() > 1 {
             Order::any()
         } else {
             logical.get_out_column_index_order()
         };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, order);
+        let base = PlanBase::new_batch_from_logical(&logical, dist, order);
 
         {
             // validate scan_range
             scan_ranges.iter().for_each(|scan_range| {
                 assert!(!scan_range.is_full_table_scan());
                 let scan_pk_prefix_len = scan_range.eq_conds.len();
-                let order_len = logical.table_desc().order_column_indices().len();
+                let order_len = logical.table_desc.order_column_indices().len();
                 assert!(
                     scan_pk_prefix_len < order_len
                         || (scan_pk_prefix_len == order_len && is_full_range(&scan_range.range)),
@@ -69,7 +70,7 @@ impl BatchSeqScan {
         }
     }
 
-    pub fn new(logical: LogicalScan, scan_ranges: Vec<ScanRange>) -> Self {
+    pub fn new(logical: generic::Scan, scan_ranges: Vec<ScanRange>) -> Self {
         // Use `Single` by default, will be updated later with `clone_with_dist`.
         Self::new_inner(logical, Distribution::Single, scan_ranges)
     }
@@ -77,7 +78,7 @@ impl BatchSeqScan {
     fn clone_with_dist(&self) -> Self {
         Self::new_inner(
             self.logical.clone(),
-            if self.logical.is_sys_table() {
+            if self.logical.is_sys_table {
                 Distribution::Single
             } else {
                 match self.logical.distribution_key() {
@@ -97,7 +98,7 @@ impl BatchSeqScan {
                             // inserted.
                             Distribution::UpstreamHashShard(
                                 distribution_key,
-                                self.logical.table_desc().table_id,
+                                self.logical.table_desc.table_id,
                             )
                         }
                     }
@@ -109,52 +110,110 @@ impl BatchSeqScan {
 
     /// Get a reference to the batch seq scan's logical.
     #[must_use]
-    pub fn logical(&self) -> &LogicalScan {
+    pub fn logical(&self) -> &generic::Scan {
         &self.logical
     }
 
     pub fn scan_ranges(&self) -> &[ScanRange] {
         &self.scan_ranges
     }
+
+    fn scan_ranges_as_strs(&self, verbose: bool) -> Vec<String> {
+        let order_names = match verbose {
+            true => self.logical.order_names_with_table_prefix(),
+            false => self.logical.order_names(),
+        };
+        let mut range_strs = vec![];
+
+        let explain_max_range = 20;
+        for scan_range in self.scan_ranges.iter().take(explain_max_range) {
+            #[expect(clippy::disallowed_methods)]
+            let mut range_str = scan_range
+                .eq_conds
+                .iter()
+                .zip(order_names.iter())
+                .map(|(v, name)| match v {
+                    Some(v) => format!("{} = {:?}", name, v),
+                    None => format!("{} IS NULL", name),
+                })
+                .collect_vec();
+            if !is_full_range(&scan_range.range) {
+                let i = scan_range.eq_conds.len();
+                range_str.push(range_to_string(&order_names[i], &scan_range.range))
+            }
+            range_strs.push(range_str.join(" AND "));
+        }
+        if self.scan_ranges.len() > explain_max_range {
+            range_strs.push("...".to_string());
+        }
+        range_strs
+    }
 }
 
 impl_plan_tree_node_for_leaf! { BatchSeqScan }
 
-impl fmt::Display for BatchSeqScan {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
-            let (op, v) = match lb {
-                Bound::Included(v) => (">=", v),
-                Bound::Excluded(v) => (">", v),
-                Bound::Unbounded => unreachable!(),
-            };
-            format!("{} {} {:?}", name, op, v)
+fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
+    let (op, v) = match lb {
+        Bound::Included(v) => (">=", v),
+        Bound::Excluded(v) => (">", v),
+        Bound::Unbounded => unreachable!(),
+    };
+    format!("{} {} {:?}", name, op, v)
+}
+fn ub_to_string(name: &str, ub: &Bound<ScalarImpl>) -> String {
+    let (op, v) = match ub {
+        Bound::Included(v) => ("<=", v),
+        Bound::Excluded(v) => ("<", v),
+        Bound::Unbounded => unreachable!(),
+    };
+    format!("{} {} {:?}", name, op, v)
+}
+fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
+    match (&range.0, &range.1) {
+        (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
+        (Bound::Unbounded, ub) => ub_to_string(name, ub),
+        (lb, Bound::Unbounded) => lb_to_string(name, lb),
+        (lb, ub) => {
+            format!("{} AND {}", lb_to_string(name, lb), ub_to_string(name, ub))
         }
-        fn ub_to_string(name: &str, ub: &Bound<ScalarImpl>) -> String {
-            let (op, v) = match ub {
-                Bound::Included(v) => ("<=", v),
-                Bound::Excluded(v) => ("<", v),
-                Bound::Unbounded => unreachable!(),
-            };
-            format!("{} {} {:?}", name, op, v)
-        }
-        fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
-            match (&range.0, &range.1) {
-                (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
-                (Bound::Unbounded, ub) => ub_to_string(name, ub),
-                (lb, Bound::Unbounded) => lb_to_string(name, lb),
-                (lb, ub) => {
-                    format!("{} AND {}", lb_to_string(name, lb), ub_to_string(name, ub))
-                }
-            }
+    }
+}
+
+impl Distill for BatchSeqScan {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut vec = Vec::with_capacity(4);
+        vec.push(("table", Pretty::from(self.logical.table_name.clone())));
+        vec.push(("columns", self.logical.columns_pretty(verbose)));
+
+        if !self.scan_ranges.is_empty() {
+            let range_strs = self.scan_ranges_as_strs(verbose);
+            vec.push((
+                "scan_ranges",
+                Pretty::Array(range_strs.into_iter().map(Pretty::from).collect()),
+            ));
         }
 
+        if verbose {
+            let dist = Pretty::display(&DistributionDisplay {
+                distribution: self.distribution(),
+                input_schema: &self.base.schema,
+            });
+            vec.push(("distribution", dist));
+        }
+
+        childless_record("BatchScan", vec)
+    }
+}
+
+impl fmt::Display for BatchSeqScan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
 
         write!(
             f,
             "BatchScan {{ table: {}, columns: [{}]",
-            self.logical.table_name(),
+            self.logical.table_name,
             match verbose {
                 true => self.logical.column_names_with_table_prefix(),
                 false => self.logical.column_names(),
@@ -163,45 +222,16 @@ impl fmt::Display for BatchSeqScan {
         )?;
 
         if !self.scan_ranges.is_empty() {
-            let order_names = match verbose {
-                true => self.logical.order_names_with_table_prefix(),
-                false => self.logical.order_names(),
-            };
-            let mut range_strs = vec![];
-
-            let explain_max_range = 20;
-            for scan_range in self.scan_ranges.iter().take(explain_max_range) {
-                #[expect(clippy::disallowed_methods)]
-                let mut range_str = scan_range
-                    .eq_conds
-                    .iter()
-                    .zip(order_names.iter())
-                    .map(|(v, name)| match v {
-                        Some(v) => format!("{} = {:?}", name, v),
-                        None => format!("{} IS NULL", name),
-                    })
-                    .collect_vec();
-                if !is_full_range(&scan_range.range) {
-                    let i = scan_range.eq_conds.len();
-                    range_str.push(range_to_string(&order_names[i], &scan_range.range))
-                }
-                range_strs.push(range_str.join(" AND "));
-            }
-            if self.scan_ranges.len() > explain_max_range {
-                range_strs.push("...".to_string());
-            }
+            let range_strs = self.scan_ranges_as_strs(verbose);
             write!(f, ", scan_ranges: [{}]", range_strs.join(" , "))?;
         }
 
         if verbose {
-            write!(
-                f,
-                ", distribution: {}",
-                &DistributionDisplay {
-                    distribution: self.distribution(),
-                    input_schema: &self.base.schema,
-                }
-            )?;
+            let dist = &DistributionDisplay {
+                distribution: self.distribution(),
+                input_schema: &self.base.schema,
+            };
+            write!(f, ", distribution: {}", dist)?;
         }
 
         write!(f, " }}")
@@ -223,14 +253,14 @@ impl ToBatchPb for BatchSeqScan {
             .map(PbColumnDesc::from)
             .collect();
 
-        if self.logical.is_sys_table() {
+        if self.logical.is_sys_table {
             NodeBody::SysRowSeqScan(SysRowSeqScanNode {
-                table_id: self.logical.table_desc().table_id.table_id,
+                table_id: self.logical.table_desc.table_id.table_id,
                 column_descs,
             })
         } else {
             NodeBody::RowSeqScan(RowSeqScanNode {
-                table_desc: Some(self.logical.table_desc().to_protobuf()),
+                table_desc: Some(self.logical.table_desc.to_protobuf()),
                 column_ids: self
                     .logical
                     .output_column_ids()
@@ -243,7 +273,7 @@ impl ToBatchPb for BatchSeqScan {
                 ordered: !self.order().is_any(),
                 chunk_size: self
                     .logical
-                    .chunk_size()
+                    .chunk_size
                     .map(|chunk_size| ChunkSize { chunk_size }),
             })
         }
@@ -252,17 +282,15 @@ impl ToBatchPb for BatchSeqScan {
 
 impl ToLocalBatch for BatchSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        let dist =
-        if self.logical.is_sys_table() {
+        let dist = if self.logical.is_sys_table {
             Distribution::Single
         } else if let Some(distribution_key) = self.logical.distribution_key()
-        && !distribution_key.is_empty() {
-            Distribution::UpstreamHashShard(
-                distribution_key,
-                self.logical.table_desc().table_id,
-            )
+            && !distribution_key.is_empty()
+        {
+            Distribution::UpstreamHashShard(distribution_key, self.logical.table_desc.table_id)
         } else {
-            // NOTE(kwannoel): This is a hack to force an exchange to always be inserted before scan.
+            // NOTE(kwannoel): This is a hack to force an exchange to always be inserted before
+            // scan.
             Distribution::SomeShard
         };
         Ok(Self::new_inner(self.logical.clone(), dist, self.scan_ranges.clone()).into())
@@ -275,14 +303,8 @@ impl ExprRewritable for BatchSeqScan {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_scan()
-                .unwrap()
-                .clone(),
-            self.scan_ranges.clone(),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical, self.scan_ranges.clone()).into()
     }
 }

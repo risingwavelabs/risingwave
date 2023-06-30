@@ -14,7 +14,7 @@
 
 use std::fmt::Write;
 
-use risingwave_common::array::JsonbRef;
+use risingwave_common::types::JsonbRef;
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};

@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExpandNode;
 
+use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable};
 use crate::optimizer::plan_node::{
     PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
@@ -51,11 +50,7 @@ impl BatchExpand {
     }
 }
 
-impl fmt::Display for BatchExpand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchExpand")
-    }
-}
+impl_distill_by_unit!(BatchExpand, logical, "BatchExpand");
 
 impl PlanTreeNodeUnary for BatchExpand {
     fn input(&self) -> PlanRef {

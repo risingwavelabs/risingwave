@@ -23,10 +23,13 @@ use risingwave_common::types::DataType;
 use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
 
+mod agg;
+mod cast;
 mod expr;
 pub use expr::print_function_table;
 
-mod insert;
+mod dml;
+mod functions;
 mod query;
 mod relation;
 mod scalar;
@@ -38,11 +41,24 @@ mod utils;
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
+    pub pk_indices: Vec<usize>,
 }
 
 impl Table {
     pub fn new(name: String, columns: Vec<Column>) -> Self {
-        Self { name, columns }
+        Self {
+            name,
+            columns,
+            pk_indices: vec![],
+        }
+    }
+
+    pub fn new_with_pk(name: String, columns: Vec<Column>, pk_indices: Vec<usize>) -> Self {
+        Self {
+            name,
+            columns,
+            pk_indices,
+        }
     }
 
     pub fn get_qualified_columns(&self) -> Vec<Column> {
@@ -59,8 +75,8 @@ impl Table {
 /// Sqlsmith Column definition
 #[derive(Clone, Debug)]
 pub struct Column {
-    name: String,
-    data_type: DataType,
+    pub(crate) name: String,
+    pub(crate) data_type: DataType,
 }
 
 impl From<ColumnDef> for Column {
@@ -139,6 +155,11 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
     ///    Under this mode certain restrictions and workarounds are applied
     ///    for unsupported stream executors.
     is_mview: bool,
+
+    recursion_weight: f64,
+    // /// Count number of subquery.
+    // /// We don't want too many per query otherwise it is hard to debug.
+    // with_statements: u64,
 }
 
 /// Generators
@@ -153,6 +174,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: false,
+            recursion_weight: 0.3,
         }
     }
 
@@ -166,6 +188,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: true,
+            recursion_weight: 0.3,
         }
     }
 
@@ -177,14 +200,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_mview_stmt(&mut self, name: &str) -> (Statement, Table) {
         let (query, schema) = self.gen_query();
         let query = Box::new(query);
-        let table = Table {
-            name: name.to_string(),
-            columns: schema,
-        };
+        let table = Table::new(name.to_string(), schema);
         let name = ObjectName(vec![Ident::new_unchecked(name)]);
         let mview = Statement::CreateView {
             or_replace: false,
             materialized: true,
+            if_not_exists: false,
             name,
             columns: vec![],
             query,
@@ -201,6 +222,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Provide recursion bounds.
     pub(crate) fn can_recurse(&mut self) -> bool {
-        self.rng.gen_bool(0.3)
+        if self.recursion_weight <= 0.0 {
+            return false;
+        }
+        let can_recurse = self.rng.gen_bool(self.recursion_weight);
+        if can_recurse {
+            self.recursion_weight *= 0.9;
+            if self.recursion_weight < 0.05 {
+                self.recursion_weight = 0.0;
+            }
+        }
+        can_recurse
     }
 }

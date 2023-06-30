@@ -15,11 +15,13 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{FieldDisplay, Schema};
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
 
+use super::utils::{childless_record, formatter_debug_plan_node, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -53,7 +55,7 @@ impl StreamTemporalJoin {
         let scan: &StreamTableScan = exchange_input
             .as_stream_table_scan()
             .expect("should be a stream table scan");
-        assert!(scan.logical().for_system_time_as_of_proctime());
+        assert!(scan.logical().for_system_time_as_of_proctime);
 
         let l2o = logical
             .l2i_col_mapping()
@@ -67,7 +69,13 @@ impl StreamTemporalJoin {
                 .rewrite_bitset(logical.left.watermark_columns()),
         );
 
-        let base = PlanBase::new_stream_with_logical(&logical, dist, true, watermark_columns);
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
+            dist,
+            true,
+            false, // TODO(rc): derive EOWC property from input
+            watermark_columns,
+        );
 
         Self {
             base,
@@ -86,16 +94,43 @@ impl StreamTemporalJoin {
     }
 }
 
+impl Distill for StreamTemporalJoin {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.logical.join_type)));
+
+        let concat_schema = self.logical.concat_schema();
+        vec.push((
+            "predicate",
+            Pretty::debug(&EqJoinPredicateDisplay {
+                eq_join_predicate: self.eq_join_predicate(),
+                input_schema: &concat_schema,
+            }),
+        ));
+
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+            vec.push(("output_watermarks", ow));
+        }
+
+        if verbose {
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema)
+                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            vec.push(("output", data));
+        }
+
+        childless_record("StreamTemporalJoin", vec)
+    }
+}
+
 impl fmt::Display for StreamTemporalJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamTemporalJoin");
+        let mut builder = formatter_debug_plan_node!(f, "StreamTemporalJoin");
 
         let verbose = self.base.ctx.is_explain_verbose();
         builder.field("type", &self.logical.join_type);
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
+        let concat_schema = self.logical.concat_schema();
         builder.field(
             "predicate",
             &EqJoinPredicateDisplay {
@@ -105,7 +140,7 @@ impl fmt::Display for StreamTemporalJoin {
         );
 
         let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
+        if watermark_columns.count_ones(..) > 0 {
             let schema = self.schema();
             builder.field(
                 "output_watermarks",
@@ -117,23 +152,10 @@ impl fmt::Display for StreamTemporalJoin {
         };
 
         if verbose {
-            if self
-                .logical
-                .output_indices
-                .iter()
-                .copied()
-                .eq(0..self.logical.internal_column_num())
-            {
-                builder.field("output", &format_args!("all"));
-            } else {
-                builder.field(
-                    "output",
-                    &IndicesDisplay {
-                        indices: &self.logical.output_indices,
-                        input_schema: &concat_schema,
-                    },
-                );
-            }
+            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
+                None => builder.field("output", &format_args!("all")),
+                Some(id) => builder.field("output", &id),
+            };
         }
 
         builder.finish()
@@ -194,10 +216,10 @@ impl StreamNode for StreamTemporalJoin {
                 .iter()
                 .map(|&x| x as u32)
                 .collect(),
-            table_desc: Some(scan.logical().table_desc().to_protobuf()),
+            table_desc: Some(scan.logical().table_desc.to_protobuf()),
             table_output_indices: scan
                 .logical()
-                .output_col_idx()
+                .output_col_idx
                 .iter()
                 .map(|&i| i as _)
                 .collect(),

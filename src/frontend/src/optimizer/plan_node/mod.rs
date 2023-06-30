@@ -39,6 +39,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
+use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
@@ -49,6 +50,7 @@ use smallvec::SmallVec;
 use self::batch::BatchPlanRef;
 use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
+use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
 pub trait PlanNodeMeta {
@@ -66,6 +68,7 @@ pub trait PlanNode:
     + DynClone
     + DynEq
     + DynHash
+    + Distill
     + Debug
     + Display
     + Downcast
@@ -384,6 +387,10 @@ impl StreamPlanRef for PlanRef {
     fn append_only(&self) -> bool {
         self.plan_base().append_only
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close
+    }
 }
 
 impl BatchPlanRef for PlanRef {
@@ -426,63 +433,36 @@ pub fn reorganize_elements_id(plan: PlanRef) -> PlanRef {
 
 pub trait Explain {
     /// Write explain the whole plan tree.
-    fn explain(
-        &self,
-        is_last: &mut Vec<bool>,
-        level: usize,
-        f: &mut impl std::fmt::Write,
-    ) -> std::fmt::Result;
+    fn explain<'a>(&self) -> Pretty<'a>;
 
     /// Explain the plan node and return a string.
-    fn explain_to_string(&self) -> Result<String>;
+    fn explain_to_string(&self) -> String;
 }
 
 impl Explain for PlanRef {
     /// Write explain the whole plan tree.
-    fn explain(
-        &self,
-        is_last: &mut Vec<bool>,
-        level: usize,
-        f: &mut impl std::fmt::Write,
-    ) -> std::fmt::Result {
-        if level > 0 {
-            let mut last_iter = is_last.iter().peekable();
-            while let Some(last) = last_iter.next() {
-                // We are at the current level
-                if last_iter.peek().is_none() {
-                    if *last {
-                        writeln!(f, "└─{}", self)?;
-                    } else {
-                        writeln!(f, "├─{}", self)?;
-                    }
-                } else if *last {
-                    write!(f, "  ")?;
-                } else {
-                    write!(f, "| ")?;
-                }
-            }
-        } else {
-            writeln!(f, "{}", self)?;
-        }
+    fn explain<'a>(&self) -> Pretty<'a> {
+        let mut node = self.distill();
         let inputs = self.inputs();
-        let mut inputs_iter = inputs.iter().peekable();
-        while let Some(input) = inputs_iter.next() {
-            let last = inputs_iter.peek().is_none();
-            is_last.push(last);
-            input.explain(is_last, level + 1, f)?;
-            is_last.pop();
+        for input in inputs.iter().peekable() {
+            node.children.push(input.explain());
         }
-        Ok(())
+        Pretty::Record(node)
     }
 
     /// Explain the plan node and return a string.
-    fn explain_to_string(&self) -> Result<String> {
+    fn explain_to_string(&self) -> String {
         let plan = reorganize_elements_id(self.clone());
 
-        let mut output = String::new();
-        plan.explain(&mut vec![], 0, &mut output)
-            .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
-        Ok(output)
+        let mut output = String::with_capacity(2048);
+        let mut config = PrettyConfig {
+            indent: 3,
+            need_boundaries: false,
+            width: 2048,
+            reduced_spaces: true,
+        };
+        config.unicode(&mut output, &plan.explain());
+        output
     }
 }
 
@@ -515,6 +495,10 @@ impl dyn PlanNode {
         self.plan_base().append_only
     }
 
+    pub fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close
+    }
+
     pub fn functional_dependency(&self) -> &FunctionalDependencySet {
         &self.plan_base().functional_dependency
     }
@@ -529,7 +513,7 @@ impl dyn PlanNode {
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanPb {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
-            return stream_table_scan.adhoc_to_stream_prost();
+            return stream_table_scan.adhoc_to_stream_prost(state);
         }
         if let Some(stream_share) = self.as_stream_share() {
             return stream_share.adhoc_to_stream_prost(state);
@@ -636,15 +620,17 @@ mod logical_agg;
 mod logical_apply;
 mod logical_dedup;
 mod logical_delete;
+mod logical_except;
 mod logical_expand;
 mod logical_filter;
 mod logical_hop_window;
 mod logical_insert;
+mod logical_intersect;
 mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
 mod logical_now;
-mod logical_over_agg;
+mod logical_over_window;
 mod logical_project;
 mod logical_project_set;
 mod logical_scan;
@@ -659,22 +645,24 @@ mod stream_dedup;
 mod stream_delta_join;
 mod stream_dml;
 mod stream_dynamic_filter;
+mod stream_eowc_over_window;
 mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
-mod stream_global_simple_agg;
 mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
-mod stream_local_simple_agg;
 mod stream_materialize;
 mod stream_now;
 mod stream_project;
 mod stream_project_set;
 mod stream_row_id_gen;
+mod stream_simple_agg;
 mod stream_sink;
+mod stream_sort;
 mod stream_source;
+mod stream_stateless_simple_agg;
 mod stream_table_scan;
 mod stream_topn;
 mod stream_values;
@@ -714,15 +702,17 @@ pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
+pub use logical_except::LogicalExcept;
 pub use logical_expand::LogicalExpand;
 pub use logical_filter::LogicalFilter;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
+pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
-pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
+pub use logical_over_window::LogicalOverWindow;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
@@ -737,23 +727,25 @@ pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dml::StreamDml;
 pub use stream_dynamic_filter::StreamDynamicFilter;
+pub use stream_eowc_over_window::StreamEowcOverWindow;
 pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
-pub use stream_global_simple_agg::StreamGlobalSimpleAgg;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
-pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_now::StreamNow;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
+pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_sink::StreamSink;
+pub use stream_sort::StreamSort;
 pub use stream_source::StreamSource;
+pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
@@ -802,11 +794,12 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
-            , { Logical, OverAgg }
+            , { Logical, OverWindow }
             , { Logical, Share }
             , { Logical, Now }
             , { Logical, Dedup }
-            // , { Logical, Sort } we don't need a LogicalSort, just require the Order
+            , { Logical, Intersect }
+            , { Logical, Except }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -839,8 +832,8 @@ macro_rules! for_all_plan_nodes {
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, HashAgg }
-            , { Stream, LocalSimpleAgg }
-            , { Stream, GlobalSimpleAgg }
+            , { Stream, SimpleAgg }
+            , { Stream, StatelessSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }
@@ -858,6 +851,8 @@ macro_rules! for_all_plan_nodes {
             , { Stream, TemporalJoin }
             , { Stream, Values }
             , { Stream, Dedup }
+            , { Stream, EowcOverWindow }
+            , { Stream, Sort }
         }
     };
 }
@@ -886,12 +881,12 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
-            , { Logical, OverAgg }
+            , { Logical, OverWindow }
             , { Logical, Share }
             , { Logical, Now }
             , { Logical, Dedup }
-            // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
-            // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
+            , { Logical, Intersect }
+            , { Logical, Except }
         }
     };
 }
@@ -942,8 +937,8 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashAgg }
-            , { Stream, LocalSimpleAgg }
-            , { Stream, GlobalSimpleAgg }
+            , { Stream, SimpleAgg }
+            , { Stream, StatelessSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }
@@ -961,6 +956,8 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TemporalJoin }
             , { Stream, Values }
             , { Stream, Dedup }
+            , { Stream, EowcOverWindow }
+            , { Stream, Sort }
         }
     };
 }

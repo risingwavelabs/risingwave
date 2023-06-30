@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::function::aggregate::AggKind;
 use risingwave_sqlparser::ast::{
@@ -187,11 +188,12 @@ impl Binder {
         self.context.clause = None;
 
         // Bind GROUP BY clause.
+        let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
         self.context.clause = Some(Clause::GroupBy);
         let group_by = select
             .group_by
             .into_iter()
-            .map(|expr| self.bind_expr(expr))
+            .map(|expr| self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items))
             .try_collect()?;
         self.context.clause = None;
 
@@ -267,19 +269,32 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
-                SelectItem::Wildcard => {
+                SelectItem::WildcardOrWithExcept(w) => {
                     if self.context.range_of.is_empty() {
                         return Err(ErrorCode::BindError(
                             "SELECT * with no tables specified is not valid".into(),
                         )
                         .into());
                     }
+
                     // Bind the column groups
-                    // In psql, the USING and NATURAL columns come before the rest of the columns in
-                    // a SELECT * statement
+                    // In psql, the USING and NATURAL columns come before the rest of the
+                    // columns in a SELECT * statement
                     let (exprs, names) = self.iter_column_groups();
                     select_list.extend(exprs);
                     aliases.extend(names);
+
+                    let mut except_indices: HashSet<usize> = HashSet::new();
+                    if let Some(exprs) = w {
+                        for expr in exprs {
+                            let bound = self.bind_expr(expr)?;
+                            if let ExprImpl::InputRef(inner) = bound {
+                                except_indices.insert(inner.index);
+                            } else {
+                                unreachable!();
+                            }
+                        }
+                    }
 
                     // Bind columns that are not in groups
                     let (exprs, names) =
@@ -290,21 +305,84 @@ impl Binder {
                                     .column_group_context
                                     .mapping
                                     .contains_key(&c.index)
+                                && !except_indices.contains(&c.index)
                         }));
+
                     select_list.extend(exprs);
                     aliases.extend(names);
-
-                    // TODO: we will need to be able to handle wildcard expressions bound to aliases
-                    // in the future. We'd then need a `NaturalGroupContext`
-                    // bound to each alias to correctly disambiguate column
+                    // TODO: we will need to be able to handle wildcard expressions bound to
+                    // aliases in the future. We'd then need a
+                    // `NaturalGroupContext` bound to each alias
+                    // to correctly disambiguate column
                     // references
                     //
-                    // We may need to refactor `NaturalGroupContext` to become span aware in that
-                    // case.
+                    // We may need to refactor `NaturalGroupContext` to become span aware in
+                    // that case.
                 }
             }
         }
         Ok((select_list, aliases))
+    }
+
+    /// Bind an `GROUP BY` expression in a [`Select`], which can be either:
+    /// * index of an output column
+    /// * an arbitrary expression on input columns
+    /// * an output-column name
+    ///
+    /// Note the differences from `bind_order_by_expr_in_query`:
+    /// * When a name matches both an input column and an output column, `group by` interprets it as
+    ///   input column while `order by` interprets it as output column.
+    /// * As the name suggests, `group by` is part of `select` while `order by` is part of `query`.
+    ///   A `query` may consist unions of multiple `select`s (each with their own `group by`) but
+    ///   only one `order by`.
+    /// * Logically / semantically, `group by` evaluates before `select items`, which evaluates
+    ///   before `order by`. This means, `group by` can evaluate arbitrary expressions itself, or
+    ///   take expressions from `select items` (we `clone` here and `logical_agg` will rewrite those
+    ///   `select items` to `InputRef`). However, `order by` can only refer to `select items`, or
+    ///   append its extra arbitrary expressions as hidden `select items` for evaluation.
+    ///
+    /// # Arguments
+    ///
+    /// * `name_to_index` - output column name -> index. Ambiguous (duplicate) output names are
+    ///   marked with `usize::MAX`.
+    fn bind_group_by_expr_in_select(
+        &mut self,
+        expr: Expr,
+        name_to_index: &HashMap<String, usize>,
+        select_items: &[ExprImpl],
+    ) -> Result<ExprImpl> {
+        let name = match &expr {
+            Expr::Identifier(ident) => Some(ident.real_value()),
+            _ => None,
+        };
+        match self.bind_expr(expr) {
+            Ok(ExprImpl::Literal(lit)) => match lit.get_data() {
+                Some(ScalarImpl::Int32(idx)) => idx
+                    .saturating_sub(1)
+                    .try_into()
+                    .ok()
+                    .and_then(|i: usize| select_items.get(i).cloned())
+                    .ok_or_else(|| {
+                        ErrorCode::BindError(format!(
+                            "GROUP BY position {idx} is not in select list"
+                        ))
+                        .into()
+                    }),
+                _ => Err(ErrorCode::BindError("non-integer constant in GROUP BY".into()).into()),
+            },
+            Ok(e) => Ok(e),
+            Err(e) => match name {
+                None => Err(e),
+                Some(name) => match name_to_index.get(&name) {
+                    None => Err(e),
+                    Some(&usize::MAX) => Err(ErrorCode::BindError(format!(
+                        "GROUP BY \"{name}\" is ambiguous"
+                    ))
+                    .into()),
+                    Some(out_idx) => Ok(select_items[*out_idx].clone()),
+                },
+            },
+        }
     }
 
     pub fn bind_returning_list(

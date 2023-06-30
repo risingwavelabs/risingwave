@@ -122,12 +122,9 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn subscribe_compact_tasks(
         &self,
-        max_concurrent_task_number: u64,
         cpu_core_num: u32,
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
-        self.meta_client
-            .subscribe_compact_tasks(max_concurrent_task_number, cpu_core_num)
-            .await
+        self.meta_client.subscribe_compact_tasks(cpu_core_num).await
     }
 
     async fn compactor_heartbeat(

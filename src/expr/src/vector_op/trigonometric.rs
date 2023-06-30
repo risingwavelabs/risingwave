@@ -56,6 +56,45 @@ pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
     input_x.0.atan2(input_y.0).into()
 }
 
+#[function("sinh(float64) -> float64")]
+pub fn sinh_f64(input: F64) -> F64 {
+    f64::sinh(input.0).into()
+}
+
+#[function("cosh(float64) -> float64")]
+pub fn cosh_f64(input: F64) -> F64 {
+    f64::cosh(input.0).into()
+}
+
+#[function("tanh(float64) -> float64")]
+pub fn tanh_f64(input: F64) -> F64 {
+    f64::tanh(input.0).into()
+}
+
+#[function("coth(float64) -> float64")]
+pub fn coth_f64(input: F64) -> F64 {
+    if input.0 == 0.0 {
+        return f64::NAN.into();
+    }
+    // https://en.wikipedia.org/wiki/Hyperbolic_functions#Exponential_definitions
+    (f64::cosh(input.0) / f64::sinh(input.0)).into()
+}
+
+#[function("asinh(float64) -> float64")]
+pub fn asinh_f64(input: F64) -> F64 {
+    f64::asinh(input.0).into()
+}
+
+#[function("acosh(float64) -> float64")]
+pub fn acosh_f64(input: F64) -> F64 {
+    f64::acosh(input.0).into()
+}
+
+#[function("atanh(float64) -> float64")]
+pub fn atanh_f64(input: F64) -> F64 {
+    f64::atanh(input.0).into()
+}
+
 // Radians per degree, a.k.a. PI / 180
 static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
 // Constants we use to get more accurate results.
@@ -64,6 +103,7 @@ static SIND_30: f64 = 0.499_999_999_999_999_94;
 static ONE_MINUS_COSD_60: f64 = 0.499_999_999_999_999_9;
 static TAND_45: f64 = 1.0;
 static COTD_45: f64 = 1.0;
+static ASIN_0_5: f64 = 0.523_598_775_598_298_8;
 
 // returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
 // when xi s 0, and exactly 0.5 when x is 60 degrees.
@@ -229,7 +269,6 @@ pub fn cotd_f64(input: F64) -> F64 {
 #[function("tand(float64) -> float64")]
 pub fn tand_f64(input: F64) -> F64 {
     // PSQL implementation: https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
-
     // Returns NaN if input is NaN or infinite. Different from PSQL implementation.
     if input.0.is_nan() || input.0.is_infinite() {
         return f64::NAN.into();
@@ -242,10 +281,6 @@ pub fn tand_f64(input: F64) -> F64 {
         // tand(-x) = -tand(x)
         arg1 = -arg1;
         sign = -sign;
-    }
-
-    if arg1 % 180.0 == 90.0 {
-        return F64::from(f64::INFINITY);
     }
 
     if arg1 > 180.0 {
@@ -263,10 +298,53 @@ pub fn tand_f64(input: F64) -> F64 {
     let tan_arg1 = sind_q1(arg1) / cosd_q1(arg1);
     let result = sign * (tan_arg1 / TAND_45);
 
-    // On some machines we get tand(180) = minus zero, but this isn't always
-    // true. For portability, and because the user constituency for this
-    // function probably doesn't want minus zero, force it to plain zero.
+    // On some machines we get tand(180) = minus zero, but this isn't always true. For portability,
+    // and because the user constituency for this function probably doesn't want minus zero, force
+    // it to plain zero.
     let result = if result == 0.0 { 0.0 } else { result };
+    result.into()
+}
+
+// returns the inverse sine of x in degrees, for x in the range [0,
+// 1].  The result is an angle in the first quadrant --- [0, 90] degrees.
+// For the 3 special case inputs (0, 0.5 and 1), this function will return exact values (0, 30 and
+// 90 degrees respectively).
+pub fn asind_q1(x: f64) -> f64 {
+    // Stitch together inverse sine and cosine functions for the ranges [0,0.5] and (0.5, 1]. Each
+    // expression below is guaranteed to returnexactly 30 for x=0.5, so the result is a continuous
+    // monotonic functionover the full range.
+    if x <= 0.5 {
+        let asin_x = f64::asin(x);
+        return (asin_x / ASIN_0_5) * 30.0;
+    }
+
+    let acos_x = f64::acos(x);
+    90.0 - (acos_x / ASIN_0_5) * 60.0
+}
+
+#[function("asind(float64) -> float64")]
+pub fn asind_f64(input: F64) -> F64 {
+    let arg1 = input.0;
+
+    // Return NaN if input is NaN or Infinite. Slightly different from PSQL implementation
+    if input.0.is_nan() || input.0.is_infinite() {
+        return F64::from(f64::NAN);
+    }
+
+    // Return NaN if input is out of range. Slightly different from PSQL implementation
+    if input.0 < -1.0 || input.0 > 1.0 {
+        return F64::from(f64::NAN);
+    }
+
+    let result = if arg1 >= 0.0 {
+        asind_q1(arg1)
+    } else {
+        -asind_q1(-arg1)
+    };
+
+    if result.is_infinite() {
+        return F64::from(f64::NAN);
+    }
     result.into()
 }
 
@@ -284,15 +362,24 @@ pub fn radians_f64(input: F64) -> F64 {
 mod tests {
     use std::f64::consts::PI;
 
-    use num_traits::Float;
-    use risingwave_common::types::F64;
+    use risingwave_common::types::{FloatExt, F64};
 
     use crate::vector_op::trigonometric::*;
 
+    fn precision() -> f64 {
+        1e-13
+    }
+
     /// numbers are equal within a rounding error
     fn assert_similar(lhs: F64, rhs: F64) {
-        let x = (lhs.0 - rhs.0).abs() <= 0.000000000000001;
-        assert!(x, "{:?} != {:?}", lhs.0, rhs.0);
+        let x = (lhs.0 - rhs.0).abs() <= precision();
+        assert!(
+            x,
+            "{:?} != {:?}. Required precision is {:?}",
+            lhs.0,
+            rhs.0,
+            precision()
+        );
     }
 
     #[test]
@@ -349,7 +436,7 @@ mod tests {
             (cotd_f64(F64::from(-190)) + F64::from(5.671281819617705))
                 .abs()
                 .0
-                <= 0.00000000000001,
+                <= precision(),
         );
         assert_similar(cot_f64(50_f64.to_radians().into()), cotd_f64(F64::from(50)));
         assert_similar(
@@ -372,12 +459,19 @@ mod tests {
             (tan_f64(250_f64.to_radians().into()) - tand_f64(F64::from(250)))
                 .0
                 .abs()
-                < 0.00000000000001
+                < precision()
         );
         assert_similar(
             tan_f64(360_f64.to_radians().into()),
             tand_f64(F64::from(360)),
         );
+
+        // asind
+        assert_similar(asind_f64(F64::from(-1)), F64::from(-90));
+        assert_similar(asind_f64(F64::from(-0.5)), F64::from(-30));
+        assert_similar(asind_f64(F64::from(0)), F64::from(0));
+        assert_similar(asind_f64(F64::from(0.5)), F64::from(30));
+        assert_similar(asind_f64(F64::from(1)), F64::from(90));
 
         // exact matches
         assert!(tand_f64(F64::from(-270)).0.is_infinite());
@@ -447,5 +541,39 @@ mod tests {
         let zero = F64::from(0);
         assert_similar(degrees_f64(zero), zero);
         assert_similar(radians_f64(zero), zero);
+    }
+
+    #[test]
+    fn test_hyperbolic_trigonometric_funcs() {
+        let two = F64::from(2);
+        let one = F64::from(1);
+        let x = F64::from(5);
+        let y = F64::from(3);
+        // https://en.wikipedia.org/wiki/Hyperbolic_functions#Sums_of_arguments
+        assert_similar(
+            sinh_f64(x + y),
+            sinh_f64(x) * cosh_f64(y) + cosh_f64(x) * sinh_f64(y),
+        );
+        assert_similar(
+            cosh_f64(x + y),
+            cosh_f64(x) * cosh_f64(y) + sinh_f64(x) * sinh_f64(y),
+        );
+        assert_similar(
+            tanh_f64(x + y),
+            (tanh_f64(x) + tanh_f64(y)) / (one + tanh_f64(x) * tanh_f64(y)),
+        );
+        // https://en.wikipedia.org/wiki/Hyperbolic_functions#Useful_relations
+        assert_similar(coth_f64(-x), -coth_f64(x));
+        assert_similar(tanh_f64(-x), -tanh_f64(x));
+        // https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#Other_identities
+        assert_similar(two * acosh_f64(x), acosh_f64(two * x.powi(2) - one)); // for x >= 1
+        assert_similar(two * asinh_f64(x), acosh_f64(two * x.powi(2) + one)); // for x >= 0
+
+        let x = x.powi(2).0;
+
+        assert_similar(
+            asinh_f64(F64::from(x.powi(2) - 1.0) / (two * x)),
+            atanh_f64(F64::from(x.powi(2) - 1.0) / F64::from(x.powi(2) + 1.0)),
+        );
     }
 }

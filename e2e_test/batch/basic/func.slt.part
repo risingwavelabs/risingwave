@@ -259,6 +259,31 @@ select pg_typeof('123');
 unknown
 
 query T
+select pg_typeof('123'::varchar);
+----
+varchar
+
+query T
+select pg_typeof('123'::int);
+----
+integer
+
+query T
+select pg_typeof(null);
+----
+unknown
+
+query T
+select pg_typeof(null::varchar);
+----
+varchar
+
+query T
+select pg_typeof(null::bool);
+----
+boolean
+
+query T
 select pg_typeof(-9223372036854775808);
 ----
 bigint

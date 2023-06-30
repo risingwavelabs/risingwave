@@ -29,11 +29,11 @@ use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
+    end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::StorageError;
@@ -47,7 +47,7 @@ use risingwave_storage::store::{
 };
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use risingwave_storage::StateStore;
-use tracing::trace;
+use tracing::{trace, Instrument};
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
@@ -189,11 +189,11 @@ where
 
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
         let local_state_store = store
-            .new_local(NewLocalOptions {
+            .new_local(NewLocalOptions::new(
                 table_id,
                 is_consistent_op,
                 table_option,
-            })
+            ))
             .await;
 
         let pk_data_types = pk_indices
@@ -384,11 +384,11 @@ where
         is_consistent_op: bool,
     ) -> Self {
         let local_state_store = store
-            .new_local(NewLocalOptions {
+            .new_local(NewLocalOptions::new(
                 table_id,
                 is_consistent_op,
-                table_option: TableOption::default(),
-            })
+                TableOption::default(),
+            ))
             .await;
 
         let pk_data_types = pk_indices
@@ -790,7 +790,9 @@ where
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
-        self.seal_current_epoch(new_epoch.curr).await
+        self.seal_current_epoch(new_epoch.curr)
+            .instrument(tracing::info_span!("state_table_commit"))
+            .await
     }
 
     // TODO(st1page): maybe we should extract a pub struct to do it
@@ -825,23 +827,41 @@ where
                 prefix_serializer.as_ref().unwrap(),
             )
         });
-        if let Some(watermark_suffix) = watermark_suffix {
-            // We either serialize null into `0u8`, data into `(1u8 || scalar)`, or serialize null
-            // into `1u8`, data into `(0u8 || scalar)`. We do not want to delete null
-            // here, so `range_begin_suffix` cannot be `vec![]` when null is represented as `0u8`.
-            let range_begin_suffix = watermark_suffix
-                .first()
-                .map(|bit| vec![*bit])
-                .unwrap_or_default();
+        if let Some(watermark_suffix) = watermark_suffix && let Some(first_byte) = watermark_suffix.first() {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes.iter_vnodes().collect_vec()
             }, "delete range");
-            for vnode in self.vnodes.iter_vnodes() {
-                let mut range_begin = vnode.to_be_bytes().to_vec();
-                let mut range_end = range_begin.clone();
-                range_begin.extend(&range_begin_suffix);
-                range_end.extend(&watermark_suffix);
-                delete_ranges.push((Bytes::from(range_begin), Bytes::from(range_end)));
+            if prefix_serializer.as_ref().unwrap().get_order_types().first().unwrap().is_ascending() {
+                // We either serialize null into `0u8`, data into `(1u8 || scalar)`, or serialize null
+                // into `1u8`, data into `(0u8 || scalar)`. We do not want to delete null
+                // here, so `range_begin_suffix` cannot be `vec![]` when null is represented as `0u8`.
+                let range_begin_suffix = vec![*first_byte];
+                for vnode in self.vnodes.iter_vnodes() {
+                    let mut range_begin = vnode.to_be_bytes().to_vec();
+                    let mut range_end = range_begin.clone();
+                    range_begin.extend(&range_begin_suffix);
+                    range_end.extend(&watermark_suffix);
+                    delete_ranges.push((
+                        Bound::Included(Bytes::from(range_begin)),
+                        Bound::Excluded(Bytes::from(range_end)),
+                    ));
+                }
+            } else {
+                assert_ne!(*first_byte, u8::MAX);
+                let following_bytes = next_key(&watermark_suffix[1..]);
+                if !following_bytes.is_empty() {
+                    for vnode in self.vnodes.iter_vnodes() {
+                        let mut range_begin = vnode.to_be_bytes().to_vec();
+                        let mut range_end = range_begin.clone();
+                        range_begin.push(*first_byte);
+                        range_begin.extend(&following_bytes);
+                        range_end.push(first_byte + 1);
+                        delete_ranges.push((
+                            Bound::Included(Bytes::from(range_begin)),
+                            Bound::Excluded(Bytes::from(range_end)),
+                        ));
+                    }
+                }
             }
         }
         self.local_store.flush(delete_ranges).await?;

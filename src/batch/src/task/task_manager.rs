@@ -21,10 +21,12 @@ use parking_lot::Mutex;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::Result;
-use risingwave_common::memory::{MemoryContext, MemoryContextRef};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
+use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
@@ -53,7 +55,7 @@ pub struct BatchManager {
     total_mem_val: Arc<TrAdder<i64>>,
 
     /// Memory context used for batch tasks in cn.
-    mem_context: MemoryContextRef,
+    mem_context: MemoryContext,
 
     /// Metrics for batch manager.
     metrics: BatchManagerMetrics,
@@ -73,7 +75,7 @@ impl BatchManager {
                 .unwrap()
         };
 
-        let mem_context = Arc::new(MemoryContext::new(None, metrics.batch_total_mem.clone()));
+        let mem_context = MemoryContext::root(metrics.batch_total_mem.clone());
         BatchManager {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             runtime: Arc::new(runtime.into()),
@@ -84,17 +86,18 @@ impl BatchManager {
         }
     }
 
-    pub fn memory_context_ref(&self) -> MemoryContextRef {
+    pub fn memory_context_ref(&self) -> MemoryContext {
         self.mem_context.clone()
     }
 
     pub async fn fire_task(
-        &self,
+        self: &Arc<Self>,
         tid: &PbTaskId,
         plan: PlanFragment,
         epoch: BatchQueryEpoch,
         context: ComputeNodeContext,
         state_reporter: StateReporter,
+        tracing_context: TracingContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime())?;
@@ -106,6 +109,15 @@ impl BatchManager {
         let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
             e.insert(task.clone());
             self.metrics.task_num.inc();
+
+            let this = self.clone();
+            let task_id = task_id.clone();
+            let state_reporter = state_reporter.clone();
+            let heartbeat_join_handle = self.runtime.spawn(async move {
+                this.start_task_heartbeat(state_reporter, task_id).await;
+            });
+            task.set_heartbeat_join_handle(heartbeat_join_handle);
+
             Ok(())
         } else {
             Err(ErrorCode::InternalError(format!(
@@ -114,8 +126,65 @@ impl BatchManager {
             ))
             .into())
         };
-        task.async_execute(Some(state_reporter)).await?;
+        task.async_execute(Some(state_reporter), tracing_context)
+            .await
+            .inspect_err(|_| {
+                self.cancel_task(&task_id.to_prost());
+            })?;
         ret
+    }
+
+    #[cfg(test)]
+    async fn fire_task_for_test(
+        self: &Arc<Self>,
+        tid: &PbTaskId,
+        plan: PlanFragment,
+    ) -> Result<()> {
+        use risingwave_hummock_sdk::to_committed_batch_query_epoch;
+
+        self.fire_task(
+            tid,
+            plan,
+            to_committed_batch_query_epoch(0),
+            ComputeNodeContext::for_test(),
+            StateReporter::new_with_test(),
+            TracingContext::none(),
+        )
+        .await
+    }
+
+    async fn start_task_heartbeat(&self, mut state_reporter: StateReporter, task_id: TaskId) {
+        let _metric_guard = scopeguard::guard((), |_| {
+            tracing::debug!("heartbeat worker for task {:?} stopped", task_id);
+            self.metrics.batch_heartbeat_worker_num.dec();
+        });
+        tracing::debug!("heartbeat worker for task {:?} started", task_id);
+        self.metrics.batch_heartbeat_worker_num.inc();
+        // The heartbeat is to ensure task cancellation when frontend's cancellation request fails
+        // to reach compute node (for any reason like RPC fails, frontend crashes).
+        let mut heartbeat_interval = tokio::time::interval(core::time::Duration::from_secs(60));
+        heartbeat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        heartbeat_interval.reset();
+        loop {
+            heartbeat_interval.tick().await;
+            if !self.tasks.lock().contains_key(&task_id) {
+                break;
+            }
+            if state_reporter
+                .send(TaskInfoResponse {
+                    task_id: Some(task_id.to_prost()),
+                    task_status: TaskStatus::Ping.into(),
+                    error_message: "".to_string(),
+                })
+                .await
+                .is_err()
+            {
+                tracing::warn!("try to cancel task {:?} due to heartbeat", task_id);
+                // Task may have been cancelled, but it's fine to `cancel_task` again.
+                self.cancel_task(&task_id.to_prost());
+                break;
+            }
+        }
     }
 
     pub fn get_data(
@@ -162,9 +231,12 @@ impl BatchManager {
                 // propagated to upstream.
                 task.cancel();
                 self.metrics.task_num.dec();
+                if let Some(heartbeat_join_handle) = task.heartbeat_join_handle() {
+                    heartbeat_join_handle.abort();
+                }
             }
             None => {
-                warn!("Task id not found for abort task")
+                warn!("Task {:?} not found for cancel", sid)
             }
         };
     }
@@ -201,14 +273,6 @@ impl BatchManager {
             }
             tokio::time::sleep(Duration::from_millis(100)).await
         }
-    }
-
-    /// Return the receivers for streaming RPC.
-    pub fn get_task_receiver(
-        &self,
-        task_id: &TaskId,
-    ) -> tokio::sync::mpsc::Receiver<TaskInfoResponse> {
-        self.tasks.lock().get(task_id).unwrap().state_receiver()
     }
 
     pub fn runtime(&self) -> Arc<BackgroundShutdownRuntime> {
@@ -261,27 +325,26 @@ impl BatchManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use risingwave_common::config::BatchConfig;
-    use risingwave_common::types::DataType;
-    use risingwave_expr::expr::test_utils::make_i32_literal;
-    use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
-        ExchangeInfo, PbTaskId, PbTaskOutputId, PlanFragment, PlanNode, TableFunctionNode,
-        ValuesNode,
+        ExchangeInfo, PbTaskId, PbTaskOutputId, PlanFragment, PlanNode, ValuesNode,
     };
-    use risingwave_pb::expr::table_function::Type;
-    use risingwave_pb::expr::TableFunction;
     use tonic::Code;
 
     use crate::monitor::BatchManagerMetrics;
-    use crate::task::{BatchManager, ComputeNodeContext, StateReporter, TaskId};
+    use crate::task::{BatchManager, TaskId};
 
     #[test]
     fn test_task_not_found() {
         use tonic::Status;
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
         let task_id = TaskId {
             task_id: 0,
             stage_id: 0,
@@ -309,7 +372,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_id_conflict() {
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -324,30 +390,17 @@ mod tests {
                 distribution: None,
             }),
         };
-        let context = ComputeNodeContext::for_test();
         let task_id = PbTaskId {
             query_id: "".to_string(),
             stage_id: 0,
             task_id: 0,
         };
         manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                to_committed_batch_query_epoch(0),
-                context.clone(),
-                StateReporter::new_with_test(),
-            )
+            .fire_task_for_test(&task_id, plan.clone())
             .await
             .unwrap();
         let err = manager
-            .fire_task(
-                &task_id,
-                plan,
-                to_committed_batch_query_epoch(0),
-                context,
-                StateReporter::new_with_test(),
-            )
+            .fire_task_for_test(&task_id, plan)
             .await
             .unwrap_err();
         assert!(err
@@ -356,48 +409,124 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_task_aborted() {
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
+    async fn test_task_cancel_for_busy_loop() {
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
                 identity: "".to_string(),
-                node_body: Some(NodeBody::TableFunction(TableFunctionNode {
-                    table_function: Some(TableFunction {
-                        function_type: Type::Generate as i32,
-                        args: vec![
-                            make_i32_literal(1),
-                            make_i32_literal(i32::MAX),
-                            make_i32_literal(1),
-                        ],
-                        return_type: Some(DataType::Int32.to_protobuf()),
-                        udtf: None,
-                    }),
-                })),
+                node_body: Some(NodeBody::BusyLoopExecutor(true)),
             }),
             exchange_info: Some(ExchangeInfo {
                 mode: DistributionMode::Single as i32,
                 distribution: None,
             }),
         };
-        let context = ComputeNodeContext::for_test();
         let task_id = PbTaskId {
             query_id: "".to_string(),
             stage_id: 0,
             task_id: 0,
         };
-        manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                to_committed_batch_query_epoch(0),
-                context.clone(),
-                StateReporter::new_with_test(),
-            )
-            .await
-            .unwrap();
+        manager.fire_task_for_test(&task_id, plan).await.unwrap();
         manager.cancel_task(&task_id);
         let task_id = TaskId::from(&task_id);
         assert!(!manager.tasks.lock().contains_key(&task_id));
+    }
+
+    #[tokio::test]
+    async fn test_task_cancel_for_block() {
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
+        let plan = PlanFragment {
+            root: Some(PlanNode {
+                children: vec![],
+                identity: "".to_string(),
+                node_body: Some(NodeBody::BlockExecutor(true)),
+            }),
+            exchange_info: Some(ExchangeInfo {
+                mode: DistributionMode::Single as i32,
+                distribution: None,
+            }),
+        };
+        let task_id = PbTaskId {
+            query_id: "".to_string(),
+            stage_id: 0,
+            task_id: 0,
+        };
+        manager.fire_task_for_test(&task_id, plan).await.unwrap();
+        manager.cancel_task(&task_id);
+        let task_id = TaskId::from(&task_id);
+        assert!(!manager.tasks.lock().contains_key(&task_id));
+    }
+
+    #[tokio::test]
+    async fn test_task_abort_for_busy_loop() {
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
+        let plan = PlanFragment {
+            root: Some(PlanNode {
+                children: vec![],
+                identity: "".to_string(),
+                node_body: Some(NodeBody::BusyLoopExecutor(true)),
+            }),
+            exchange_info: Some(ExchangeInfo {
+                mode: DistributionMode::Single as i32,
+                distribution: None,
+            }),
+        };
+        let task_id = PbTaskId {
+            query_id: "".to_string(),
+            stage_id: 0,
+            task_id: 0,
+        };
+        manager.fire_task_for_test(&task_id, plan).await.unwrap();
+        let task_id = TaskId::from(&task_id);
+        manager
+            .tasks
+            .lock()
+            .get(&task_id)
+            .unwrap()
+            .abort("Abort Test".to_owned());
+        assert!(manager.wait_until_task_aborted(&task_id).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_task_abort_for_block() {
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
+        let plan = PlanFragment {
+            root: Some(PlanNode {
+                children: vec![],
+                identity: "".to_string(),
+                node_body: Some(NodeBody::BlockExecutor(true)),
+            }),
+            exchange_info: Some(ExchangeInfo {
+                mode: DistributionMode::Single as i32,
+                distribution: None,
+            }),
+        };
+        let task_id = PbTaskId {
+            query_id: "".to_string(),
+            stage_id: 0,
+            task_id: 0,
+        };
+        manager.fire_task_for_test(&task_id, plan).await.unwrap();
+        let task_id = TaskId::from(&task_id);
+        manager
+            .tasks
+            .lock()
+            .get(&task_id)
+            .unwrap()
+            .abort("Abort Test".to_owned());
+        assert!(manager.wait_until_task_aborted(&task_id).await.is_ok());
     }
 }

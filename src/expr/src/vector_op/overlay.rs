@@ -108,7 +108,9 @@ pub fn overlay_for(
 
     let Ok(count) = count.try_into() else {
         // For negative `count`, which is rare in practice, we hand over to `substr`
-        let start_right = start.checked_add(count).ok_or(ExprError::NumericOutOfRange)?;
+        let start_right = start
+            .checked_add(count)
+            .ok_or(ExprError::NumericOutOfRange)?;
         return super::substr::substr_start(s, start_right, writer);
     };
 

@@ -59,8 +59,42 @@ public class BaseRow implements AutoCloseable {
         return Binding.rowGetTimestampValue(pointer, index);
     }
 
+    public java.sql.Time getTime(int index) {
+        return Binding.rowGetTimeValue(pointer, index);
+    }
+
     public java.math.BigDecimal getDecimal(int index) {
         return Binding.rowGetDecimalValue(pointer, index);
+    }
+
+    public java.sql.Date getDate(int index) {
+        return Binding.rowGetDateValue(pointer, index);
+    }
+
+    // string representation of interval: "2 mons 3 days 00:00:00.000004" or "P1Y2M3DT4H5M6.789123S"
+    public String getInterval(int index) {
+        return Binding.rowGetIntervalValue(pointer, index);
+    }
+
+    // string representation of jsonb: '{"key": "value"}'
+    public String getJsonb(int index) {
+        return Binding.rowGetJsonbValue(pointer, index);
+    }
+
+    public byte[] getBytea(int index) {
+        return Binding.rowGetByteaValue(pointer, index);
+    }
+
+    /**
+     * Only supports one-dimensional array right now
+     *
+     * @return an Object[] which will be used in java.sql.Connection#createArrayOf(String typeName,
+     *     Object[] elements)
+     */
+    public <T> Object[] getArray(int index, Class<T> clazz) {
+        var val = Binding.rowGetArrayValue(pointer, index, clazz);
+        assert (val instanceof Object[]);
+        return (Object[]) val;
     }
 
     @Override

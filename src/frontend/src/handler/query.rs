@@ -25,7 +25,7 @@ use postgres_types::FromSql;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
@@ -43,6 +43,7 @@ use crate::optimizer::{
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
     LocalQueryExecution, LocalQueryStream, PinnedHummockSnapshot,
@@ -114,6 +115,7 @@ pub struct BoundResult {
     pub(crate) must_dist: bool,
     pub(crate) bound: BoundStatement,
     pub(crate) param_types: Vec<DataType>,
+    pub(crate) parsed_params: Option<Vec<Datum>>,
     pub(crate) dependent_relations: HashSet<TableId>,
 }
 
@@ -137,6 +139,7 @@ fn gen_bound(
         must_dist,
         bound,
         param_types: binder.export_param_types()?,
+        parsed_params: None,
         dependent_relations: binder.included_relations(),
     })
 }
@@ -256,7 +259,6 @@ struct BatchPlanFragmenterResult {
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
     pub(crate) _dependent_relations: Vec<TableId>,
-    pub(crate) notice: String,
 }
 
 fn gen_batch_plan_fragmenter(
@@ -271,20 +273,21 @@ fn gen_batch_plan_fragmenter(
         dependent_relations,
     } = plan_result;
 
-    let context = plan.plan_base().ctx.clone();
     tracing::trace!(
         "Generated query plan: {:?}, query_mode:{:?}",
-        plan.explain_to_string()?,
+        plan.explain_to_string(),
         query_mode
     );
-    let plan_fragmenter = BatchPlanFragmenter::new(
+    let worker_node_manager_reader = WorkerNodeSelector::new(
         session.env().worker_node_manager_ref(),
+        session.is_barrier_read(),
+    );
+    let plan_fragmenter = BatchPlanFragmenter::new(
+        worker_node_manager_reader,
         session.env().catalog_reader().clone(),
         session.config().get_batch_parallelism(),
         plan,
     )?;
-    let mut notice = String::new();
-    context.append_notice(&mut notice);
 
     Ok(BatchPlanFragmenterResult {
         plan_fragmenter,
@@ -292,7 +295,6 @@ fn gen_batch_plan_fragmenter(
         schema,
         stmt_type,
         _dependent_relations: dependent_relations,
-        notice,
     })
 }
 
@@ -306,11 +308,10 @@ async fn execute(
         query_mode,
         schema,
         stmt_type,
-        notice,
         ..
     } = plan_fragmenter_result;
 
-    let only_checkpoint_visible = session.config().only_checkpoint_visible();
+    let is_barrier_read = session.is_barrier_read();
     let query_start_time = Instant::now();
     let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
@@ -335,7 +336,7 @@ async fn execute(
             let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
             let query_id = query.query_id().clone();
             let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, only_checkpoint_visible)
+            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, is_barrier_read)
         };
         match query_mode {
             QueryMode::Auto => unreachable!(),
@@ -357,7 +358,7 @@ async fn execute(
         }
     };
 
-    let rows_count: Option<i32> = match stmt_type {
+    let row_cnt: Option<i32> = match stmt_type {
         StatementType::SELECT
         | StatementType::INSERT_RETURNING
         | StatementType::DELETE_RETURNING
@@ -383,7 +384,7 @@ async fn execute(
                     i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
                         .unwrap()
                         .try_into()
-                        .expect("affected rows count large than i32"),
+                        .expect("affected rows count large than i64"),
                 )
             } else {
                 Some(
@@ -441,9 +442,11 @@ async fn execute(
         Ok(())
     };
 
-    Ok(PgResponse::new_for_stream_extra(
-        stmt_type, rows_count, row_stream, pg_descs, notice, callback,
-    ))
+    Ok(PgResponse::builder(stmt_type)
+        .row_cnt_opt(row_cnt)
+        .values(row_stream, pg_descs)
+        .callback(callback)
+        .into())
 }
 
 async fn distribute_execute(

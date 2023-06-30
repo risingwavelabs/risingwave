@@ -141,7 +141,10 @@ impl<S: StateStore> SortExecutor<S> {
 
                     yield Message::Watermark(watermark);
                 }
-                Message::Watermark(watermark) => yield Message::Watermark(watermark),
+                Message::Watermark(_) => {
+                    // ignore watermarks on other columns
+                    continue;
+                }
                 Message::Chunk(chunk) => {
                     vars.buffer.apply_chunk(chunk, &mut this.buffer_table);
                     vars.buffer_changed = true;
@@ -240,11 +243,10 @@ mod tests {
         sort_executor.expect_barrier().await;
 
         // Init watermark
-        tx.push_int64_watermark(0, 0_i64);
+        tx.push_int64_watermark(0, 0_i64); // expected to be ignored
         tx.push_int64_watermark(sort_column_index, 0_i64);
 
         // Consume the watermark
-        sort_executor.expect_watermark().await;
         sort_executor.expect_watermark().await;
 
         // Push data chunk1
@@ -257,10 +259,7 @@ mod tests {
         ));
 
         // Push watermark1 on an irrelevant column
-        tx.push_int64_watermark(0, 3_i64);
-
-        // Consume the watermark
-        sort_executor.expect_watermark().await;
+        tx.push_int64_watermark(0, 3_i64); // expected to be ignored
 
         // Push watermark1 on sorted column
         tx.push_int64_watermark(sort_column_index, 3_i64);
@@ -294,10 +293,7 @@ mod tests {
         sort_executor.expect_barrier().await;
 
         // Push watermark2 on an irrelevant column
-        tx.push_int64_watermark(0, 7_i64);
-
-        // Consume the watermark
-        sort_executor.expect_watermark().await;
+        tx.push_int64_watermark(0, 7_i64); // expected to be ignored
 
         // Push watermark2 on sorted column
         tx.push_int64_watermark(sort_column_index, 7_i64);
@@ -332,11 +328,10 @@ mod tests {
         sort_executor.expect_barrier().await;
 
         // Init watermark
-        tx.push_int64_watermark(0, 0_i64);
+        tx.push_int64_watermark(0, 0_i64); // expected to be ignored
         tx.push_int64_watermark(sort_column_index, 0_i64);
 
         // Consume the watermark
-        sort_executor.expect_watermark().await;
         sort_executor.expect_watermark().await;
 
         // Push data chunk

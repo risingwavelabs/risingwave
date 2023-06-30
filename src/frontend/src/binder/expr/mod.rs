@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::{
     TrimWhereField, UnaryOperator,
 };
 
+use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
 use crate::binder::Binder;
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Parameter, SubqueryKind};
 
@@ -87,7 +88,7 @@ impl Binder {
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
             Expr::Identifier(ident) => {
-                if ["session_user", "current_schema", "current_timestamp"]
+                if SYS_FUNCTION_WITHOUT_ARGS
                     .iter()
                     .any(|e| ident.real_value().as_str() == *e)
                 {
@@ -129,6 +130,8 @@ impl Binder {
             Expr::IsNotTrue(expr) => self.bind_is_operator(ExprType::IsNotTrue, *expr),
             Expr::IsFalse(expr) => self.bind_is_operator(ExprType::IsFalse, *expr),
             Expr::IsNotFalse(expr) => self.bind_is_operator(ExprType::IsNotFalse, *expr),
+            Expr::IsUnknown(expr) => self.bind_is_unknown(ExprType::IsNull, *expr),
+            Expr::IsNotUnknown(expr) => self.bind_is_unknown(ExprType::IsNotNull, *expr),
             Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(*left, *right),
             Expr::IsNotDistinctFrom(left, right) => self.bind_not_distinct_from(*left, *right),
             Expr::Case {
@@ -154,7 +157,7 @@ impl Binder {
                 timestamp,
                 time_zone,
             } => self.bind_at_time_zone(*timestamp, time_zone),
-            // special syntaxt for string
+            // special syntax for string
             Expr::Trim {
                 expr,
                 trim_where,
@@ -269,6 +272,7 @@ impl Binder {
                 return self.rewrite_positive(expr);
             }
             UnaryOperator::PGSquareRoot => ExprType::Sqrt,
+            UnaryOperator::PGCubeRoot => ExprType::Cbrt,
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported unary expression: {:?}", op),
@@ -441,6 +445,13 @@ impl Binder {
         Ok(FunctionCall::new(func_type, vec![expr])?.into())
     }
 
+    pub(super) fn bind_is_unknown(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {
+        let expr = self
+            .bind_expr_inner(expr)?
+            .cast_implicit(DataType::Boolean)?;
+        Ok(FunctionCall::new(func_type, vec![expr])?.into())
+    }
+
     pub(super) fn bind_distinct_from(&mut self, left: Expr, right: Expr) -> Result<ExprImpl> {
         let left = self.bind_expr_inner(left)?;
         let right = self.bind_expr_inner(right)?;
@@ -496,7 +507,9 @@ impl Binder {
     }
 
     pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
-        if let Expr::Array(Array {elem: ref expr, ..}) = expr && matches!(&data_type, DataType::List{ .. } ) {
+        if let Expr::Array(Array { elem: ref expr, .. }) = expr
+            && matches!(&data_type, DataType::List { .. })
+        {
             return self.bind_array_cast(expr.clone(), data_type);
         }
         let lhs = self.bind_expr_inner(expr)?;
@@ -516,7 +529,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
                     name: f.name.real_value(),
                     field_descs: vec![],
                     type_name: "".to_string(),
-                    generated_column: None,
+                    generated_or_default_column: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?
@@ -529,7 +542,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         name: column_def.name.real_value(),
         field_descs,
         type_name: "".to_string(),
-        generated_column: None,
+        generated_or_default_column: None,
     })
 }
 
@@ -555,9 +568,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp(false) => DataType::Timestamp,
         AstDataType::Timestamp(true) => DataType::Timestamptz,
         AstDataType::Interval => DataType::Interval,
-        AstDataType::Array(datatype) => DataType::List {
-            datatype: Box::new(bind_data_type(datatype)?),
-        },
+        AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
         AstDataType::Char(..) => {
             return Err(ErrorCode::NotImplemented(
                 "CHAR is not supported, please use VARCHAR instead\n".to_string(),

@@ -21,8 +21,8 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceContext, SplitId, SplitImpl, SplitMetaData,
-    StreamChunkWithState,
+    BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    SplitMetaData, StreamChunkWithState,
 };
 use risingwave_source::source_desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -57,6 +57,8 @@ pub struct FsSourceExecutor<S: StateStore> {
 
     /// Expected barrier latency
     expected_barrier_latency_ms: u64,
+
+    source_ctrl_opts: SourceCtrlOpts,
 }
 
 impl<S: StateStore> FsSourceExecutor<S> {
@@ -70,6 +72,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         expected_barrier_latency_ms: u64,
         executor_id: u64,
+        source_ctrl_opts: SourceCtrlOpts,
     ) -> StreamResult<Self> {
         Ok(Self {
             ctx,
@@ -80,6 +83,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             expected_barrier_latency_ms,
+            source_ctrl_opts,
         })
     }
 
@@ -98,6 +102,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.stream_source_core.source_id,
             self.ctx.fragment_id,
             source_desc.metrics.clone(),
+            self.source_ctrl_opts.clone(),
         );
         source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
         let stream_reader = source_desc
@@ -111,7 +116,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -177,7 +182,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED>,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -333,7 +338,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
-        let mut stream = StreamReaderWithPause::<true>::new(barrier_stream, source_chunk_reader);
+        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
+            barrier_stream,
+            source_chunk_reader,
+        );
         if start_with_paused {
             stream.pause_stream();
         }
@@ -383,7 +391,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             .source_row_per_barrier
                             .with_label_values(&[
                                 self.ctx.id.to_string().as_str(),
-                                self.stream_source_core.source_identify.as_ref(),
+                                self.stream_source_core.source_id.to_string().as_ref(),
                             ])
                             .inc_by(metric_row_per_barrier);
                         metric_row_per_barrier = 0;
@@ -426,8 +434,9 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     self.metrics
                         .source_output_row_count
                         .with_label_values(&[
-                            self.stream_source_core.source_identify.as_str(),
+                            self.stream_source_core.source_id.to_string().as_ref(),
                             self.stream_source_core.source_name.as_ref(),
+                            self.ctx.id.to_string().as_str(),
                         ])
                         .inc_by(chunk.cardinality() as u64);
                     yield Message::Chunk(chunk);

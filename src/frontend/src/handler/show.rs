@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -26,8 +28,8 @@ use serde_json;
 
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
-use crate::catalog::CatalogError;
-use crate::handler::util::col_descs_to_rows;
+use crate::catalog::{CatalogError, IndexCatalog};
+use crate::handler::util::{col_descs_to_rows, indexes_to_rows};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
 
@@ -51,6 +53,22 @@ pub fn get_columns_from_table(
         .filter(|c| !c.is_hidden)
         .map(|c| c.column_desc.clone())
         .collect())
+}
+
+pub fn get_indexes_from_table(
+    session: &SessionImpl,
+    table_name: ObjectName,
+) -> Result<Vec<Arc<IndexCatalog>>> {
+    let mut binder = Binder::new_for_system(session);
+    let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
+    let indexes = match relation {
+        Relation::BaseTable(t) => t.table_indexes,
+        _ => {
+            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
+        }
+    };
+
+    Ok(indexes)
 }
 
 fn schema_or_default(schema: &Option<Ident>) -> String {
@@ -102,23 +120,60 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
             let columns = get_columns_from_table(&session, table)?;
             let rows = col_descs_to_rows(columns);
 
-            return Ok(PgResponse::new_for_stream(
-                StatementType::SHOW_COMMAND,
-                None,
-                rows.into(),
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Type".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ],
-            ));
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(
+                    rows.into(),
+                    vec![
+                        PgFieldDescriptor::new(
+                            "Name".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Type".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                    ],
+                )
+                .into());
+        }
+        ShowObject::Indexes { table } => {
+            let indexes = get_indexes_from_table(&session, table)?;
+            let rows = indexes_to_rows(indexes);
+
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(
+                    rows.into(),
+                    vec![
+                        PgFieldDescriptor::new(
+                            "Name".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "On".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Key".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Include".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Distributed By".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                    ],
+                )
+                .into());
         }
         ShowObject::Connection { schema } => {
             let schema = catalog_reader
@@ -164,28 +219,28 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                     ])
                 })
                 .collect_vec();
-            return Ok(PgResponse::new_for_stream(
-                StatementType::SHOW_COMMAND,
-                None,
-                rows.into(),
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Type".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Properties".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ],
-            ));
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(
+                    rows.into(),
+                    vec![
+                        PgFieldDescriptor::new(
+                            "Name".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Type".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Properties".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                    ],
+                )
+                .into());
         }
         ShowObject::Function { schema } => {
             let rows = catalog_reader
@@ -201,38 +256,38 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                     ])
                 })
                 .collect_vec();
-            return Ok(PgResponse::new_for_stream(
-                StatementType::SHOW_COMMAND,
-                None,
-                rows.into(),
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Arguments".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Return Type".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Language".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Link".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ],
-            ));
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(
+                    rows.into(),
+                    vec![
+                        PgFieldDescriptor::new(
+                            "Name".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Arguments".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Return Type".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Language".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Link".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                    ],
+                )
+                .into());
         }
     };
 
@@ -241,16 +296,16 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
         .map(|n| Row::new(vec![Some(n.into())]))
         .collect_vec();
 
-    Ok(PgResponse::new_for_stream(
-        StatementType::SHOW_COMMAND,
-        None,
-        rows.into(),
-        vec![PgFieldDescriptor::new(
-            "Name".to_owned(),
-            DataType::Varchar.to_oid(),
-            DataType::Varchar.type_len(),
-        )],
-    ))
+    Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+        .values(
+            rows.into(),
+            vec![PgFieldDescriptor::new(
+                "Name".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            )],
+        )
+        .into())
 }
 
 pub fn handle_show_create_object(
@@ -298,7 +353,14 @@ pub fn handle_show_create_object(
                 .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
             source.create_sql()
         }
-        _ => {
+        ShowCreateType::Index => {
+            let index = schema
+                .get_table_by_name(&object_name)
+                .filter(|t| t.is_index())
+                .ok_or_else(|| CatalogError::NotFound("index", name.to_string()))?;
+            index.create_sql()
+        }
+        ShowCreateType::Function => {
             return Err(ErrorCode::NotImplemented(
                 format!("show create on: {}", show_create_type),
                 None.into(),
@@ -308,23 +370,23 @@ pub fn handle_show_create_object(
     };
     let name = format!("{}.{}", schema_name, object_name);
 
-    Ok(PgResponse::new_for_stream(
-        StatementType::SHOW_COMMAND,
-        None,
-        vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
-        vec![
-            PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Create Sql".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ],
-    ))
+    Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+        .values(
+            vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
+            vec![
+                PgFieldDescriptor::new(
+                    "Name".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Create Sql".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+            ],
+        )
+        .into())
 }
 
 #[cfg(test)]
@@ -356,7 +418,7 @@ mod tests {
         let sql = format!(
             r#"CREATE SOURCE t
     WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+    ROW FORMAT PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;

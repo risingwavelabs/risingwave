@@ -52,8 +52,8 @@ use core::str::FromStr;
 
 pub use num_traits::Float;
 use num_traits::{
-    Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, NumCast,
-    One, Pow, Signed, ToPrimitive, Zero,
+    Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Pow,
+    Signed, Zero,
 };
 
 // masks for the parts of the IEEE 754 float
@@ -565,64 +565,12 @@ impl<T: One> One for OrderedFloat<T> {
     }
 }
 
-impl<T: NumCast> NumCast for OrderedFloat<T> {
-    #[inline]
-    fn from<F: ToPrimitive>(n: F) -> Option<Self> {
-        T::from(n).map(OrderedFloat)
-    }
-}
-
-impl<T: ToPrimitive> ToPrimitive for OrderedFloat<T> {
-    fn to_i64(&self) -> Option<i64> {
-        self.0.to_i64()
-    }
-
-    fn to_u64(&self) -> Option<u64> {
-        self.0.to_u64()
-    }
-
-    fn to_isize(&self) -> Option<isize> {
-        self.0.to_isize()
-    }
-
-    fn to_i8(&self) -> Option<i8> {
-        self.0.to_i8()
-    }
-
-    fn to_i16(&self) -> Option<i16> {
-        self.0.to_i16()
-    }
-
-    fn to_i32(&self) -> Option<i32> {
-        self.0.to_i32()
-    }
-
-    fn to_usize(&self) -> Option<usize> {
-        self.0.to_usize()
-    }
-
-    fn to_u8(&self) -> Option<u8> {
-        self.0.to_u8()
-    }
-
-    fn to_u16(&self) -> Option<u16> {
-        self.0.to_u16()
-    }
-
-    fn to_u32(&self) -> Option<u32> {
-        self.0.to_u32()
-    }
-
-    fn to_f32(&self) -> Option<f32> {
-        self.0.to_f32()
-    }
-
-    fn to_f64(&self) -> Option<f64> {
-        self.0.to_f64()
-    }
-}
-
-impl<T: Float> Float for OrderedFloat<T> {
+/// Similar to [`num_traits::Float`], but without requiring `NumCast` and `ToPrimitive`.
+#[easy_ext::ext(FloatExt)]
+pub impl<T: Float> OrderedFloat<T>
+where
+    Self: Sized + Copy,
+{
     fn nan() -> Self {
         OrderedFloat(T::nan())
     }
@@ -997,10 +945,12 @@ mod impl_from {
     impl_from_lossless!(i16, f32);
     impl_from_approx!(i32, f32);
     impl_from_approx!(i64, f32);
+    impl_from_approx!(u64, f32);
 
     impl_from_lossless!(i16, f64);
     impl_from_lossless!(i32, f64);
     impl_from_approx!(i64, f64);
+    impl_from_approx!(u64, f64);
 
     impl TryFrom<OrderedFloat<f64>> for OrderedFloat<f32> {
         type Error = &'static str;

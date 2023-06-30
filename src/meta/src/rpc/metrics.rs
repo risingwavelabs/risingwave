@@ -25,7 +25,7 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_internal_tables;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
@@ -91,6 +91,16 @@ pub struct MetaMetrics {
     pub min_pinned_version_id: IntGauge,
     /// The smallest version id that is being guarded by meta node safe points.
     pub min_safepoint_version_id: IntGauge,
+    /// Compaction groups that is in write stop state.
+    pub write_stop_compaction_groups: IntGaugeVec,
+    /// The object id watermark used in last full GC.
+    pub full_gc_last_object_id_watermark: IntGauge,
+    /// The number of attempts to trigger full GC.
+    pub full_gc_trigger_count: IntGauge,
+    /// The number of candidate object to delete after scanning object store.
+    pub full_gc_candidate_object_count: Histogram,
+    /// The number of object to delete after filtering by meta node.
+    pub full_gc_selected_object_count: Histogram,
     /// Hummock version stats
     pub version_stats: IntGaugeVec,
     /// Total number of objects that is no longer referenced by versions.
@@ -119,11 +129,15 @@ pub struct MetaMetrics {
     pub compact_pending_bytes: IntGaugeVec,
     /// Per level compression ratio
     pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
-    /// The number of compactor CPU need to be scale.
-    pub scale_compactor_core_num: IntGauge,
     /// Per level number of running compaction task
     pub level_compact_task_cnt: IntGaugeVec,
     pub time_after_last_observation: AtomicU64,
+    pub l0_compact_level_count: HistogramVec,
+    pub compact_task_size: HistogramVec,
+    pub compact_task_file_count: HistogramVec,
+    pub move_state_table_count: IntCounterVec,
+    pub state_table_count: IntGaugeVec,
+    pub branched_sst_count: IntGaugeVec,
 
     /// ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
@@ -138,6 +152,9 @@ pub struct MetaMetrics {
     pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
+
+    /// Write throughput of commit epoch for each stable
+    pub table_write_throughput: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -260,6 +277,44 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let write_stop_compaction_groups = register_int_gauge_vec_with_registry!(
+            "storage_write_stop_compaction_groups",
+            "compaction groups of write stop state",
+            &["compaction_group_id"],
+            registry
+        )
+        .unwrap();
+
+        let full_gc_last_object_id_watermark = register_int_gauge_with_registry!(
+            "storage_full_gc_last_object_id_watermark",
+            "the object id watermark used in last full GC",
+            registry
+        )
+        .unwrap();
+
+        let full_gc_trigger_count = register_int_gauge_with_registry!(
+            "storage_full_gc_trigger_count",
+            "the number of attempts to trigger full GC",
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "storage_full_gc_candidate_object_count",
+            "the number of candidate object to delete after scanning object store",
+            exponential_buckets(1.0, 10.0, 6).unwrap()
+        );
+        let full_gc_candidate_object_count =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "storage_full_gc_selected_object_count",
+            "the number of object to delete after filtering by meta node",
+            exponential_buckets(1.0, 10.0, 6).unwrap()
+        );
+        let full_gc_selected_object_count =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
         let min_safepoint_version_id = register_int_gauge_with_registry!(
             "storage_min_safepoint_version_id",
             "min safepoint version id",
@@ -362,12 +417,6 @@ impl MetaMetrics {
             registry,
         )
         .unwrap();
-        let scale_compactor_core_num = register_int_gauge_with_registry!(
-            "storage_compactor_suggest_core_count",
-            "num of CPU to be scale to meet compaction need",
-            registry
-        )
-        .unwrap();
 
         let meta_type = register_int_gauge_vec_with_registry!(
             "meta_num",
@@ -439,6 +488,62 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let l0_compact_level_count = register_histogram_vec_with_registry!(
+            "storage_l0_compact_level_count",
+            "level_count of l0 compact task",
+            &["group", "type"],
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "storage_compact_task_size",
+            "Total size of compact that have been issued to state store",
+            exponential_buckets(4096.0, 1.6, 28).unwrap()
+        );
+
+        let compact_task_size =
+            register_histogram_vec_with_registry!(opts, &["group", "type"], registry).unwrap();
+
+        let compact_task_file_count = register_histogram_vec_with_registry!(
+            "storage_compact_task_file_count",
+            "file count of compact task",
+            &["group", "type"],
+            registry
+        )
+        .unwrap();
+        let table_write_throughput = register_int_counter_vec_with_registry!(
+            "storage_commit_write_throughput",
+            "The number of compactions from one level to another level that have been skipped.",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let move_state_table_count = register_int_counter_vec_with_registry!(
+            "storage_move_state_table_count",
+            "Count of trigger move state table",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let state_table_count = register_int_gauge_vec_with_registry!(
+            "storage_state_table_count",
+            "Count of stable table per compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let branched_sst_count = register_int_gauge_vec_with_registry!(
+            "storage_branched_sst_count",
+            "Count of branched sst per compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             grpc_latency,
@@ -472,6 +577,11 @@ impl MetaMetrics {
             checkpoint_version_id,
             min_pinned_version_id,
             min_safepoint_version_id,
+            write_stop_compaction_groups,
+            full_gc_last_object_id_watermark,
+            full_gc_trigger_count,
+            full_gc_candidate_object_count,
+            full_gc_selected_object_count,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
@@ -479,12 +589,18 @@ impl MetaMetrics {
             meta_type,
             compact_pending_bytes,
             compact_level_compression_ratio,
-            scale_compactor_core_num,
             level_compact_task_cnt,
             object_store_metric,
             source_is_up,
             actor_info,
             table_info,
+            l0_compact_level_count,
+            compact_task_size,
+            compact_task_file_count,
+            table_write_throughput,
+            move_state_table_count,
+            state_table_count,
+            branched_sst_count,
         }
     }
 
@@ -525,14 +641,19 @@ pub async fn start_worker_info_monitor<S: MetaStore>(
                     .with_label_values(&[(worker_type.as_str_name())])
                     .set(worker_num as i64);
             }
-            if let Some(client) = &election_client && let Ok(meta_members) = client.get_members().await {
+            if let Some(client) = &election_client
+                && let Ok(meta_members) = client.get_members().await
+            {
                 meta_metrics
                     .worker_num
                     .with_label_values(&[WorkerType::Meta.as_str_name()])
                     .set(meta_members.len() as i64);
                 meta_members.into_iter().for_each(|m| {
-                    let role = if m.is_leader {"leader"} else {"follower"};
-                    meta_metrics.meta_type.with_label_values(&[&m.id, role]).set(1);
+                    let role = if m.is_leader { "leader" } else { "follower" };
+                    meta_metrics
+                        .meta_type
+                        .with_label_values(&[&m.id, role])
+                        .set(1);
                 });
             }
         }
@@ -568,13 +689,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
             // report full info on each interval.
             meta_metrics.actor_info.reset();
             meta_metrics.table_info.reset();
-            let fragments = match fragment_manager.list_table_fragments().await {
-                Ok(f) => f,
-                Err(e) => {
-                    tracing::error!("Error when in list_table_fragments: {:?}", e);
-                    continue;
-                }
-            };
+            let fragments = fragment_manager.list_table_fragments().await;
             let workers: HashMap<u32, String> = cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, None)
                 .await
@@ -586,11 +701,11 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                 .collect();
             for table_fragments in fragments {
                 for (fragment_id, fragment) in table_fragments.fragments {
-                    let frament_id_str = fragment_id.to_string();
+                    let fragment_id_str = fragment_id.to_string();
                     for actor in fragment.actors {
                         let actor_id_str = actor.actor_id.to_string();
-                        // Report a dummay gauge metrics with (table id, actor id, table
-                        // name) as its label
+                        // Report a dummay gauge metrics with (fragment id, actor id, node
+                        // address) as its label
                         if let Some(actor_status) =
                             table_fragments.actor_status.get(&actor.actor_id)
                         {
@@ -600,7 +715,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                         .actor_info
                                         .with_label_values(&[
                                             &actor_id_str,
-                                            &frament_id_str,
+                                            &fragment_id_str,
                                             address,
                                         ])
                                         .set(1);
@@ -611,7 +726,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                         // Report a dummay gauge metrics with (table id, actor id, table
                         // name) as its label
                         if let Some(mut node) = actor.nodes {
-                            visit_stream_node_internal_tables(&mut node, |table, _| {
+                            visit_stream_node_tables(&mut node, |table, _| {
                                 let table_id_str = table.id.to_string();
                                 meta_metrics
                                     .table_info

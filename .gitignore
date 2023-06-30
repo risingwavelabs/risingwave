@@ -25,6 +25,7 @@ build/
 
 # Python
 *.pyc
+venv/
 
 # Golang
 go/bin/
@@ -68,3 +69,7 @@ e2e_test/generated/*
 # generated scale tests by `cargo nextest`
 scale-test.tar.zst
 simulation-it-test.tar.zst
+
+
+# hummock-trace
+.trace

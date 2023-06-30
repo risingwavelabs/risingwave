@@ -16,7 +16,9 @@ use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk, ListValue};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, DatumRef, ScalarRefImpl, ToDatumRef};
+use risingwave_common::types::{
+    DataType, Datum, DatumRef, ScalarRefImpl, ToDatumRef, ToOwnedDatum,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -97,14 +99,13 @@ impl ArrayConcatExpression {
     /// ```
     fn concat_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
-            (None, right) => right.map(ScalarRefImpl::into_scalar_impl),
-            (left, None) => left.map(ScalarRefImpl::into_scalar_impl),
+            (None, right) => right.to_owned_datum(),
+            (left, None) => left.to_owned_datum(),
             (Some(ScalarRefImpl::List(left)), Some(ScalarRefImpl::List(right))) => Some(
                 ListValue::new(
-                    left.values_ref()
-                        .into_iter()
-                        .chain(right.values_ref().into_iter())
-                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                    left.iter()
+                        .chain(right.iter())
+                        .map(|x| x.to_owned_datum())
                         .collect(),
                 )
                 .into(),
@@ -147,16 +148,13 @@ impl ArrayConcatExpression {
     fn append_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, None) => None,
-            (None, right) => {
-                Some(ListValue::new(vec![right.map(ScalarRefImpl::into_scalar_impl)]).into())
-            }
-            (left, None) => left.map(ScalarRefImpl::into_scalar_impl),
+            (None, right) => Some(ListValue::new(vec![right.to_owned_datum()]).into()),
+            (left, None) => left.to_owned_datum(),
             (Some(ScalarRefImpl::List(left)), right) => Some(
                 ListValue::new(
-                    left.values_ref()
-                        .into_iter()
+                    left.iter()
                         .chain(std::iter::once(right))
-                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .map(|x| x.to_owned_datum())
                         .collect(),
                 )
                 .into(),
@@ -192,17 +190,15 @@ impl ArrayConcatExpression {
     /// select array_append(null::int[], null::int);
     /// ----
     /// {NULL}
+    /// ```
     fn append_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
-            (None, right) => {
-                Some(ListValue::new(vec![right.map(ScalarRefImpl::into_scalar_impl)]).into())
-            }
+            (None, right) => Some(ListValue::new(vec![right.to_owned_datum()]).into()),
             (Some(ScalarRefImpl::List(left)), right) => Some(
                 ListValue::new(
-                    left.values_ref()
-                        .into_iter()
+                    left.iter()
                         .chain(std::iter::once(right))
-                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .map(|x| x.to_owned_datum())
                         .collect(),
                 )
                 .into(),
@@ -241,18 +237,17 @@ impl ArrayConcatExpression {
     /// select array_cat(null::int[], null::int[][]);
     /// ----
     /// NULL
+    /// ```
     fn prepend_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, None) => None,
-            (left, None) => {
-                Some(ListValue::new(vec![left.map(ScalarRefImpl::into_scalar_impl)]).into())
-            }
-            (None, right) => right.map(ScalarRefImpl::into_scalar_impl),
+            (left, None) => Some(ListValue::new(vec![left.to_owned_datum()]).into()),
+            (None, right) => right.to_owned_datum(),
             (left, Some(ScalarRefImpl::List(right))) => Some(
                 ListValue::new(
                     std::iter::once(left)
-                        .chain(right.values_ref().into_iter())
-                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .chain(right.iter())
+                        .map(|x| x.to_owned_datum())
                         .collect(),
                 )
                 .into(),
@@ -288,16 +283,15 @@ impl ArrayConcatExpression {
     /// select array_prepend(null::int, null::int[]);
     /// ----
     /// {NULL}
+    /// ```
     fn prepend_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
-            (left, None) => {
-                Some(ListValue::new(vec![left.map(ScalarRefImpl::into_scalar_impl)]).into())
-            }
+            (left, None) => Some(ListValue::new(vec![left.to_owned_datum()]).into()),
             (left, Some(ScalarRefImpl::List(right))) => Some(
                 ListValue::new(
                     std::iter::once(left)
-                        .chain(right.values_ref().into_iter())
-                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .chain(right.iter())
+                        .map(|x| x.to_owned_datum())
                         .collect(),
                 )
                 .into(),
@@ -333,7 +327,7 @@ impl Expression for ArrayConcatExpression {
             if !vis {
                 builder.append_null();
             } else {
-                builder.append_datum(&self.evaluate(left, right));
+                builder.append(&self.evaluate(left, right));
             }
         }
         Ok(Arc::new(builder.finish()))
@@ -360,7 +354,7 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayConcatExpression {
         let left_type = left.return_type();
         let right_type = right.return_type();
         let ret_type = DataType::from(prost.get_return_type()?);
-        let op = match prost.get_expr_type()? {
+        let op = match prost.get_function_type()? {
             // the types are checked in frontend, so no need for type checking here
             Type::ArrayCat => {
                 if left_type == right_type {
@@ -395,7 +389,7 @@ mod tests {
 
     fn make_i64_expr_node(value: i64) -> ExprNode {
         ExprNode {
-            expr_type: PbType::ConstantValue as i32,
+            function_type: PbType::Unspecified as _,
             return_type: Some(DataType::Int64.to_protobuf()),
             rex_node: Some(RexNode::Constant(PbDatum {
                 body: value.to_be_bytes().to_vec(),
@@ -405,13 +399,8 @@ mod tests {
 
     fn make_i64_array_expr_node(values: Vec<i64>) -> ExprNode {
         ExprNode {
-            expr_type: PbType::Array as i32,
-            return_type: Some(
-                DataType::List {
-                    datatype: Box::new(DataType::Int64),
-                }
-                .to_protobuf(),
-            ),
+            function_type: PbType::Array as i32,
+            return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
                 children: values.into_iter().map(make_i64_expr_node).collect(),
             })),
@@ -420,14 +409,9 @@ mod tests {
 
     fn make_i64_array_array_expr_node(values: Vec<Vec<i64>>) -> ExprNode {
         ExprNode {
-            expr_type: PbType::Array as i32,
+            function_type: PbType::Array as i32,
             return_type: Some(
-                DataType::List {
-                    datatype: Box::new(DataType::List {
-                        datatype: Box::new(DataType::Int64),
-                    }),
-                }
-                .to_protobuf(),
+                DataType::List(Box::new(DataType::List(Box::new(DataType::Int64)))).to_protobuf(),
             ),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
                 children: values.into_iter().map(make_i64_array_expr_node).collect(),
@@ -441,13 +425,8 @@ mod tests {
             let left = make_i64_array_expr_node(vec![42]);
             let right = make_i64_array_expr_node(vec![43]);
             let expr = ExprNode {
-                expr_type: PbType::ArrayCat as i32,
-                return_type: Some(
-                    DataType::List {
-                        datatype: Box::new(DataType::Int64),
-                    }
-                    .to_protobuf(),
-                ),
+                function_type: PbType::ArrayCat as i32,
+                return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],
                 })),
@@ -459,13 +438,8 @@ mod tests {
             let left = make_i64_array_array_expr_node(vec![vec![42]]);
             let right = make_i64_array_array_expr_node(vec![vec![43]]);
             let expr = ExprNode {
-                expr_type: PbType::ArrayCat as i32,
-                return_type: Some(
-                    DataType::List {
-                        datatype: Box::new(DataType::Int64),
-                    }
-                    .to_protobuf(),
-                ),
+                function_type: PbType::ArrayCat as i32,
+                return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],
                 })),
@@ -477,13 +451,8 @@ mod tests {
             let left = make_i64_array_expr_node(vec![42]);
             let right = make_i64_expr_node(43);
             let expr = ExprNode {
-                expr_type: PbType::ArrayAppend as i32,
-                return_type: Some(
-                    DataType::List {
-                        datatype: Box::new(DataType::Int64),
-                    }
-                    .to_protobuf(),
-                ),
+                function_type: PbType::ArrayAppend as i32,
+                return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],
                 })),
@@ -495,13 +464,8 @@ mod tests {
             let left = make_i64_array_array_expr_node(vec![vec![42]]);
             let right = make_i64_array_expr_node(vec![43]);
             let expr = ExprNode {
-                expr_type: PbType::ArrayAppend as i32,
-                return_type: Some(
-                    DataType::List {
-                        datatype: Box::new(DataType::Int64),
-                    }
-                    .to_protobuf(),
-                ),
+                function_type: PbType::ArrayAppend as i32,
+                return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],
                 })),
@@ -513,13 +477,8 @@ mod tests {
             let left = make_i64_expr_node(43);
             let right = make_i64_array_expr_node(vec![42]);
             let expr = ExprNode {
-                expr_type: PbType::ArrayPrepend as i32,
-                return_type: Some(
-                    DataType::List {
-                        datatype: Box::new(DataType::Int64),
-                    }
-                    .to_protobuf(),
-                ),
+                function_type: PbType::ArrayPrepend as i32,
+                return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],
                 })),
@@ -531,13 +490,8 @@ mod tests {
             let left = make_i64_array_expr_node(vec![43]);
             let right = make_i64_array_array_expr_node(vec![vec![42]]);
             let expr = ExprNode {
-                expr_type: PbType::ArrayPrepend as i32,
-                return_type: Some(
-                    DataType::List {
-                        datatype: Box::new(DataType::Int64),
-                    }
-                    .to_protobuf(),
-                ),
+                function_type: PbType::ArrayPrepend as i32,
+                return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],
                 })),
@@ -548,9 +502,7 @@ mod tests {
 
     fn make_i64_array_expr(values: Vec<i64>) -> BoxedExpression {
         LiteralExpression::new(
-            DataType::List {
-                datatype: Box::new(DataType::Int64),
-            },
+            DataType::List(Box::new(DataType::Int64)),
             Some(ListValue::new(values.into_iter().map(|x| Some(x.into())).collect()).into()),
         )
         .boxed()
@@ -561,9 +513,7 @@ mod tests {
         let left = make_i64_array_expr(vec![42]);
         let right = make_i64_array_expr(vec![43, 44]);
         let expr = ArrayConcatExpression::new(
-            DataType::List {
-                datatype: Box::new(DataType::Int64),
-            },
+            DataType::List(Box::new(DataType::Int64)),
             left,
             right,
             Operation::ConcatArray,

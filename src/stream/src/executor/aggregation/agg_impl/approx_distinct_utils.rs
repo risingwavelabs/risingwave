@@ -19,6 +19,7 @@ use dyn_clone::DynClone;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -241,6 +242,7 @@ where
     B: RegisterBucket,
     T: std::fmt::Debug
         + DynClone
+        + EstimateSize
         + Send
         + Sync
         + 'static

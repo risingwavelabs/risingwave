@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
@@ -30,13 +29,10 @@ use url::Url;
 
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
-use crate::impl_common_parser_logic;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
-
-impl_common_parser_logic!(ProtobufParser);
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug, Clone)]
 pub struct ProtobufParser {
@@ -127,8 +123,13 @@ impl ProtobufParserConfig {
     pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
         let mut columns = Vec::with_capacity(self.message_descriptor.fields().len());
         let mut index = 0;
+        let mut parse_trace: Vec<String> = vec![];
         for field in self.message_descriptor.fields() {
-            columns.push(Self::pb_field_to_col_desc(&field, &mut index)?);
+            columns.push(Self::pb_field_to_col_desc(
+                &field,
+                &mut index,
+                &mut parse_trace,
+            )?);
         }
 
         Ok(columns)
@@ -138,14 +139,15 @@ impl ProtobufParserConfig {
     fn pb_field_to_col_desc(
         field_descriptor: &FieldDescriptor,
         index: &mut i32,
+        parse_trace: &mut Vec<String>,
     ) -> Result<ColumnDesc> {
-        let field_type = protobuf_type_mapping(field_descriptor)?;
+        let field_type = protobuf_type_mapping(field_descriptor, parse_trace)?;
         if let Kind::Message(m) = field_descriptor.kind() {
             let field_descs = if let DataType::List { .. } = field_type {
                 vec![]
             } else {
                 m.fields()
-                    .map(|f| Self::pb_field_to_col_desc(&f, index))
+                    .map(|f| Self::pb_field_to_col_desc(&f, index, parse_trace))
                     .collect::<Result<Vec<_>>>()?
             };
             *index += 1;
@@ -155,7 +157,7 @@ impl ProtobufParserConfig {
                 column_type: Some(field_type.to_protobuf()),
                 field_descs,
                 type_name: m.full_name().to_string(),
-                generated_column: None,
+                generated_or_default_column: None,
             })
         } else {
             *index += 1;
@@ -220,6 +222,38 @@ impl ProtobufParser {
                 e
             })
         })
+    }
+}
+
+fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> Result<()> {
+    let identifier = format!("{}({})", fd.name(), fd.full_name());
+    if trace.iter().any(|s| s == identifier.as_str()) {
+        return Err(RwError::from(ProtocolError(format!(
+            "circular reference detected: {}, conflict with {}, kind {:?}",
+            trace.iter().join("->"),
+            identifier,
+            fd.kind(),
+        ))));
+    }
+    trace.push(identifier);
+    Ok(())
+}
+
+impl ByteStreamSourceParser for ProtobufParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 
@@ -288,20 +322,26 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
 }
 
 /// Maps protobuf type to RW type.
-fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType> {
+fn protobuf_type_mapping(
+    field_descriptor: &FieldDescriptor,
+    parse_trace: &mut Vec<String>,
+) -> Result<DataType> {
+    detect_loop_and_push(parse_trace, field_descriptor)?;
     let field_type = field_descriptor.kind();
     let mut t = match field_type {
         Kind::Bool => DataType::Boolean,
         Kind::Double => DataType::Float64,
         Kind::Float => DataType::Float32,
-        Kind::Int32 | Kind::Sfixed32 | Kind::Fixed32 => DataType::Int32,
-        Kind::Int64 | Kind::Sfixed64 | Kind::Fixed64 | Kind::Uint32 => DataType::Int64,
+        Kind::Int32 | Kind::Sint32 | Kind::Sfixed32 | Kind::Fixed32 => DataType::Int32,
+        Kind::Int64 | Kind::Sint64 | Kind::Sfixed64 | Kind::Fixed64 | Kind::Uint32 => {
+            DataType::Int64
+        }
         Kind::Uint64 => DataType::Decimal,
         Kind::String => DataType::Varchar,
         Kind::Message(m) => {
             let fields = m
                 .fields()
-                .map(|f| protobuf_type_mapping(&f))
+                .map(|f| protobuf_type_mapping(&f, parse_trace))
                 .collect::<Result<Vec<_>>>()?;
             let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
             DataType::new_struct(fields, field_names)
@@ -316,10 +356,9 @@ fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType>
         }
     };
     if field_descriptor.cardinality() == Cardinality::Repeated {
-        t = DataType::List {
-            datatype: Box::new(t),
-        }
+        t = DataType::List(Box::new(t))
     }
+    _ = parse_trace.pop();
     Ok(t)
 }
 
@@ -441,5 +480,22 @@ mod test {
             PbTypeName::List
         );
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_refuse_recursive_proto_message() {
+        let location = schema_dir() + "/proto_recursive/recursive.pb";
+        let message_name = "recursive.ComplexRecursiveMessage";
+        let conf = ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false)
+            .await
+            .unwrap();
+        let columns = conf.map_to_columns();
+        // expect error message:
+        // "Err(Protocol error: circular reference detected:
+        // parent(recursive.ComplexRecursiveMessage.parent)->siblings(recursive.
+        // ComplexRecursiveMessage.Parent.siblings), conflict with
+        // parent(recursive.ComplexRecursiveMessage.parent), kind
+        // recursive.ComplexRecursiveMessage.Parent"
+        assert!(columns.is_err());
     }
 }

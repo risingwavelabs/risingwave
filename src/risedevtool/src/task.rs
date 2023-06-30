@@ -20,7 +20,6 @@ mod ensure_stop_service;
 mod etcd_service;
 mod frontend_service;
 mod grafana_service;
-mod jaeger_service;
 mod kafka_service;
 mod meta_node_service;
 mod minio_service;
@@ -33,11 +32,11 @@ mod task_etcd_ready_check;
 mod task_kafka_ready_check;
 mod task_pubsub_emu_ready_check;
 mod task_redis_ready_check;
+mod tempo_service;
 mod utils;
 mod zookeeper_service;
 
 use std::env;
-use std::io::Read;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -46,8 +45,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use indicatif::ProgressBar;
-use isahc::prelude::*;
-use isahc::Request;
+use reqwest::blocking::Client;
 use tempfile::TempDir;
 pub use utils::*;
 
@@ -59,7 +57,6 @@ pub use self::ensure_stop_service::*;
 pub use self::etcd_service::*;
 pub use self::frontend_service::*;
 pub use self::grafana_service::*;
-pub use self::jaeger_service::*;
 pub use self::kafka_service::*;
 pub use self::meta_node_service::*;
 pub use self::minio_service::*;
@@ -72,6 +69,7 @@ pub use self::task_etcd_ready_check::*;
 pub use self::task_kafka_ready_check::*;
 pub use self::task_pubsub_emu_ready_check::*;
 pub use self::task_redis_ready_check::*;
+pub use self::tempo_service::*;
 pub use self::zookeeper_service::*;
 use crate::util::{complete_spin, get_program_args, get_program_name};
 use crate::wait::{wait, wait_tcp_available};
@@ -192,11 +190,10 @@ where
         let server = server.as_ref();
         wait(
             || {
-                let resp = Request::get(server)
-                    .connect_timeout(Duration::from_secs(1))
+                let resp = Client::new()
+                    .get(server)
                     .timeout(Duration::from_secs(1))
                     .body("")
-                    .unwrap()
                     .send()?;
                 if resp.status().is_success() {
                     Ok(())
@@ -220,15 +217,13 @@ where
         let server = server.as_ref();
         wait(
             || {
-                let resp = Request::get(server)
-                    .connect_timeout(Duration::from_secs(1))
+                let resp = Client::new()
+                    .get(server)
                     .timeout(Duration::from_secs(1))
                     .body("")
-                    .unwrap()
                     .send()?;
                 if resp.status().is_success() {
-                    let mut data = String::new();
-                    resp.into_body().read_to_string(&mut data)?;
+                    let data = resp.text()?;
                     if cb(&data) {
                         Ok(())
                     } else {

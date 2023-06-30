@@ -39,9 +39,13 @@
                 <include>*:risingwave-source-cdc</include>
 
                 <!-- Sink connectors -->
+                <include>*:risingwave-sink-es</include>
                 <include>*:risingwave-sink-jdbc</include>
                 <include>*:risingwave-sink-iceberg</include>
                 <include>*:risingwave-sink-deltalake</include>
+
+                <!-- For S3-->
+                <include>*:s3-common</include>
             </includes>
             <useTransitiveDependencies>true</useTransitiveDependencies>
             <useTransitiveFiltering>true</useTransitiveFiltering>

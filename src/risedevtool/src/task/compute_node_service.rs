@@ -16,11 +16,11 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, ComputeNodeConfig};
+use crate::{add_meta_node, add_tempo_endpoint, ComputeNodeConfig};
 
 pub struct ComputeNodeService {
     config: ComputeNodeConfig,
@@ -35,7 +35,11 @@ impl ComputeNodeService {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
         if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
-            Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("compute-node")))
+            Ok(Command::new(
+                Path::new(&prefix_bin)
+                    .join("risingwave")
+                    .join("compute-node"),
+            ))
         } else {
             Ok(Command::new(Path::new(&prefix_bin).join("compute-node")))
         }
@@ -61,24 +65,15 @@ impl ComputeNodeService {
             .arg("--parallelism")
             .arg(&config.parallelism.to_string())
             .arg("--total-memory-bytes")
-            .arg(&config.total_memory_bytes.to_string());
-
-        let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
-        match provide_jaeger.len() {
-            0 => {}
-            1 => {
-                cmd.arg("--enable-jaeger-tracing");
-            }
-            other_size => {
-                return Err(anyhow!(
-                    "{} Jaeger instance found in config, but only 1 is needed",
-                    other_size
-                ))
-            }
-        }
+            .arg(&config.total_memory_bytes.to_string())
+            .arg("--role")
+            .arg(&config.role);
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
+
+        let provide_tempo = config.provide_tempo.as_ref().unwrap();
+        add_tempo_endpoint(provide_tempo, cmd)?;
 
         Ok(())
     }
@@ -109,8 +104,8 @@ impl Task for ComputeNodeService {
         if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
             cmd.env(
-                "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:40,lg_prof_sample:19,prof_prefix:compute-node",
+                "MALLOC_CONF",
+                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node",
             );
         }
 
