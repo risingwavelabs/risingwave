@@ -38,6 +38,7 @@ rw_image_tag="latest"
 if [ -n "$RW_IMAGE_VERSION" ]; then
   rw_image_tag=$RW_IMAGE_VERSION
 fi
+echo $rw_image_tag
 sed -i "s|risingwave:latest|risingwave:$rw_image_tag|g" docker/docker-compose.yml
 
 cd integration_tests/scripts
@@ -51,6 +52,9 @@ fi
 
 echo "--- run Demos"
 python3 run_demos.py --case ${case} --format ${format}
+
+echo "--- run docker ps"
+docker ps
 
 echo "--- check if the ingestion is successful"
 # extract the type of upstream source,e.g. mysql,postgres,etc
