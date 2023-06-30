@@ -39,6 +39,7 @@ message CreateTaskRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
   common.BatchQueryEpoch epoch = 3;
+  map<string, string> tracing_context = 4;
 }
 
 message CancelTaskRequest {
@@ -61,6 +62,7 @@ message ExecuteRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
   common.BatchQueryEpoch epoch = 3;
+  map<string, string> tracing_context = 4;
 }
 
 service TaskService {

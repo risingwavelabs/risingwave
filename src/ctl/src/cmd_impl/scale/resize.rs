@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_pb::meta::get_reschedule_plan_request::{
     PbPolicy, StableResizePolicy, WorkerChanges,
 };
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
 use risingwave_stream::task::FragmentId;
 use serde_yaml;
@@ -288,7 +289,7 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
 pub async fn update_schedulability(
     context: &CtlContext,
     workers: Vec<String>,
-    is_unschedulable: bool,
+    target: Schedulability,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
 
@@ -331,7 +332,8 @@ pub async fn update_schedulability(
     let target_worker_ids = target_worker_ids.into_iter().collect_vec();
 
     meta_client
-        .update_schedulability(&target_worker_ids, is_unschedulable)
+        .update_schedulability(&target_worker_ids, target)
         .await?;
+
     Ok(())
 }

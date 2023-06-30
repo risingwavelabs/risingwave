@@ -322,6 +322,32 @@ create source s23 (bytea_example bytea) with (
 ) row format json
 
 statement ok
+create source s24 (id bytea) with (
+  connector = 'kafka',
+  topic = 'kafka_source_format_bytes',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) row format bytes
+
+# bytes format only accept one column
+statement error 
+create source s25 (v1 bytea, v2 int) with (
+  connector = 'kafka',
+  topic = 'kafka_source_format_bytes',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) row format bytes
+
+# bytes format only accept bytea type
+statement error 
+create source s26 (id int) with (
+  connector = 'kafka',
+  topic = 'kafka_source_format_bytes',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) row format bytes
+
+statement ok
 CREATE TABLE mongo_customers (
 	_id BIGINT PRIMARY KEY,
 	payload jsonb
@@ -491,6 +517,9 @@ create materialized view source_mv1 as select * from s6;
 
 statement ok
 create materialized view source_mv2 as select sum(v1) as sum_v1, count(v2) as count_v2 from s6 where v1 > 3;
+
+statement ok 
+create materialized view source_mv3 as select * from s24;
 
 # Wait for source
 sleep 10s
@@ -663,11 +692,20 @@ order by
 56166    1
 56166    2
 
+query I 
+SELECT * FROM source_mv3 ORDER BY id;
+----
+\x6b6b
+\x776561776566776566
+
 statement ok
 drop materialized view source_mv1
 
 statement ok
 drop materialized view source_mv2
+
+statement ok 
+drop materialized view source_mv3
 
 statement ok
 drop table s6
@@ -716,6 +754,9 @@ drop source s22
 
 statement ok
 drop source s23
+
+statement ok
+drop source s24
 
 statement ok
 DROP TABLE mongo_customers;

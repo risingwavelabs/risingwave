@@ -53,18 +53,8 @@ pub async fn handle_create_function(
     }
     let language = match params.language {
         Some(lang) => lang.real_value().to_lowercase(),
-        None => {
-            return Err(
-                ErrorCode::InvalidParameterValue("LANGUAGE must be specified".to_string()).into(),
-            )
-        }
+        None => "".to_string(),
     };
-    if !matches!(language.as_str(), "python" | "java") {
-        return Err(ErrorCode::InvalidParameterValue(
-            "LANGUAGE should be one of: python, java".to_string(),
-        )
-        .into());
-    }
     let Some(FunctionDefinition::SingleQuotedDef(identifier)) = params.as_ else {
         return Err(ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into());
     };
