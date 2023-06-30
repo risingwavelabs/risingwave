@@ -15,7 +15,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_common::types::*;
 use risingwave_expr_macro::aggregate;
 
@@ -32,37 +32,81 @@ const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
     state = "Registers",
     init_state = "Some(Registers::new())"
 )]
-fn approx_count_distinct<'a>(mut reg: Registers, value: impl ScalarRef<'a>) -> Registers {
-    reg.add_datum(value);
+fn approx_count_distinct<'a>(
+    mut reg: Registers,
+    value: impl ScalarRef<'a>,
+    retract: bool,
+) -> Registers {
+    reg.update(value, retract);
     reg
 }
 
-/// `ApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`. The
-/// estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^14 registers this
-/// is ~1/128.
+/// Approximates the count of non-null rows using a modified version of the `HyperLogLog` algorithm.
+/// Each `Bucket` stores a count of how many hash values have x trailing zeroes for all x from 1-64.
+/// This allows the algorithm to support insertion and deletion, but uses up more memory and limits
+/// the number of rows that can be counted.
+///
+/// This can count up to a total of 2^64 unduplicated rows.
+///
+/// The estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^16 registers this
+/// is ~1/256, or about 0.4%. The memory usage for the default choice of parameters is about
+/// (1024 + 24) bits * 2^16 buckets, which is about 8.58 MB.
 #[derive(Clone, EstimateSize)]
-struct Registers {
-    registers: Box<[u8]>,
+struct Registers<B: Bucket = u8> {
+    initial: i64,
+    registers: Box<[B]>,
 }
 
-impl Registers {
+trait Bucket: Copy + ZeroHeapSize {
+    fn new() -> Self;
+
+    /// Increments or decrements the bucket at `index` depending on the state of `retract`.
+    /// Returns an Error if `index` is invalid or if inserting will cause an overflow in the bucket.
+    fn update(&mut self, index: u8, retract: bool);
+
+    /// Gets the number of the maximum bucket which has a count greater than zero.
+    fn max(&self) -> u8;
+}
+
+impl Bucket for u8 {
+    fn new() -> Self {
+        0
+    }
+
+    fn update(&mut self, index: u8, retract: bool) {
+        if index > 64 || index == 0 {
+            panic!("HyperLogLog: Invalid bucket index");
+        }
+        if retract {
+            panic!("HyperLogLog: Deletion in append-only bucket");
+        }
+        if index > *self {
+            *self = index;
+        }
+    }
+
+    fn max(&self) -> u8 {
+        *self
+    }
+}
+
+impl<B: Bucket> Registers<B> {
     fn new() -> Self {
         Self {
-            registers: Box::new([0; NUM_OF_REGISTERS]),
+            initial: 0,
+            registers: Box::new([B::new(); NUM_OF_REGISTERS]),
         }
     }
 
     /// Adds the count of the datum's hash into the register, if it is greater than the existing
     /// count at the register
-    fn add_datum<'a>(&mut self, scalar_ref: impl ScalarRef<'a>) {
+    fn update<'a>(&mut self, scalar_ref: impl ScalarRef<'a>, retract: bool) {
         let hash = self.get_hash(scalar_ref.into());
 
         let index = (hash as usize) & (NUM_OF_REGISTERS - 1); // Index is based on last few bits
         let count = self.count_hash(hash);
 
-        if count > self.registers[index] {
-            self.registers[index] = count;
-        }
+        self.registers[index].update(count, retract);
     }
 
     /// Calculate the hash of the `scalar` using Rust's default hasher
@@ -87,8 +131,9 @@ impl Registers {
         let mut mean = 0.0;
 
         // Get harmonic mean of all the counts in results
-        for count in self.registers.iter() {
-            mean += 1.0 / ((1 << *count) as f64);
+        for bucket in self.registers.iter() {
+            let count = bucket.max();
+            mean += 1.0 / ((1 << count) as f64);
         }
 
         let raw_estimate = BIAS_CORRECTION * m * m / mean;
@@ -98,7 +143,7 @@ impl Registers {
         let answer = if raw_estimate <= 2.5 * m {
             let mut zero_registers: f64 = 0.0;
             for i in self.registers.iter() {
-                if *i == 0 {
+                if i.max() == 0 {
                     zero_registers += 1.0;
                 }
             }
@@ -112,12 +157,12 @@ impl Registers {
             raw_estimate
         };
 
-        answer as i64
+        answer as i64 + self.initial
     }
 }
 
-impl From<Registers> for i64 {
-    fn from(reg: Registers) -> Self {
+impl<B: Bucket> From<Registers<B>> for i64 {
+    fn from(reg: Registers<B>) -> Self {
         reg.calculate_result()
     }
 }
