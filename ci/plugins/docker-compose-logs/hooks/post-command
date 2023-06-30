@@ -6,14 +6,14 @@ source env_vars.sh
 
 if [ $BUILDKITE_COMMAND_EXIT_STATUS -ne 0 ]; then
   echo "--- docker compose compactor node logs"
-  docker compose -f ${INTEGRATION_TEST_CASE}/docker-compose.yaml logs compactor-0
+  docker compose -f integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yaml logs compactor-0
 
   echo "--- docker compose compute node logs"
-  docker compose -f ${INTEGRATION_TEST_CASE}/docker-compose.yaml logs compute-node-0
+  docker compose -f integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yaml logs compute-node-0
 
   echo "--- docker compose frontend node logs"
-  docker compose -f ${INTEGRATION_TEST_CASE}/docker-compose.yaml logs frontend-node-0
+  docker compose -f integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yaml logs frontend-node-0
 
   echo "--- docker compose meta node logs"
-  docker compose -f ${INTEGRATION_TEST_CASE}/docker-compose.yaml logs meta-node-0
+  docker compose -f integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yaml logs meta-node-0
 fi
