@@ -27,6 +27,8 @@ echo "export INTEGRATION_TEST_CASE=${case}" > env_vars.sh
 echo "--- clean up docker containers"
 if [ $(docker ps -aq |wc -l) -gt 0 ]; then
   docker rm -f $(docker ps -aq)
+  docker network prune -f
+  docker volume prune -f
 fi
 
 echo "--- ghcr login"
