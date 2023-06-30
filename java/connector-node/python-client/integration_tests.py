@@ -186,7 +186,7 @@ def test_jdbc_sink(input_file, input_binary_file, use_json):
 def test_elasticsearch_sink(file_name, use_json):
     prop = {"url": "http://127.0.0.1:9200",
             "index": "test"}
-    type = "elasticsearch"
+    type = "elasticsearch-7"
     test_sink(type, prop, construct_payload(
         file_name, use_json), use_json)
 
