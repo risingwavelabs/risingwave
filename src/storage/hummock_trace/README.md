@@ -47,7 +47,7 @@ cargo run --package risingwave_hummock_test --bin replay -- \
 --object-storage minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
 --config src/config/hummock-trace.toml
 ```
-We are all set!
+We are all set!!
 
 # Document
 ## Trace
