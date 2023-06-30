@@ -252,6 +252,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
         _progress: Vec<CompactTaskProgress>,
         _workload: CompactorWorkload,
+        _pull_task_count: Option<u32>,
     ) -> Result<()> {
         Ok(())
     }

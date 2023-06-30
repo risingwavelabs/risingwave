@@ -46,6 +46,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         &self,
         progress: Vec<CompactTaskProgress>,
         workload: CompactorWorkload,
+        pull_task_count: Option<u32>,
     ) -> Result<()>;
     // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch(

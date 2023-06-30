@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 pub mod compaction;
-mod compaction_schedule_policy;
+// mod compaction_schedule_policy;
 mod compaction_scheduler;
 pub mod compactor_manager;
 pub mod error;
@@ -50,7 +50,7 @@ use crate::MetaOpts;
 pub fn start_hummock_workers<S>(
     hummock_manager: HummockManagerRef<S>,
     vacuum_manager: VacuumManagerRef<S>,
-    compaction_scheduler: CompactionSchedulerRef<S>,
+    compaction_scheduler: CompactionScheduler<S>,
     meta_opts: &MetaOpts,
 ) -> Vec<(JoinHandle<()>, Sender<()>)>
 where
@@ -73,7 +73,7 @@ where
 
 /// Starts a task to accept compaction request.
 fn start_compaction_scheduler<S>(
-    compaction_scheduler: CompactionSchedulerRef<S>,
+    mut compaction_scheduler: CompactionScheduler<S>,
 ) -> (JoinHandle<()>, Sender<()>)
 where
     S: MetaStore,

@@ -399,6 +399,7 @@ message CompactorHeartbeatRequest {
   uint32 context_id = 1;
   repeated CompactTaskProgress progress = 2;
   CompactorWorkload workload = 3;
+  optional uint32 pull_task_count = 4;
 }
 
 message CompactorHeartbeatResponse {

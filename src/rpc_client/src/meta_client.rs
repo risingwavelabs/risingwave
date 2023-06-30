@@ -1101,11 +1101,13 @@ impl HummockMetaClient for MetaClient {
         &self,
         progress: Vec<CompactTaskProgress>,
         workload: CompactorWorkload,
+        pull_task_count: Option<u32>,
     ) -> Result<()> {
         let req = CompactorHeartbeatRequest {
             context_id: self.worker_id(),
             progress,
             workload: Some(workload),
+            pull_task_count,
         };
         self.inner.compactor_heartbeat(req).await?;
         Ok(())

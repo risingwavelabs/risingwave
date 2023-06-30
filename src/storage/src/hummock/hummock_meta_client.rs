@@ -131,9 +131,10 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         &self,
         progress: Vec<CompactTaskProgress>,
         workload: CompactorWorkload,
+        pull_task_count: Option<u32>,
     ) -> Result<()> {
         self.meta_client
-            .compactor_heartbeat(progress, workload)
+            .compactor_heartbeat(progress, workload, pull_task_count)
             .await
     }
 

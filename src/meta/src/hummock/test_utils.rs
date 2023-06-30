@@ -91,7 +91,7 @@ where
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
-    let compactor = hummock_manager.get_idle_compactor().unwrap();
+    let compactor_pull_task_handle = hummock_manager.get_idle_compactor().unwrap();
     let mut selector = default_level_selector();
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
@@ -108,7 +108,10 @@ where
     );
     compact_task.target_level = 6;
     if temp_compactor {
-        assert_eq!(compactor.context_id(), context_id);
+        assert_eq!(
+            compactor_pull_task_handle.compactor.context_id(),
+            context_id
+        );
     }
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.set_task_status(TaskStatus::Success);

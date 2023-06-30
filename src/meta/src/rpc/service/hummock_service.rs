@@ -260,7 +260,7 @@ where
         let compactor_manager = self.hummock_manager.compactor_manager.clone();
 
         let cancel_tasks = compactor_manager.update_task_heartbeats(&req.progress);
-        compactor_manager.update_compactor_state(req.context_id, req.workload.unwrap());
+        compactor_manager.update_compactor_pending_task(req.context_id, req.pull_task_count);
 
         for task in cancel_tasks {
             tracing::info!(

@@ -42,7 +42,6 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
@@ -59,7 +58,7 @@ use tracing::warn;
 use crate::hummock::compaction::{
     CompactStatus, LocalSelectorStatistic, ManualCompactionOption, ScaleCompactorInfo,
 };
-use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
+use crate::hummock::compaction_scheduler::{CompactionRequestChannelRef, ScheduleStatus};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_pin_unpin_snapshot_state,
@@ -210,7 +209,7 @@ macro_rules! start_measure_real_process_timer {
 pub(crate) use start_measure_real_process_timer;
 
 use super::compaction::{LevelSelector, ManualCompactionSelector};
-use super::Compactor;
+use super::CompactorPullTaskHandle;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
@@ -1118,7 +1117,7 @@ where
             .await
     }
 
-    pub fn get_idle_compactor(&self) -> Option<Arc<Compactor>> {
+    pub fn get_idle_compactor(&self) -> Option<CompactorPullTaskHandle> {
         self.compactor_manager.next_idle_compactor()
     }
 
@@ -1869,8 +1868,8 @@ where
         let start_time = Instant::now();
 
         // 1. Get idle compactor.
-        let compactor = match self.get_idle_compactor() {
-            Some(compactor) => compactor,
+        let mut compactor_pull_task_handle = match self.get_idle_compactor() {
+            Some(compactor_pull_task_handle) => compactor_pull_task_handle,
             None => {
                 tracing::warn!("trigger_manual_compaction No compactor is available.");
                 return Err(anyhow::anyhow!(
@@ -1917,17 +1916,9 @@ where
             )))
         };
 
-        // 2. Send the task.
-        if let Err(e) = compactor
-            .send_task(Task::CompactTask(compact_task.clone()))
-            .await
-        {
-            tracing::warn!(
-                "Failed to send task {} to {}. {:#?}",
-                compact_task.task_id,
-                compactor.context_id(),
-                e
-            );
+        // 3. send task to compactor
+        let result = compactor_pull_task_handle.consume_task(&compact_task).await;
+        if result != ScheduleStatus::Ok {
             return locally_cancel_task(compact_task, TaskStatus::SendFailCanceled).await;
         }
 
@@ -1974,29 +1965,7 @@ where
 
     #[named]
     pub async fn get_scale_compactor_info(&self) -> ScaleCompactorInfo {
-        let total_cpu_core = self.compactor_manager.total_cpu_core_num();
-        let total_running_cpu_core = self.compactor_manager.total_running_cpu_core_num();
-        let (version, configs) = {
-            let guard = read_lock!(self, versioning).await;
-            let c = self.get_compaction_group_map().await;
-            (guard.current_version.clone(), c)
-        };
-        let mut global_info = ScaleCompactorInfo {
-            total_cores: total_cpu_core as u64,
-            running_cores: total_running_cpu_core as u64,
-            ..Default::default()
-        };
-
-        let compaction = read_lock!(self, compaction).await;
-        for (group_id, status) in &compaction.compaction_statuses {
-            if let Some(levels) = version.levels.get(group_id) {
-                let info =
-                    status.get_compaction_info(levels, configs[group_id].compaction_config());
-                global_info.add(&info);
-                tracing::debug!("cg {} info {:?}", group_id, info);
-            }
-        }
-        global_info
+        unreachable!()
     }
 
     fn notify_last_version_delta(&self, versioning: &Versioning) {

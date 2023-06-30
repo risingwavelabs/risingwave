@@ -513,6 +513,7 @@ impl Compactor {
 
                 let executor = compactor_context.compaction_executor.clone();
                 let mut last_workload = CompactorWorkload::default();
+                let mut pending_pull_task_count: u32 = 0;
 
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
@@ -530,7 +531,16 @@ impl Compactor {
                                 });
                             }
 
-                            if let Err(e) = hummock_meta_client.compactor_heartbeat(progress_list, last_workload.clone()).await {
+                            let pull_task_count = {
+                                if pending_pull_task_count == 0 {
+                                    pending_pull_task_count = (100 - last_workload.get_cpu()) * cpu_core_num * 2 / 100;
+                                    Some(pending_pull_task_count)
+                                } else {
+                                    None
+                                }
+                            };
+
+                            if let Err(e) = hummock_meta_client.compactor_heartbeat(progress_list, last_workload.clone(), pull_task_count).await {
                                 // ignore any errors while trying to report task progress
                                 tracing::warn!("Failed to report task progress. {e:?}");
                             }
@@ -575,6 +585,10 @@ impl Compactor {
                             let shutdown = shutdown_map.clone();
                             let context = compactor_context.clone();
                             let meta_client = hummock_meta_client.clone();
+
+                            if let Task::CompactTask(_) = &task {
+                                pending_pull_task_count -= 1;
+                            }
 
                             executor.spawn(async move {
                                 match task {
