@@ -25,7 +25,7 @@ use futures::Future;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::env_var::is_ci;
 use tracing::level_filters::LevelFilter as Level;
-use tracing_subscriber::filter::Targets;
+use tracing_subscriber::filter::{FilterFn, Targets};
 use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
@@ -44,7 +44,7 @@ use tracing_subscriber::{filter, EnvFilter};
 const ENABLE_QUERY_LOG_FILE: bool = false;
 /// Use an [excessively pretty, human-readable formatter](tracing_subscriber::fmt::format::Pretty).
 /// Includes line numbers for each log.
-const ENABLE_PRETTY_LOG: bool = true;
+const ENABLE_PRETTY_LOG: bool = false;
 
 const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
 
@@ -208,6 +208,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
         layers.push(
             fmt_layer
+                .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
                 .with_filter(default_filter.clone().with_target("rw_tracing", Level::OFF)) // filter-out tracing-only events
                 .boxed(),
         );
