@@ -28,7 +28,7 @@ use crate::{ExprError, Result};
 #[aggregate("sum(float64) -> float64")]
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
-#[aggregate("sum(int256) -> int256", state = "Int256")]
+#[aggregate("sum(int256) -> int256")]
 #[aggregate("sum0(int64) -> int64", init_state = "Some(0)")]
 fn sum<S, T>(state: S, input: T, retract: bool) -> Result<S>
 where
@@ -45,12 +45,12 @@ where
     }
 }
 
-#[aggregate("min(*) -> auto")]
+#[aggregate("min(*) -> auto", state = "ref")]
 fn min<T: Ord>(state: T, input: T) -> T {
     state.min(input)
 }
 
-#[aggregate("max(*) -> auto")]
+#[aggregate("max(*) -> auto", state = "ref")]
 fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
 }
@@ -79,7 +79,7 @@ where
     state.bitxor(input)
 }
 
-#[aggregate("first_value(*) -> auto")]
+#[aggregate("first_value(*) -> auto", state = "ref")]
 fn first<T>(state: T, _: T) -> T {
     state
 }

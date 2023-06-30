@@ -313,8 +313,8 @@ impl FunctionAttr {
     fn generate_agg_build_fn(&self) -> Result<TokenStream2> {
         let ret_owned: TokenStream2 = types::owned_type(&self.ret).parse().unwrap();
         let state_type: TokenStream2 = match &self.state {
-            Some(state) => state.parse().unwrap(),
-            None => types::owned_type(&self.ret).parse().unwrap(),
+            Some(state) if state != "ref" => state.parse().unwrap(),
+            _ => types::owned_type(&self.ret).parse().unwrap(),
         };
         let let_arrays = self.args.iter().enumerate().map(|(i, arg)| {
             let array = format_ident!("a{i}");
@@ -331,12 +331,12 @@ impl FunctionAttr {
             quote! { let #v = #a.value_at(row_id); }
         });
         let let_state = match &self.state {
-            Some(_) => quote! { self.state.take() },
-            None => quote! { self.state.as_ref().map(|x| x.as_scalar_ref()) },
+            Some(s) if s == "ref" => quote! { self.state.as_ref().map(|x| x.as_scalar_ref()) },
+            _ => quote! { self.state.take() },
         };
         let assign_state = match &self.state {
-            Some(_) => quote! { state },
-            None => quote! { state.map(|x| x.to_owned_scalar()) },
+            Some(s) if s == "ref" => quote! { state.map(|x| x.to_owned_scalar()) },
+            _ => quote! { state },
         };
         let init_state = match &self.init_state {
             Some(s) => s.parse().unwrap(),
