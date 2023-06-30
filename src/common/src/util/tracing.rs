@@ -29,8 +29,8 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 /// There're two ways to do this:
 ///
 /// - For RPC calls with clear caller/callee relationship, the tracing context can be serialized
-///   into the W3C trace context format and passed in HTTP headers simply with a service middleware.
-///   For example, the DDL requests from the frontend to the meta service.
+///   into the W3C trace context format and passed in HTTP headers seamlessly with a service
+///   middleware. For example, the DDL requests from the frontend to the meta service.
 /// - For RPC calls with no clear caller/callee relationship or with asynchronous semantics, the
 ///   tracing context should be passed manually as a protobuf field in the request and response for
 ///   better lifetime management. For example, the exchange services between streaming actors or
