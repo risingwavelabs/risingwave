@@ -218,7 +218,18 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for OverWindow<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.input.logical_pk().to_vec())
+        let mut output_pk = self.input.logical_pk().to_vec();
+        for part_key_idx in self
+            .window_functions
+            .iter()
+            .map(|f| f.partition_by.iter().map(|i| i.index))
+            .flatten()
+        {
+            if !output_pk.contains(&part_key_idx) {
+                output_pk.push(part_key_idx);
+            }
+        }
+        Some(output_pk)
     }
 
     fn ctx(&self) -> OptimizerContextRef {
