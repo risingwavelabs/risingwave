@@ -78,7 +78,6 @@ let health_srv = HealthServiceImpl::new();
 tokio::spawn(async move {
      tonic::transport::Server::builder()
          .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
-         .layer(TracingMiddlewareLayer::new())
          .add_service(HealthServer::new(health_srv))
          .serve(address_info.listen_addr)
          .await
