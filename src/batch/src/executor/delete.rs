@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
@@ -136,10 +135,7 @@ impl DeleteExecutor {
             rows_deleted += write_txn_data(chunk).await?;
         }
 
-        write_handle
-            .end()?
-            .await
-            .context("failed to wait the end message")?;
+        write_handle.end().await?;
 
         // create ret value
         if !self.returning {

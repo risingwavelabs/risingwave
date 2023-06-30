@@ -15,7 +15,7 @@
 use std::iter::repeat;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{
@@ -182,10 +182,7 @@ impl InsertExecutor {
             rows_inserted += write_txn_data(chunk).await?;
         }
 
-        write_handle
-            .end()?
-            .await
-            .context("failed to wait the end message")?;
+        write_handle.end().await?;
 
         // create ret value
         if !self.returning {

@@ -187,7 +187,11 @@ mod tests {
             .write_chunk(StreamChunk::default())
             .await
             .unwrap();
-        write_handle1.end().unwrap();
+        // Since the end will wait the notifier which is sent by the reader,
+        // we need to spawn a task here to avoid dead lock.
+        tokio::spawn(async move {
+            write_handle1.end().await.unwrap();
+        });
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
         barrier_tx.send(Barrier::new_test_barrier(1)).unwrap();
@@ -204,7 +208,11 @@ mod tests {
             .write_chunk(StreamChunk::default())
             .await
             .unwrap();
-        write_handle2.end().unwrap();
+        // Since the end will wait the notifier which is sent by the reader,
+        // we need to spawn a task here to avoid dead lock.
+        tokio::spawn(async move {
+            write_handle2.end().await.unwrap();
+        });
 
         // We should receive the barrier.
         assert_matches!(next!().unwrap(), Either::Left(_));

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{
@@ -176,10 +175,7 @@ impl UpdateExecutor {
             rows_updated += write_txn_data(chunk).await?;
         }
 
-        write_handle
-            .end()?
-            .await
-            .context("failed to wait the end message")?;
+        write_handle.end().await?;
 
         // Create ret value
         if !self.returning {
