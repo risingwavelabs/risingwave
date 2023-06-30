@@ -34,6 +34,7 @@
 #![feature(is_sorted)]
 #![feature(string_leak)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(type_name_of_val)]
 
 pub mod backup_restore;
 mod barrier;

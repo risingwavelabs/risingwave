@@ -220,6 +220,8 @@ pub struct CommandContext<S: MetaStore> {
     pub checkpoint: bool,
 
     source_manager: SourceManagerRef<S>,
+
+    pub span: tracing::Span,
 }
 
 impl<S: MetaStore> CommandContext<S> {
@@ -233,6 +235,7 @@ impl<S: MetaStore> CommandContext<S> {
         command: Command,
         checkpoint: bool,
         source_manager: SourceManagerRef<S>,
+        span: tracing::Span,
     ) -> Self {
         Self {
             fragment_manager,
@@ -243,6 +246,7 @@ impl<S: MetaStore> CommandContext<S> {
             command,
             checkpoint,
             source_manager,
+            span,
         }
     }
 }
