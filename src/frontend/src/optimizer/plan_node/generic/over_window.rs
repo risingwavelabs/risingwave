@@ -222,8 +222,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for OverWindow<PlanRef> {
         for part_key_idx in self
             .window_functions
             .iter()
-            .map(|f| f.partition_by.iter().map(|i| i.index))
-            .flatten()
+            .flat_map(|f| f.partition_by.iter().map(|i| i.index))
         {
             if !output_pk.contains(&part_key_idx) {
                 output_pk.push(part_key_idx);
