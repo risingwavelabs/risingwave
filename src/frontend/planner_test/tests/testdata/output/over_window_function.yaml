@@ -111,11 +111,10 @@
       └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), lag], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(t._row_id) }
-      └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
-        └─StreamExchange { dist: HashShard(t.y) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), lag], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
+      └─StreamExchange { dist: HashShard(t.y) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
@@ -129,11 +128,10 @@
       └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), lag], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(t._row_id) }
-      └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
-        └─StreamExchange { dist: HashShard(t.y) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), lag], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
+      └─StreamExchange { dist: HashShard(t.y) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
@@ -198,11 +196,10 @@
       └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), min], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(t._row_id) }
-      └─StreamOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
-        └─StreamExchange { dist: HashShard(t.y) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), min], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
+      └─StreamExchange { dist: HashShard(t.y) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
@@ -216,11 +213,10 @@
       └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), min], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(t._row_id) }
-      └─StreamOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING)] }
-        └─StreamExchange { dist: HashShard(t.y) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), min], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING)] }
+      └─StreamExchange { dist: HashShard(t.y) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
@@ -272,11 +268,10 @@
       └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), first_value], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(t._row_id) }
-      └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─StreamExchange { dist: HashShard(t.y) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), first_value], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─StreamExchange { dist: HashShard(t.y) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
@@ -295,15 +290,14 @@
           └─LogicalProject { exprs: [t.x, t.y, t.z, t.w, t._row_id, ((t.x - t.y) * (t.x - t.y)) as $expr1, (t.x - t.y) as $expr2, (t.x * t.x) as $expr3] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id] }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, z, res0, res1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(t._row_id) }
-      └─StreamProject { exprs: [t.x, t.y, t.z, Sqrt(((sum::Decimal - ((sum::Decimal * sum::Decimal) / count::Decimal)) / count::Decimal)) as $expr4, Case((count <= 1:Int64), null:Decimal, Sqrt(((sum::Decimal - ((sum::Decimal * sum::Decimal) / count::Decimal)) / (count - 1:Int64)::Decimal))) as $expr5, t._row_id] }
-        └─StreamFilter { predicate: (Sqrt(((sum::Decimal - ((sum::Decimal * sum::Decimal) / count::Decimal)) / count::Decimal)) <= 3.0:Decimal) AND (Case((count <= 1:Int64), null:Decimal, Sqrt(((sum::Decimal - ((sum::Decimal * sum::Decimal) / count::Decimal)) / (count - 1:Int64)::Decimal))) > 1.0:Decimal) }
-          └─StreamOverWindow { window_functions: [sum($expr1) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum($expr2) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count($expr2) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum($expr3) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum(t.x) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.x) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-            └─StreamExchange { dist: HashShard(t.z) }
-              └─StreamProject { exprs: [t.x, t.y, t.z, ((t.x - t.y) * (t.x - t.y)) as $expr1, (t.x - t.y) as $expr2, (t.x * t.x) as $expr3, t._row_id] }
-                └─StreamFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) }
-                  └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [x, y, z, res0, res1, t._row_id(hidden)], stream_key: [t._row_id, z], pk_columns: [t._row_id, z], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y, t.z, Sqrt(((sum::Decimal - ((sum::Decimal * sum::Decimal) / count::Decimal)) / count::Decimal)) as $expr4, Case((count <= 1:Int64), null:Decimal, Sqrt(((sum::Decimal - ((sum::Decimal * sum::Decimal) / count::Decimal)) / (count - 1:Int64)::Decimal))) as $expr5, t._row_id] }
+      └─StreamFilter { predicate: (Sqrt(((sum::Decimal - ((sum::Decimal * sum::Decimal) / count::Decimal)) / count::Decimal)) <= 3.0:Decimal) AND (Case((count <= 1:Int64), null:Decimal, Sqrt(((sum::Decimal - ((sum::Decimal * sum::Decimal) / count::Decimal)) / (count - 1:Int64)::Decimal))) > 1.0:Decimal) }
+        └─StreamOverWindow { window_functions: [sum($expr1) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum($expr2) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count($expr2) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum($expr3) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum(t.x) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.x) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─StreamExchange { dist: HashShard(t.z) }
+            └─StreamProject { exprs: [t.x, t.y, t.z, ((t.x - t.y) * (t.x - t.y)) as $expr1, (t.x - t.y) as $expr2, (t.x * t.x) as $expr3, t._row_id] }
+              └─StreamFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) }
+                └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
@@ -328,15 +322,14 @@
         └─LogicalProject { exprs: [t.x, t.y, t.z, (t.z * t.z) as $expr1, Abs(t.w) as $expr2, (t.y + 1:Int32) as $expr3] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w], predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, z, res, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(t._row_id) }
-      └─StreamProject { exprs: [t.x, t.y, t.z, (sum::Decimal / count::Decimal) as $expr4, t._row_id] }
-        └─StreamFilter { predicate: ((sum::Decimal / count::Decimal) <= 3.0:Decimal) }
-          └─StreamOverWindow { window_functions: [sum($expr1) OVER(PARTITION BY $expr3 ORDER BY $expr2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count($expr1) OVER(PARTITION BY $expr3 ORDER BY $expr2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-            └─StreamExchange { dist: HashShard($expr3) }
-              └─StreamProject { exprs: [t.x, t.y, t.z, (t.z * t.z) as $expr1, Abs(t.w) as $expr2, (t.y + 1:Int32) as $expr3, t._row_id] }
-                └─StreamFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) }
-                  └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [x, y, z, res, t._row_id(hidden), $expr3(hidden)], stream_key: [t._row_id, $expr3], pk_columns: [t._row_id, $expr3], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y, t.z, (sum::Decimal / count::Decimal) as $expr4, t._row_id, $expr3] }
+      └─StreamFilter { predicate: ((sum::Decimal / count::Decimal) <= 3.0:Decimal) }
+        └─StreamOverWindow { window_functions: [sum($expr1) OVER(PARTITION BY $expr3 ORDER BY $expr2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count($expr1) OVER(PARTITION BY $expr3 ORDER BY $expr2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─StreamExchange { dist: HashShard($expr3) }
+            └─StreamProject { exprs: [t.x, t.y, t.z, (t.z * t.z) as $expr1, Abs(t.w) as $expr2, (t.y + 1:Int32) as $expr3, t._row_id] }
+              └─StreamFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) }
+                └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
