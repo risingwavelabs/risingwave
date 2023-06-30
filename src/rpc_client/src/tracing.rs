@@ -5,36 +5,31 @@ use risingwave_common::util::tracing::TracingContext;
 use tower::{Layer, Service};
 
 #[derive(Clone, Default)]
-pub struct TracingInjectMiddlewareLayer {
+pub struct TracingInjectLayer {
     _private: (),
 }
 
-impl TracingInjectMiddlewareLayer {
+impl TracingInjectLayer {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl<S> Layer<S> for TracingInjectMiddlewareLayer {
-    type Service = TracingInjectMiddleware<S>;
+impl<S> Layer<S> for TracingInjectLayer {
+    type Service = TracingInject<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        TracingInjectMiddleware { inner: service }
+        TracingInject { inner: service }
     }
 }
 
-#[derive(Clone)]
-pub struct TracingInjectMiddleware<S> {
+#[derive(Clone, Debug)]
+pub struct TracingInject<S> {
     inner: S,
 }
 
-impl<S: std::fmt::Debug> std::fmt::Debug for TracingInjectMiddleware<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Traced").field(&self.inner).finish()
-    }
-}
-
-impl<S, B> Service<hyper::Request<B>> for TracingInjectMiddleware<S>
+impl<S, B> Service<hyper::Request<B>> for TracingInject<S>
 where
     S: Service<hyper::Request<B>> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -61,5 +56,14 @@ where
             req.headers_mut().extend(headers);
             inner.call(req).await
         }
+    }
+}
+
+pub type Channel = TracingInject<tonic::transport::Channel>;
+
+#[easy_ext::ext(TracingInjectedChannelExt)]
+impl tonic::transport::Channel {
+    pub fn tracing_injected(self) -> Channel {
+        TracingInject { inner: self }
     }
 }

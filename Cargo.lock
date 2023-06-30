@@ -6427,6 +6427,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
+ "easy-ext",
  "either",
  "futures",
  "hyper",

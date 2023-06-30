@@ -76,20 +76,17 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tonic::transport::{Channel as RawChannel, Endpoint};
+use tonic::transport::Endpoint;
 use tonic::{Code, Streaming};
-use tower::ServiceBuilder;
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
-use crate::tracing::{TracingInjectMiddleware, TracingInjectMiddlewareLayer};
+use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
 type ConnectionId = u32;
 type DatabaseId = u32;
 type SchemaId = u32;
-
-type Channel = TracingInjectMiddleware<RawChannel>;
 
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone, Debug)]
@@ -1527,11 +1524,7 @@ impl GrpcMetaClient {
             .await
             .map_err(RpcError::TransportError)?;
 
-        let service = ServiceBuilder::new()
-            .layer(TracingInjectMiddlewareLayer::new())
-            .service(channel);
-
-        Ok(service)
+        Ok(channel.tracing_injected())
     }
 
     pub(crate) fn retry_strategy_to_bound(

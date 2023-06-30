@@ -21,30 +21,30 @@ use tower::{Layer, Service};
 use tracing::Instrument;
 
 #[derive(Clone, Default)]
-pub struct TracingMiddlewareLayer {
+pub struct TracingExtractLayer {
     _private: (),
 }
 
-impl TracingMiddlewareLayer {
+impl TracingExtractLayer {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl<S> Layer<S> for TracingMiddlewareLayer {
-    type Service = TracingMiddleware<S>;
+impl<S> Layer<S> for TracingExtractLayer {
+    type Service = TracingExtract<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        TracingMiddleware { inner: service }
+        TracingExtract { inner: service }
     }
 }
 
 #[derive(Clone)]
-pub struct TracingMiddleware<S> {
+pub struct TracingExtract<S> {
     inner: S,
 }
 
-impl<S> Service<hyper::Request<Body>> for TracingMiddleware<S>
+impl<S> Service<hyper::Request<Body>> for TracingExtract<S>
 where
     S: Service<hyper::Request<Body>> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -69,8 +69,11 @@ where
             let span = if let Some(tracing_context) =
                 TracingContext::from_http_headers(req.headers())
             {
-                let path = req.uri().path();
-                let span = tracing::info_span!("grpc_serve", "otel.name" = path, path);
+                let span = tracing::info_span!(
+                    "grpc_serve",
+                    "otel.name" = req.uri().path(),
+                    uri = %req.uri()
+                );
                 tracing_context.attach(span)
             } else {
                 tracing::Span::none() // if there's no parent span, disable tracing for this request
