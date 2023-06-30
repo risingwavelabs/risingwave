@@ -7,6 +7,10 @@
 ./risedev k
 ./risedev clean-data
 ```
+Configure risedev to enable Hummock Trace
+```
+./risedev configure
+```
 
 ## Step 1: Start a cluster with tracing
 ```bash
@@ -72,7 +76,7 @@ It makes `risingdev` put flag `hm_trace` in env variables `RUSTFLAGS`.
 Then running any risedev commands traces storage operations to the log file.
 
 ### CLI
-If you wish to manually run `cargo` rather than `risedev`, set the env variable to enable tracing.
+If you wish to manually run `cargo` rather than `risedev`, you may either use cfg or features.
 ```
 RUSTFLAGS="--cfg hm_trace --cfg tokio_unstable"
 ```
@@ -81,6 +85,12 @@ For example, to start a traced playground
 
 ```
 RUSTFLAGS="--cfg hm_trace --cfg tokio_unstable" USE_HM_TRACE=true cargo run --bin risingwave playground
+```
+
+Or, you may use Cargo features to enable tracing.
+Example:
+```
+cargo build -p risingwave_cmd -p risedev -p risingwave_storage --features hm-trace --profile dev --features rw-static-link
 ```
 
 ### Development

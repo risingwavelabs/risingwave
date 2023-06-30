@@ -62,6 +62,3 @@ workspace-hack = { path = "../workspace-hack" }
 futures-async-stream = { workspace = true }
 rand = "0.8"
 tempfile = "3"
-
-[features]
-hm-trace = ["risingwave_storage/hm-trace"]
