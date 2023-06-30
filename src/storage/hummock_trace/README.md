@@ -76,36 +76,11 @@ It makes `risingdev` put flag `hm_trace` in env variables `RUSTFLAGS`.
 Then running any risedev commands traces storage operations to the log file.
 
 ### CLI
-If you wish to manually run `cargo` rather than `risedev`, you may either use cfg or features.
-```
-RUSTFLAGS="--cfg hm_trace --cfg tokio_unstable"
-```
-We must manually enable `tokio_unstable` because extra flag sources are mutually exclusive. If we provide this variable, cargo will not evaluate `build.rustflags` in `.cargo/config.toml`
-For example, to start a traced playground
-
-```
-RUSTFLAGS="--cfg hm_trace --cfg tokio_unstable" USE_HM_TRACE=true cargo run --bin risingwave playground
-```
-
-Or, you may use Cargo features to enable tracing.
+You may use Cargo features to enable tracing.
 Example:
 ```
 cargo build -p risingwave_cmd -p risedev -p risingwave_storage --features hm-trace --profile dev --features rw-static-link
 ```
-
-### Development
-It's recommended to add `--cfg hm_trace` flag to `.cargo/config.toml` for development since Rust may compile everything again if we set RUSTFLAGS.
-
-Example:
-```toml
-[target.'cfg(all())']
-rustflags = [
-  "--cfg",
-  "hm_trace"
-]
-```
-
-If we set the flag in root `Cargo.toml`, we don't need to set the env variable.
 
 You may also use `risedev` to start tracing with profile "hm-trace".
 Example:

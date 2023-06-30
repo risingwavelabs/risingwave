@@ -93,7 +93,7 @@ impl Components {
             Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
             Self::DynamicLinking => "[Build] Enable dynamic linking",
-            Self::HummockTrace => "[Component] Hummock Trace",
+            Self::HummockTrace => "[Build] Hummock Trace",
         }
         .into()
     }
