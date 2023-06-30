@@ -41,7 +41,7 @@ const CHUNK_SIZE: usize = 1024;
 fn bench_expr(c: &mut Criterion) {
     use itertools::Itertools;
 
-    let input = DataChunk::new(
+    let input = StreamChunk::from(DataChunk::new(
         vec![
             BoolArray::from_iter((1..=CHUNK_SIZE).map(|i| i % 2 == 0)).into_ref(),
             I16Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
@@ -154,7 +154,7 @@ fn bench_expr(c: &mut Criterion) {
             .into_ref(),
         ],
         CHUNK_SIZE,
-    );
+    ));
     let inputrefs = [
         InputRefExpression::new(DataType::Boolean, 0),
         InputRefExpression::new(DataType::Int16, 1),
