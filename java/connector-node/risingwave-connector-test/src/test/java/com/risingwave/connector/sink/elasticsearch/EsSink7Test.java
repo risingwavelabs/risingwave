@@ -54,8 +54,10 @@ public class EsSink7Test {
             throws IOException {
         EsSink7 sink =
                 new EsSink7(
-                        new EsSink7Config(
-                                container.getHttpHostAddress(), "test", "$", username, password),
+                        new EsSink7Config(container.getHttpHostAddress(), "test")
+                                .withDelimiter("$")
+                                .withUsername(username)
+                                .withPassword(password),
                         getTestTableSchema());
         sink.write(
                 Iterators.forArray(

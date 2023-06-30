@@ -63,4 +63,19 @@ public class EsSink7Config extends CommonSinkConfig {
     public String getPassword() {
         return password;
     }
+
+    public EsSink7Config withDelimiter(String delimiter) {
+        this.delimiter = delimiter;
+        return this;
+    }
+
+    public EsSink7Config withUsername(String username) {
+        this.username = username;
+        return this;
+    }
+
+    public EsSink7Config withPassword(String password) {
+        this.password = password;
+        return this;
+    }
 }
