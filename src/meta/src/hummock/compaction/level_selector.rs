@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 //  Copyright 2023 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,6 +16,7 @@ use std::collections::HashMap;
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableOption;
@@ -245,7 +245,7 @@ impl DynamicLevelSelectorCore {
 
                 let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
                     / std::cmp::max(
-                        base_level_sst_count / 4,
+                        base_level_sst_count / 16,
                         self.config.level0_sub_level_compact_level_count as u64,
                     );
 

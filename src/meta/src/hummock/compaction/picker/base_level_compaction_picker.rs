@@ -141,6 +141,10 @@ impl LevelCompactionPicker {
                 continue;
             }
 
+            if target_level_size > self.config.max_compaction_bytes {
+                continue;
+            }
+
             if input.total_file_size >= target_level_size {
                 min_write_amp_meet = true;
             }
