@@ -80,7 +80,10 @@ where
 
 /// A wrapper around tonic's `Channel` that injects the [`TracingContext`] obtained from the current
 /// tracing span when making gRPC requests.
+#[cfg(not(madsim))]
 pub type Channel = TracingInject<tonic::transport::Channel>;
+#[cfg(madsim)]
+pub type Channel = tonic::transport::Channel;
 
 /// An extension trait for tonic's `Channel` that wraps it in a [`TracingInject`] service.
 #[easy_ext::ext(TracingInjectedChannelExt)]
@@ -91,6 +94,9 @@ impl tonic::transport::Channel {
     /// The server can then extract the [`TracingContext`] from the HTTP headers with the
     /// `TracingExtract` middleware.
     pub fn tracing_injected(self) -> Channel {
-        TracingInject { inner: self }
+        #[cfg(not(madsim))]
+        return TracingInject { inner: self };
+        #[cfg(madsim)]
+        return self;
     }
 }
