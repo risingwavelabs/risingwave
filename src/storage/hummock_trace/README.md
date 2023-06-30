@@ -41,7 +41,7 @@ MINIO_ROOT_USER=hummockadmin \
 cargo run --package risingwave_hummock_test --bin replay -- \
 --path .trace/hummock.ht \
 --object-storage minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
---config src/config/risingwave.user.toml
+--config src/config/hummock-trace.toml
 ```
 We are all set!
 
