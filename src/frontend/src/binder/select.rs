@@ -520,6 +520,7 @@ impl Binder {
             false,
             OrderBy::any(),
             Condition::true_cond(),
+            vec![],
         )?
         .into()];
 
