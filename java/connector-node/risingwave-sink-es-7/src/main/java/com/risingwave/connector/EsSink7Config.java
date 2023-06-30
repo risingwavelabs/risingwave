@@ -28,24 +28,20 @@ public class EsSink7Config extends CommonSinkConfig {
     private String index;
 
     /** Optional, delimiter for generating id */
+    @JsonProperty(value = "delimiter")
     private String delimiter;
 
+    @JsonProperty(value = "username")
     private String username;
 
+    @JsonProperty(value = "password")
     private String password;
 
     @JsonCreator
     public EsSink7Config(
-            @JsonProperty(value = "url", required = true) String url,
-            @JsonProperty(value = "index", required = true) String index,
-            @JsonProperty(value = "delimiter") String delimiter,
-            @JsonProperty(value = "username") String username,
-            @JsonProperty(value = "password") String password) {
+            @JsonProperty(value = "url") String url, @JsonProperty(value = "index") String index) {
         this.url = url;
         this.index = index;
-        this.delimiter = delimiter == null ? "_" : delimiter;
-        this.username = username;
-        this.password = password;
     }
 
     public String getUrl() {
