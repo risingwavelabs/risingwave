@@ -17,16 +17,21 @@ package com.risingwave.connector.source.common;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.source.SourceTypeE;
 import io.grpc.Status;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.Properties;
 import java.util.Set;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public final class ValidatorUtils {
     static final Logger LOG = LoggerFactory.getLogger(ValidatorUtils.class);
 
     static final String VALIDATE_SQL_FILE = "validate_sql.properties";
+
+    public static RuntimeException failedPrecondition(String description) {
+        return Status.FAILED_PRECONDITION.withDescription(description).asRuntimeException();
+    }
 
     public static RuntimeException invalidArgument(String description) {
         return Status.INVALID_ARGUMENT.withDescription(description).asRuntimeException();

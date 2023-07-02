@@ -17,12 +17,14 @@ package com.risingwave.connector.source.common;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.proto.Data;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class PostgresValidator extends DatabaseValidator implements AutoCloseable {
     static final Logger LOG = LoggerFactory.getLogger(PostgresValidator.class);
@@ -51,13 +53,37 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     @Override
     public void validateDbConfig() {
         // TODO: check database server version
-        // check whether source db has enabled wal
         try (var stmt = jdbcConnection.createStatement()) {
+            // check whether wal has been enabled
             var res = stmt.executeQuery(ValidatorUtils.getSql("postgres.wal"));
             while (res.next()) {
                 if (!res.getString(1).equals("logical")) {
                     throw ValidatorUtils.invalidArgument(
                             "Postgres wal_level should be 'logical'.\nPlease modify the config and restart your Postgres server.");
+                }
+            }
+        } catch (SQLException e) {
+            throw ValidatorUtils.internalError(e);
+        }
+
+        try (var stmt =
+                jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.slot.check"))) {
+            // check whether the replication slot is already existed
+            var slotName = userProps.get(DbzConnectorConfig.PG_SLOT_NAME);
+            stmt.setString(1, slotName);
+            var res = stmt.executeQuery();
+            if (res.next() && res.getString(1).equals(slotName)) {
+                LOG.info("replication slot '{}' already exists, just use it", slotName);
+            } else {
+                // otherwise, we need to create a new one
+                var stmt2 =
+                        jdbcConnection.prepareStatement(
+                                ValidatorUtils.getSql("postgres.slot_limit.check"));
+                var res2 = stmt2.executeQuery();
+                // check whether the number of replication slots is reach the max limit
+                if (res2.next() && res2.getString(1).equals("true")) {
+                    throw ValidatorUtils.failedPrecondition(
+                            "all replication slots are in use\n Hint: Free one or increase max_replication_slots.");
                 }
             }
         } catch (SQLException e) {
