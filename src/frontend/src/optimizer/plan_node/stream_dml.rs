@@ -58,15 +58,6 @@ impl StreamDml {
     }
 }
 
-impl fmt::Display for StreamDml {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamDml {{ columns: {} }}",
-            format_args!("[{}]", &self.column_names().join(", "))
-        )
-    }
-}
 impl Distill for StreamDml {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let col = self

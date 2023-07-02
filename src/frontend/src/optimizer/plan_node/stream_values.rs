@@ -64,12 +64,6 @@ impl StreamValues {
     }
 }
 
-impl fmt::Display for StreamValues {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamValues");
-        builder.field("rows", &self.logical.rows()).finish()
-    }
-}
 impl Distill for StreamValues {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let data = self.logical.rows_pretty();

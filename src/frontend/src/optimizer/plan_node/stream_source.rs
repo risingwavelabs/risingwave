@@ -62,17 +62,6 @@ impl StreamSource {
 
 impl_plan_tree_node_for_leaf! { StreamSource }
 
-impl fmt::Display for StreamSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamSource");
-        if let Some(catalog) = self.source_catalog() {
-            builder
-                .field("source", &catalog.name)
-                .field("columns", &self.schema().names_str());
-        }
-        builder.finish()
-    }
-}
 impl Distill for StreamSource {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = if let Some(catalog) = self.source_catalog() {

@@ -46,11 +46,6 @@ impl StreamShare {
     }
 }
 
-impl fmt::Display for StreamShare {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LogicalShare::fmt_with_name(&self.base, f, "StreamShare")
-    }
-}
 impl Distill for StreamShare {
     fn distill<'a>(&self) -> XmlNode<'a> {
         LogicalShare::pretty_fields(&self.base, "StreamShare")

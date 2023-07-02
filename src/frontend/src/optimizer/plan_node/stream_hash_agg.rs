@@ -164,30 +164,6 @@ impl Distill for StreamHashAgg {
         )
     }
 }
-impl fmt::Display for StreamHashAgg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(
-            f, "StreamHashAgg",
-            { "append_only", self.input().append_only() },
-            { "eowc", self.emit_on_window_close },
-        );
-        self.logical.fmt_fields_with_builder(&mut builder);
-
-        let watermark_columns = &self.base.watermark_columns;
-        if watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        builder.finish()
-    }
-}
 
 impl PlanTreeNodeUnary for StreamHashAgg {
     fn input(&self) -> PlanRef {

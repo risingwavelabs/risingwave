@@ -105,11 +105,6 @@ impl Distill for LogicalInsert {
         childless_record("LogicalInsert", vec)
     }
 }
-impl fmt::Display for LogicalInsert {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalInsert")
-    }
-}
 
 impl ColPrunable for LogicalInsert {
     fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

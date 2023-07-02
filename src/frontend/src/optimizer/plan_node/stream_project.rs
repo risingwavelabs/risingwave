@@ -51,24 +51,6 @@ impl Distill for StreamProject {
         childless_record("StreamProject", vec)
     }
 }
-impl fmt::Display for StreamProject {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamProject");
-        self.logical
-            .fmt_fields_with_builder(&mut builder, self.schema());
-        let watermark_derivations = &self.watermark_derivations;
-        if !watermark_derivations.is_empty() {
-            builder.field(
-                "output_watermarks",
-                &watermark_derivations
-                    .iter()
-                    .map(|(_, idx)| FieldDisplay(self.schema().fields.get(*idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-        builder.finish()
-    }
-}
 
 impl StreamProject {
     pub fn new(logical: generic::Project<PlanRef>) -> Self {

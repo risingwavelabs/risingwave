@@ -70,19 +70,6 @@ impl Distill for StreamNow {
         childless_record("StreamNow", vec)
     }
 }
-impl fmt::Display for StreamNow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = formatter_debug_plan_node!(f, "StreamNow");
-
-        if verbose {
-            // For now, output all columns from the left side. Make it explicit here.
-            builder.field("output", &self.schema().names_str());
-        }
-
-        builder.finish()
-    }
-}
 
 impl_plan_tree_node_for_leaf! { StreamNow }
 

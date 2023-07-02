@@ -94,20 +94,6 @@ impl Distill for StreamExchange {
         )
     }
 }
-impl fmt::Display for StreamExchange {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(
-            f, "StreamExchange",
-            { "no_shuffle", self.no_shuffle },
-        );
-
-        let distribution_display = DistributionDisplay {
-            distribution: &self.base.dist,
-            input_schema: self.input.schema(),
-        };
-        builder.field("dist", &distribution_display).finish()
-    }
-}
 
 impl PlanTreeNodeUnary for StreamExchange {
     fn input(&self) -> PlanRef {

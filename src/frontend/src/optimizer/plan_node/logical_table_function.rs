@@ -64,11 +64,6 @@ impl LogicalTableFunction {
 
 impl_plan_tree_node_for_leaf! { LogicalTableFunction }
 
-impl fmt::Display for LogicalTableFunction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "LogicalTableFunction {{ {:?} }}", self.table_function)
-    }
-}
 impl Distill for LogicalTableFunction {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let data = Pretty::debug(&self.table_function);

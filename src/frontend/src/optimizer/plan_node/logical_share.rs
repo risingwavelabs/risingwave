@@ -109,11 +109,6 @@ impl LogicalShare {
     }
 }
 
-impl fmt::Display for LogicalShare {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Self::fmt_with_name(&self.base, f, "LogicalShare")
-    }
-}
 impl Distill for LogicalShare {
     fn distill<'a>(&self) -> XmlNode<'a> {
         Self::pretty_fields(&self.base, "LogicalShare")

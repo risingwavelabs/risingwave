@@ -64,15 +64,6 @@ impl StreamSimpleAgg {
     }
 }
 
-impl fmt::Display for StreamSimpleAgg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = plan_node_name!("StreamSimpleAgg",
-            { "append_only", self.input().append_only() },
-        );
-        self.logical.fmt_with_name(f, &name)
-    }
-}
-
 impl Distill for StreamSimpleAgg {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let name = plan_node_name!("StreamSimpleAgg",

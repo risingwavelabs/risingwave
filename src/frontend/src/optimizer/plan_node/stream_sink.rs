@@ -290,44 +290,6 @@ impl Distill for StreamSink {
         childless_record("StreamSink", vec)
     }
 }
-impl fmt::Display for StreamSink {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamSink");
-
-        let sink_type = if self.sink_desc.sink_type.is_append_only() {
-            "append-only"
-        } else {
-            "upsert"
-        };
-        let column_names = self
-            .sink_desc
-            .columns
-            .iter()
-            .map(|col| col.name_with_hidden())
-            .collect_vec()
-            .join(", ");
-        builder
-            .field("type", &format_args!("{}", sink_type))
-            .field("columns", &format_args!("[{}]", column_names));
-
-        if self.sink_desc.sink_type.is_upsert() {
-            builder.field(
-                "pk",
-                &IndicesDisplay {
-                    indices: &self
-                        .sink_desc
-                        .plan_pk
-                        .iter()
-                        .map(|k| k.column_index)
-                        .collect_vec(),
-                    input_schema: &self.base.schema,
-                },
-            );
-        }
-
-        builder.finish()
-    }
-}
 
 impl StreamNode for StreamSink {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {

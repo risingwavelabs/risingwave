@@ -90,31 +90,6 @@ impl StreamDeltaJoin {
     }
 }
 
-impl fmt::Display for StreamDeltaJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = formatter_debug_plan_node!(f, "StreamDeltaJoin");
-        builder.field("type", &self.logical.join_type);
-
-        let concat_schema = self.logical.concat_schema();
-        builder.field(
-            "predicate",
-            &EqJoinPredicateDisplay {
-                eq_join_predicate: self.eq_join_predicate(),
-                input_schema: &concat_schema,
-            },
-        );
-
-        if verbose {
-            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
-                None => builder.field("output", &format_args!("all")),
-                Some(id) => builder.field("output", &id),
-            };
-        }
-
-        builder.finish()
-    }
-}
 impl Distill for StreamDeltaJoin {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();

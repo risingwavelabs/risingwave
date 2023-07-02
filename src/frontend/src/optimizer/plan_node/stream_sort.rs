@@ -33,14 +33,6 @@ pub struct StreamSort {
     sort_column_index: usize,
 }
 
-impl fmt::Display for StreamSort {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamSort");
-        builder
-            .field("sort_column_index", &self.sort_column_index)
-            .finish()
-    }
-}
 impl Distill for StreamSort {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = vec![("sort_column_index", Pretty::debug(&self.sort_column_index))];

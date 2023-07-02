@@ -61,26 +61,6 @@ impl StreamUnion {
     }
 }
 
-impl fmt::Display for StreamUnion {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamUnion");
-        self.logical.fmt_fields_with_builder(&mut builder);
-
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        builder.finish()
-    }
-}
 impl Distill for StreamUnion {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let mut vec = self.logical.fields_pretty();

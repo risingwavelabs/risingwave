@@ -88,43 +88,6 @@ impl Distill for StreamWatermarkFilter {
         childless_record("StreamWatermarkFilter", fields)
     }
 }
-impl fmt::Display for StreamWatermarkFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        struct DisplayWatermarkDesc<'a> {
-            watermark_idx: u32,
-            expr: ExprImpl,
-            input_schema: &'a Schema,
-        }
-
-        impl fmt::Debug for DisplayWatermarkDesc<'_> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let expr_display = ExprDisplay {
-                    expr: &self.expr,
-                    input_schema: self.input_schema,
-                };
-                write!(f, "idx: {}, expr: {}", self.watermark_idx, expr_display)
-            }
-        }
-
-        let mut builder = formatter_debug_plan_node!(f, "StreamWatermarkFilter");
-        let input_schema = self.input.schema();
-
-        let display_watermark_descs: Vec<_> = self
-            .watermark_descs
-            .iter()
-            .map(|desc| {
-                Ok::<_, RwError>(DisplayWatermarkDesc {
-                    watermark_idx: desc.watermark_idx,
-                    expr: ExprImpl::from_expr_proto(desc.get_expr()?)?,
-                    input_schema,
-                })
-            })
-            .try_collect()
-            .map_err(|_| fmt::Error)?;
-        builder.field("watermark_descs", &display_watermark_descs);
-        builder.finish()
-    }
-}
 
 impl PlanTreeNodeUnary for StreamWatermarkFilter {
     fn input(&self) -> PlanRef {

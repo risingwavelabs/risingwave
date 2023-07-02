@@ -57,15 +57,6 @@ impl StreamRowIdGen {
     }
 }
 
-impl fmt::Display for StreamRowIdGen {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamRowIdGen {{ row_id_index: {} }}",
-            self.row_id_index
-        )
-    }
-}
 impl Distill for StreamRowIdGen {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = vec![("row_id_index", Pretty::debug(&self.row_id_index))];

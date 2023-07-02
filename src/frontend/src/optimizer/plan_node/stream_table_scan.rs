@@ -192,40 +192,6 @@ impl Distill for StreamTableScan {
         childless_record("StreamTableScan", vec)
     }
 }
-impl fmt::Display for StreamTableScan {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = formatter_debug_plan_node!(f, "StreamTableScan");
-
-        let v = match verbose {
-            false => self.logical.column_names(),
-            true => self.logical.column_names_with_table_prefix(),
-        }
-        .join(", ");
-        builder
-            .field("table", &format_args!("{}", self.logical.table_name))
-            .field("columns", &format_args!("[{}]", v));
-
-        if verbose {
-            builder.field(
-                "pk",
-                &IndicesDisplay {
-                    indices: self.logical_pk(),
-                    input_schema: &self.base.schema,
-                },
-            );
-            builder.field(
-                "dist",
-                &DistributionDisplay {
-                    distribution: self.distribution(),
-                    input_schema: &self.base.schema,
-                },
-            );
-        }
-
-        builder.finish()
-    }
-}
 
 impl StreamNode for StreamTableScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {

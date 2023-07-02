@@ -60,16 +60,6 @@ impl StreamTopN {
     }
 }
 
-impl fmt::Display for StreamTopN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = plan_node_name!("StreamTopN",
-            { "append_only", self.input().append_only() },
-        );
-        self.logical
-            .fmt_with_name_and_force(f, &name, false)
-            .finish()
-    }
-}
 impl Distill for StreamTopN {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let name = plan_node_name!("StreamTopN",

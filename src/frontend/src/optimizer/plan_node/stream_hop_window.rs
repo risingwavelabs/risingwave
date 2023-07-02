@@ -86,26 +86,6 @@ impl Distill for StreamHopWindow {
         childless_record("StreamHopWindow", vec)
     }
 }
-impl fmt::Display for StreamHopWindow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamHopWindow");
-        self.logical.fmt_fields_with_builder(&mut builder);
-
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        builder.finish()
-    }
-}
 
 impl PlanTreeNodeUnary for StreamHopWindow {
     fn input(&self) -> PlanRef {

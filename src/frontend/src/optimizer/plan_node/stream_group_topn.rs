@@ -130,28 +130,6 @@ impl Distill for StreamGroupTopN {
         node
     }
 }
-impl fmt::Display for StreamGroupTopN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = plan_node_name!("StreamGroupTopN",
-            { "append_only", self.input().append_only() },
-        );
-
-        let mut builder = self.logical.fmt_with_name_and_force(f, &name, true);
-        let watermark_columns = &self.base.watermark_columns;
-        if watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        builder.finish()
-    }
-}
 
 impl_plan_tree_node_for_unary! { StreamGroupTopN }
 

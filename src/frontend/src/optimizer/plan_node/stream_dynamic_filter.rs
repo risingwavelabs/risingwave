@@ -72,33 +72,6 @@ impl Distill for StreamDynamicFilter {
     }
 }
 
-impl fmt::Display for StreamDynamicFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = formatter_debug_plan_node!(f, "StreamDynamicFilter");
-
-        self.core.fmt_fields_with_builder(&mut builder);
-        let watermark_columns = &self.base.watermark_columns;
-        if watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        if verbose {
-            // For now, output all columns from the left side. Make it explicit here.
-            builder.field("output", &self.schema().names_str());
-        }
-
-        builder.finish()
-    }
-}
-
 impl PlanTreeNodeBinary for StreamDynamicFilter {
     fn left(&self) -> PlanRef {
         self.core.left().clone()

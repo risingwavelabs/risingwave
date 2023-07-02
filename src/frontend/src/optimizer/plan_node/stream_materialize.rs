@@ -267,53 +267,6 @@ impl Distill for StreamMaterialize {
         childless_record("StreamMaterialize", vec)
     }
 }
-impl fmt::Display for StreamMaterialize {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let table = self.table();
-
-        let column_names = table
-            .columns
-            .iter()
-            .map(|c| c.name_with_hidden())
-            .join(", ");
-
-        let stream_key = table
-            .stream_key
-            .iter()
-            .map(|&k| table.columns[k].name())
-            .join(", ");
-
-        let pk_columns = table
-            .pk
-            .iter()
-            .map(|o| table.columns[o.column_index].name().to_string())
-            .join(", ");
-
-        let mut builder = formatter_debug_plan_node!(f, "StreamMaterialize");
-        builder
-            .field("columns", &format_args!("[{}]", column_names))
-            .field("stream_key", &format_args!("[{}]", stream_key))
-            .field("pk_columns", &format_args!("[{}]", pk_columns));
-
-        let pk_conflict_behavior = self.table.conflict_behavior().debug_to_string();
-
-        builder.field("pk_conflict", &pk_conflict_behavior);
-
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
-            let watermark_column_names = watermark_columns
-                .ones()
-                .map(|i| table.columns()[i].name_with_hidden())
-                .join(", ");
-            builder.field(
-                "watermark_columns",
-                &format_args!("[{}]", watermark_column_names),
-            );
-        };
-
-        builder.finish()
-    }
-}
 
 impl PlanTreeNodeUnary for StreamMaterialize {
     fn input(&self) -> PlanRef {
