@@ -54,11 +54,6 @@ impl Distill for BatchInsert {
         childless_record("BatchInsert", vec)
     }
 }
-impl fmt::Display for BatchInsert {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchInsert")
-    }
-}
 
 impl PlanTreeNodeUnary for BatchInsert {
     fn input(&self) -> PlanRef {

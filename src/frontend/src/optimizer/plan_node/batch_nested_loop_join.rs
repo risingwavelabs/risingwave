@@ -76,32 +76,6 @@ impl Distill for BatchNestedLoopJoin {
     }
 }
 
-impl fmt::Display for BatchNestedLoopJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("BatchNestedLoopJoin");
-        builder.field("type", &self.logical.join_type);
-
-        let concat_schema = self.logical.concat_schema();
-        builder.field(
-            "predicate",
-            &ConditionDisplay {
-                condition: &self.logical.on,
-                input_schema: &concat_schema,
-            },
-        );
-
-        if verbose {
-            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
-                None => builder.field("output", &format_args!("all")),
-                Some(id) => builder.field("output", &id),
-            };
-        }
-
-        builder.finish()
-    }
-}
-
 impl PlanTreeNodeBinary for BatchNestedLoopJoin {
     fn left(&self) -> PlanRef {
         self.logical.left.clone()

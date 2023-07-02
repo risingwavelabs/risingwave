@@ -185,12 +185,6 @@ macro_rules! impl_distill_by_unit {
                 self.$core.distill_with_name($name)
             }
         }
-
-        impl std::fmt::Display for $ty {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                self.$core.fmt_with_name(f, $name)
-            }
-        }
     };
 }
 pub(crate) use impl_distill_by_unit;

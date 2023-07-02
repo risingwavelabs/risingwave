@@ -52,15 +52,6 @@ impl BatchTableFunction {
     }
 }
 
-impl fmt::Display for BatchTableFunction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchTableFunction {{ {:?} }}",
-            self.logical.table_function
-        )
-    }
-}
 impl Distill for BatchTableFunction {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let data = Pretty::debug(&self.logical.table_function);

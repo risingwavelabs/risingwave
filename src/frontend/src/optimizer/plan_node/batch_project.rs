@@ -58,12 +58,6 @@ impl BatchProject {
     }
 }
 
-impl fmt::Display for BatchProject {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchProject", self.schema())
-    }
-}
-
 impl Distill for BatchProject {
     fn distill<'a>(&self) -> XmlNode<'a> {
         childless_record("BatchProject", self.logical.fields_pretty(self.schema()))

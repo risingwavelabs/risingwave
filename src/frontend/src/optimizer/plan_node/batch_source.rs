@@ -70,17 +70,6 @@ impl BatchSource {
 
 impl_plan_tree_node_for_leaf! { BatchSource }
 
-impl fmt::Display for BatchSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("BatchSource");
-        builder
-            .field("source", &self.source_catalog().unwrap().name)
-            .field("columns", &self.column_names())
-            .field("filter", &self.kafka_timestamp_range_value())
-            .finish()
-    }
-}
-
 impl Distill for BatchSource {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let src = Pretty::from(self.source_catalog().unwrap().name.clone());

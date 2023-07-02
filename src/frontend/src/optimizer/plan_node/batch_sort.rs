@@ -42,19 +42,6 @@ impl BatchSort {
     }
 }
 
-impl fmt::Display for BatchSort {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchSort {{ order: {} }}",
-            OrderDisplay {
-                order: self.order(),
-                input_schema: self.input.schema()
-            }
-        )
-    }
-}
-
 impl Distill for BatchSort {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let data = Pretty::display(&OrderDisplay {
