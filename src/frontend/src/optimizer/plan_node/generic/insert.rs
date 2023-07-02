@@ -80,35 +80,6 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
         }
         vec
     }
-
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let verbose = self.ctx().is_explain_verbose();
-
-        let ret = if self.returning {
-            ", returning: true"
-        } else {
-            ""
-        };
-        write!(f, "{} {{ table: {}{}", name, self.table_name, ret)?;
-        if verbose {
-            let collect = self
-                .column_indices
-                .iter()
-                .enumerate()
-                .map(|(k, v)| format!("{}:{}", k, v))
-                .join(", ");
-            write!(f, ", mapping: [{}]", collect)?;
-            if !self.default_columns.is_empty() {
-                let collect = self
-                    .default_columns
-                    .iter()
-                    .map(|(k, v)| format!("{}<-{:?}", k, v))
-                    .join(", ");
-                write!(f, ", default: [{}]", collect)?;
-            }
-        }
-        write!(f, " }}")
-    }
 }
 
 impl<PlanRef: Eq + Hash> Insert<PlanRef> {

@@ -56,21 +56,6 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
         }
     }
 
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ table: {}, exprs: {:?}{} }}",
-            name,
-            self.table_name,
-            self.exprs,
-            if self.returning {
-                ", returning: true"
-            } else {
-                ""
-            }
-        )
-    }
-
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.exprs = self
             .exprs
