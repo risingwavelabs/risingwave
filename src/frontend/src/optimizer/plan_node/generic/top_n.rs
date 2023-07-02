@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::fmt;
+
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;

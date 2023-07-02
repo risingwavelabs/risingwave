@@ -297,15 +297,6 @@ macro_rules! plan_node_name {
         }
     };
 }
-macro_rules! formatter_debug_plan_node {
-    ($formatter:ident, $name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
-        {
-            use $crate::optimizer::plan_node::utils::plan_node_name;
-            let name = plan_node_name!($name $(, { $prop, $cond } )* );
-            $formatter.debug_struct(&name)
-        }
-    };
-}
 pub(crate) use plan_node_name;
 
 use super::generic::{self, GenericPlanRef};
