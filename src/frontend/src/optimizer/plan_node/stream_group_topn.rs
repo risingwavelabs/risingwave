@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 

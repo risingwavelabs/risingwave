@@ -69,14 +69,6 @@ impl LogicalShare {
         LogicalShare::new(input).into()
     }
 
-    pub(super) fn fmt_with_name(
-        base: &PlanBase,
-        f: &mut fmt::Formatter<'_>,
-        name: &str,
-    ) -> fmt::Result {
-        write!(f, "{} {{ id = {} }}", name, &base.id.0)
-    }
-
     pub(super) fn pretty_fields<'a>(base: &PlanBase, name: &'a str) -> XmlNode<'a> {
         childless_record(name, vec![("id", Pretty::debug(&base.id.0))])
     }
