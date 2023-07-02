@@ -125,27 +125,6 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
         )
     }
 
-    fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
-        self.column_subsets
-            .iter()
-            .map(|subset| {
-                subset
-                    .iter()
-                    .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-                    .collect()
-            })
-            .collect()
-    }
-
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ column_subsets: {:?} }}",
-            name,
-            self.column_subsets_display()
-        )
-    }
-
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         let input_len = self.input.schema().len();
         let map = (0..input_len)

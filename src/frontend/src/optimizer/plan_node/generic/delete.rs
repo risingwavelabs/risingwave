@@ -61,20 +61,6 @@ impl<PlanRef: Eq + Hash> Delete<PlanRef> {
             returning,
         }
     }
-
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ table: {}{} }}",
-            name,
-            self.table_name,
-            if self.returning {
-                ", returning: true"
-            } else {
-                ""
-            }
-        )
-    }
 }
 
 impl<PlanRef: Eq + Hash> DistillUnit for Delete<PlanRef> {

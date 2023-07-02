@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::hash::Hash;
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
