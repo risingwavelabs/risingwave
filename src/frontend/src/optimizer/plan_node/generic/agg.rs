@@ -602,14 +602,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         }
     }
 
-    fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        let f = |plan_agg_call| PlanAggCallDisplay {
-            plan_agg_call,
-            input_schema: self.input.schema(),
-        };
-        self.agg_calls.iter().map(f).collect()
-    }
-
     fn agg_calls_pretty<'a>(&self) -> Pretty<'a> {
         let f = |plan_agg_call| {
             Pretty::debug(&PlanAggCallDisplay {
@@ -618,11 +610,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             })
         };
         Pretty::Array(self.agg_calls.iter().map(f).collect())
-    }
-
-    fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
-        let f = |i| FieldDisplay(self.input.schema().fields.get(i).unwrap());
-        self.group_key.ones().map(f).collect()
     }
 
     fn group_key_pretty<'a>(&self) -> Pretty<'a> {
