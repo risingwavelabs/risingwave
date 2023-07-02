@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 
-use itertools::Itertools;
+
+
 use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{FieldDisplay, Schema};
 
