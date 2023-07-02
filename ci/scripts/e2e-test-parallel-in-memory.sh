@@ -27,6 +27,7 @@ host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
 
 echo "--- e2e, ci-3cn-3fe-in-memory, streaming"
 cargo make ci-start ci-3cn-3fe-in-memory
+sqllogictest --version
 sqllogictest ${host_args} -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-in-memory-streaming-${profile}" --label in-memory
 
 echo "--- Kill cluster"
