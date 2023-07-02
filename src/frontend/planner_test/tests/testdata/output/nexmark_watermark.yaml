@@ -349,7 +349,7 @@
       ├─LogicalProject { exprs: [$expr1, count, window_start] }
       │ └─LogicalAgg { group_key: [window_start, $expr1], aggs: [count] }
       │   └─LogicalProject { exprs: [window_start, $expr1] }
-      │     └─LogicalHopWindow { time_col: date_time, slide: Interval { months: 0, days: 0, usecs: 2000000 }, size: Interval { months: 0, days: 0, usecs: 10000000 }, output: all }
+      │     └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
       │       └─LogicalFilter { predicate: IsNotNull(date_time) }
       │         └─LogicalShare { id: 3 }
       │           └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
@@ -361,7 +361,7 @@
             └─LogicalProject { exprs: [count, window_start] }
               └─LogicalAgg { group_key: [$expr1, window_start], aggs: [count] }
                 └─LogicalProject { exprs: [$expr1, window_start] }
-                  └─LogicalHopWindow { time_col: date_time, slide: Interval { months: 0, days: 0, usecs: 2000000 }, size: Interval { months: 0, days: 0, usecs: 10000000 }, output: all }
+                  └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
                     └─LogicalFilter { predicate: IsNotNull(date_time) }
                       └─LogicalShare { id: 3 }
                         └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
@@ -372,7 +372,7 @@
     └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [$expr2, count] }
       ├─BatchExchange { order: [], dist: HashShard(window_start) }
       │ └─BatchHashAgg { group_key: [$expr2, window_start], aggs: [count] }
-      │   └─BatchHopWindow { time_col: $expr1, slide: Interval { months: 0, days: 0, usecs: 2000000 }, size: Interval { months: 0, days: 0, usecs: 10000000 }, output: [$expr2, window_start] }
+      │   └─BatchHopWindow { time_col: $expr1, slide: 00:00:02, size: 00:00:10, output: [$expr2, window_start] }
       │     └─BatchExchange { order: [], dist: HashShard($expr2) }
       │       └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, $expr1] }
       │         └─BatchFilter { predicate: IsNotNull($expr1) AND (event_type = 2:Int32) }
@@ -381,7 +381,7 @@
       └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
         └─BatchExchange { order: [], dist: HashShard(window_start) }
           └─BatchHashAgg { group_key: [$expr4, window_start], aggs: [count] }
-            └─BatchHopWindow { time_col: $expr3, slide: Interval { months: 0, days: 0, usecs: 2000000 }, size: Interval { months: 0, days: 0, usecs: 10000000 }, output: [$expr4, window_start] }
+            └─BatchHopWindow { time_col: $expr3, slide: 00:00:02, size: 00:00:10, output: [$expr4, window_start] }
               └─BatchExchange { order: [], dist: HashShard($expr4) }
                 └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr4, $expr3] }
                   └─BatchFilter { predicate: IsNotNull($expr3) AND (event_type = 2:Int32) }
@@ -396,7 +396,7 @@
           │ └─StreamShare { id: 9 }
           │   └─StreamHashAgg [append_only] { group_key: [$expr2, window_start], aggs: [count], output_watermarks: [window_start] }
           │     └─StreamExchange { dist: HashShard($expr2, window_start) }
-          │       └─StreamHopWindow { time_col: $expr1, slide: Interval { months: 0, days: 0, usecs: 2000000 }, size: Interval { months: 0, days: 0, usecs: 10000000 }, output: [$expr2, window_start, _row_id], output_watermarks: [window_start] }
+          │       └─StreamHopWindow { time_col: $expr1, slide: 00:00:02, size: 00:00:10, output: [$expr2, window_start, _row_id], output_watermarks: [window_start] }
           │         └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, $expr1, _row_id], output_watermarks: [$expr1] }
           │           └─StreamFilter { predicate: IsNotNull($expr1) AND (event_type = 2:Int32) }
           │             └─StreamRowIdGen { row_id_index: 5 }
@@ -409,7 +409,7 @@
                 └─StreamShare { id: 9 }
                   └─StreamHashAgg [append_only] { group_key: [$expr2, window_start], aggs: [count], output_watermarks: [window_start] }
                     └─StreamExchange { dist: HashShard($expr2, window_start) }
-                      └─StreamHopWindow { time_col: $expr1, slide: Interval { months: 0, days: 0, usecs: 2000000 }, size: Interval { months: 0, days: 0, usecs: 10000000 }, output: [$expr2, window_start, _row_id], output_watermarks: [window_start] }
+                      └─StreamHopWindow { time_col: $expr1, slide: 00:00:02, size: 00:00:10, output: [$expr2, window_start, _row_id], output_watermarks: [window_start] }
                         └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, $expr1, _row_id], output_watermarks: [$expr1] }
                           └─StreamFilter { predicate: IsNotNull($expr1) AND (event_type = 2:Int32) }
                             └─StreamRowIdGen { row_id_index: 5 }
@@ -437,7 +437,7 @@
     └── StreamExchange Hash([0, 1]) from 3
 
     Fragment 3
-    StreamHopWindow { time_col: $expr1, slide: Interval { months: 0, days: 0, usecs: 2000000 }, size: Interval { months: 0, days: 0, usecs: 10000000 }, output: [$expr2, window_start, _row_id], output_watermarks: [window_start] }
+    StreamHopWindow { time_col: $expr1, slide: 00:00:02, size: 00:00:10, output: [$expr2, window_start, _row_id], output_watermarks: [window_start] }
     └── StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, $expr1, _row_id], output_watermarks: [$expr1] }
         └── StreamFilter { predicate: IsNotNull($expr1) AND (event_type = 2:Int32) }
             └── StreamRowIdGen { row_id_index: 5 }
@@ -477,7 +477,7 @@
             │ └─StreamShare { id: 9 }
             │   └─StreamHashAgg [append_only, eowc] { group_key: [$expr2, window_start], aggs: [count], output_watermarks: [window_start] }
             │     └─StreamExchange { dist: HashShard($expr2, window_start) }
-            │       └─StreamHopWindow { time_col: $expr1, slide: Interval { months: 0, days: 0, usecs: 2000000 }, size: Interval { months: 0, days: 0, usecs: 10000000 }, output: [$expr2, window_start, _row_id], output_watermarks: [window_start] }
+            │       └─StreamHopWindow { time_col: $expr1, slide: 00:00:02, size: 00:00:10, output: [$expr2, window_start, _row_id], output_watermarks: [window_start] }
             │         └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, $expr1, _row_id], output_watermarks: [$expr1] }
             │           └─StreamFilter { predicate: IsNotNull($expr1) AND (event_type = 2:Int32) }
             │             └─StreamRowIdGen { row_id_index: 5 }
@@ -490,7 +490,7 @@
                   └─StreamShare { id: 9 }
                     └─StreamHashAgg [append_only, eowc] { group_key: [$expr2, window_start], aggs: [count], output_watermarks: [window_start] }
                       └─StreamExchange { dist: HashShard($expr2, window_start) }
-                        └─StreamHopWindow { time_col: $expr1, slide: Interval { months: 0, days: 0, usecs: 2000000 }, size: Interval { months: 0, days: 0, usecs: 10000000 }, output: [$expr2, window_start, _row_id], output_watermarks: [window_start] }
+                        └─StreamHopWindow { time_col: $expr1, slide: 00:00:02, size: 00:00:10, output: [$expr2, window_start, _row_id], output_watermarks: [window_start] }
                           └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, $expr1, _row_id], output_watermarks: [$expr1] }
                             └─StreamFilter { predicate: IsNotNull($expr1) AND (event_type = 2:Int32) }
                               └─StreamRowIdGen { row_id_index: 5 }
