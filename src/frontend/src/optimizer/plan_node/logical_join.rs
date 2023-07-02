@@ -15,7 +15,6 @@
 use std::cmp::max;
 use std::collections::HashMap;
 
-
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};
 use pretty_xmlish::{Pretty, XmlNode};

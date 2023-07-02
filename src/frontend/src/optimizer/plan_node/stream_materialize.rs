@@ -14,7 +14,6 @@
 
 use std::assert_matches::assert_matches;
 
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};

@@ -14,7 +14,6 @@
 
 use std::collections::HashSet;
 
-
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::util::sort_util::OrderType;

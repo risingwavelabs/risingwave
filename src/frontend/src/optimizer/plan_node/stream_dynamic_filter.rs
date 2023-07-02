@@ -12,19 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
-
 use pretty_xmlish::XmlNode;
-
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::generic::DynamicFilter;
-use super::utils::{
-    childless_record, column_names_pretty, watermark_pretty, Distill,
-};
+use super::utils::{childless_record, column_names_pretty, watermark_pretty, Distill};
 use super::{generic, ExprRewritable};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};

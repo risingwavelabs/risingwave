@@ -12,20 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
-use super::utils::{
-    childless_record, plan_node_name, watermark_pretty, Distill,
-};
+use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
 };

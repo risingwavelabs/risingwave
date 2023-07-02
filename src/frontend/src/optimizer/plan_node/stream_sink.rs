@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-
 use std::io::{Error, ErrorKind};
 
 use fixedbitset::FixedBitSet;

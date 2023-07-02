@@ -14,12 +14,9 @@
 
 use std::collections::HashMap;
 
-
 use fixedbitset::FixedBitSet;
-
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{Field};
-
+use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::WatermarkDesc;
@@ -28,7 +25,6 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprDisplay, ExprImpl};
-
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{TableCatalog, WithOptions};
 

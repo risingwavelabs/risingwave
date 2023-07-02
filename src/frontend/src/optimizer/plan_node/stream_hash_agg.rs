@@ -12,19 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
-
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
-use super::utils::{
-    childless_record, plan_node_name, watermark_pretty, Distill,
-};
+use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
 use crate::optimizer::property::Distribution;
