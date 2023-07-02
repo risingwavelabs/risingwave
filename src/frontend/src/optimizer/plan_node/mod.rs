@@ -28,7 +28,7 @@
 //! - all field should be valued in construction, so the properties' derivation should be finished
 //!   in the `new()` function.
 
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -70,7 +70,6 @@ pub trait PlanNode:
     + DynHash
     + Distill
     + Debug
-    + Display
     + Downcast
     + ColPrunable
     + ExprRewritable
@@ -126,12 +125,6 @@ impl Deref for PlanRef {
 impl<T: PlanNode> From<T> for PlanRef {
     fn from(value: T) -> Self {
         PlanRef(Rc::new(value))
-    }
-}
-
-impl Display for PlanRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.0, f)
     }
 }
 
