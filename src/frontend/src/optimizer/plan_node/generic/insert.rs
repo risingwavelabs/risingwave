@@ -15,7 +15,6 @@
 use std::hash::Hash;
 
 use educe::Educe;
-
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Schema, TableVersionId};
 

@@ -14,7 +14,6 @@
 
 use std::collections::HashSet;
 
-
 use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;

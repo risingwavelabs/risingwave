@@ -52,12 +52,6 @@ impl<PlanRef> ProjectSet<PlanRef> {
     pub(crate) fn output_len(&self) -> usize {
         self.select_list.len() + 1
     }
-
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field("select_list", &self.select_list);
-        builder.finish()
-    }
 }
 
 impl<PlanRef> DistillUnit for ProjectSet<PlanRef> {

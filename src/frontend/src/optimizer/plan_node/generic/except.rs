@@ -48,14 +48,6 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Except<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef> Except<PlanRef> {
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field("all", &self.all);
-        builder.finish()
-    }
-}
-
 impl<PlanRef> DistillUnit for Except<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         childless_record(name, vec![("all", Pretty::debug(&self.all))])
