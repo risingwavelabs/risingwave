@@ -349,8 +349,8 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
                 input_schema: self.input.schema(),
             }),
         ));
-        out.push(("slide", Pretty::debug(&self.window_slide)));
-        out.push(("size", Pretty::debug(&self.window_size)));
+        out.push(("slide", Pretty::display(&self.window_slide)));
+        out.push(("size", Pretty::display(&self.window_size)));
         if self
             .output_indices
             .iter()

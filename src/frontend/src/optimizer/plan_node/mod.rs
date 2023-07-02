@@ -455,14 +455,18 @@ impl Explain for PlanRef {
         let plan = reorganize_elements_id(self.clone());
 
         let mut output = String::with_capacity(2048);
-        let mut config = PrettyConfig {
-            indent: 3,
-            need_boundaries: false,
-            width: 2048,
-            reduced_spaces: true,
-        };
+        let mut config = pretty_config();
         config.unicode(&mut output, &plan.explain());
         output
+    }
+}
+
+fn pretty_config() -> PrettyConfig {
+    PrettyConfig {
+        indent: 3,
+        need_boundaries: false,
+        width: 2048,
+        reduced_spaces: true,
     }
 }
 
@@ -528,7 +532,7 @@ impl dyn PlanNode {
         // TODO: support pk_indices and operator_id
         StreamPlanPb {
             input,
-            identity: format!("{}", self),
+            identity: self.explain_myself_to_string(),
             node_body: node,
             operator_id: self.id().0 as _,
             stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
@@ -554,12 +558,20 @@ impl dyn PlanNode {
         BatchPlanPb {
             children,
             identity: if identity {
-                format!("{:?}", self)
+                self.explain_myself_to_string()
             } else {
                 "".into()
             },
             node_body,
         }
+    }
+
+    pub fn explain_myself_to_string(&self) -> String {
+        let p = Pretty::Record(self.distill());
+        let mut output = String::with_capacity(2048);
+        let mut config = pretty_config();
+        config.unicode(&mut output, &p);
+        output
     }
 }
 
