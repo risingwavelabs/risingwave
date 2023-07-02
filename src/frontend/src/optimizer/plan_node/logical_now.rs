@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+
 
 use pretty_xmlish::XmlNode;
 use risingwave_common::bail;

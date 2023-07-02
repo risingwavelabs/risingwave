@@ -14,7 +14,7 @@
 
 use std::cmp::max;
 use std::collections::HashMap;
-use std::fmt;
+
 
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};

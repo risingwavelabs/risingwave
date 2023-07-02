@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
 use super::stream::StreamPlanRef;
-use super::utils::{childless_record, formatter_debug_plan_node, plan_node_name, Distill};
+use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;

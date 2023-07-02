@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::{fmt, vec};
+use std::{vec};
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};

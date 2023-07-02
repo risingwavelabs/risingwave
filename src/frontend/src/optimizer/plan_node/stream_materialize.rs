@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::fmt;
+
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -25,7 +25,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
-use super::utils::{childless_record, formatter_debug_plan_node, Distill};
+use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;

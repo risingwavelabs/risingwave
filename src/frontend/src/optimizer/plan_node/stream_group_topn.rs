@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
-use risingwave_common::catalog::FieldDisplay;
+
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};

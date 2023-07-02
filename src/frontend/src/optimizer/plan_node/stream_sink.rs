@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::fmt;
+
 use std::io::{Error, ErrorKind};
 
 use fixedbitset::FixedBitSet;
@@ -31,7 +31,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
-use super::utils::{childless_record, formatter_debug_plan_node, Distill, IndicesDisplay};
+use super::utils::{childless_record, Distill, IndicesDisplay};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};

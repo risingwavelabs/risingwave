@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+
 
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
-use risingwave_common::catalog::FieldDisplay;
+
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::stream::StreamPlanRef;
-use super::utils::{childless_record, formatter_debug_plan_node, watermark_pretty, Distill};
+use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;

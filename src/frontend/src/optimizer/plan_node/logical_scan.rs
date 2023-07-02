@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::fmt;
+
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;

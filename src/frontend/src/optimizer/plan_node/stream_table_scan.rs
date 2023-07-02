@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fmt;
+
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -25,7 +25,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
-use super::utils::{childless_record, formatter_debug_plan_node, Distill};
+use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};

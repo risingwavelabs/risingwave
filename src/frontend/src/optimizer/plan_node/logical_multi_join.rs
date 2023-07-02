@@ -14,7 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::fmt;
+
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};

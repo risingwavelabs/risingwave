@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::{max, min};
-use std::fmt;
+
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;

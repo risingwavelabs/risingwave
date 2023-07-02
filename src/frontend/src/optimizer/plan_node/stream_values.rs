@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::values_node::ExprTuple;
 use risingwave_pb::stream_plan::ValuesNode;
 
-use super::utils::{childless_record, formatter_debug_plan_node, Distill};
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::Distribution;
