@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cell::RefCell;
-use std::fmt;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::ErrorCode::NotImplemented;
