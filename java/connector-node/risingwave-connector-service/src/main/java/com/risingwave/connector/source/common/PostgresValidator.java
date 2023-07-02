@@ -80,7 +80,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         jdbcConnection.prepareStatement(
                                 ValidatorUtils.getSql("postgres.slot_limit.check"));
                 var res2 = stmt2.executeQuery();
-                // check whether the number of replication slots is reach the max limit
+                // check whether the number of replication slots reaches the max limit
                 if (res2.next() && res2.getString(1).equals("true")) {
                     throw ValidatorUtils.failedPrecondition(
                             "all replication slots are in use\n Hint: Free one or increase max_replication_slots.");
@@ -167,7 +167,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             stmt.setString(2, tableName);
             var res = stmt.executeQuery();
 
-            // Field name in lower case -> data type
+            // Field names in lower case -> data type
             Map<String, String> schema = new HashMap<>();
             while (res.next()) {
                 var field = res.getString(1);
