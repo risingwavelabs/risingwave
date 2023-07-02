@@ -166,6 +166,13 @@ impl TableCatalogBuilder {
 /// See also [`super::generic::DistillUnit`].
 pub trait Distill {
     fn distill<'a>(&self) -> XmlNode<'a>;
+
+    fn distill_to_string(&self) -> String {
+        let mut config = pretty_config();
+        let mut output = String::with_capacity(2048);
+        config.unicode(&mut output, &Pretty::Record(self.distill()));
+        output
+    }
 }
 
 pub(super) fn childless_record<'a>(
@@ -302,3 +309,4 @@ macro_rules! formatter_debug_plan_node {
 pub(crate) use {formatter_debug_plan_node, plan_node_name};
 
 use super::generic::{self, GenericPlanRef};
+use super::pretty_config;

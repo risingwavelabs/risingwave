@@ -454,7 +454,7 @@ impl Explain for PlanRef {
     }
 }
 
-fn pretty_config() -> PrettyConfig {
+pub(crate) fn pretty_config() -> PrettyConfig {
     PrettyConfig {
         indent: 3,
         need_boundaries: false,
@@ -560,11 +560,7 @@ impl dyn PlanNode {
     }
 
     pub fn explain_myself_to_string(&self) -> String {
-        let p = Pretty::Record(self.distill());
-        let mut output = String::with_capacity(2048);
-        let mut config = pretty_config();
-        config.unicode(&mut output, &p);
-        output
+        self.distill_to_string()
     }
 }
 

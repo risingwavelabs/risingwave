@@ -288,7 +288,7 @@ impl StreamTableScan {
             stream_key,
             operator_id: self.base.id.0 as u64,
             identity: {
-                let s = format!("{}", self);
+                let s = self.distill_to_string();
                 s.replace("StreamTableScan", "Chain")
             },
             append_only: self.append_only(),

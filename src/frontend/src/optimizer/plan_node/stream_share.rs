@@ -95,7 +95,7 @@ impl StreamShare {
 
                 let stream_node = PbStreamNode {
                     input,
-                    identity: format!("{}", self),
+                    identity: self.distill_to_string(),
                     node_body: Some(node_body),
                     operator_id: self.id().0 as _,
                     stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
