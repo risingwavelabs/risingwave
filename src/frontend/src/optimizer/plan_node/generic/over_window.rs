@@ -164,22 +164,6 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        let window_funcs_display = self
-            .window_functions
-            .iter()
-            .map(|func| PlanWindowFunctionDisplay {
-                window_function: func,
-                input_schema: self.input.schema(),
-            })
-            .collect::<Vec<_>>();
-        builder.field("window_functions", &window_funcs_display);
-        builder.finish()
-    }
-}
-
 impl<PlanRef: GenericPlanRef> DistillUnit for OverWindow<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let f = |func| {
