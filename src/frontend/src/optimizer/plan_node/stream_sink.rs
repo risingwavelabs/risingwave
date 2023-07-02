@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::fmt;
 use std::io::{Error, ErrorKind};
 
 use fixedbitset::FixedBitSet;
@@ -31,7 +30,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
-use super::utils::{childless_record, formatter_debug_plan_node, Distill, IndicesDisplay};
+use super::utils::{childless_record, Distill, IndicesDisplay};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -288,44 +287,6 @@ impl Distill for StreamSink {
             vec.push(("pk", Pretty::display(&pk)));
         }
         childless_record("StreamSink", vec)
-    }
-}
-impl fmt::Display for StreamSink {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamSink");
-
-        let sink_type = if self.sink_desc.sink_type.is_append_only() {
-            "append-only"
-        } else {
-            "upsert"
-        };
-        let column_names = self
-            .sink_desc
-            .columns
-            .iter()
-            .map(|col| col.name_with_hidden())
-            .collect_vec()
-            .join(", ");
-        builder
-            .field("type", &format_args!("{}", sink_type))
-            .field("columns", &format_args!("[{}]", column_names));
-
-        if self.sink_desc.sink_type.is_upsert() {
-            builder.field(
-                "pk",
-                &IndicesDisplay {
-                    indices: &self
-                        .sink_desc
-                        .plan_pk
-                        .iter()
-                        .map(|k| k.column_index)
-                        .collect_vec(),
-                    input_schema: &self.base.schema,
-                },
-            );
-        }
-
-        builder.finish()
     }
 }
 

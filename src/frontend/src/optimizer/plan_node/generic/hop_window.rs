@@ -381,12 +381,6 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
         }
         out
     }
-
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        self.fmt_fields_with_builder(&mut builder);
-        builder.finish()
-    }
 }
 
 impl_distill_unit_from_fields!(HopWindow, GenericPlanRef);

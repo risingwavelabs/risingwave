@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
@@ -61,15 +59,6 @@ impl StreamSimpleAgg {
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         &self.logical.agg_calls
-    }
-}
-
-impl fmt::Display for StreamSimpleAgg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = plan_node_name!("StreamSimpleAgg",
-            { "append_only", self.input().append_only() },
-        );
-        self.logical.fmt_with_name(f, &name)
     }
 }
 

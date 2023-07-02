@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -25,7 +24,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
-use super::utils::{childless_record, formatter_debug_plan_node, Distill};
+use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
@@ -265,53 +264,6 @@ impl Distill for StreamMaterialize {
             vec.push(("watermark_columns", Pretty::Array(watermark_column_names)));
         };
         childless_record("StreamMaterialize", vec)
-    }
-}
-impl fmt::Display for StreamMaterialize {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let table = self.table();
-
-        let column_names = table
-            .columns
-            .iter()
-            .map(|c| c.name_with_hidden())
-            .join(", ");
-
-        let stream_key = table
-            .stream_key
-            .iter()
-            .map(|&k| table.columns[k].name())
-            .join(", ");
-
-        let pk_columns = table
-            .pk
-            .iter()
-            .map(|o| table.columns[o.column_index].name().to_string())
-            .join(", ");
-
-        let mut builder = formatter_debug_plan_node!(f, "StreamMaterialize");
-        builder
-            .field("columns", &format_args!("[{}]", column_names))
-            .field("stream_key", &format_args!("[{}]", stream_key))
-            .field("pk_columns", &format_args!("[{}]", pk_columns));
-
-        let pk_conflict_behavior = self.table.conflict_behavior().debug_to_string();
-
-        builder.field("pk_conflict", &pk_conflict_behavior);
-
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
-            let watermark_column_names = watermark_columns
-                .ones()
-                .map(|i| table.columns()[i].name_with_hidden())
-                .join(", ");
-            builder.field(
-                "watermark_columns",
-                &format_args!("[{}]", watermark_column_names),
-            );
-        };
-
-        builder.finish()
     }
 }
 

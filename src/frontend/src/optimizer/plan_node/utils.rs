@@ -166,6 +166,13 @@ impl TableCatalogBuilder {
 /// See also [`super::generic::DistillUnit`].
 pub trait Distill {
     fn distill<'a>(&self) -> XmlNode<'a>;
+
+    fn distill_to_string(&self) -> String {
+        let mut config = pretty_config();
+        let mut output = String::with_capacity(2048);
+        config.unicode(&mut output, &Pretty::Record(self.distill()));
+        output
+    }
 }
 
 pub(super) fn childless_record<'a>(
@@ -183,12 +190,6 @@ macro_rules! impl_distill_by_unit {
         impl Distill for $ty {
             fn distill<'a>(&self) -> XmlNode<'a> {
                 self.$core.distill_with_name($name)
-            }
-        }
-
-        impl std::fmt::Display for $ty {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                self.$core.fmt_with_name(f, $name)
             }
         }
     };
@@ -296,15 +297,7 @@ macro_rules! plan_node_name {
         }
     };
 }
-macro_rules! formatter_debug_plan_node {
-    ($formatter:ident, $name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
-        {
-            use $crate::optimizer::plan_node::utils::plan_node_name;
-            let name = plan_node_name!($name $(, { $prop, $cond } )* );
-            $formatter.debug_struct(&name)
-        }
-    };
-}
-pub(crate) use {formatter_debug_plan_node, plan_node_name};
+pub(crate) use plan_node_name;
 
 use super::generic::{self, GenericPlanRef};
+use super::pretty_config;
