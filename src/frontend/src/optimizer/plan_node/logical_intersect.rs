@@ -46,10 +46,6 @@ impl LogicalIntersect {
         LogicalIntersect::new(all, inputs).into()
     }
 
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        self.core.fmt_fields_with_builder(builder)
-    }
-
     pub fn all(&self) -> bool {
         self.core.all
     }
