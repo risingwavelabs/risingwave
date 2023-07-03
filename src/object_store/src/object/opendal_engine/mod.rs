@@ -29,4 +29,8 @@ pub use oss::*;
 pub mod azblob;
 pub use azblob::*;
 pub mod fs;
+use std::time::Duration;
+
 pub use fs::*;
+
+pub static OPERATION_ATTEMPT_TIMEOUT: Duration = Duration::from_millis(600000);

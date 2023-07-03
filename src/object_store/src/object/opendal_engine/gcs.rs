@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::layers::{LoggingLayer, RetryLayer, TimeoutLayer};
 use opendal::services::Gcs;
 use opendal::Operator;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{EngineType, OpendalObjectStore, OPERATION_ATTEMPT_TIMEOUT};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal gcs engine.
@@ -36,6 +36,7 @@ impl OpendalObjectStore {
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
+            .layer(TimeoutLayer::new().with_timeout(OPERATION_ATTEMPT_TIMEOUT))
             .finish();
         Ok(Self {
             op,
