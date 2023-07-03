@@ -465,6 +465,8 @@ where
                 .await?;
             streams.push(Box::pin(vnode_iter));
         }
+        // TODO: Highlight this change to patrick vs `FuturesUnordered`, since `FuturesUnordered`
+        // merges `Futures` -> `Stream`, whereas `select_all` merges `Streams` -> `Stream`.
         let iter = select_all(streams);
         #[for_await]
         for chunk in iter_chunks(iter, &schema, CHUNK_SIZE) {
