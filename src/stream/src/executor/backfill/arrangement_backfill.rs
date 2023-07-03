@@ -153,7 +153,7 @@ where
                 let snapshot = Self::snapshot_read_per_vnode(
                     schema.clone(),
                     &upstream_table,
-                    &mut current_pos_map,
+                    &current_pos_map,
                 );
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
@@ -230,20 +230,21 @@ where
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
 
-                // NOTE(kwannoel): Scope it so that immutable reference to `upstream_table` can be dropped.
-                // Then we can write to `upstream_table` on barrier in the next block.
+                // NOTE(kwannoel): Scope it so that immutable reference to `upstream_table` can be
+                // dropped. Then we can write to `upstream_table` on barrier in the
+                // next block.
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
                     let right_snapshot = pin!(Self::snapshot_read_per_vnode(
                         schema.clone(),
                         &upstream_table,
-                        &mut current_pos_map
+                        &current_pos_map
                     )
                     .map(Either::Right),);
 
-                    // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
-                    // comes.
+                    // Prefer to select upstream, so we can stop snapshot stream as soon as the
+                    // barrier comes.
                     let backfill_stream =
                         select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                             stream::PollNext::Left
