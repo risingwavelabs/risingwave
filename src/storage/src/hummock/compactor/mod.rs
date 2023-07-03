@@ -536,8 +536,30 @@ impl Compactor {
 
                             let pull_task_count = {
                                 if pending_pull_task_count == 0 {
-                                    pending_pull_task_count = (100 - last_workload.get_cpu()) * cpu_core_num * 2 / 100;
-                                    Some(pending_pull_task_count)
+                                    // reset pending_pull_task_count when all pending task had been refill
+                                    pending_pull_task_count = {
+                                        let refresh_result = system.refresh_process_specifics(pid, ProcessRefreshKind::new().with_cpu());
+                                        debug_assert!(refresh_result);
+                                        let cpu = if let Some(process) = system.process(pid) {
+                                            process.cpu_usage().div(cpu_core_num as f32) as u32
+                                        } else {
+                                            tracing::warn!("fail to get process pid {:?}", pid);
+                                            0
+                                        };
+
+                                        last_workload = CompactorWorkload {
+                                            cpu,
+                                        };
+
+                                        (100 - last_workload.get_cpu()) * cpu_core_num * 2 / 100
+                                    };
+
+                                    if pending_pull_task_count < 1 {
+                                        // workload overload
+                                        None
+                                    } else {
+                                        Some(pending_pull_task_count)
+                                    }
                                 } else {
                                     None
                                 }
@@ -592,7 +614,6 @@ impl Compactor {
                             if let Task::CompactTask(_) = &task {
                                 pending_pull_task_count -= 1;
                             }
-
                             executor.spawn(async move {
                                 match task {
                                     Task::CompactTask(compact_task) => {

@@ -244,8 +244,6 @@ where
             );
         }
 
-        // return ScheduleStatus::Ok;
-
         return result;
     }
 
@@ -337,8 +335,6 @@ where
                                 }
 
                                 if let Some(task_type) = self.compaction_state.auto_pick_type() {
-                                    println!("AutoPickTrigger task_type {:?}", task_type);
-
                                     // Periodically trigger compaction for all compaction groups.
                                     self.on_handle_trigger_multi_grouop(
                                         sched_channel.clone(),
@@ -404,11 +400,6 @@ where
         let selector = compaction_selectors.get_mut(&task_type).unwrap();
 
         if let Some(compactor_pull_task_handle) = self.compactor_manager.next_idle_compactor() {
-            println!(
-                "compactor_pull_task_handle count {}",
-                compactor_pull_task_handle.pending_pull_task_count
-            );
-
             if let ScheduleStatus::Ok = self
                 .pick_and_send2(
                     compaction_group,
@@ -424,7 +415,6 @@ where
                 return false;
             }
         } else {
-            println!("fail to next_idle_compactor");
             self.compaction_state.enable_task_type(task_type);
         }
 

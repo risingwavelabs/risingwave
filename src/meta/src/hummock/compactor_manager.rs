@@ -188,13 +188,6 @@ impl CompactorManagerInner {
         use rand::Rng;
         let rand_index = rand::thread_rng().gen_range(0..self.compactors.len());
 
-        println!(
-            "next_idle_compactor compactors {:?} compactor_pending_io_counts {:?}, rand_index {}",
-            self.compactors.len(),
-            self.compactor_pending_io_counts.len(),
-            rand_index
-        );
-
         if self.compactors.is_empty() {
             return None;
         }
@@ -477,22 +470,6 @@ impl CompactorManagerInner {
         self.compactors.len()
     }
 
-    /// Return the maximum number of tasks that can be assigned to all compactors.
-    // pub fn max_concurrent_task_number(&self) -> usize {
-    //     self.policy.read().max_concurrent_task_num()
-    // }
-
-    /// Update compactor state based on its workload.
-    // pub fn update_compactor_state(
-    //     &self,
-    //     context_id: HummockContextId,
-    //     workload: CompactorWorkload,
-    // ) {
-    //     if let Some(compactor) = self.policy.read().get_compactor(context_id) {
-    //         compactor.cpu_ratio.store(workload.cpu, Ordering::Release);
-    //     }
-    // }
-
     pub fn update_compactor_pending_task(
         &mut self,
         context_id: HummockContextId,
@@ -522,14 +499,6 @@ impl CompactorManagerInner {
             }
         }
     }
-
-    // pub fn total_cpu_core_num(&self) -> u32 {
-    //     self.policy.read().total_cpu_core_num()
-    // }
-
-    // pub fn total_running_cpu_core_num(&self) -> u32 {
-    //     self.policy.read().total_running_cpu_core_num()
-    // }
 
     pub fn get_progress(&self) -> Vec<CompactTaskProgress> {
         self.task_heartbeats
@@ -703,14 +672,12 @@ impl CompactorPullTaskHandle {
 
 impl Drop for CompactorPullTaskHandle {
     fn drop(&mut self) {
-        if self.pending_pull_task_count > 0 {
-            self.compactor_manager
-                .write()
-                .update_compactor_pending_task(
-                    self.compactor.context_id,
-                    Some(self.pending_pull_task_count),
-                );
-        }
+        self.compactor_manager
+            .write()
+            .update_compactor_pending_task(
+                self.compactor.context_id,
+                Some(self.pending_pull_task_count),
+            );
     }
 }
 
@@ -755,7 +722,7 @@ mod tests {
         };
 
         // Restart. Set task_expiry_seconds to 0 only to speed up test.
-        let compactor_manager = CompactorManager::with_meta(env, 0).await.unwrap();
+        let compactor_manager = CompactorManager::with_meta(env).await.unwrap();
         // Because task assignment exists.
         assert_eq!(compactor_manager.task_heartbeats.len(), 1);
         // Because compactor gRPC is not established yet.
