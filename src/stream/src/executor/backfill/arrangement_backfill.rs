@@ -134,6 +134,10 @@ where
             assert!(!first_barrier.is_newly_added(self.actor_id));
         }
 
+        // Current position of upstream_table primary key.
+        // Current position is computed **per vnode**.
+        let mut current_pos_map: CurrentPosMap = HashMap::new();
+
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
         // finished state to state store first.
@@ -143,7 +147,14 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                let snapshot = Self::snapshot_read(schema.clone(), &upstream_table, None);
+                // TODO: This should work.
+                // current_pos (None) -> current_pos_map::get (Should still be none per vnode,
+                // as we have not persisted the state yet).
+                let snapshot = Self::snapshot_read_per_vnode(
+                    schema.clone(),
+                    &upstream_table,
+                    &mut current_pos_map,
+                );
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
             }
@@ -155,10 +166,6 @@ where
         // | f                    | t              | -> | f                |
         // | f                    | f              | -> | t                |
         let to_backfill = !is_finished && !is_snapshot_empty;
-
-        // Current position of upstream_table primary key.
-        // Current position is computed **per vnode**.
-        let mut current_pos_map: CurrentPosMap = HashMap::new();
 
         // Current position of the upstream_table primary key.
         // `None` means it starts from the beginning.
@@ -297,11 +304,12 @@ where
 
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
-                let right_snapshot =
-                    pin!(
-                        Self::snapshot_read(schema.clone(), &upstream_table, current_pos.clone(),)
-                            .map(Either::Right),
-                    );
+                let right_snapshot = pin!(Self::snapshot_read_per_vnode(
+                    schema.clone(),
+                    &upstream_table,
+                    &mut current_pos_map
+                )
+                .map(Either::Right),);
 
                 // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
                 // comes.
