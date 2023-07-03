@@ -12,23 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 pub const RW_FUNCTIONS_TABLE_NAME: &str = "rw_functions";
 
-pub const RW_FUNCTIONS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "id"),
-    (DataType::Varchar, "name"),
-    (DataType::Int32, "schema_id"),
-    (DataType::Int32, "owner"),
-    (DataType::Varchar, "type"),
-    // [16, 20]
-    (DataType::Varchar, "arg_type_ids"),
-    // 16
-    (DataType::Int32, "return_type_id"),
-    (DataType::Varchar, "language"),
-    (DataType::Varchar, "link"),
-    (DataType::Varchar, "acl"),
-];
+pub static RW_FUNCTIONS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
+    vec![
+        (DataType::Int32, "id"),
+        (DataType::Varchar, "name"),
+        (DataType::Int32, "schema_id"),
+        (DataType::Int32, "owner"),
+        (DataType::Varchar, "type"),
+        // [16, 20]
+        (DataType::List(Box::new(DataType::Int32)), "arg_type_ids"),
+        // 16
+        (DataType::Int32, "return_type_id"),
+        (DataType::Varchar, "language"),
+        (DataType::Varchar, "link"),
+        (DataType::Varchar, "acl"),
+    ]
+});

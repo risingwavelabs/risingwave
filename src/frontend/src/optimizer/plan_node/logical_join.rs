@@ -14,7 +14,6 @@
 
 use std::cmp::max;
 use std::collections::HashMap;
-use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};
@@ -76,33 +75,6 @@ impl Distill for LogicalJoin {
         }
 
         childless_record("LogicalJoin", vec)
-    }
-}
-impl fmt::Display for LogicalJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("LogicalJoin");
-        builder.field("type", &self.join_type());
-
-        let concat_schema = self.core.concat_schema();
-        let cond = &ConditionDisplay {
-            condition: self.on(),
-            input_schema: &concat_schema,
-        };
-        builder.field("on", cond);
-
-        if verbose {
-            match IndicesDisplay::from(
-                self.output_indices(),
-                self.internal_column_num(),
-                &concat_schema,
-            ) {
-                None => builder.field("output", &format_args!("all")),
-                Some(id) => builder.field("output", &id),
-            };
-        }
-
-        builder.finish()
     }
 }
 

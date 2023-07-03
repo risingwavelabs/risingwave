@@ -40,6 +40,10 @@ public class SinkValidationHandler {
             SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getConnectorType());
             sinkFactory.validate(tableSchema, sinkConfig.getPropertiesMap(), request.getSinkType());
 
+            responseObserver.onNext(
+                    ConnectorServiceProto.ValidateSinkResponse.newBuilder().build());
+            responseObserver.onCompleted();
+
         } catch (IllegalArgumentException e) {
             LOG.error("sink validation failed", e);
             // Extract useful information from the error thrown by Jackson and convert it into a
@@ -74,8 +78,5 @@ public class SinkValidationHandler {
                             .build());
             responseObserver.onCompleted();
         }
-
-        responseObserver.onNext(ConnectorServiceProto.ValidateSinkResponse.newBuilder().build());
-        responseObserver.onCompleted();
     }
 }

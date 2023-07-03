@@ -18,11 +18,14 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
 import io.grpc.Status;
-import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.apache.http.HttpHost;
-import org.elasticsearch.action.ActionListener;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.elasticsearch.action.bulk.BackoffPolicy;
 import org.elasticsearch.action.bulk.BulkProcessor;
 import org.elasticsearch.action.bulk.BulkRequest;
@@ -52,17 +55,17 @@ import org.slf4j.LoggerFactory;
  *
  * 4. bulkprocessor and high-level-client are deprecated in es 8 java api.
  */
-public class EsSink extends SinkBase {
-    private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
+public class EsSink7 extends SinkBase {
+    private static final Logger LOG = LoggerFactory.getLogger(EsSink7.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
-    private final EsSinkConfig config;
+    private final EsSink7Config config;
     private final BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
     // For bulk listener
     private final List<Integer> primaryKeyIndexes;
 
-    public EsSink(EsSinkConfig config, TableSchema tableSchema) {
+    public EsSink7(EsSink7Config config, TableSchema tableSchema) {
         super(tableSchema);
         HttpHost host;
         try {
@@ -95,29 +98,33 @@ public class EsSink extends SinkBase {
     }
 
     private static RestClientBuilder configureRestClientBuilder(
-            RestClientBuilder builder, EsSinkConfig config) {
+            RestClientBuilder builder, EsSink7Config config) {
         // Possible config:
         // 1. Connection path prefix
         // 2. Username and password
+        if (config.getPassword() != null && config.getUsername() != null) {
+            final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+            credentialsProvider.setCredentials(
+                    AuthScope.ANY,
+                    new UsernamePasswordCredentials(config.getUsername(), config.getPassword()));
+            builder.setHttpClientConfigCallback(
+                    httpClientBuilder ->
+                            httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider));
+        }
         // 3. Timeout
         return builder;
     }
 
     private BulkProcessor.Builder applyBulkConfig(
-            RestHighLevelClient client, EsSinkConfig config, BulkProcessor.Listener listener) {
+            RestHighLevelClient client, EsSink7Config config, BulkProcessor.Listener listener) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
-                        new BulkRequestConsumerFactory() {
-                            @Override
-                            public void accept(
-                                    BulkRequest bulkRequest,
-                                    ActionListener<BulkResponse> bulkResponseActionListener) {
-                                client.bulkAsync(
-                                        bulkRequest,
-                                        RequestOptions.DEFAULT,
-                                        bulkResponseActionListener);
-                            }
-                        },
+                        (BulkRequestConsumerFactory)
+                                (bulkRequest, bulkResponseActionListener) ->
+                                        client.bulkAsync(
+                                                bulkRequest,
+                                                RequestOptions.DEFAULT,
+                                                bulkResponseActionListener),
                         listener);
         // Possible feature: move these to config
         // execute the bulk every 10 000 requests
@@ -256,9 +263,11 @@ public class EsSink extends SinkBase {
     @Override
     public void drop() {
         try {
-            bulkProcessor.close();
+            // give processor enough time to finish unfinished work, otherwise we will get an error
+            // in afterbulk
+            bulkProcessor.awaitClose(100, TimeUnit.SECONDS);
             client.close();
-        } catch (IOException e) {
+        } catch (Exception e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(String.format(ERROR_REPORT_TEMPLATE, e.getMessage()))
                     .asRuntimeException();

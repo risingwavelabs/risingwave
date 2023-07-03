@@ -26,10 +26,11 @@ use futures::stream::StreamExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
+use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
-use tracing::{error, warn};
+use tracing::{error, warn, Instrument};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::ResultCache;
@@ -368,65 +369,80 @@ where
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
-            let session = session.clone();
-            // execute query
-            let res = session.clone().run_one_query(stmt, Format::Text).await;
-            for notice in session.take_notices() {
-                self.stream
-                    .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
-            }
-            let mut res = res.map_err(|err| PsqlError::QueryError(err))?;
+            let span = tracing::info_span!("run_stmt", %stmt);
 
-            for notice in res.notices() {
-                self.stream
-                    .write_no_flush(&BeMessage::NoticeResponse(notice))?;
-            }
-
-            let status = res.status();
-            if let Some(ref application_name) = status.application_name {
-                self.stream.write_no_flush(&BeMessage::ParameterStatus(
-                    BeParameterStatusMessage::ApplicationName(application_name),
-                ))?;
-            }
-
-            if res.is_query() {
-                self.stream
-                    .write_no_flush(&BeMessage::RowDescription(&res.row_desc()))?;
-
-                let mut rows_cnt = 0;
-
-                while let Some(row_set) = res.values_stream().next().await {
-                    let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
-                    for row in row_set {
-                        self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
-                        rows_cnt += 1;
-                    }
-                }
-
-                // Run the callback before sending the `CommandComplete` message.
-                res.run_callback().await?;
-
-                self.stream.write_no_flush(&BeMessage::CommandComplete(
-                    BeCommandCompleteMessage {
-                        stmt_type: res.stmt_type(),
-                        rows_cnt,
-                    },
-                ))?;
-            } else {
-                // Run the callback before sending the `CommandComplete` message.
-                res.run_callback().await?;
-
-                self.stream.write_no_flush(&BeMessage::CommandComplete(
-                    BeCommandCompleteMessage {
-                        stmt_type: res.stmt_type(),
-                        rows_cnt: res.affected_rows_cnt().expect("row count should be set"),
-                    },
-                ))?;
-            }
+            self.inner_process_query_msg_one_stmt(stmt, session.clone())
+                .instrument(span)
+                .await?;
         }
         // Put this line inside the for loop above will lead to unfinished/stuck regress test...Not
         // sure the reason.
         self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+        Ok(())
+    }
+
+    async fn inner_process_query_msg_one_stmt(
+        &mut self,
+        stmt: Statement,
+        session: Arc<SM::Session>,
+    ) -> PsqlResult<()> {
+        let session = session.clone();
+        // execute query
+        let res = session
+            .clone()
+            .run_one_query(stmt.clone(), Format::Text)
+            .await;
+        for notice in session.take_notices() {
+            self.stream
+                .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
+        }
+        let mut res = res.map_err(|err| PsqlError::QueryError(err))?;
+
+        for notice in res.notices() {
+            self.stream
+                .write_no_flush(&BeMessage::NoticeResponse(notice))?;
+        }
+
+        let status = res.status();
+        if let Some(ref application_name) = status.application_name {
+            self.stream.write_no_flush(&BeMessage::ParameterStatus(
+                BeParameterStatusMessage::ApplicationName(application_name),
+            ))?;
+        }
+
+        if res.is_query() {
+            self.stream
+                .write_no_flush(&BeMessage::RowDescription(&res.row_desc()))?;
+
+            let mut rows_cnt = 0;
+
+            while let Some(row_set) = res.values_stream().next().await {
+                let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
+                for row in row_set {
+                    self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
+                    rows_cnt += 1;
+                }
+            }
+
+            // Run the callback before sending the `CommandComplete` message.
+            res.run_callback().await?;
+
+            self.stream
+                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                    stmt_type: res.stmt_type(),
+                    rows_cnt,
+                }))?;
+        } else {
+            // Run the callback before sending the `CommandComplete` message.
+            res.run_callback().await?;
+
+            self.stream
+                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                    stmt_type: res.stmt_type(),
+                    rows_cnt: res.affected_rows_cnt().expect("row count should be set"),
+                }))?;
+        }
+
         Ok(())
     }
 

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnId, TableDesc};
 use risingwave_common::error::Result;
@@ -136,32 +134,6 @@ impl Distill for BatchLookupJoin {
         }
 
         childless_record("BatchLookupJoin", vec)
-    }
-}
-
-impl fmt::Display for BatchLookupJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("BatchLookupJoin");
-        builder.field("type", &self.logical.join_type);
-
-        let concat_schema = self.logical.concat_schema();
-        builder.field(
-            "predicate",
-            &EqJoinPredicateDisplay {
-                eq_join_predicate: self.eq_join_predicate(),
-                input_schema: &concat_schema,
-            },
-        );
-
-        if verbose {
-            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
-                None => builder.field("output", &format_args!("all")),
-                Some(id) => builder.field("output", &id),
-            };
-        }
-
-        builder.finish()
     }
 }
 

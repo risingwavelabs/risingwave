@@ -1,7 +1,56 @@
 # Hummock trace and replay
 
-## Tracing
+# Demo
 
+## Step 0: Kill and clean running clusters
+```bash
+./risedev k
+./risedev clean-data
+```
+Configure risedev to enable Hummock Trace
+```
+./risedev configure
+```
+
+## Step 1: Start a cluster with tracing
+```bash
+USE_HM_TRACE=true ./risedev d hummock-trace
+```
+
+## Step 2: Run an e2e test
+```bash
+./risedev slt-batch -p 4566 -d dev -j 1
+```
+After this, you will see data in the object storage under `.risingwave/data/minio/hummock001`.
+
+## Step 3: Kill the cluster
+The object storage only allows a single server to access it. We must kill the cluster before replaying.
+```bash
+./risedev k
+```
+
+## Step 4: Start MinIO
+```bash
+MINIO_ROOT_PASSWORD=hummockadmin \
+MINIO_ROOT_USER=hummockadmin \
+.risingwave/bin/minio server \
+--address 127.0.0.1:9301 \
+--console-address 127.0.0.1:9400 \
+--config-dir .risingwave/config/minio \
+.risingwave/data/minio
+```
+
+## Step 5: Replay
+```bash
+cargo run --package risingwave_hummock_test --bin replay -- \
+--path .trace/hummock.ht \
+--object-storage minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+--config src/config/hummock-trace.toml
+```
+We are all set!!
+
+# Document
+## Trace
 ### Config
 There is a default config file in `src/config/hummock-trace.toml`.
 
@@ -27,30 +76,11 @@ It makes `risingdev` put flag `hm_trace` in env variables `RUSTFLAGS`.
 Then running any risedev commands traces storage operations to the log file.
 
 ### CLI
-If you wish to manually run `cargo` rather than `risedev`, set the env variable to enable tracing.
-```
-RUSTFLAGS="--cfg hm_trace --cfg tokio_unstable"
-```
-We must manually enable `tokio_unstable` because extra flag sources are mutually exclusive. If we provide this variable, cargo will not evaluate `build.rustflags` in `.cargo/config.toml`
-For example, to start a traced playground
-
-```
-RUSTFLAGS="--cfg hm_trace --cfg tokio_unstable" USE_HM_TRACE=true cargo run --bin risingwave playground
-```
-
-### Development
-It's recommended to add `--cfg hm_trace` flag to `.cargo/config.toml` for development since Rust may compile everything again if we set RUSTFLAGS.
-
+You may use Cargo features to enable tracing.
 Example:
-```toml
-[target.'cfg(all())']
-rustflags = [
-  "--cfg",
-  "hm_trace"
-]
 ```
-
-If we set the flag in root `Cargo.toml`, we don't need to set the env variable.
+cargo build -p risingwave_cmd -p risedev -p risingwave_storage --features hm-trace --profile dev --features rw-static-link
+```
 
 You may also use `risedev` to start tracing with profile "hm-trace".
 Example:

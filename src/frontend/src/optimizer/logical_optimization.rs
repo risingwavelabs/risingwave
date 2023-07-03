@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use risingwave_common::error::{ErrorCode, Result};
 
 use super::plan_node::RewriteExprsRecursive;
@@ -99,16 +98,20 @@ impl OptimizationStage {
     }
 }
 
+use std::sync::LazyLock;
+
 pub struct LogicalOptimizer {}
 
-lazy_static! {
-    static ref DAG_TO_TREE: OptimizationStage = OptimizationStage::new(
+static DAG_TO_TREE: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "DAG To Tree",
         vec![DagToTreeRule::create()],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref SIMPLE_UNNESTING: OptimizationStage = OptimizationStage::new(
+static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Simple Unnesting",
         vec![
             // Eliminate max one row
@@ -119,9 +122,11 @@ lazy_static! {
             PullUpCorrelatedPredicateRule::create(),
         ],
         ApplyOrder::BottomUp,
-    );
+    )
+});
 
-    static ref SET_OPERATION_MERGE: OptimizationStage = OptimizationStage::new(
+static SET_OPERATION_MERGE: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Set Operation Merge",
         vec![
             UnionMergeRule::create(),
@@ -129,22 +134,29 @@ lazy_static! {
             ExceptMergeRule::create(),
         ],
         ApplyOrder::BottomUp,
-    );
+    )
+});
 
+static GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "General Unnesting(Translate Apply)",
+            vec![TranslateApplyRule::create(true)],
+            ApplyOrder::BottomUp,
+        )
+    });
 
-    static ref GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE: OptimizationStage = OptimizationStage::new(
-        "General Unnesting(Translate Apply)",
-        vec![TranslateApplyRule::create(true)],
-        ApplyOrder::BottomUp,
-    );
+static GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "General Unnesting(Translate Apply)",
+            vec![TranslateApplyRule::create(false)],
+            ApplyOrder::BottomUp,
+        )
+    });
 
-    static ref GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE: OptimizationStage = OptimizationStage::new(
-        "General Unnesting(Translate Apply)",
-        vec![TranslateApplyRule::create(false)],
-        ApplyOrder::BottomUp,
-    );
-
-    static ref GENERAL_UNNESTING_PUSH_DOWN_APPLY: OptimizationStage = OptimizationStage::new(
+static GENERAL_UNNESTING_PUSH_DOWN_APPLY: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "General Unnesting(Push Down Apply)",
         vec![
             ApplyEliminateRule::create(),
@@ -157,57 +169,78 @@ lazy_static! {
             ApplyShareEliminateRule::create(),
         ],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref TO_MULTI_JOIN: OptimizationStage = OptimizationStage::new(
+static TO_MULTI_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "To MultiJoin",
         vec![MergeMultiJoinRule::create()],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref LEFT_DEEP_JOIN_ORDERING: OptimizationStage = OptimizationStage::new(
+static LEFT_DEEP_JOIN_ORDERING: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Join Ordering".to_string(),
         vec![LeftDeepTreeJoinOrderingRule::create()],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref BUSHY_TREE_JOIN_ORDERING: OptimizationStage = OptimizationStage::new(
+static BUSHY_TREE_JOIN_ORDERING: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Join Ordering".to_string(),
         vec![BushyTreeJoinOrderingRule::create()],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref FILTER_WITH_NOW_TO_JOIN: OptimizationStage = OptimizationStage::new(
+static FILTER_WITH_NOW_TO_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Push down filter with now into a left semijoin",
         vec![FilterWithNowToJoinRule::create()],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref PUSH_CALC_OF_JOIN: OptimizationStage = OptimizationStage::new(
+static PUSH_CALC_OF_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Push down the calculation of inputs of join's condition",
         vec![PushCalculationOfJoinRule::create()],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref CONVERT_DISTINCT_AGG_FOR_STREAM: OptimizationStage = OptimizationStage::new(
+static CONVERT_DISTINCT_AGG_FOR_STREAM: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Convert Distinct Aggregation",
         vec![UnionToDistinctRule::create(), DistinctAggRule::create(true)],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref CONVERT_DISTINCT_AGG_FOR_BATCH: OptimizationStage = OptimizationStage::new(
+static CONVERT_DISTINCT_AGG_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Convert Distinct Aggregation",
-        vec![UnionToDistinctRule::create(), DistinctAggRule::create(false)],
+        vec![
+            UnionToDistinctRule::create(),
+            DistinctAggRule::create(false),
+        ],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref JOIN_COMMUTE: OptimizationStage = OptimizationStage::new(
+static JOIN_COMMUTE: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Join Commute".to_string(),
         vec![JoinCommuteRule::create()],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref PROJECT_REMOVE: OptimizationStage = OptimizationStage::new(
+static PROJECT_REMOVE: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Project Remove",
         vec![
             // merge should be applied before eliminate
@@ -222,12 +255,14 @@ lazy_static! {
             AggProjectMergeRule::create(),
         ],
         ApplyOrder::BottomUp,
-    );
+    )
+});
 
-    // the `OverWindowToTopNRule` need to match the pattern of Proj-Filter-OverWindow so it is
-    // 1. conflict with `ProjectJoinMergeRule`, `AggProjectMergeRule` or other rules
-    // 2. should be after merge the multiple projects
-    static ref CONVERT_WINDOW_AGG: OptimizationStage = OptimizationStage::new(
+// the `OverWindowToTopNRule` need to match the pattern of Proj-Filter-OverWindow so it is
+// 1. conflict with `ProjectJoinMergeRule`, `AggProjectMergeRule` or other rules
+// 2. should be after merge the multiple projects
+static CONVERT_WINDOW_AGG: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Convert Window Function",
         vec![
             ProjectMergeRule::create(),
@@ -239,48 +274,59 @@ lazy_static! {
             OverWindowToTopNRule::create(),
         ],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref REWRITE_LIKE_EXPR: OptimizationStage = OptimizationStage::new(
+static REWRITE_LIKE_EXPR: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Rewrite Like Expr",
         vec![RewriteLikeExprRule::create()],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref TOP_N_AGG_ON_INDEX: OptimizationStage = OptimizationStage::new(
+static TOP_N_AGG_ON_INDEX: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "TopN/SimpleAgg on Index",
-        vec![TopNOnIndexRule::create(),
-             MinMaxOnIndexRule::create()],
+        vec![TopNOnIndexRule::create(), MinMaxOnIndexRule::create()],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref ALWAYS_FALSE_FILTER: OptimizationStage = OptimizationStage::new(
+static ALWAYS_FALSE_FILTER: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Void always-false filter's downstream",
         vec![AlwaysFalseFilterRule::create()],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref LIMIT_PUSH_DOWN: OptimizationStage = OptimizationStage::new(
+static LIMIT_PUSH_DOWN: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Push Down Limit",
         vec![LimitPushDownRule::create()],
         ApplyOrder::TopDown,
-    );
+    )
+});
 
-    static ref PULL_UP_HOP: OptimizationStage = OptimizationStage::new(
+static PULL_UP_HOP: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Pull Up Hop",
         vec![PullUpHopRule::create()],
         ApplyOrder::BottomUp,
-    );
+    )
+});
 
-    static ref SET_OPERATION_TO_JOIN: OptimizationStage = OptimizationStage::new(
+static SET_OPERATION_TO_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
         "Set Operation To Join",
         vec![
             IntersectToSemiJoinRule::create(),
             ExceptToAntiJoinRule::create(),
         ],
         ApplyOrder::BottomUp,
-    );
-}
+    )
+});
 
 impl LogicalOptimizer {
     pub fn predicate_pushdown(

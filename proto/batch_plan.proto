@@ -219,6 +219,7 @@ message TaskOutputId {
 message LocalExecutePlan {
   batch_plan.PlanFragment plan = 1;
   common.BatchQueryEpoch epoch = 2;
+  map<string, string> tracing_context = 3;
 }
 
 // ExchangeSource describes where to read results from children operators
