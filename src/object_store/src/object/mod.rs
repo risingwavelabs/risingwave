@@ -260,6 +260,14 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
         }
     }
+
+    pub fn get_object_type(&self) -> &'static str {
+        match self {
+            ObjectStoreImpl::InMem(_) => "InMemory",
+            ObjectStoreImpl::Opendal(store) => store.inner.store_media_type(),
+            ObjectStoreImpl::S3(_) => "S3",
+        }
+    }
 }
 
 fn try_update_failure_metric<T>(
