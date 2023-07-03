@@ -110,7 +110,7 @@ impl BatchEnvironment {
             )),
             task_metrics: Arc::new(BatchTaskMetrics::for_test()),
             client_pool: Arc::new(ComputeClientPool::default()),
-            dml_manager: Arc::new(DmlManager::new(WorkerNodeId::default())),
+            dml_manager: Arc::new(DmlManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
             executor_metrics: Arc::new(BatchExecutorMetrics::for_test()),
         }

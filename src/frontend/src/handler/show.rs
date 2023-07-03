@@ -21,6 +21,7 @@ use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
@@ -120,60 +121,60 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
             let columns = get_columns_from_table(&session, table)?;
             let rows = col_descs_to_rows(columns);
 
-            return Ok(PgResponse::new_for_stream(
-                StatementType::SHOW_COMMAND,
-                None,
-                rows.into(),
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Type".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ],
-            ));
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(
+                    rows.into(),
+                    vec![
+                        PgFieldDescriptor::new(
+                            "Name".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Type".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                    ],
+                )
+                .into());
         }
         ShowObject::Indexes { table } => {
             let indexes = get_indexes_from_table(&session, table)?;
             let rows = indexes_to_rows(indexes);
 
-            return Ok(PgResponse::new_for_stream(
-                StatementType::SHOW_COMMAND,
-                None,
-                rows.into(),
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "On".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Key".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Include".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Distributed By".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ],
-            ));
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(
+                    rows.into(),
+                    vec![
+                        PgFieldDescriptor::new(
+                            "Name".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "On".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Key".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Include".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Distributed By".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                    ],
+                )
+                .into());
         }
         ShowObject::Connection { schema } => {
             let schema = catalog_reader
@@ -219,28 +220,28 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                     ])
                 })
                 .collect_vec();
-            return Ok(PgResponse::new_for_stream(
-                StatementType::SHOW_COMMAND,
-                None,
-                rows.into(),
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Type".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Properties".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ],
-            ));
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(
+                    rows.into(),
+                    vec![
+                        PgFieldDescriptor::new(
+                            "Name".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Type".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Properties".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                    ],
+                )
+                .into());
         }
         ShowObject::Function { schema } => {
             let rows = catalog_reader
@@ -256,38 +257,100 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                     ])
                 })
                 .collect_vec();
-            return Ok(PgResponse::new_for_stream(
-                StatementType::SHOW_COMMAND,
-                None,
-                rows.into(),
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Arguments".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Return Type".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Language".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Link".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ],
-            ));
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(
+                    rows.into(),
+                    vec![
+                        PgFieldDescriptor::new(
+                            "Name".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Arguments".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Return Type".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Language".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Link".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                    ],
+                )
+                .into());
+        }
+        ShowObject::Cluster => {
+            let workers = session.env().worker_node_manager().list_worker_nodes();
+            let rows = workers
+                .into_iter()
+                .map(|worker| {
+                    let addr: HostAddr = worker.host.as_ref().unwrap().into();
+                    let property = worker.property.as_ref().unwrap();
+                    Row::new(vec![
+                        Some(addr.to_string().into()),
+                        Some(worker.get_state().unwrap().as_str_name().into()),
+                        Some(
+                            worker
+                                .parallel_units
+                                .into_iter()
+                                .map(|pu| pu.id)
+                                .join(", ")
+                                .into(),
+                        ),
+                        Some(property.is_streaming.to_string().into()),
+                        Some(property.is_serving.to_string().into()),
+                        Some(property.is_unschedulable.to_string().into()),
+                    ])
+                })
+                .collect_vec();
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(
+                    rows.into(),
+                    vec![
+                        PgFieldDescriptor::new(
+                            "Addr".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "State".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Parallel Units".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Is Streaming".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Is Serving".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Is Unschedulable".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                    ],
+                )
+                .into());
         }
     };
 
@@ -296,16 +359,16 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
         .map(|n| Row::new(vec![Some(n.into())]))
         .collect_vec();
 
-    Ok(PgResponse::new_for_stream(
-        StatementType::SHOW_COMMAND,
-        None,
-        rows.into(),
-        vec![PgFieldDescriptor::new(
-            "Name".to_owned(),
-            DataType::Varchar.to_oid(),
-            DataType::Varchar.type_len(),
-        )],
-    ))
+    Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+        .values(
+            rows.into(),
+            vec![PgFieldDescriptor::new(
+                "Name".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            )],
+        )
+        .into())
 }
 
 pub fn handle_show_create_object(
@@ -370,23 +433,23 @@ pub fn handle_show_create_object(
     };
     let name = format!("{}.{}", schema_name, object_name);
 
-    Ok(PgResponse::new_for_stream(
-        StatementType::SHOW_COMMAND,
-        None,
-        vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
-        vec![
-            PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Create Sql".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ],
-    ))
+    Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+        .values(
+            vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
+            vec![
+                PgFieldDescriptor::new(
+                    "Name".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Create Sql".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+            ],
+        )
+        .into())
 }
 
 #[cfg(test)]
@@ -418,7 +481,7 @@ mod tests {
         let sql = format!(
             r#"CREATE SOURCE t
     WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+    ROW FORMAT PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;

@@ -26,10 +26,11 @@ use futures::stream::StreamExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
+use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
-use tracing::{error, warn};
+use tracing::{error, warn, Instrument};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::ResultCache;
@@ -272,6 +273,14 @@ where
             .session_mgr
             .connect(&db_name, &user_name)
             .map_err(PsqlError::StartupError)?;
+
+        let application_name = msg.config.get("application_name");
+        if let Some(application_name) = application_name {
+            session
+                .set_config("application_name", vec![application_name.clone()])
+                .map_err(PsqlError::StartupError)?;
+        }
+
         match session.user_authenticator() {
             UserAuthenticator::None => {
                 self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
@@ -281,7 +290,10 @@ where
                 self.stream
                     .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
 
-                self.stream.write_parameter_status_msg_no_flush()?;
+                self.stream
+                    .write_parameter_status_msg_no_flush(&ParameterStatus {
+                        application_name: application_name.cloned(),
+                    })?;
                 self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
             }
             UserAuthenticator::ClearText(_) => {
@@ -293,6 +305,7 @@ where
                     .write_no_flush(&BeMessage::AuthenticationMd5Password(salt))?;
             }
         }
+
         self.session = Some(session);
         self.state = PgProtocolState::Regular;
         Ok(())
@@ -307,7 +320,8 @@ where
             )));
         }
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
-        self.stream.write_parameter_status_msg_no_flush()?;
+        self.stream
+            .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
         self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
         self.state = PgProtocolState::Regular;
         Ok(())
@@ -355,60 +369,80 @@ where
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
-            let session = session.clone();
-            // execute query
-            let res = session.clone().run_one_query(stmt, Format::Text).await;
-            for notice in session.take_notices() {
-                self.stream
-                    .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
-            }
-            let mut res = res.map_err(|err| PsqlError::QueryError(err))?;
+            let span = tracing::info_span!("run_stmt", %stmt);
 
-            for notice in res.get_notices() {
-                self.stream
-                    .write_no_flush(&BeMessage::NoticeResponse(notice))?;
-            }
-
-            if res.is_query() {
-                self.stream
-                    .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
-
-                let mut rows_cnt = 0;
-
-                while let Some(row_set) = res.values_stream().next().await {
-                    let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
-                    for row in row_set {
-                        self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
-                        rows_cnt += 1;
-                    }
-                }
-
-                // Run the callback before sending the `CommandComplete` message.
-                res.run_callback().await?;
-
-                self.stream.write_no_flush(&BeMessage::CommandComplete(
-                    BeCommandCompleteMessage {
-                        stmt_type: res.get_stmt_type(),
-                        rows_cnt,
-                    },
-                ))?;
-            } else {
-                // Run the callback before sending the `CommandComplete` message.
-                res.run_callback().await?;
-
-                self.stream.write_no_flush(&BeMessage::CommandComplete(
-                    BeCommandCompleteMessage {
-                        stmt_type: res.get_stmt_type(),
-                        rows_cnt: res
-                            .get_effected_rows_cnt()
-                            .expect("row count should be set"),
-                    },
-                ))?;
-            }
+            self.inner_process_query_msg_one_stmt(stmt, session.clone())
+                .instrument(span)
+                .await?;
         }
         // Put this line inside the for loop above will lead to unfinished/stuck regress test...Not
         // sure the reason.
         self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+        Ok(())
+    }
+
+    async fn inner_process_query_msg_one_stmt(
+        &mut self,
+        stmt: Statement,
+        session: Arc<SM::Session>,
+    ) -> PsqlResult<()> {
+        let session = session.clone();
+        // execute query
+        let res = session
+            .clone()
+            .run_one_query(stmt.clone(), Format::Text)
+            .await;
+        for notice in session.take_notices() {
+            self.stream
+                .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
+        }
+        let mut res = res.map_err(|err| PsqlError::QueryError(err))?;
+
+        for notice in res.notices() {
+            self.stream
+                .write_no_flush(&BeMessage::NoticeResponse(notice))?;
+        }
+
+        let status = res.status();
+        if let Some(ref application_name) = status.application_name {
+            self.stream.write_no_flush(&BeMessage::ParameterStatus(
+                BeParameterStatusMessage::ApplicationName(application_name),
+            ))?;
+        }
+
+        if res.is_query() {
+            self.stream
+                .write_no_flush(&BeMessage::RowDescription(&res.row_desc()))?;
+
+            let mut rows_cnt = 0;
+
+            while let Some(row_set) = res.values_stream().next().await {
+                let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
+                for row in row_set {
+                    self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
+                    rows_cnt += 1;
+                }
+            }
+
+            // Run the callback before sending the `CommandComplete` message.
+            res.run_callback().await?;
+
+            self.stream
+                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                    stmt_type: res.stmt_type(),
+                    rows_cnt,
+                }))?;
+        } else {
+            // Run the callback before sending the `CommandComplete` message.
+            res.run_callback().await?;
+
+            self.stream
+                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                    stmt_type: res.stmt_type(),
+                    rows_cnt: res.affected_rows_cnt().expect("row count should be set"),
+                }))?;
+        }
+
         Ok(())
     }
 
@@ -580,10 +614,7 @@ where
                 sql = %truncated_sql,
             );
 
-            let pg_response = match result {
-                Ok(pg_response) => pg_response,
-                Err(err) => return Err(PsqlError::ExecuteError(err)),
-            };
+            let pg_response = result.map_err(PsqlError::ExecuteError)?;
             let mut result_cache = ResultCache::new(pg_response);
             let is_consume_completed = result_cache.consume::<S>(row_max, &mut self.stream).await?;
             if !is_consume_completed {
@@ -628,7 +659,7 @@ where
             let portal = self.get_portal(&name)?;
 
             let row_descriptions = session
-                .describe_portral(portal)
+                .describe_portal(portal)
                 .map_err(PsqlError::Internal)?;
 
             if row_descriptions.is_empty() {
@@ -725,6 +756,27 @@ pub struct PgStream<S> {
     write_buf: BytesMut,
 }
 
+/// At present there is a hard-wired set of parameters for which
+/// ParameterStatus will be generated: they are:
+///
+///  * `server_version`
+///  * `server_encoding`
+///  * `client_encoding`
+///  * `application_name`
+///  * `is_superuser`
+///  * `session_authorization`
+///  * `DateStyle`
+///  * `IntervalStyle`
+///  * `TimeZone`
+///  * `integer_datetimes`
+///  * `standard_conforming_string`
+///
+/// See: https://www.postgresql.org/docs/9.2/static/protocol-flow.html#PROTOCOL-ASYNC.
+#[derive(Debug, Default, Clone)]
+pub struct ParameterStatus {
+    pub application_name: Option<String>,
+}
+
 impl<S> PgStream<S>
 where
     S: AsyncWrite + AsyncRead + Unpin,
@@ -737,7 +789,7 @@ where
         FeMessage::read(self.stream()).await
     }
 
-    fn write_parameter_status_msg_no_flush(&mut self) -> io::Result<()> {
+    fn write_parameter_status_msg_no_flush(&mut self, status: &ParameterStatus) -> io::Result<()> {
         self.write_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ClientEncoding("UTF8"),
         ))?;
@@ -747,6 +799,11 @@ where
         self.write_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::ServerVersion("8.3.0"),
         ))?;
+        if let Some(application_name) = &status.application_name {
+            self.write_no_flush(&BeMessage::ParameterStatus(
+                BeParameterStatusMessage::ApplicationName(application_name),
+            ))?;
+        }
         Ok(())
     }
 
@@ -825,10 +882,10 @@ where
         }
     }
 
-    fn write_parameter_status_msg_no_flush(&mut self) -> io::Result<()> {
+    fn write_parameter_status_msg_no_flush(&mut self, status: &ParameterStatus) -> io::Result<()> {
         match self {
-            Conn::Unencrypted(s) => s.write_parameter_status_msg_no_flush(),
-            Conn::Ssl(s) => s.write_parameter_status_msg_no_flush(),
+            Conn::Unencrypted(s) => s.write_parameter_status_msg_no_flush(status),
+            Conn::Ssl(s) => s.write_parameter_status_msg_no_flush(status),
         }
     }
 

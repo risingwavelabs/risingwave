@@ -14,12 +14,12 @@
           └─StreamSource { source: t, columns: [v1, _row_id] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "NoCheck", watermark_columns: [v1] }
+    StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [SubtractWithTimeZone(v1, '00:00:02':Interval, 'UTC':Varchar) as $expr1, _row_id], output_watermarks: [$expr1] }
         └── StreamRowIdGen { row_id_index: 1 }
-            └── StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
-                └── StreamSource { source: "t", columns: ["v1", "_row_id"] } { source state table: 1 }
+            └── StreamWatermarkFilter { watermark_descs: [Desc { idx: 0, expr: (v1 - '00:00:01':Interval) }] }
+                └── StreamSource { source: t, columns: [v1, _row_id] } { source state table: 1 }
 
     Table 1
     ├── columns: [ partition_id, offset_info ]
@@ -170,7 +170,7 @@
     select * from hop(t, ts, interval '1' minute, interval '3' minute);
   stream_plan: |-
     StreamMaterialize { columns: [ts, v1, v2, window_start, window_end, t._row_id(hidden)], stream_key: [t._row_id, window_start, window_end], pk_columns: [t._row_id, window_start, window_end], pk_conflict: NoCheck, watermark_columns: [ts, window_start, window_end] }
-    └─StreamHopWindow { time_col: t.ts, slide: Interval { months: 0, days: 0, usecs: 60000000 }, size: Interval { months: 0, days: 0, usecs: 180000000 }, output: [t.ts, t.v1, t.v2, window_start, window_end, t._row_id], output_watermarks: [t.ts, window_start, window_end] }
+    └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [t.ts, t.v1, t.v2, window_start, window_end, t._row_id], output_watermarks: [t.ts, window_start, window_end] }
       └─StreamFilter { predicate: IsNotNull(t.ts) }
         └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: hop ts
@@ -179,7 +179,7 @@
     select ts from hop(t, ts, interval '1' minute, interval '3' minute);
   stream_plan: |-
     StreamMaterialize { columns: [ts, window_start(hidden), t._row_id(hidden)], stream_key: [t._row_id, window_start], pk_columns: [t._row_id, window_start], pk_conflict: NoCheck, watermark_columns: [ts, window_start(hidden)] }
-    └─StreamHopWindow { time_col: t.ts, slide: Interval { months: 0, days: 0, usecs: 60000000 }, size: Interval { months: 0, days: 0, usecs: 180000000 }, output: [t.ts, window_start, t._row_id], output_watermarks: [t.ts, window_start] }
+    └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [t.ts, window_start, t._row_id], output_watermarks: [t.ts, window_start] }
       └─StreamFilter { predicate: IsNotNull(t.ts) }
         └─StreamTableScan { table: t, columns: [t.ts, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: hop start
@@ -188,7 +188,7 @@
     select window_end from hop(t, ts, interval '1' minute, interval '3' minute);
   stream_plan: |-
     StreamMaterialize { columns: [window_end, t._row_id(hidden)], stream_key: [t._row_id, window_end], pk_columns: [t._row_id, window_end], pk_conflict: NoCheck, watermark_columns: [window_end] }
-    └─StreamHopWindow { time_col: t.ts, slide: Interval { months: 0, days: 0, usecs: 60000000 }, size: Interval { months: 0, days: 0, usecs: 180000000 }, output: [window_end, t._row_id], output_watermarks: [window_end] }
+    └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [window_end, t._row_id], output_watermarks: [window_end] }
       └─StreamFilter { predicate: IsNotNull(t.ts) }
         └─StreamTableScan { table: t, columns: [t.ts, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: hop end
@@ -197,6 +197,6 @@
     select window_start from hop(t, ts, interval '1' minute, interval '3' minute);
   stream_plan: |-
     StreamMaterialize { columns: [window_start, t._row_id(hidden)], stream_key: [t._row_id, window_start], pk_columns: [t._row_id, window_start], pk_conflict: NoCheck, watermark_columns: [window_start] }
-    └─StreamHopWindow { time_col: t.ts, slide: Interval { months: 0, days: 0, usecs: 60000000 }, size: Interval { months: 0, days: 0, usecs: 180000000 }, output: [window_start, t._row_id], output_watermarks: [window_start] }
+    └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [window_start, t._row_id], output_watermarks: [window_start] }
       └─StreamFilter { predicate: IsNotNull(t.ts) }
         └─StreamTableScan { table: t, columns: [t.ts, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

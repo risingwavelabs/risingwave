@@ -31,6 +31,7 @@ do_not_config_object_storage_lifecycle = false
 partition_vnode_count = 64
 table_write_throughput_threshold = 134217728
 min_table_split_write_throughput = 33554432
+compaction_task_max_heartbeat_interval_secs = 60
 
 [batch]
 enable_barrier_read = true
@@ -52,6 +53,7 @@ stream_chunk_size = 256
 stream_exchange_initial_permits = 2048
 stream_exchange_batched_permits = 256
 stream_exchange_concurrent_barriers = 1
+stream_dml_channel_initial_permits = 32768
 
 [storage]
 share_buffers_sync_parallelism = 1

@@ -503,17 +503,6 @@ where
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }
 
-    async fn get_scale_compactor(
-        &self,
-        _: Request<GetScaleCompactorRequest>,
-    ) -> Result<Response<GetScaleCompactorResponse>, Status> {
-        let info = self.hummock_manager.get_scale_compactor_info().await;
-        let scale_out_cores = info.scale_out_cores();
-        let mut resp: GetScaleCompactorResponse = info.into();
-        resp.suggest_cores = scale_out_cores;
-        Ok(Response::new(resp))
-    }
-
     async fn rise_ctl_pause_version_checkpoint(
         &self,
         _request: Request<RiseCtlPauseVersionCheckpointRequest>,
