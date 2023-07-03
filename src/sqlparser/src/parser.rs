@@ -3774,6 +3774,9 @@ impl Parser {
                         return self.expected("from after indexes", self.peek_token());
                     }
                 }
+                Keyword::CLUSTERS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Cluster));
+                }
                 _ => {}
             }
         }

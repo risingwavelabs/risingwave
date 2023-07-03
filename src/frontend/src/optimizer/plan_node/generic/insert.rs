@@ -11,11 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::fmt;
+
 use std::hash::Hash;
 
 use educe::Educe;
-use itertools::Itertools;
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Schema, TableVersionId};
 
@@ -79,35 +78,6 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
             }
         }
         vec
-    }
-
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let verbose = self.ctx().is_explain_verbose();
-
-        let ret = if self.returning {
-            ", returning: true"
-        } else {
-            ""
-        };
-        write!(f, "{} {{ table: {}{}", name, self.table_name, ret)?;
-        if verbose {
-            let collect = self
-                .column_indices
-                .iter()
-                .enumerate()
-                .map(|(k, v)| format!("{}:{}", k, v))
-                .join(", ");
-            write!(f, ", mapping: [{}]", collect)?;
-            if !self.default_columns.is_empty() {
-                let collect = self
-                    .default_columns
-                    .iter()
-                    .map(|(k, v)| format!("{}<-{:?}", k, v))
-                    .join(", ");
-                write!(f, ", default: [{}]", collect)?;
-            }
-        }
-        write!(f, " }}")
     }
 }
 

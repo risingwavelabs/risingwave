@@ -24,19 +24,24 @@ import io.grpc.Status;
 import java.io.IOException;
 import java.util.Map;
 import org.apache.http.HttpHost;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestClient;
+import org.elasticsearch.client.RestClientBuilder;
 import org.elasticsearch.client.RestHighLevelClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class EsSinkFactory implements SinkFactory {
-    private static final Logger LOG = LoggerFactory.getLogger(EsSinkFactory.class);
+public class EsSink7Factory implements SinkFactory {
+    private static final Logger LOG = LoggerFactory.getLogger(EsSink7Factory.class);
 
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
-        EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
-        return new EsSink(config, tableSchema);
+        EsSink7Config config = mapper.convertValue(tableProperties, EsSink7Config.class);
+        return new EsSink7(config, tableSchema);
     }
 
     @Override
@@ -46,7 +51,7 @@ public class EsSinkFactory implements SinkFactory {
             Catalog.SinkType sinkType) {
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
-        EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
+        EsSink7Config config = mapper.convertValue(tableProperties, EsSink7Config.class);
 
         // 1. check url
         HttpHost host;
@@ -57,7 +62,17 @@ public class EsSinkFactory implements SinkFactory {
         }
 
         // 2. check connection
-        RestHighLevelClient client = new RestHighLevelClient(RestClient.builder(host));
+        RestClientBuilder builder = RestClient.builder(host);
+        if (config.getPassword() != null && config.getUsername() != null) {
+            final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+            credentialsProvider.setCredentials(
+                    AuthScope.ANY,
+                    new UsernamePasswordCredentials(config.getUsername(), config.getPassword()));
+            builder.setHttpClientConfigCallback(
+                    httpClientBuilder ->
+                            httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider));
+        }
+        RestHighLevelClient client = new RestHighLevelClient(builder);
         // Test connection
         try {
             boolean isConnected = client.ping(RequestOptions.DEFAULT);
@@ -69,6 +84,7 @@ public class EsSinkFactory implements SinkFactory {
         } catch (Exception e) {
             throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
         }
+
         // 3. close client
         try {
             client.close();
