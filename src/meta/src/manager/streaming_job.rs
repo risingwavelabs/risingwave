@@ -118,6 +118,15 @@ impl StreamingJob {
         }
     }
 
+    pub fn owner(&self) -> u32 {
+        match self {
+            StreamingJob::MaterializedView(mv) => mv.owner,
+            StreamingJob::Sink(sink) => sink.owner,
+            StreamingJob::Table(_, table) => table.owner,
+            StreamingJob::Index(index, _) => index.owner,
+        }
+    }
+
     pub fn definition(&self) -> String {
         match self {
             Self::MaterializedView(table) => table.definition.clone(),
