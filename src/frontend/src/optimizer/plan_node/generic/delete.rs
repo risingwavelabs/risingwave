@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::fmt;
+
 use std::hash::Hash;
 
 use educe::Educe;
@@ -60,20 +60,6 @@ impl<PlanRef: Eq + Hash> Delete<PlanRef> {
             input,
             returning,
         }
-    }
-
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ table: {}{} }}",
-            name,
-            self.table_name,
-            if self.returning {
-                ", returning: true"
-            } else {
-                ""
-            }
-        )
     }
 }
 

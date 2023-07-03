@@ -184,7 +184,7 @@ fn visit_stream_node_tables_inner<F>(
 
             // Chain
             NodeBody::Chain(node) => {
-                always!(node.state_table, "Chain")
+                optional!(node.state_table, "Chain")
             }
 
             // Note: add internal tables for new nodes here.

@@ -27,6 +27,7 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
@@ -135,6 +136,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
                 }),
             }),
             epoch: Some(self.epoch.clone()),
+            tracing_context: TracingContext::from_current_span().to_protobuf(),
         };
 
         let prost_exchange_source = PbExchangeSource {

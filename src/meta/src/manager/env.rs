@@ -144,6 +144,8 @@ pub struct MetaOpts {
     pub partition_vnode_count: u32,
     pub table_write_throughput_threshold: u64,
     pub min_table_split_write_throughput: u64,
+
+    pub compaction_task_max_heartbeat_interval_secs: u64,
 }
 
 impl MetaOpts {
@@ -179,6 +181,7 @@ impl MetaOpts {
             min_table_split_write_throughput: 64 * 1024 * 1024,
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
+            compaction_task_max_heartbeat_interval_secs: 0,
         }
     }
 }

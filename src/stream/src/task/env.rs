@@ -98,7 +98,7 @@ impl StreamEnvironment {
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 MonitoredStorageMetrics::unused(),
             )),
-            dml_manager: Arc::new(DmlManager::new(WorkerNodeId::default())),
+            dml_manager: Arc::new(DmlManager::for_test()),
             system_params_manager: Arc::new(LocalSystemParamsManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
             total_mem_val: Arc::new(TrAdder::new()),

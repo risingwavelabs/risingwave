@@ -44,14 +44,21 @@ pub struct TableReader {
 pub struct DmlManager {
     pub table_readers: RwLock<HashMap<TableId, TableReader>>,
     txn_id_generator: TxnIdGenerator,
+    dml_channel_initial_permits: usize,
 }
 
 impl DmlManager {
-    pub fn new(worker_node_id: WorkerNodeId) -> Self {
+    pub fn new(worker_node_id: WorkerNodeId, dml_channel_initial_permits: usize) -> Self {
         Self {
             table_readers: RwLock::new(HashMap::new()),
             txn_id_generator: TxnIdGenerator::new(worker_node_id),
+            dml_channel_initial_permits,
         }
+    }
+
+    pub fn for_test() -> Self {
+        const TEST_DML_CHANNEL_INIT_PERMITS: usize = 32768;
+        Self::new(WorkerNodeId::default(), TEST_DML_CHANNEL_INIT_PERMITS)
     }
 
     /// Register a new DML reader for a table. If the reader for this version of the table already
@@ -63,13 +70,15 @@ impl DmlManager {
         column_descs: &[ColumnDesc],
     ) -> Result<TableDmlHandleRef> {
         let mut table_readers = self.table_readers.write();
-
         // Clear invalid table readers.
         table_readers.drain_filter(|_, r| r.handle.strong_count() == 0);
 
         macro_rules! new_handle {
             ($entry:ident) => {{
-                let handle = Arc::new(TableDmlHandle::new(column_descs.to_vec()));
+                let handle = Arc::new(TableDmlHandle::new(
+                    column_descs.to_vec(),
+                    self.dml_channel_initial_permits,
+                ));
                 $entry.insert(TableReader {
                     version_id: table_version_id,
                     handle: Arc::downgrade(&handle),
@@ -172,9 +181,9 @@ mod tests {
 
     const TEST_TRANSACTION_ID: TxnId = 0;
 
-    #[test]
-    fn test_register_and_drop() {
-        let dml_manager = DmlManager::new(WorkerNodeId::default());
+    #[tokio::test]
+    async fn test_register_and_drop() {
+        let dml_manager = DmlManager::for_test();
         let table_id = TableId::new(1);
         let table_version_id = INITIAL_TABLE_VERSION_ID;
         let column_descs = vec![ColumnDesc::unnamed(100.into(), DataType::Float64)];
@@ -201,28 +210,28 @@ mod tests {
         write_handle.begin().unwrap();
 
         // Should be able to write to the table.
-        write_handle.write_chunk(chunk()).unwrap();
+        write_handle.write_chunk(chunk()).await.unwrap();
 
         // After dropping the corresponding reader, the write handle should be not allowed to write.
         // This is to simulate the scale-in of DML executors.
         drop(r1);
 
-        write_handle.write_chunk(chunk()).unwrap_err();
+        write_handle.write_chunk(chunk()).await.unwrap_err();
 
         // Unless we create a new write handle.
         let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
         write_handle.begin().unwrap();
-        write_handle.write_chunk(chunk()).unwrap();
+        write_handle.write_chunk(chunk()).await.unwrap();
 
         // After dropping the last reader, no more writes are allowed.
         // This is to simulate the dropping of the table.
         drop(r2);
-        write_handle.write_chunk(chunk()).unwrap_err();
+        write_handle.write_chunk(chunk()).await.unwrap_err();
     }
 
-    #[test]
-    fn test_versioned() {
-        let dml_manager = DmlManager::new(WorkerNodeId::default());
+    #[tokio::test]
+    async fn test_versioned() {
+        let dml_manager = DmlManager::for_test();
         let table_id = TableId::new(1);
 
         let old_version_id = INITIAL_TABLE_VERSION_ID;
@@ -249,7 +258,7 @@ mod tests {
         write_handle.begin().unwrap();
 
         // Should be able to write to the table.
-        write_handle.write_chunk(old_chunk()).unwrap();
+        write_handle.write_chunk(old_chunk()).await.unwrap();
 
         // Start reading the new version.
         let new_h = dml_manager
@@ -258,7 +267,7 @@ mod tests {
         let _new_r = new_h.stream_reader();
 
         // Still be able to write to the old write handle, if the channel is not closed.
-        write_handle.write_chunk(old_chunk()).unwrap();
+        write_handle.write_chunk(old_chunk()).await.unwrap();
 
         // However, it is no longer possible to create a `table_dml_handle` with the old version;
         dml_manager
@@ -271,13 +280,13 @@ mod tests {
             .unwrap();
         let mut write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
         write_handle.begin().unwrap();
-        write_handle.write_chunk(new_chunk()).unwrap();
+        write_handle.write_chunk(new_chunk()).await.unwrap();
     }
 
     #[test]
     #[should_panic]
     fn test_bad_schema() {
-        let dml_manager = DmlManager::new(WorkerNodeId::default());
+        let dml_manager = DmlManager::for_test();
         let table_id = TableId::new(1);
         let table_version_id = INITIAL_TABLE_VERSION_ID;
 

@@ -34,7 +34,7 @@
             └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: "NoCheck" } { materialized table: 4294967294 }
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck } { materialized table: 4294967294 }
     └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { result table: 0, state tables: [], distinct tables: [] }
             └── StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
@@ -129,7 +129,7 @@
             └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: "NoCheck" } { materialized table: 4294967294 }
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck } { materialized table: 4294967294 }
     └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { result table: 0, state tables: [], distinct tables: [] }
             └── StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }

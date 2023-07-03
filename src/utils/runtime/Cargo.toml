@@ -38,7 +38,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tracing = "0.1"
 tracing-opentelemetry = "0.19"
-tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std", "time", "local-time"] }
+tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std", "time", "local-time", "json"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 opentelemetry = { version = "0.19", default-features = false, features = ["rt-tokio"] }

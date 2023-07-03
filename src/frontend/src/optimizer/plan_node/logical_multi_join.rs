@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::fmt;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
@@ -71,23 +70,6 @@ impl Distill for LogicalMultiJoin {
             input_schema: &input_schema,
         });
         childless_record("LogicalMultiJoin", vec![("on", cond)])
-    }
-}
-impl fmt::Display for LogicalMultiJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "LogicalMultiJoin {{ on: {} }}", {
-            let fields = (self.inputs.iter())
-                .flat_map(|input| input.schema().fields.clone())
-                .collect();
-            let input_schema = Schema { fields };
-            format!(
-                "{}",
-                ConditionDisplay {
-                    condition: self.on(),
-                    input_schema: &input_schema,
-                }
-            )
-        })
     }
 }
 
