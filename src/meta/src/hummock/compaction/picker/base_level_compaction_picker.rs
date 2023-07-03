@@ -159,10 +159,18 @@ impl LevelCompactionPicker {
             return None;
         }
 
+        if !min_write_amp_meet {
+            let is_base_level_task_pending = level_handlers[0]
+                .get_pending_tasks()
+                .iter()
+                .any(|task| task.target_level != 0);
+            if is_base_level_task_pending {
+                return None;
+            }
+        }
+
         for (input, target_file_size, target_level_files) in input_levels {
-            if (min_write_amp_meet || l0.total_file_size < self.config.max_bytes_for_level_base)
-                && input.total_file_size < target_file_size
-            {
+            if min_write_amp_meet && input.total_file_size < target_file_size {
                 continue;
             }
 
@@ -686,8 +694,14 @@ pub mod tests {
                 generate_table(6, 1, 600, 700, 2),
             ],
         );
-        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let mut local_stats = LocalPickerStatistic::default();
+        levels_handler[0].add_pending_task(
+            1,
+            4,
+            &levels.l0.as_ref().unwrap().sub_levels[0].table_infos,
+        );
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         // Skip this compaction because the write amplification is too large.
         assert!(ret.is_none());
@@ -800,7 +814,7 @@ pub mod tests {
                 level_type: pending_level.level_type,
                 table_infos: pending_level.table_infos.clone(),
             }],
-            target_level: 0,
+            target_level: 1,
             target_sub_level_id: pending_level.sub_level_id,
         };
         assert!(!levels_handler[0].is_level_pending_compact(&pending_level));

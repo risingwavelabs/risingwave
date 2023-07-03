@@ -206,23 +206,11 @@ impl DynamicLevelSelectorCore {
                 .filter(|level| level.level_type() == LevelType::Overlapping)
                 .map(|level| level.table_infos.len())
                 .sum::<usize>();
-            // level count limit
-            let non_overlapping_level_count = levels
-                .l0
-                .as_ref()
-                .unwrap()
-                .sub_levels
-                .iter()
-                .filter(|level| level.level_type() == LevelType::Nonoverlapping)
-                .count() as u64;
             if overlapping_file_count > 0 {
                 // FIXME: use overlapping idle file count
                 let l0_overlapping_score =
                     std::cmp::min(idle_file_count, overlapping_file_count) as u64 * SCORE_BASE
-                        / std::cmp::max(
-                            non_overlapping_level_count,
-                            self.config.level0_tier_compact_file_number,
-                        );
+                        / self.config.level0_tier_compact_file_number;
                 // Reduce the level num of l0 overlapping sub_level
                 ctx.score_levels
                     .push((std::cmp::max(l0_overlapping_score, SCORE_BASE + 1), 0, 0));
@@ -242,7 +230,15 @@ impl DynamicLevelSelectorCore {
                 // size limit
                 let non_overlapping_size_score = total_size * SCORE_BASE
                     / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
-
+                // level count limit
+                let non_overlapping_level_count = levels
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .filter(|level| level.level_type() == LevelType::Nonoverlapping)
+                    .count() as u64;
                 let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
                     / std::cmp::max(
                         base_level_sst_count / 16,
