@@ -3497,9 +3497,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-aws-sdk-s3"
-version = "0.2.23+0.28"
+version = "0.2.25+0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eab6f17267ffa9ab9ea0f30c11b6829690e7112745958a45dfa57fd7f74929b3"
+checksum = "84ab622f10406b583fb75af6f94811d5ae003c1197b9fbaec011ff1d323fc9b6"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -4642,6 +4642,7 @@ dependencies = [
  "itertools",
  "madsim-tokio",
  "openssl",
+ "panic-message",
  "risingwave_common",
  "risingwave_sqlparser",
  "thiserror",

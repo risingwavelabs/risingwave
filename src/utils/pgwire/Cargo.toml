@@ -21,6 +21,7 @@ bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 openssl = "0.10.48"
+panic-message = "0.3"
 risingwave_common = { path = "../../common" }
 risingwave_sqlparser = { path = "../../sqlparser" }
 thiserror = "1"
