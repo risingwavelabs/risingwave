@@ -25,6 +25,9 @@ use crate::sql_gen::expr::typed_null;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
+    /// Generates integer scalar expression.
+    /// Bound: [start, end).
+    /// Type: `DataType`.
     pub(super) fn gen_range_scalar(
         &mut self,
         typ: &DataType,
@@ -32,7 +35,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         end: isize,
     ) -> Option<Expr> {
         use DataType as T;
-        let value = self.gen_int(start, end);
+        let value = self.rng.gen_range(start..end);
         match *typ {
             T::Int64 => Some(Expr::TypedString {
                 data_type: AstDataType::BigInt,
