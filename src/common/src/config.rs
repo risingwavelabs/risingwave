@@ -561,6 +561,11 @@ pub struct StreamingDeveloperConfig {
     /// The maximum number of concurrent barriers in an exchange channel.
     #[serde(default = "default::developer::stream_exchange_concurrent_barriers")]
     pub exchange_concurrent_barriers: usize,
+
+    /// The initial permits for a dml channel, i.e., the maximum row count can be buffered in
+    /// the channel.
+    #[serde(default = "default::developer::stream_dml_channel_initial_permits")]
+    pub dml_channel_initial_permits: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -899,6 +904,10 @@ mod default {
 
         pub fn stream_exchange_concurrent_barriers() -> usize {
             1
+        }
+
+        pub fn stream_dml_channel_initial_permits() -> usize {
+            32768
         }
     }
 

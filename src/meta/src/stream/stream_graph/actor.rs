@@ -680,6 +680,19 @@ impl ActorGraphBuilder {
             external_locations,
         } = self.build_actor_graph(id_gen)?;
 
+        for parallel_unit_id in external_locations.values() {
+            if let Some(parallel_unit) = self
+                .cluster_info
+                .unschedulable_parallel_units
+                .get(parallel_unit_id)
+            {
+                bail!(
+                    "The worker {} where the associated upstream is located is unscheduable",
+                    parallel_unit.worker_node_id
+                );
+            }
+        }
+
         // Serialize the graph into a map of sealed fragments.
         let graph = {
             let mut actors: HashMap<GlobalFragmentId, Vec<StreamActor>> = HashMap::new();

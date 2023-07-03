@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
@@ -103,11 +101,6 @@ impl Distill for LogicalInsert {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let vec = self.core.fields_pretty(self.base.ctx.is_explain_verbose());
         childless_record("LogicalInsert", vec)
-    }
-}
-impl fmt::Display for LogicalInsert {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalInsert")
     }
 }
 

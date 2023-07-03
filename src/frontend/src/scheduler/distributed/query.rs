@@ -29,7 +29,7 @@ use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Instrument};
 
 use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
@@ -154,10 +154,16 @@ impl QueryExecution {
                     query_metrics,
                 };
 
+                let span = tracing::info_span!(
+                    "distributed_execute",
+                    query_id = self.query.query_id.id,
+                    epoch = ?pinned_snapshot.get_batch_query_epoch(),
+                );
+
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run(pinned_snapshot).await });
+                tokio::spawn(async move { runner.run(pinned_snapshot).instrument(span).await });
 
                 let root_stage = root_stage_receiver
                     .await

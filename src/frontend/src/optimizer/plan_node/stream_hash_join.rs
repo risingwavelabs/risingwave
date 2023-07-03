@@ -12,20 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
-use super::utils::{
-    childless_record, formatter_debug_plan_node, plan_node_name, watermark_pretty, Distill,
-};
+use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
 };
@@ -341,67 +336,6 @@ impl Distill for StreamHashJoin {
         }
 
         childless_record(name, vec)
-    }
-}
-impl fmt::Display for StreamHashJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (ljk, rjk) = self
-            .eq_join_predicate
-            .eq_indexes()
-            .first()
-            .cloned()
-            .expect("first join key");
-
-        let mut builder = formatter_debug_plan_node!(
-            f, "StreamHashJoin",
-            { "window", self.left().watermark_columns().contains(ljk) && self.right().watermark_columns().contains(rjk) },
-            { "interval", self.clean_left_state_conjunction_idx.is_some() && self.clean_right_state_conjunction_idx.is_some() },
-            { "append_only", self.is_append_only },
-        );
-
-        let verbose = self.base.ctx.is_explain_verbose();
-        builder.field("type", &self.logical.join_type);
-
-        let concat_schema = self.logical.concat_schema();
-        builder.field(
-            "predicate",
-            &EqJoinPredicateDisplay {
-                eq_join_predicate: self.eq_join_predicate(),
-                input_schema: &concat_schema,
-            },
-        );
-
-        let get_cond = |conjunction_idx| ExprDisplay {
-            expr: &self.eq_join_predicate().other_cond().conjunctions[conjunction_idx],
-            input_schema: &concat_schema,
-        };
-        if let Some(i) = self.clean_left_state_conjunction_idx {
-            builder.field("conditions_to_clean_left_state_table", &get_cond(i));
-        }
-        if let Some(i) = self.clean_right_state_conjunction_idx {
-            builder.field("conditions_to_clean_right_state_table", &get_cond(i));
-        }
-
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        if verbose {
-            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
-                None => builder.field("output", &format_args!("all")),
-                Some(id) => builder.field("output", &id),
-            };
-        }
-
-        builder.finish()
     }
 }
 
