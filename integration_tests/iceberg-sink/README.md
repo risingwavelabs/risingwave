@@ -70,5 +70,5 @@ We can find it in `Admin`->`Connection`.
 5. Stark airflow task
 In airflow ui(DAGS), we can find `remove_iceberg_orphan_files` and `rewrite_iceberg_small_files` ,open it by clicking on them. They will trigger tasks at regular intervals.
 
-This demo uses `spark` and `airflow`. We can find more at https://spark.apache.org/, https://airflow.apache.org/ and https://iceberg.apache.org/docs/latest/spark-procedures/.
+This demo uses `spark` and `airflow`. We can find more at https://spark.apache.org/, https://airflow.apache.org/.
 
