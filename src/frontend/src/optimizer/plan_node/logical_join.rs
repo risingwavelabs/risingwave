@@ -1232,6 +1232,15 @@ impl ToBatch for LogicalJoin {
 
 impl ToStream for LogicalJoin {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        if self
+            .on()
+            .conjunctions
+            .iter()
+            .any(|cond| cond.count_nows() > 0)
+        {
+            return Err(ErrorCode::NotSupported("now() expression in ON clause".to_string(), "please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information".to_string()).into());
+        }
+
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),

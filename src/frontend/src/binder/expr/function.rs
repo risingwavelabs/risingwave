@@ -933,7 +933,8 @@ impl Binder {
                 | Clause::Having
                 | Clause::Filter
                 | Clause::GeneratedColumn
-                | Clause::From => {
+                | Clause::From
+                | Clause::On => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
                         clause
@@ -949,7 +950,7 @@ impl Binder {
         if self.is_for_stream()
             && !matches!(
                 self.context.clause,
-                Some(Clause::Where) | Some(Clause::Having)
+                Some(Clause::Where) | Some(Clause::Having) | Some(Clause::On)
             )
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -981,7 +982,11 @@ impl Binder {
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::From | Clause::GeneratedColumn => {
+                Clause::Where
+                | Clause::Values
+                | Clause::From
+                | Clause::GeneratedColumn
+                | Clause::On => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
                         clause
@@ -1004,7 +1009,7 @@ impl Binder {
                     ))
                     .into());
                 }
-                Clause::GroupBy | Clause::Having | Clause::Filter | Clause::From => {}
+                Clause::On | Clause::GroupBy | Clause::Having | Clause::Filter | Clause::From => {}
             }
         }
         Ok(())
