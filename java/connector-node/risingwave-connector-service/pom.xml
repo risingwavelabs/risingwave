@@ -96,7 +96,7 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave.java</groupId>
-            <artifactId>risingwave-sink-es</artifactId>
+            <artifactId>risingwave-sink-es-7</artifactId>
             <scope>provided</scope>
         </dependency>
     </dependencies>
