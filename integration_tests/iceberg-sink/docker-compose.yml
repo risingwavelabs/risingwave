@@ -18,8 +18,6 @@ x-airflow-common:
     volumes:
       - ./airflow_dags:/opt/airflow/dags
       - ./iceberg-compaction-sql:/opt/airflow/iceberg-compaction-sql
-      - ./.airflow/logs:/opt/airflow/logs
-      - ./.airflow/plugins:/opt/airflow/plugins
     depends_on:
       &airflow-common-depends-on
       redis:
@@ -36,8 +34,6 @@ services:
       target: spark
     environment:
       - SPARK_MODE=master
-      - AWS_ACCESS_KEY=hummockadmin
-      - AWS_SECRET_KEY=hummockadmin
     ports:
       - '7077:7077'
     volumes:
@@ -49,8 +45,6 @@ services:
       - SPARK_MASTER_URL=spark://spark:7077
       - SPARK_WORKER_MEMORY=1G
       - SPARK_WORKER_CORES=1
-      - AWS_ACCESS_KEY=hummockadmin
-      - AWS_SECRET_KEY=hummockadmin
   presto:
     build: ./presto-with-iceberg
     container_name: presto
