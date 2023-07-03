@@ -21,6 +21,7 @@ use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
@@ -282,6 +283,68 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                         ),
                         PgFieldDescriptor::new(
                             "Link".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                    ],
+                )
+                .into());
+        }
+        ShowObject::Cluster => {
+            let workers = session.env().worker_node_manager().list_worker_nodes();
+            let rows = workers
+                .into_iter()
+                .map(|worker| {
+                    let addr: HostAddr = worker.host.as_ref().unwrap().into();
+                    let property = worker.property.as_ref().unwrap();
+                    Row::new(vec![
+                        Some(addr.to_string().into()),
+                        Some(worker.get_state().unwrap().as_str_name().into()),
+                        Some(
+                            worker
+                                .parallel_units
+                                .into_iter()
+                                .map(|pu| pu.id)
+                                .join(", ")
+                                .into(),
+                        ),
+                        Some(property.is_streaming.to_string().into()),
+                        Some(property.is_serving.to_string().into()),
+                        Some(property.is_unschedulable.to_string().into()),
+                    ])
+                })
+                .collect_vec();
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(
+                    rows.into(),
+                    vec![
+                        PgFieldDescriptor::new(
+                            "Addr".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "State".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Parallel Units".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Is Streaming".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Is Serving".to_owned(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
+                        ),
+                        PgFieldDescriptor::new(
+                            "Is Unschedulable".to_owned(),
                             DataType::Varchar.to_oid(),
                             DataType::Varchar.type_len(),
                         ),

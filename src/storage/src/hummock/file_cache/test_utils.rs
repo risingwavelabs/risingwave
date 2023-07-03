@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::{Buf, BufMut};
-use risingwave_common::util::env_var::is_ci;
+use risingwave_common::util::deployment::Deployment;
 use tokio::sync::{mpsc, Mutex};
 
 use super::cache::FlushBufferHook;
@@ -212,7 +212,7 @@ pub fn datasize(path: impl AsRef<Path>) -> Result<usize> {
 /// exists, then this will create a temp directory under the path given in the variable. Otherwise,
 /// this will create the temp directory under `/tmp`
 pub fn tempdir() -> tempfile::TempDir {
-    if is_ci() {
+    if Deployment::current().is_ci() {
         tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
     } else {
         match std::env::var("RISINGWAVE_TEST_DIR") {

@@ -5,80 +5,80 @@
 
 # Create a function.
 statement ok
-create function int_42() returns int language python as int_42 using link 'http://localhost:8815';
+create function int_42() returns int as int_42 using link 'http://localhost:8815';
 
 # Argument or return type mismatch.
 statement error argument mismatch
-create function foo(int) returns int language python as int_42 using link 'http://localhost:8815';
+create function foo(int) returns int as int_42 using link 'http://localhost:8815';
 
 statement error return type mismatch
-create function foo() returns real language python as int_42 using link 'http://localhost:8815';
+create function foo() returns real as int_42 using link 'http://localhost:8815';
 
 # Create another function.
 statement ok
-create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
+create function gcd(int, int) returns int as gcd using link 'http://localhost:8815';
 
 # Create a function with the same name but different arguments.
 statement ok
-create function gcd(int, int, int) returns int language python as gcd3 using link 'http://localhost:8815';
+create function gcd(int, int, int) returns int as gcd3 using link 'http://localhost:8815';
 
 # Create a function with the same name and arguments.
 statement error exists
-create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
+create function gcd(int, int) returns int as gcd using link 'http://localhost:8815';
 
 # Create a function that returns multiple columns.
 statement ok
 create function extract_tcp_info(bytea) returns struct<src_ip varchar, dst_ip varchar, src_port smallint, dst_port smallint>
-language python as extract_tcp_info using link 'http://localhost:8815';
+as extract_tcp_info using link 'http://localhost:8815';
 
 # Create a table function.
 statement ok
-create function series(int) returns table (x int) language python as series using link 'http://localhost:8815';
+create function series(int) returns table (x int) as series using link 'http://localhost:8815';
 
 # Create a table function that returns multiple columns.
 statement ok
-create function split(varchar) returns table (word varchar, length int) language python as split using link 'http://localhost:8815';
+create function split(varchar) returns table (word varchar, length int) as split using link 'http://localhost:8815';
 
 statement ok
-create function hex_to_dec(varchar) returns decimal language python as hex_to_dec using link 'http://localhost:8815';
+create function hex_to_dec(varchar) returns decimal as hex_to_dec using link 'http://localhost:8815';
 
 statement ok
-create function array_access(varchar[], int) returns varchar language python as array_access using link 'http://localhost:8815';
+create function array_access(varchar[], int) returns varchar as array_access using link 'http://localhost:8815';
 
 statement ok
-create function jsonb_access(jsonb, int) returns jsonb language python as jsonb_access using link 'http://localhost:8815';
+create function jsonb_access(jsonb, int) returns jsonb as jsonb_access using link 'http://localhost:8815';
 
 statement ok
-create function jsonb_concat(jsonb[]) returns jsonb language python as jsonb_concat using link 'http://localhost:8815';
+create function jsonb_concat(jsonb[]) returns jsonb as jsonb_concat using link 'http://localhost:8815';
 
 statement ok
-create function jsonb_array_identity(jsonb[]) returns jsonb[] language python as jsonb_array_identity using link 'http://localhost:8815';
+create function jsonb_array_identity(jsonb[]) returns jsonb[] as jsonb_array_identity using link 'http://localhost:8815';
 
 statement ok
 create function jsonb_array_struct_identity(struct<v jsonb[], len int>) returns struct<v jsonb[], len int>
-language python as jsonb_array_struct_identity using link 'http://localhost:8815';
+as jsonb_array_struct_identity using link 'http://localhost:8815';
 
 statement ok
 create function return_all(BOOLEAN,SMALLINT,INT,BIGINT,FLOAT4,FLOAT8,DECIMAL,DATE,TIME,TIMESTAMP,INTERVAL,VARCHAR,BYTEA,JSONB)
 returns struct<bool BOOLEAN, i16 SMALLINT, i32 INT, i64 BIGINT, f32 FLOAT4, f64 FLOAT8, decimal DECIMAL, date DATE, time TIME, timestamp TIMESTAMP, interval INTERVAL, varchar VARCHAR, bytea BYTEA, jsonb JSONB>
-language python as return_all using link 'http://localhost:8815';
+as return_all using link 'http://localhost:8815';
 
 query TTTTT rowsort
 show functions
 ----
-array_access varchar[], integer varchar python http://localhost:8815
-extract_tcp_info bytea struct<src_ip varchar,dst_ip varchar,src_port smallint,dst_port smallint> python http://localhost:8815
-gcd integer, integer integer python http://localhost:8815
-gcd integer, integer, integer integer python http://localhost:8815
-hex_to_dec varchar numeric python http://localhost:8815
-int_42 (empty) integer python http://localhost:8815
-jsonb_access jsonb, integer jsonb python http://localhost:8815
-jsonb_array_identity jsonb[] jsonb[] python http://localhost:8815
-jsonb_array_struct_identity struct<v jsonb[],len integer> struct<v jsonb[],len integer> python http://localhost:8815
-jsonb_concat jsonb[] jsonb python http://localhost:8815
-return_all boolean, smallint, integer, bigint, real, double precision, numeric, date, time without time zone, timestamp without time zone, interval, varchar, bytea, jsonb struct<bool boolean,i16 smallint,i32 integer,i64 bigint,f32 real,f64 double precision,decimal numeric,date date,time time without time zone,timestamp timestamp without time zone,interval interval,varchar varchar,bytea bytea,jsonb jsonb> python http://localhost:8815
-series integer integer python http://localhost:8815
-split varchar struct<word varchar,length integer> python http://localhost:8815
+array_access varchar[], integer varchar (empty) http://localhost:8815
+extract_tcp_info bytea struct<src_ip varchar,dst_ip varchar,src_port smallint,dst_port smallint> (empty) http://localhost:8815
+gcd integer, integer integer (empty) http://localhost:8815
+gcd integer, integer, integer integer (empty) http://localhost:8815
+hex_to_dec varchar numeric (empty) http://localhost:8815
+int_42 (empty) integer (empty) http://localhost:8815
+jsonb_access jsonb, integer jsonb (empty) http://localhost:8815
+jsonb_array_identity jsonb[] jsonb[] (empty) http://localhost:8815
+jsonb_array_struct_identity struct<v jsonb[],len integer> struct<v jsonb[],len integer> (empty) http://localhost:8815
+jsonb_concat jsonb[] jsonb (empty) http://localhost:8815
+return_all boolean, smallint, integer, bigint, real, double precision, numeric, date, time without time zone, timestamp without time zone, interval, varchar, bytea, jsonb struct<bool boolean,i16 smallint,i32 integer,i64 bigint,f32 real,f64 double precision,decimal numeric,date date,time time without time zone,timestamp timestamp without time zone,interval interval,varchar varchar,bytea bytea,jsonb jsonb> (empty) http://localhost:8815
+series integer integer (empty) http://localhost:8815
+split varchar struct<word varchar,length integer> (empty) http://localhost:8815
 
 query I
 select int_42();

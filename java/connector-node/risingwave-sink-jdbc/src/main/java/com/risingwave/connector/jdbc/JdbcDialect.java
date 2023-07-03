@@ -29,6 +29,15 @@ import java.util.stream.Collectors;
 public interface JdbcDialect {
 
     /**
+     * Create a SchemaTableName object that contains necessary information to get an identity of the
+     * table.
+     */
+    SchemaTableName createSchemaTableName(String schemaName, String tableName);
+
+    /** Returns the normalized table name to be used in the SQL statements */
+    String getNormalizedTableName(SchemaTableName schemaTableName);
+
+    /**
      * Quotes the identifier.
      *
      * <p>Used to put quotes around the identifier if the column name is a reserved keyword or
@@ -50,7 +59,7 @@ public interface JdbcDialect {
      * @return The upsert statement if supported, otherwise None.
      */
     Optional<String> getUpsertStatement(
-            String tableName, List<String> fieldNames, List<String> uniqueKeyFields);
+            SchemaTableName schemaTableName, List<String> fieldNames, List<String> uniqueKeyFields);
 
     void bindUpsertStatement(
             PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
@@ -63,12 +72,13 @@ public interface JdbcDialect {
      *
      * @return the dialects {@code INSERT INTO} statement.
      */
-    default String getInsertIntoStatement(String tableName, List<String> fieldNames) {
+    default String getInsertIntoStatement(
+            SchemaTableName schemaTableName, List<String> fieldNames) {
         String columns =
                 fieldNames.stream().map(this::quoteIdentifier).collect(Collectors.joining(", "));
         String placeholders = fieldNames.stream().map(f -> "?").collect(Collectors.joining(", "));
         return "INSERT INTO "
-                + quoteIdentifier(tableName)
+                + getNormalizedTableName(schemaTableName)
                 + "("
                 + columns
                 + ")"
@@ -85,11 +95,15 @@ public interface JdbcDialect {
      * WHERE cond [AND ...]
      * }</pre>
      */
-    default String getDeleteStatement(String tableName, List<String> conditionFields) {
+    default String getDeleteStatement(
+            SchemaTableName schemaTableName, List<String> conditionFields) {
         String conditionClause =
                 conditionFields.stream()
                         .map(f -> format("%s = ?", quoteIdentifier(f)))
                         .collect(Collectors.joining(" AND "));
-        return "DELETE FROM " + quoteIdentifier(tableName) + " WHERE " + conditionClause;
+        return "DELETE FROM "
+                + getNormalizedTableName(schemaTableName)
+                + " WHERE "
+                + conditionClause;
     }
 }

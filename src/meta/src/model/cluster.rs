@@ -30,7 +30,7 @@ const WORKER_CF_NAME: &str = "cf/worker";
 
 pub const INVALID_EXPIRE_AT: u64 = 0;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Worker {
     pub worker_node: WorkerNode,
 

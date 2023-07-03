@@ -732,8 +732,10 @@ mod tests {
     use risingwave_pb::hummock::CompactTaskProgress;
 
     use crate::hummock::compaction::default_level_selector;
-    use crate::hummock::test_utils::{add_ssts, setup_compute_env};
-    use crate::hummock::CompactorManagerInner;
+    use crate::hummock::test_utils::{
+        add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
+    };
+    use crate::hummock::CompactorManager;
 
     #[tokio::test]
     async fn test_compactor_manager() {
@@ -742,6 +744,12 @@ mod tests {
             let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
             let context_id = worker_node.id;
             let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+            register_table_ids_to_compaction_group(
+                hummock_manager.as_ref(),
+                &[1],
+                StaticCompactionGroupId::StateDefault.into(),
+            )
+            .await;
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
             let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
             let _compactor = hummock_manager.get_idle_compactor().unwrap();
@@ -757,7 +765,7 @@ mod tests {
         };
 
         // Restart. Set task_expiry_seconds to 0 only to speed up test.
-        let compactor_manager = CompactorManagerInner::with_meta(env, 0).await.unwrap();
+        let compactor_manager = CompactorManager::with_meta(env, 0).await.unwrap();
         // Because task assignment exists.
         assert_eq!(compactor_manager.task_heartbeats.len(), 1);
         // Because compactor gRPC is not established yet.
