@@ -261,7 +261,22 @@ impl ObjectStoreImpl {
         }
     }
 
-    pub fn get_object_type(&self) -> &'static str {
+    pub fn support_streaming_upload(&self) -> bool {
+        match self {
+            ObjectStoreImpl::InMem(_) => true,
+            ObjectStoreImpl::Opendal(store) => {
+                store
+                    .inner
+                    .op
+                    .info()
+                    .capability()
+                    .write_without_content_length
+            }
+            ObjectStoreImpl::S3(_) => true,
+        }
+    }
+
+    pub fn get_store_type(&self) -> &'static str {
         match self {
             ObjectStoreImpl::InMem(_) => "InMemory",
             ObjectStoreImpl::Opendal(store) => store.inner.store_media_type(),

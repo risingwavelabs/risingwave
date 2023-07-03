@@ -828,7 +828,7 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
-        if self.sstable_store.store.get_object_type() != "Azblob" {
+        if self.sstable_store.store.support_streaming_upload() {
             let path = self.sstable_store.get_sst_data_path(object_id);
             let uploader = self.sstable_store.store.streaming_upload(&path).await?;
             Ok(AnySstableWriter::StreamingUploadWriter(
