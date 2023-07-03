@@ -124,16 +124,28 @@ impl Aggregator for PercentileDisc {
     }
 
     fn output(&mut self) -> Result<Datum> {
+        Ok(self.get())
+    }
+
+    fn reset(&mut self) {
+        self.data.clear();
+    }
+
+    fn get(&self) -> Datum {
         if let Some(fractions) = self.fractions && !self.data.is_empty() {
             let rn = fractions * self.data.len() as f64;
             if fractions == 0.0 {
-                Ok(Some(self.data[0].clone()))
+                Some(self.data[0].clone())
             } else {
-                Ok(Some(self.data[f64::ceil(rn) as usize - 1].clone()))
+                Some(self.data[f64::ceil(rn) as usize - 1].clone())
             }
         } else {
-            Ok(None)
+            None
         }
+    }
+
+    fn set(&mut self, _: Datum) {
+        unimplemented!()
     }
 
     fn estimated_size(&self) -> usize {

@@ -77,6 +77,20 @@ impl Aggregator for Distinct {
         self.inner.output()
     }
 
+    fn reset(&mut self) {
+        self.inner.reset();
+        self.exists.clear();
+        self.exists_estimated_heap_size = 0;
+    }
+
+    fn get(&self) -> Datum {
+        self.inner.get()
+    }
+
+    fn set(&mut self, _: Datum) {
+        unimplemented!("set is not supported for distinct");
+    }
+
     fn estimated_size(&self) -> usize {
         std::mem::size_of::<Self>()
             + self.inner.estimated_size()

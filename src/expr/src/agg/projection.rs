@@ -55,6 +55,18 @@ impl Aggregator for Projection {
         self.inner.output()
     }
 
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    fn get(&self) -> Datum {
+        self.inner.get()
+    }
+
+    fn set(&mut self, state: Datum) {
+        self.inner.set(state);
+    }
+
     fn estimated_size(&self) -> usize {
         std::mem::size_of::<Self>() + self.inner.estimated_size()
     }

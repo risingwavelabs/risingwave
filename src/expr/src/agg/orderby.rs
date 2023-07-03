@@ -124,6 +124,18 @@ impl Aggregator for ProjectionOrderBy {
         self.inner.output()
     }
 
+    fn reset(&mut self) {
+        unimplemented!("reset is not supported for orderby");
+    }
+
+    fn get(&self) -> Datum {
+        unimplemented!("get is not supported for orderby");
+    }
+
+    fn set(&mut self, _: Datum) {
+        unimplemented!("set is not supported for orderby");
+    }
+
     fn estimated_size(&self) -> usize {
         std::mem::size_of::<Self>()
             + self.inner.estimated_size()

@@ -14,6 +14,7 @@
 
 use dyn_clone::DynClone;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, DataTypeName, Datum};
 
 use crate::sig::FuncSigDebug;
@@ -47,13 +48,8 @@ use self::projection::Projection;
 
 /// An `Aggregator` supports `update` data and `output` result.
 #[async_trait::async_trait]
-pub trait Aggregator: Send + DynClone + 'static {
+pub trait Aggregator: Send + Sync + DynClone + 'static {
     fn return_type(&self) -> DataType;
-
-    /// `update_single` update the aggregator with a single row with type checked at runtime.
-    async fn update_single(&mut self, input: &StreamChunk, row_id: usize) -> Result<()> {
-        self.update_multi(input, row_id, row_id + 1).await
-    }
 
     /// `update_multi` update the aggregator with multiple rows with type checked at runtime.
     async fn update_multi(
@@ -68,8 +64,22 @@ pub trait Aggregator: Send + DynClone + 'static {
         self.update_multi(input, 0, input.capacity()).await
     }
 
+    /// `update_single` update the aggregator with a single row with type checked at runtime.
+    async fn update_single(&mut self, input: &StreamChunk, row_id: usize) -> Result<()> {
+        self.update_multi(input, row_id, row_id + 1).await
+    }
+
     /// Output the aggregate state and reset to initial state.
     fn output(&mut self) -> Result<Datum>;
+
+    /// Reset the state.
+    fn reset(&mut self);
+
+    /// Get the current value state.
+    fn get(&self) -> Datum;
+
+    /// Set the current value state.
+    fn set(&mut self, state: Datum);
 
     /// The estimated size of the state.
     fn estimated_size(&self) -> usize;
@@ -78,6 +88,12 @@ pub trait Aggregator: Send + DynClone + 'static {
 dyn_clone::clone_trait_object!(Aggregator);
 
 pub type BoxedAggState = Box<dyn Aggregator>;
+
+impl EstimateSize for BoxedAggState {
+    fn estimated_heap_size(&self) -> usize {
+        self.as_ref().estimated_size()
+    }
+}
 
 /// Build an `Aggregator` from `AggCall`.
 pub fn build(agg: AggCall) -> Result<BoxedAggState> {
