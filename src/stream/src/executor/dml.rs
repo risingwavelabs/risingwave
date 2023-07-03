@@ -302,7 +302,11 @@ mod tests {
         // Message from batch
         write_handle.begin().unwrap();
         write_handle.write_chunk(batch_chunk).await.unwrap();
-        write_handle.end().unwrap();
+        // Since the end will wait the notifier which is sent by the reader,
+        // we need to spawn a task here to avoid dead lock.
+        tokio::spawn(async move {
+            write_handle.end().await.unwrap();
+        });
 
         // Consume the 1st message from upstream executor
         let msg = dml_executor.next().await.unwrap().unwrap();

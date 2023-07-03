@@ -15,8 +15,7 @@
 use std::iter::repeat;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
-use futures::future::try_join_all;
+use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{
@@ -119,9 +118,7 @@ impl InsertExecutor {
             .table_dml_handle(self.table_id, self.table_version_id)?;
         let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
 
-        let mut notifiers = Vec::new();
-
-        notifiers.push(write_handle.begin()?);
+        write_handle.begin()?;
 
         // Transform the data chunk to a stream chunk, then write to the source.
         let write_txn_data = |chunk: DataChunk| async {
@@ -162,8 +159,13 @@ impl InsertExecutor {
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);
 
-            write_handle.write_chunk(stream_chunk).await
+            let cardinality = stream_chunk.cardinality();
+            write_handle.write_chunk(stream_chunk).await?;
+
+            Result::Ok(cardinality)
         };
+
+        let mut rows_inserted = 0;
 
         #[for_await]
         for data_chunk in self.child.execute() {
@@ -172,22 +174,15 @@ impl InsertExecutor {
                 yield data_chunk.clone();
             }
             for chunk in builder.append_chunk(data_chunk) {
-                notifiers.push(write_txn_data(chunk).await?);
+                rows_inserted += write_txn_data(chunk).await?;
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            notifiers.push(write_txn_data(chunk).await?);
+            rows_inserted += write_txn_data(chunk).await?;
         }
 
-        notifiers.push(write_handle.end()?);
-
-        // Wait for all chunks to be taken / written.
-        let rows_inserted = try_join_all(notifiers)
-            .await
-            .context("failed to wait chunks to be written")?
-            .into_iter()
-            .sum::<usize>();
+        write_handle.end().await?;
 
         // create ret value
         if !self.returning {
