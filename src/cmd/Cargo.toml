@@ -19,7 +19,6 @@ ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 normal = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 
 [dependencies]
-anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 prometheus = { version = "0.13" }
 risingwave_common = { path = "../common" }

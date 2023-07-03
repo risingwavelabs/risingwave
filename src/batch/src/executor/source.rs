@@ -26,7 +26,8 @@ use risingwave_common::types::DataType;
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceColumnDesc, SourceContext, SourceFormat, SplitImpl, SplitMetaData,
+    ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SourceFormat, SplitImpl,
+    SplitMetaData,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::RowFormatType;
@@ -48,6 +49,8 @@ pub struct SourceExecutor {
 
     schema: Schema,
     identity: String,
+
+    source_ctrl_opts: SourceCtrlOpts,
 }
 
 #[async_trait::async_trait]
@@ -79,6 +82,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             RowFormatType::Native => SourceFormat::Native,
             RowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
             RowFormatType::UpsertJson => SourceFormat::UpsertJson,
+            RowFormatType::Bytes => SourceFormat::Bytes,
             _ => unreachable!(),
         };
         if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {
@@ -105,6 +109,9 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 .get_config()
                 .developer
                 .connector_message_buffer_size,
+        };
+        let source_ctrl_opts = SourceCtrlOpts {
+            chunk_size: source.context().get_config().developer.chunk_size,
         };
 
         let column_ids: Vec<_> = source_node
@@ -135,6 +142,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             split,
             schema,
             identity: source.plan_node().get_identity().clone(),
+            source_ctrl_opts,
         }))
     }
 }
@@ -161,6 +169,7 @@ impl SourceExecutor {
             self.source_id,
             u32::MAX,
             self.metrics,
+            self.source_ctrl_opts.clone(),
         ));
         let stream = self
             .connector_source

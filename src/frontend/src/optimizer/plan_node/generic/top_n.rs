@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::fmt;
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
@@ -121,31 +120,6 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
             order,
             group_key: vec![],
         }
-    }
-
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        let input_schema = self.input.schema();
-        builder.field(
-            "order",
-            &format!(
-                "{}",
-                OrderDisplay {
-                    order: &self.order,
-                    input_schema
-                }
-            ),
-        );
-        builder
-            .field("limit", &self.limit_attr.limit())
-            .field("offset", &self.offset);
-        if self.limit_attr.with_ties() {
-            builder.field("with_ties", &true);
-        }
-        if !self.group_key.is_empty() {
-            builder.field("group_key", &self.group_key);
-        }
-        builder.finish()
     }
 }
 

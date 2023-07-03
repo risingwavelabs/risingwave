@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -52,15 +50,6 @@ impl BatchTableFunction {
     }
 }
 
-impl fmt::Display for BatchTableFunction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchTableFunction {{ {:?} }}",
-            self.logical.table_function
-        )
-    }
-}
 impl Distill for BatchTableFunction {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let data = Pretty::debug(&self.logical.table_function);

@@ -34,7 +34,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{load_config, BatchConfig, MetaConfig};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::session_config::{ConfigMap, VisibilityMode};
+use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -52,16 +52,17 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
+use thiserror::Error;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::info;
 
-use crate::binder::{Binder, BoundStatement};
+use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
+use crate::catalog::{check_schema_writable, CatalogError, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
@@ -197,6 +198,9 @@ impl FrontendEnv {
             &meta_config,
         )
         .await?;
+
+        let worker_id = meta_client.worker_id();
+        info!("Assigned worker node id {}", worker_id);
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
@@ -437,6 +441,23 @@ pub struct SessionImpl {
     current_query_cancel_flag: Mutex<Option<Trigger>>,
 }
 
+#[derive(Error, Debug)]
+pub enum CheckRelationError {
+    #[error("{0}")]
+    Resolve(#[from] ResolveQualifiedNameError),
+    #[error("{0}")]
+    Catalog(#[from] CatalogError),
+}
+
+impl From<CheckRelationError> for RwError {
+    fn from(e: CheckRelationError) -> Self {
+        match e {
+            CheckRelationError::Resolve(e) => e.into(),
+            CheckRelationError::Catalog(e) => e.into(),
+        }
+    }
+}
+
 impl SessionImpl {
     pub fn new(
         env: FrontendEnv,
@@ -498,14 +519,32 @@ impl SessionImpl {
     }
 
     pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
-        self.config_map.write().set(key, value)
+        struct Nop;
+
+        impl ConfigReporter for Nop {
+            fn report_status(&mut self, _key: &str, _new_val: String) {}
+        }
+
+        self.config_map.write().set(key, value, Nop)
+    }
+
+    pub fn set_config_report(
+        &self,
+        key: &str,
+        value: Vec<String>,
+        reporter: impl ConfigReporter,
+    ) -> Result<()> {
+        self.config_map.write().set(key, value, reporter)
     }
 
     pub fn session_id(&self) -> SessionId {
         self.id
     }
 
-    pub fn check_relation_name_duplicated(&self, name: ObjectName) -> Result<()> {
+    pub fn check_relation_name_duplicated(
+        &self,
+        name: ObjectName,
+    ) -> std::result::Result<(), CheckRelationError> {
         let db_name = self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
@@ -521,9 +560,9 @@ impl SessionImpl {
             };
             (schema_name, relation_name)
         };
-        catalog_reader
-            .check_relation_name_duplicated(db_name, &schema_name, &relation_name)
-            .map_err(RwError::from)
+        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name)?;
+
+        Ok(())
     }
 
     pub fn check_connection_name_duplicated(&self, name: ObjectName) -> Result<()> {
@@ -651,10 +690,11 @@ impl SessionImpl {
             ));
         }
         if stmts.len() > 1 {
-            return Ok(PgResponse::empty_result_with_notice(
-                pgwire::pg_response::StatementType::EMPTY,
-                "cannot insert multiple commands into statement".to_string(),
-            ));
+            return Ok(
+                PgResponse::builder(pgwire::pg_response::StatementType::EMPTY)
+                    .notice("cannot insert multiple commands into statement")
+                    .into(),
+            );
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {
@@ -703,7 +743,7 @@ pub struct SessionManagerImpl {
     number: AtomicI32,
 }
 
-impl SessionManager<PgResponseStream, PrepareStatement, Portal> for SessionManagerImpl {
+impl SessionManager for SessionManagerImpl {
     type Session = SessionImpl;
 
     fn connect(
@@ -841,10 +881,13 @@ impl SessionManagerImpl {
     }
 }
 
-#[async_trait::async_trait]
-impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
-    /// A copy of run_statement but exclude the parser part so each run must be at most one
-    /// statement. The str sql use the to_string of AST. Consider Reuse later.
+impl Session for SessionImpl {
+    type Portal = Portal;
+    type PreparedStatement = PrepareStatement;
+    type ValuesStream = PgResponseStream;
+
+    /// A copy of `run_statement` but exclude the parser part so each run must be at most one
+    /// statement. The str sql use the `to_string` of AST. Consider Reuse later.
     async fn run_one_query(
         self: Arc<Self>,
         stmt: Statement,
@@ -945,7 +988,7 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
         })
     }
 
-    fn describe_portral(
+    fn describe_portal(
         self: Arc<Self>,
         portal: Portal,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
@@ -953,6 +996,10 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
             Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
+    }
+
+    fn set_config(&self, key: &str, value: Vec<String>) -> std::result::Result<(), BoxedError> {
+        Self::set_config(self, key, value).map_err(Into::into)
     }
 
     fn take_notices(self: Arc<Self>) -> Vec<String> {

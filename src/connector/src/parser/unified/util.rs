@@ -32,7 +32,7 @@ pub fn apply_row_operation_on_stream_chunk_writer(
                 },
                 Err(e) => Err(e)
             };
-            tracing::debug!(
+            tracing::trace!(
                 "inserted {:?} {:?} is_pk:{:?} {:?} ",
                 &column.name,
                 &column.data_type,

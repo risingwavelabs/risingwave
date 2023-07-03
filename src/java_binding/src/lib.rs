@@ -15,6 +15,7 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(lazy_cell)]
+#![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
 
 mod hummock_iterator;
@@ -24,7 +25,7 @@ use std::backtrace::Backtrace;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::slice::from_raw_parts;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use hummock_iterator::{HummockJavaBindingIterator, KeyedRow};
 use jni::objects::{
@@ -35,7 +36,6 @@ use jni::sys::{
     jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jobject, jshort, jsize, jvalue,
 };
 use jni::JNIEnv;
-use once_cell::sync::OnceCell;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
@@ -234,11 +234,11 @@ pub enum JavaBindingRowInner {
 }
 #[derive(Default)]
 pub struct JavaClassMethodCache {
-    big_decimal_ctor: OnceCell<(GlobalRef, JMethodID)>,
-    timestamp_ctor: OnceCell<(GlobalRef, JMethodID)>,
+    big_decimal_ctor: OnceLock<(GlobalRef, JMethodID)>,
+    timestamp_ctor: OnceLock<(GlobalRef, JMethodID)>,
 
-    date_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
-    time_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
+    date_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
+    time_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
 }
 
 pub struct JavaBindingRow {

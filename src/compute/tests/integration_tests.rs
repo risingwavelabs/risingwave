@@ -38,6 +38,7 @@ use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
@@ -101,7 +102,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_common::types::DataType;
 
     let memory_state_store = MemoryStateStore::new();
-    let dml_manager = Arc::new(DmlManager::default());
+    let dml_manager = Arc::new(DmlManager::for_test());
     let table_id = TableId::default();
     let schema = Schema {
         fields: vec![
@@ -173,6 +174,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         barrier_rx,
         u64::MAX,
         1,
+        SourceCtrlOpts::default(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
@@ -289,7 +291,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let mut col_row_ids = vec![];
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].as_serial();
@@ -368,7 +370,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let message = materialize.next().await.unwrap()?;
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].as_serial();

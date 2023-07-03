@@ -20,6 +20,7 @@
 #![feature(stmt_expr_attributes)]
 #![cfg(madsim)]
 #![feature(lazy_cell)]
+#![feature(drain_filter)]
 
 mod batch;
 mod recovery;

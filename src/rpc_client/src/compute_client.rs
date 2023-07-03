@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::compute::config_service_client::ConfigServiceClient;
@@ -154,6 +155,7 @@ impl ComputeClient {
                 task_id: Some(task_id),
                 plan: Some(plan),
                 epoch: Some(epoch),
+                tracing_context: TracingContext::from_current_span().to_protobuf(),
             })
             .await?
             .into_inner())

@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use futures::Future;
 use risingwave_common::metrics::MetricsLayer;
-use risingwave_common::util::env_var::is_ci;
+use risingwave_common::util::deployment::Deployment;
 use tracing::level_filters::LevelFilter as Level;
 use tracing_subscriber::filter::{FilterFn, Targets};
 use tracing_subscriber::fmt::time::OffsetTime;
@@ -42,23 +42,24 @@ use tracing_subscriber::{filter, EnvFilter};
 /// - Changing the level of `pgwire` to `TRACE` in `configure_risingwave_targets_fmt` can also turn
 ///   on the logs, but without a dedicated file.
 const ENABLE_QUERY_LOG_FILE: bool = false;
-/// Use an [excessively pretty, human-readable formatter](tracing_subscriber::fmt::format::Pretty).
-/// Includes line numbers for each log.
-const ENABLE_PRETTY_LOG: bool = false;
 
 const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
 
 const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
 
-/// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
-/// logs are needed, add them here.
+/// Configure log targets for some `RisingWave` crates.
+///
+/// Other RisingWave crates will follow the default level (`DEBUG` or `INFO` according to
+/// the `debug_assertions` and `is_ci` flag).
 fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets {
     targets
-        // Other RisingWave crates will follow the default level (`DEBUG` or `INFO` according to
-        // the `debug_assertions` and `is_ci` flag).
+        // force a lower level for important logs
         .with_target("risingwave_stream", Level::DEBUG)
         .with_target("risingwave_storage", Level::DEBUG)
-        .with_target("pgwire", Level::ERROR)
+        // force a higher level for noisy logs
+        .with_target("risingwave_sqlparser", Level::INFO)
+        .with_target("pgwire", Level::INFO)
+        .with_target(PGWIRE_QUERY_LOG, Level::OFF)
         // disable events that are too verbose
         // if you want to enable any of them, find the target name and set it to `TRACE`
         // .with_target("events::stream::mview::scan", Level::TRACE)
@@ -138,6 +139,8 @@ pub fn set_panic_hook() {
 /// * `RW_QUERY_LOG_PATH`: the path to generate query log. If set, [`ENABLE_QUERY_LOG_FILE`] is
 ///   turned on.
 pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Registry) {
+    let deployment = Deployment::current();
+
     // Default timer for logging with local time offset.
     let default_timer = OffsetTime::local_rfc_3339().unwrap_or_else(|e| {
         println!("failed to get local time offset: {e}, falling back to UTC");
@@ -168,10 +171,15 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
         filter = configure_risingwave_targets_fmt(filter);
 
         // For all other crates
-        filter = filter.with_default(if cfg!(debug_assertions) && !is_ci() {
-            Level::DEBUG
-        } else {
-            Level::INFO
+        filter = filter.with_default(match Deployment::current() {
+            Deployment::Ci => Level::INFO,
+            _ => {
+                if cfg!(debug_assertions) {
+                    Level::DEBUG
+                } else {
+                    Level::INFO
+                }
+            }
         });
 
         // Overrides from settings
@@ -194,18 +202,20 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
     // fmt layer (formatting and logging to stdout)
     {
         let fmt_layer = tracing_subscriber::fmt::layer()
-            .compact()
             .with_timer(default_timer.clone())
             .with_ansi(settings.colorful);
-        let fmt_layer = if ENABLE_PRETTY_LOG {
-            fmt_layer.pretty().boxed()
-        } else {
-            fmt_layer.boxed()
+
+        let fmt_layer = match deployment {
+            Deployment::Ci => fmt_layer
+                .compact()
+                .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
+                .boxed(),
+            Deployment::Cloud => fmt_layer.json().boxed(),
+            Deployment::Other => fmt_layer.pretty().boxed(),
         };
 
         layers.push(
             fmt_layer
-                .with_filter(FilterFn::new(|metadata| metadata.is_event())) // filter-out all span-related info
                 .with_filter(default_filter.clone().with_target("rw_tracing", Level::OFF)) // filter-out tracing-only events
                 .boxed(),
         );
@@ -370,9 +380,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
         layers.push(Box::new(MetricsLayer::new(registry).with_filter(filter)));
     }
-
     tracing_subscriber::registry().with(layers).init();
-
     // TODO: add file-appender tracing subscriber in the future
 }
 

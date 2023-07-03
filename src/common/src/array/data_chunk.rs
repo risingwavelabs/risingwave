@@ -184,6 +184,11 @@ impl DataChunk {
         &self.columns
     }
 
+    /// Returns the data types of all columns.
+    pub fn data_types(&self) -> Vec<DataType> {
+        self.columns.iter().map(|col| col.data_type()).collect()
+    }
+
     /// Divides one chunk into two at an column index.
     ///
     /// # Panics

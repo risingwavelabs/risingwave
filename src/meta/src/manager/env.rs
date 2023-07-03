@@ -15,6 +15,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use risingwave_common::config::DefaultParallelism;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
@@ -77,6 +78,8 @@ pub struct MetaOpts {
     pub max_idle_ms: u64,
     /// Whether run in compaction detection test mode
     pub compaction_deterministic_test: bool,
+    /// Default parallelism of units for all streaming jobs.
+    pub default_parallelism: DefaultParallelism,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
@@ -111,6 +114,11 @@ pub struct MetaOpts {
     /// colocated with Meta node in the cloud environment
     pub connector_rpc_endpoint: Option<String>,
 
+    /// Default tag for the endpoint created when creating a privatelink connection.
+    /// Will be appended to the tags specified in the `tags` field in with clause in `create
+    /// connection`.
+    pub privatelink_endpoint_default_tags: Option<Vec<(String, String)>>,
+
     /// Schedule space_reclaim_compaction for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
 
@@ -136,6 +144,8 @@ pub struct MetaOpts {
     pub partition_vnode_count: u32,
     pub table_write_throughput_threshold: u64,
     pub min_table_split_write_throughput: u64,
+
+    pub compaction_task_max_heartbeat_interval_secs: u64,
 }
 
 impl MetaOpts {
@@ -146,6 +156,7 @@ impl MetaOpts {
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
+            default_parallelism: DefaultParallelism::Full,
             vacuum_interval_sec: 30,
             hummock_version_checkpoint_interval_sec: 30,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
@@ -158,6 +169,7 @@ impl MetaOpts {
             vpc_id: None,
             security_group_id: None,
             connector_rpc_endpoint: None,
+            privatelink_endpoint_default_tags: None,
             periodic_space_reclaim_compaction_interval_sec: 60,
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
@@ -169,6 +181,7 @@ impl MetaOpts {
             min_table_split_write_throughput: 64 * 1024 * 1024,
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
+            compaction_task_max_heartbeat_interval_secs: 0,
         }
     }
 }

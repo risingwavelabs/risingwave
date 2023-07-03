@@ -20,6 +20,7 @@ use risingwave_sqlparser::ast::Statement;
 
 use crate::error::PsqlError;
 use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_protocol::ParameterStatus;
 use crate::pg_server::BoxedError;
 use crate::types::Row;
 
@@ -103,19 +104,94 @@ pub type BoxedCallback = Pin<Box<dyn Callback>>;
 
 pub struct PgResponse<VS> {
     stmt_type: StatementType,
-    // row count of effected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
+    // row count of affected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
     // don't return rows.
     row_cnt: Option<i32>,
     notices: Vec<String>,
     values_stream: Option<VS>,
     callback: Option<BoxedCallback>,
     row_desc: Vec<PgFieldDescriptor>,
+    status: ParameterStatus,
 }
 
-impl<VS> std::fmt::Debug for PgResponse<VS>
-where
-    VS: ValuesStream,
-{
+pub struct PgResponseBuilder<VS> {
+    stmt_type: StatementType,
+    // row count of affected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
+    // don't return rows.
+    row_cnt: Option<i32>,
+    notices: Vec<String>,
+    values_stream: Option<VS>,
+    callback: Option<BoxedCallback>,
+    row_desc: Vec<PgFieldDescriptor>,
+    status: ParameterStatus,
+}
+
+impl<VS> From<PgResponseBuilder<VS>> for PgResponse<VS> {
+    fn from(builder: PgResponseBuilder<VS>) -> Self {
+        Self {
+            stmt_type: builder.stmt_type,
+            row_cnt: builder.row_cnt,
+            notices: builder.notices,
+            values_stream: builder.values_stream,
+            callback: builder.callback,
+            row_desc: builder.row_desc,
+            status: builder.status,
+        }
+    }
+}
+
+impl<VS> PgResponseBuilder<VS> {
+    pub fn empty(stmt_type: StatementType) -> Self {
+        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
+        Self {
+            stmt_type,
+            row_cnt,
+            notices: vec![],
+            values_stream: None,
+            callback: None,
+            row_desc: vec![],
+            status: Default::default(),
+        }
+    }
+
+    pub fn row_cnt(self, row_cnt: i32) -> Self {
+        Self {
+            row_cnt: Some(row_cnt),
+            ..self
+        }
+    }
+
+    pub fn row_cnt_opt(self, row_cnt: Option<i32>) -> Self {
+        Self { row_cnt, ..self }
+    }
+
+    pub fn values(self, values_stream: VS, row_desc: Vec<PgFieldDescriptor>) -> Self {
+        Self {
+            values_stream: Some(values_stream),
+            row_desc,
+            ..self
+        }
+    }
+
+    pub fn callback(self, callback: impl Callback + 'static) -> Self {
+        Self {
+            callback: Some(callback.boxed()),
+            ..self
+        }
+    }
+
+    pub fn notice(self, notice: impl ToString) -> Self {
+        let mut notices = self.notices;
+        notices.push(notice.to_string());
+        Self { notices, ..self }
+    }
+
+    pub fn status(self, status: ParameterStatus) -> Self {
+        Self { status, ..self }
+    }
+}
+
+impl<VS> std::fmt::Debug for PgResponse<VS> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PgResponse")
             .field("stmt_type", &self.stmt_type)
@@ -261,100 +337,27 @@ impl<VS> PgResponse<VS>
 where
     VS: ValuesStream,
 {
+    pub fn builder(stmt_type: StatementType) -> PgResponseBuilder<VS> {
+        PgResponseBuilder::empty(stmt_type)
+    }
+
     pub fn empty_result(stmt_type: StatementType) -> Self {
-        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
-        Self {
-            stmt_type,
-            row_cnt,
-            values_stream: None,
-            row_desc: vec![],
-            notices: vec![],
-            callback: None,
-        }
+        PgResponseBuilder::empty(stmt_type).into()
     }
 
-    pub fn empty_result_with_notice(stmt_type: StatementType, notice: String) -> Self {
-        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
-        Self {
-            stmt_type,
-            row_cnt,
-            values_stream: None,
-            row_desc: vec![],
-            notices: vec![notice],
-            callback: None,
-        }
-    }
-
-    pub fn empty_result_with_notices(stmt_type: StatementType, notices: Vec<String>) -> Self {
-        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
-        Self {
-            stmt_type,
-            row_cnt,
-            values_stream: None,
-            row_desc: vec![],
-            notices,
-            callback: None,
-        }
-    }
-
-    pub fn new_for_stream(
-        stmt_type: StatementType,
-        row_cnt: Option<i32>,
-        values_stream: VS,
-        row_desc: Vec<PgFieldDescriptor>,
-    ) -> Self {
-        Self::new_for_stream_inner(stmt_type, row_cnt, values_stream, row_desc, vec![], None)
-    }
-
-    pub fn new_for_stream_extra(
-        stmt_type: StatementType,
-        row_cnt: Option<i32>,
-        values_stream: VS,
-        row_desc: Vec<PgFieldDescriptor>,
-        notices: Vec<String>,
-        callback: impl Callback + 'static,
-    ) -> Self {
-        Self::new_for_stream_inner(
-            stmt_type,
-            row_cnt,
-            values_stream,
-            row_desc,
-            notices,
-            Some(callback.boxed()),
-        )
-    }
-
-    fn new_for_stream_inner(
-        stmt_type: StatementType,
-        row_cnt: Option<i32>,
-        values_stream: VS,
-        row_desc: Vec<PgFieldDescriptor>,
-        notices: Vec<String>,
-        callback: Option<BoxedCallback>,
-    ) -> Self {
-        assert!(
-            stmt_type.is_query() ^ row_cnt.is_some(),
-            "should specify row count for command and not for query: {stmt_type}"
-        );
-        Self {
-            stmt_type,
-            row_cnt,
-            values_stream: Some(values_stream),
-            row_desc,
-            notices,
-            callback,
-        }
-    }
-
-    pub fn get_stmt_type(&self) -> StatementType {
+    pub fn stmt_type(&self) -> StatementType {
         self.stmt_type
     }
 
-    pub fn get_notices(&self) -> &[String] {
+    pub fn notices(&self) -> &[String] {
         &self.notices
     }
 
-    pub fn get_effected_rows_cnt(&self) -> Option<i32> {
+    pub fn status(&self) -> &ParameterStatus {
+        &self.status
+    }
+
+    pub fn affected_rows_cnt(&self) -> Option<i32> {
         self.row_cnt
     }
 
@@ -366,7 +369,7 @@ where
         self.stmt_type == StatementType::EMPTY
     }
 
-    pub fn get_row_desc(&self) -> Vec<PgFieldDescriptor> {
+    pub fn row_desc(&self) -> Vec<PgFieldDescriptor> {
         self.row_desc.clone()
     }
 
