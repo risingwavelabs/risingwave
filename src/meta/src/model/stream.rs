@@ -238,6 +238,18 @@ impl TableFragments {
             .collect()
     }
 
+    pub fn actor_fragment_mapping(&self) -> HashMap<ActorId, FragmentId> {
+        self.fragments
+            .values()
+            .flat_map(|fragment| {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|actor| (actor.actor_id, fragment.fragment_id))
+            })
+            .collect()
+    }
+
     /// Returns actors associated with this table.
     pub fn actors(&self) -> Vec<StreamActor> {
         self.fragments
