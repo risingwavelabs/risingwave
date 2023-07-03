@@ -24,7 +24,7 @@ pub(super) mod task_progress;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::Div;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -475,13 +475,14 @@ impl Compactor {
         let mut system =
             System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
         let pid = sysinfo::get_current_pid().unwrap();
+        let mut pending_pull_task_count: u32 = 0;
+        let running_task_count = Arc::new(AtomicU32::new(0));
 
         let join_handle = tokio::spawn(async move {
             let shutdown_map = CompactionShutdownMap::default();
             let mut min_interval = tokio::time::interval(stream_retry_interval);
             let mut task_progress_interval = tokio::time::interval(task_progress_update_interval);
             let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
-            let mut pending_pull_task_count: u32 = 0;
 
             // This outer loop is to recreate stream.
             'start_stream: loop {
@@ -520,6 +521,7 @@ impl Compactor {
 
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
+                    let running_task_count = running_task_count.clone();
                     let message: Option<Result<SubscribeCompactTasksResponse, _>> = tokio::select! {
                         _ = task_progress_interval.tick() => {
                             let mut progress_list = Vec::new();
@@ -538,21 +540,27 @@ impl Compactor {
                                 if pending_pull_task_count == 0 {
                                     // reset pending_pull_task_count when all pending task had been refill
                                     pending_pull_task_count = {
-                                        let refresh_result = system.refresh_process_specifics(pid, ProcessRefreshKind::new().with_cpu());
-                                        debug_assert!(refresh_result);
-                                        let cpu = if let Some(process) = system.process(pid) {
-                                            process.cpu_usage().div(cpu_core_num as f32) as u32
-                                        } else {
-                                            tracing::warn!("fail to get process pid {:?}", pid);
-                                            0
-                                        };
+                                        // TODO: use cpu limit
+                                        // let refresh_result = system.refresh_process_specifics(pid, ProcessRefreshKind::new().with_cpu());
+                                        // debug_assert!(refresh_result);
+                                        // let cpu = if let Some(process) = system.process(pid) {
+                                        //     process.cpu_usage().div(cpu_core_num as f32) as u32
+                                        // } else {
+                                        //     tracing::warn!("fail to get process pid {:?}", pid);
+                                        //     0
+                                        // };
 
-                                        last_workload = CompactorWorkload {
-                                            cpu,
-                                        };
+                                        // last_workload = CompactorWorkload {
+                                        //     cpu,
+                                        // };
 
-                                        (100 - last_workload.get_cpu()) * cpu_core_num * 2 / 100
+                                        // (100 - last_workload.get_cpu()) * cpu_core_num * 2 / 100 - running_task_count.load(Ordering::Relaxed)
+
+                                        cpu_core_num * 2 - running_task_count.load(Ordering::Relaxed)
                                     };
+
+                                    tracing::info!("TRACE workload {:?} running_task_count {:?} pending_pull_task_count {:?}", last_workload, running_task_count.load(Ordering::Relaxed), pending_pull_task_count);
+
 
                                     if pending_pull_task_count < 1 {
                                         // workload overload
@@ -613,8 +621,10 @@ impl Compactor {
 
                             if let Task::CompactTask(_) = &task {
                                 pending_pull_task_count -= 1;
+                                running_task_count.fetch_add(1, Ordering::SeqCst);
                             }
                             executor.spawn(async move {
+                                let running_task_count = running_task_count.clone();
                                 match task {
                                     Task::CompactTask(compact_task) => {
                                         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -622,6 +632,8 @@ impl Compactor {
                                         shutdown.lock().unwrap().insert(task_id, tx);
                                         Compactor::compact(context, compact_task, rx).await;
                                         shutdown.lock().unwrap().remove(&task_id);
+
+                                        running_task_count.fetch_sub(1, Ordering::SeqCst);
                                     }
                                     Task::VacuumTask(vacuum_task) => {
                                         Vacuum::vacuum(
@@ -657,15 +669,15 @@ impl Compactor {
                                                     "Cancellation of compaction task failed. task_id: {}",
                                                     cancel_compact_task.task_id
                                                 );
+                                            }
+                                        } else {
+                                            tracing::warn!(
+                                                    "Attempting to cancel non-existent compaction task. task_id: {}",
+                                                    cancel_compact_task.task_id
+                                                );
                                         }
-                                    } else {
-                                        tracing::warn!(
-                                                "Attempting to cancel non-existent compaction task. task_id: {}",
-                                                cancel_compact_task.task_id
-                                            );
                                     }
                                 }
-                            }
                             });
                         }
                         Some(Err(e)) => {
