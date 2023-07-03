@@ -68,7 +68,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.slot.check"))) {
             // check whether the replication slot is already existed
             var slotName = userProps.get(DbzConnectorConfig.PG_SLOT_NAME);
+            var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
             stmt.setString(1, slotName);
+            stmt.setString(2, dbName);
             var res = stmt.executeQuery();
             if (res.next() && res.getString(1).equals(slotName)) {
                 LOG.info("replication slot '{}' already exists, just use it", slotName);
