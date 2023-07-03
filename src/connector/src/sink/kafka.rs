@@ -37,11 +37,10 @@ use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
-use crate::sink::{NoSinkCoordinator, Result, SinkWriter};
+use crate::sink::{NoSinkCoordinator, Result, SinkWriter, SinkWriterEnv};
 use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
-    ConnectorParams,
 };
 
 pub const KAFKA_SINK: &str = "kafka";
@@ -84,8 +83,6 @@ pub struct KafkaConfig {
         deserialize_with = "deserialize_bool_from_string"
     )]
     pub force_append_only: bool,
-
-    pub identifier: String,
 
     #[serde(
         rename = "properties.timeout",
@@ -170,12 +167,13 @@ impl Sink for KafkaSink {
     type Coordinator = NoSinkCoordinator;
     type Writer = KafkaSinkWriter;
 
-    async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {
+    async fn new_writer(&self, writer_env: SinkWriterEnv) -> Result<Self::Writer> {
         KafkaSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
+            format!("sink-{:?}", writer_env.executor_id),
         )
         .await
     }
@@ -191,7 +189,7 @@ impl Sink for KafkaSink {
 
         // Try Kafka connection.
         // TODO: Reuse the conductor instance we create during validation.
-        KafkaTransactionConductor::new(self.config.clone()).await?;
+        KafkaTransactionConductor::new(self.config.clone(), &"validation".to_string()).await?;
 
         Ok(())
     }
@@ -207,6 +205,7 @@ enum KafkaSinkState {
 pub struct KafkaSinkWriter {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
+    identifier: String,
     state: KafkaSinkState,
     schema: Schema,
     pk_indices: Vec<usize>,
@@ -220,10 +219,12 @@ impl KafkaSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        identifier: String,
     ) -> Result<Self> {
         Ok(KafkaSinkWriter {
             config: config.clone(),
-            conductor: KafkaTransactionConductor::new(config).await?,
+            conductor: KafkaTransactionConductor::new(config, &identifier).await?,
+            identifier,
             in_transaction_epoch: None,
             state: KafkaSinkState::Init,
             schema,
@@ -277,11 +278,7 @@ impl KafkaSinkWriter {
     }
 
     fn gen_message_key(&self) -> String {
-        format!(
-            "{}-{}",
-            self.config.identifier,
-            self.in_transaction_epoch.unwrap()
-        )
+        format!("{}-{}", self.identifier, self.in_transaction_epoch.unwrap())
     }
 
     async fn write_json_objects(
@@ -425,7 +422,7 @@ pub struct KafkaTransactionConductor {
 }
 
 impl KafkaTransactionConductor {
-    async fn new(mut config: KafkaConfig) -> Result<Self> {
+    async fn new(mut config: KafkaConfig, identifier: &String) -> Result<Self> {
         let inner: ThreadedProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
             config.common.set_security_properties(&mut c);
@@ -433,7 +430,7 @@ impl KafkaTransactionConductor {
                 .set("message.timeout.ms", "5000");
             config.use_transaction = false;
             if config.use_transaction {
-                c.set("transactional.id", &config.identifier); // required by kafka transaction
+                c.set("transactional.id", identifier); // required by kafka transaction
             }
             let client_ctx =
                 PrivateLinkProducerContext::new(config.common.broker_rewrite_map.clone())?;
@@ -515,7 +512,6 @@ mod test {
             "properties.sasl.mechanism".to_string() => "SASL".to_string(),
             "properties.sasl.username".to_string() => "test".to_string(),
             "properties.sasl.password".to_string() => "test".to_string(),
-            "identifier".to_string() => "test_sink_1".to_string(),
             "properties.timeout".to_string() => "10s".to_string(),
             "properties.retry.max".to_string() => "20".to_string(),
             "properties.retry.interval".to_string() => "500ms".to_string(),
@@ -536,7 +532,6 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
-            "identifier".to_string() => "test_sink_2".to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
         assert!(!config.force_append_only);
@@ -551,7 +546,6 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
-            "identifier".to_string() => "test_sink_3".to_string(),
             "properties.retry.max".to_string() => "-20".to_string(),  // error!
         };
         assert!(KafkaConfig::from_hashmap(properties).is_err());
@@ -562,7 +556,6 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
-            "identifier".to_string() => "test_sink_4".to_string(),
             "force_append_only".to_string() => "yes".to_string(),  // error!
         };
         assert!(KafkaConfig::from_hashmap(properties).is_err());
@@ -573,7 +566,6 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
-            "identifier".to_string() => "test_sink_5".to_string(),
             "properties.retry.interval".to_string() => "500minutes".to_string(),  // error!
         };
         assert!(KafkaConfig::from_hashmap(properties).is_err());
@@ -584,7 +576,6 @@ mod test {
     async fn test_kafka_producer() -> Result<()> {
         let properties = hashmap! {
             "properties.bootstrap.server".to_string() => "localhost:29092".to_string(),
-            "identifier".to_string() => "test_sink_1".to_string(),
             "type".to_string() => "append-only".to_string(),
             "topic".to_string() => "test_topic".to_string(),
         };
@@ -604,9 +595,15 @@ mod test {
         ]);
         let pk_indices = vec![];
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSinkWriter::new(kafka_config.clone(), schema, pk_indices, true)
-            .await
-            .unwrap();
+        let mut sink = KafkaSinkWriter::new(
+            kafka_config.clone(),
+            schema,
+            pk_indices,
+            true,
+            "test_sink_1".to_string(),
+        )
+        .await
+        .unwrap();
 
         for i in 0..10 {
             let mut fail_flag = false;

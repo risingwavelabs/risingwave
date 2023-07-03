@@ -42,7 +42,8 @@ use tonic::{Status, Streaming};
 
 use crate::sink::catalog::{SinkId, SinkType};
 use crate::sink::{
-    record_to_json, NoSinkCoordinator, Result, Sink, SinkError, SinkWriter, TimestampHandlingMode,
+    record_to_json, NoSinkCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterEnv,
+    TimestampHandlingMode,
 };
 use crate::ConnectorParams;
 
@@ -110,12 +111,12 @@ impl Sink for RemoteSink {
     type Coordinator = NoSinkCoordinator;
     type Writer = RemoteSinkWriter;
 
-    async fn new_writer(&self, connector_params: ConnectorParams) -> Result<Self::Writer> {
+    async fn new_writer(&self, writer_env: SinkWriterEnv) -> Result<Self::Writer> {
         RemoteSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
-            connector_params,
+            writer_env.connector_params,
             self.sink_id,
         )
         .await

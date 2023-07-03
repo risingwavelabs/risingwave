@@ -34,10 +34,9 @@ use crate::sink::utils::{
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
 use crate::sink::{
-    NoSinkCoordinator, Result, Sink, SinkError, SinkWriter, SINK_TYPE_APPEND_ONLY,
+    NoSinkCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterEnv, SINK_TYPE_APPEND_ONLY,
     SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
-use crate::ConnectorParams;
 
 pub const KINESIS_SINK: &str = "kinesis";
 
@@ -93,7 +92,7 @@ impl Sink for KinesisSink {
         Ok(())
     }
 
-    async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {
+    async fn new_writer(&self, _writer_env: SinkWriterEnv) -> Result<Self::Writer> {
         KinesisSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),

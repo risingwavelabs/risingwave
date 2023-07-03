@@ -54,13 +54,18 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
+pub struct SinkWriterEnv {
+    pub connector_params: ConnectorParams,
+    pub executor_id: u64,
+}
+
 #[async_trait]
 pub trait Sink {
     type Writer: SinkWriter;
     type Coordinator: SinkCoordinator;
 
     async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()>;
-    async fn new_writer(&self, connector_params: ConnectorParams) -> Result<Self::Writer>;
+    async fn new_writer(&self, writer_env: SinkWriterEnv) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
         _connector_rpc_endpoint: Option<String>,
@@ -127,7 +132,7 @@ impl Sink for BlackHoleSink {
     type Coordinator = NoSinkCoordinator;
     type Writer = Self;
 
-    async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {
+    async fn new_writer(&self, _writer_env: SinkWriterEnv) -> Result<Self::Writer> {
         Ok(Self)
     }
 

@@ -26,7 +26,9 @@ use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
-use risingwave_connector::sink::{build_sink, Sink, SinkConfig, SinkImpl, SinkWriter};
+use risingwave_connector::sink::{
+    build_sink, Sink, SinkConfig, SinkImpl, SinkWriter, SinkWriterEnv,
+};
 use risingwave_connector::{dispatch_sink, ConnectorParams};
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
@@ -48,7 +50,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
     log_reader: F::Reader,
     log_writer: F::Writer,
-    connector_params: ConnectorParams,
+    sink_writer_env: SinkWriterEnv,
 }
 
 struct SinkMetrics {
@@ -110,7 +112,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             actor_context,
             log_reader,
             log_writer,
-            connector_params,
+            sink_writer_env: SinkWriterEnv {
+                connector_params,
+                executor_id,
+            },
         })
     }
 
@@ -138,7 +143,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 sink,
                 self.log_reader,
                 sink_metrics,
-                self.connector_params,
+                self.sink_writer_env,
             );
             select(consume_log_stream.into_stream(), write_log_stream).boxed()
         })
@@ -217,10 +222,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink: S,
         mut log_reader: R,
         sink_metrics: SinkMetrics,
-        connector_params: ConnectorParams,
+        sink_writer_env: SinkWriterEnv,
     ) -> StreamExecutorResult<Message> {
         log_reader.init().await?;
-        let mut sink_writer = sink.new_writer(connector_params).await?;
+        let mut sink_writer = sink.new_writer(sink_writer_env).await?;
 
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
