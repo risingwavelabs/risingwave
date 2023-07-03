@@ -56,7 +56,7 @@ use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
 use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCompactionOption};
-use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
+use crate::hummock::compaction_scheduler::{CompactionRequestChannelRef, ScheduleStatus};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_pin_unpin_snapshot_state,

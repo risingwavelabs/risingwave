@@ -155,15 +155,11 @@ pub struct CompactorManagerInner {
 }
 
 impl CompactorManagerInner {
-    pub async fn with_meta<S: MetaStore>(
-        env: MetaSrvEnv<S>,
-        task_expiry_seconds: u64,
-    ) -> MetaResult<Self> {
+    pub async fn with_meta<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         // Retrieve the existing task assignments from metastore.
         let task_assignment = CompactTaskAssignment::list(env.meta_store()).await?;
         let mut manager = Self {
-            // policy: RwLock::new(Box::new(RoundRobinPolicy::new())),
-            task_expiry_seconds,
+            task_expiry_seconds: env.opts.compaction_task_max_heartbeat_interval_secs,
             task_heartbeats: Default::default(),
             compactor_pending_io_counts: Default::default(),
             compactors: Default::default(),
@@ -556,11 +552,8 @@ pub struct CompactorManager {
 }
 
 impl CompactorManager {
-    pub async fn with_meta<S: MetaStore>(
-        env: MetaSrvEnv<S>,
-        task_expiry_seconds: u64,
-    ) -> MetaResult<Self> {
-        let inner = CompactorManagerInner::with_meta(env, task_expiry_seconds).await?;
+    pub async fn with_meta<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+        let inner = CompactorManagerInner::with_meta(env).await?;
 
         Ok(Self {
             inner: Arc::new(RwLock::new(inner)),
@@ -677,9 +670,6 @@ pub struct CompactorPullTaskHandle {
 
 impl CompactorPullTaskHandle {
     pub async fn consume_task(&mut self, compact_task: &CompactTask) -> ScheduleStatus {
-        // if self.pending_pull_task_count == 0 {
-        //     panic!("pending_pull_task_count == 0");
-        // }
         assert!(self.valid());
 
         // 2. Send the compaction task.
