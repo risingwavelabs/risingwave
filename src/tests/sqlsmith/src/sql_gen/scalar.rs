@@ -35,7 +35,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         end: isize,
     ) -> Option<Expr> {
         use DataType as T;
-        let value = self.rng.gen_range(start..end);
+        let value = self.rng.gen_range(start..end).to_string();
         match *typ {
             T::Int64 => Some(Expr::TypedString {
                 data_type: AstDataType::BigInt,
