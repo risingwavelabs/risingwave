@@ -1,61 +1,40 @@
 # result should be empty, which means output in mv_a_b all equal to mv_a and mv_b
 query i
-select * from mv_a_b where not exists (
-    select * from (
-        select * from mv_a natural join mv_b
-    ) as t
-    where
-        mv_a_b.id = t.id and
-        (mv_a_b.out1 = t.out1 or mv_a_b.out1 is null and t.out1 is null) and
-        (mv_a_b.out3 = t.out3 or mv_a_b.out3 is null and t.out3 is null) and
-        (mv_a_b.out4 = t.out4 or mv_a_b.out4 is null and t.out4 is null)
-);
+select
+    id, out1, out3, out4
+from mv_a_b
+except
+select
+    id, out1, out3, out4
+from mv_a natural join mv_b;
 ----
 
 query i
-select * from mv_a_c where not exists (
-    select * from (
-        select * from mv_a natural join mv_c
-    ) as t
-    where
-        mv_a_c.id = t.id and
-        (mv_a_c.out1 = t.out1 or mv_a_c.out1 is null and t.out1 is null) and
-        (mv_a_c.out7 = t.out7 or mv_a_c.out7 is null and t.out7 is null) and
-        (mv_a_c.out8 = t.out8 or mv_a_c.out8 is null and t.out8 is null) and
-        (mv_a_c.out9 = t.out9 or mv_a_c.out9 is null and t.out9 is null)
-);
+select
+    id, out1, out7, out8, out9
+from mv_a_c
+except
+select
+    id, out1, out7, out8, out9
+from mv_a natural join mv_c;
 ----
 
 query i
-select * from mv_b_c where not exists (
-    select * from (
-        select * from mv_b natural join mv_c
-    ) as t
-    where
-        mv_b_c.id = t.id and
-        (mv_b_c.out3 = t.out3 or mv_b_c.out3 is null or t.out3 is null) and
-        (mv_b_c.out4 = t.out4 or mv_b_c.out4 is null or t.out4 is null) and
-        (mv_b_c.out7 = t.out7 or mv_b_c.out7 is null or t.out7 is null) and
-        (mv_b_c.out8 = t.out8 or mv_b_c.out8 is null or t.out8 is null) and
-        (mv_b_c.out9 = t.out9 or mv_b_c.out9 is null or t.out9 is null)
-);
+select
+    id, out3, out4, out7, out8, out9
+from mv_b_c
+except
+select
+    id, out3, out4, out7, out8, out9
+from mv_b natural join mv_c;
 ----
 
 query i
-select * from mv_a_b_c where not exists (
-    select * from (
-        select * from mv_a natural join mv_b natural join mv_c
-    ) as t
-    where
-        mv_a_b_c.id = t.id and
-        (mv_a_b_c.out1 = t.out1 or mv_a_b_c.out1 is null or t.out1 is null) and
-        (mv_a_b_c.out2 = t.out2 or mv_a_b_c.out2 is null or t.out2 is null) and
-        (mv_a_b_c.out3 = t.out3 or mv_a_b_c.out3 is null or t.out3 is null) and
-        (mv_a_b_c.out4 = t.out4 or mv_a_b_c.out4 is null or t.out4 is null) and
-        (mv_a_b_c.out5 = t.out5 or mv_a_b_c.out5 is null or t.out5 is null) and
-        (mv_a_b_c.out6 = t.out6 or mv_a_b_c.out6 is null or t.out6 is null) and
-        (mv_a_b_c.out7 = t.out7 or mv_a_b_c.out7 is null or t.out7 is null) and
-        (mv_a_b_c.out8 = t.out8 or mv_a_b_c.out8 is null or t.out8 is null) and
-        (mv_a_b_c.out9 = t.out9 or mv_a_b_c.out9 is null or t.out9 is null)
-);
+select
+    id, out1, out2, out3, out4, out5, out6, out7, out8, out9
+from mv_a_b_c
+except
+select
+    id, out1, out2, out3, out4, out5, out6, out7, out8, out9
+from mv_a natural join mv_b natural join mv_c;
 ----
