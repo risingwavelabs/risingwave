@@ -129,6 +129,16 @@ impl From<TracedCachePolicy> for CachePolicy {
     }
 }
 
+impl From<CachePolicy> for TracedCachePolicy {
+    fn from(policy: CachePolicy) -> Self {
+        match policy {
+            CachePolicy::Disable => Self::Disable,
+            CachePolicy::Fill(priority) => Self::Fill(priority.into()),
+            CachePolicy::NotFill => Self::NotFill,
+        }
+    }
+}
+
 pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,

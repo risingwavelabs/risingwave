@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::hash::Hash;
 
 use educe::Educe;
@@ -54,21 +53,6 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
             exprs,
             returning,
         }
-    }
-
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ table: {}, exprs: {:?}{} }}",
-            name,
-            self.table_name,
-            self.exprs,
-            if self.returning {
-                ", returning: true"
-            } else {
-                ""
-            }
-        )
     }
 
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {

@@ -46,10 +46,12 @@ pub async fn handle_drop_source(
             Ok((s, schema)) => (s.clone(), schema),
             Err(e) => {
                 return if if_exists {
-                    Ok(RwPgResponse::empty_result_with_notice(
-                        StatementType::DROP_SOURCE,
-                        format!("source \"{}\" does not exist, skipping", source_name),
-                    ))
+                    Ok(RwPgResponse::builder(StatementType::DROP_SOURCE)
+                        .notice(format!(
+                            "source \"{}\" does not exist, skipping",
+                            source_name
+                        ))
+                        .into())
                 } else {
                     Err(e.into())
                 }

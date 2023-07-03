@@ -165,13 +165,13 @@ impl UpdateExecutor {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };
                 if let Some(chunk) = builder.append_one_row(row_insert) {
-                    notifiers.push(write_txn_data(chunk)?);
+                    notifiers.push(write_txn_data(chunk).await?);
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            notifiers.push(write_txn_data(chunk)?);
+            notifiers.push(write_txn_data(chunk).await?);
         }
 
         notifiers.push(write_handle.end()?);
@@ -241,7 +241,6 @@ mod tests {
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::util::worker_util::WorkerNodeId;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_source::dml_manager::DmlManager;
 
@@ -251,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_executor() -> Result<()> {
-        let dml_manager = Arc::new(DmlManager::new(WorkerNodeId::default()));
+        let dml_manager = Arc::new(DmlManager::for_test());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();

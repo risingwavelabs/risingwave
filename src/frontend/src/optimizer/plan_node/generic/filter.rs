@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 
@@ -46,19 +44,6 @@ impl<PlanRef: GenericPlanRef> DistillUnit for Filter<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Filter<PlanRef> {
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let input_schema = self.input.schema();
-        write!(
-            f,
-            "{} {{ predicate: {} }}",
-            name,
-            ConditionDisplay {
-                condition: &self.predicate,
-                input_schema
-            }
-        )
-    }
-
     pub fn new(predicate: Condition, input: PlanRef) -> Self {
         Filter { predicate, input }
     }

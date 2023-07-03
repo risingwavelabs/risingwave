@@ -231,7 +231,6 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::task::WorkerNodeId;
 
     const TEST_TRANSACTION_ID: TxnId = 0;
 
@@ -247,7 +246,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
         ];
         let pk_indices = vec![0];
-        let dml_manager = Arc::new(DmlManager::new(WorkerNodeId::default()));
+        let dml_manager = Arc::new(DmlManager::for_test());
 
         let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
 
@@ -302,7 +301,7 @@ mod tests {
 
         // Message from batch
         write_handle.begin().unwrap();
-        write_handle.write_chunk(batch_chunk).unwrap();
+        write_handle.write_chunk(batch_chunk).await.unwrap();
         write_handle.end().unwrap();
 
         // Consume the 1st message from upstream executor
