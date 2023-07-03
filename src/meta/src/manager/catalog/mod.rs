@@ -83,7 +83,7 @@ macro_rules! commit_meta_with_trx {
             }
             .instrument(tracing::info_span!(
                 "meta_store_commit",
-                manager = std::any::type_name_of_val(&$manager)
+                manager = std::any::type_name_of_val(&*$manager)
             ))
             .await
         }

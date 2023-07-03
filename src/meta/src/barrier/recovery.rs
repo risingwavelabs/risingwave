@@ -161,6 +161,7 @@ where
 
                     let prev_epoch = new_epoch;
                     new_epoch = prev_epoch.next();
+
                     // checkpoint, used as init barrier to initialize all executors.
                     let command_ctx = Arc::new(CommandContext::new(
                         self.fragment_manager.clone(),
@@ -171,7 +172,7 @@ where
                         command,
                         true,
                         self.source_manager.clone(),
-                        tracing::Span::current(),
+                        tracing::Span::current(), // recovery span
                     ));
 
                     #[cfg(not(all(test, feature = "failpoints")))]

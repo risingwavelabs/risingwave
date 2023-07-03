@@ -53,12 +53,14 @@ struct Inner {
 }
 
 impl Inner {
+    /// Create a new scheduled barrier with the given `checkpoint`, `command` and `notifiers`.
     fn new_scheduled(
         &self,
         checkpoint: bool,
         command: Command,
         notifiers: impl IntoIterator<Item = Notifier>,
     ) -> Scheduled {
+        // Create a span only if we're being traced, instead of for every periodic barrier.
         let span = if tracing::Span::current().is_none() {
             tracing::Span::none()
         } else {

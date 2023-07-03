@@ -891,9 +891,14 @@ where
             self.set_status(BarrierManagerStatus::Recovering).await;
             let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::new();
+            let prev_epoch = state.in_flight_prev_epoch();
             let new_epoch = self
-                .recovery(state.in_flight_prev_epoch())
-                .instrument(tracing::info_span!("failure_recovery"))
+                .recovery(prev_epoch.clone())
+                .instrument(tracing::info_span!(
+                    "failure_recovery",
+                    %err,
+                    prev_epoch = prev_epoch.value().0
+                ))
                 .await;
             state
                 .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)

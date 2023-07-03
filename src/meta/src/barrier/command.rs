@@ -221,6 +221,11 @@ pub struct CommandContext<S: MetaStore> {
 
     source_manager: SourceManagerRef<S>,
 
+    /// The tracing span of this command.
+    ///
+    /// Differs from [`TracedEpoch`], this span focuses on the lifetime of the corresponding
+    /// barrier, including the process of waiting for the barrier to be sent, flowing through the
+    /// stream graph on compute nodes, and finishing its `post_collect` stuffs.
     pub span: tracing::Span,
 }
 
