@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
@@ -122,27 +120,6 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
                 })
                 .map(Pretty::Array)
                 .collect(),
-        )
-    }
-
-    fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
-        self.column_subsets
-            .iter()
-            .map(|subset| {
-                subset
-                    .iter()
-                    .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-                    .collect()
-            })
-            .collect()
-    }
-
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ column_subsets: {:?} }}",
-            name,
-            self.column_subsets_display()
         )
     }
 

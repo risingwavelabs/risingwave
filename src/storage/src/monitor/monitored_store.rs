@@ -25,7 +25,7 @@ use tokio::time::Instant;
 use tracing::error;
 use tracing_futures::Instrument;
 
-#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+#[cfg(all(not(madsim), feature = "hm-trace"))]
 use super::traced_store::TracedStateStore;
 use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
@@ -39,10 +39,10 @@ use crate::{
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
-    #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
+    #[cfg(not(all(not(madsim), feature = "hm-trace")))]
     inner: Box<S>,
 
-    #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+    #[cfg(all(not(madsim), feature = "hm-trace"))]
     inner: Box<TracedStateStore<S>>,
 
     storage_metrics: Arc<MonitoredStorageMetrics>,
@@ -50,7 +50,7 @@ pub struct MonitoredStateStore<S> {
 
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
-        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+        #[cfg(all(not(madsim), feature = "hm-trace"))]
         let inner = TracedStateStore::new_global(inner);
         Self {
             inner: Box::new(inner),
@@ -58,7 +58,7 @@ impl<S> MonitoredStateStore<S> {
         }
     }
 
-    #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+    #[cfg(all(not(madsim), feature = "hm-trace"))]
     pub fn new_from_local(
         inner: TracedStateStore<S>,
         storage_metrics: Arc<MonitoredStorageMetrics>,
@@ -69,7 +69,7 @@ impl<S> MonitoredStateStore<S> {
         }
     }
 
-    #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
+    #[cfg(not(all(not(madsim), feature = "hm-trace")))]
     pub fn new_from_local(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
         Self {
             inner: Box::new(inner),
@@ -131,11 +131,11 @@ impl<S> MonitoredStateStore<S> {
     }
 
     pub fn inner(&self) -> &S {
-        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+        #[cfg(all(not(madsim), feature = "hm-trace"))]
         {
             self.inner.inner()
         }
-        #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
+        #[cfg(not(all(not(madsim), feature = "hm-trace")))]
         &self.inner
     }
 

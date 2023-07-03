@@ -123,6 +123,7 @@ define_keywords!(
     CLOB,
     CLOSE,
     CLUSTER,
+    CLUSTERS,
     COALESCE,
     COLLATE,
     COLLATION,

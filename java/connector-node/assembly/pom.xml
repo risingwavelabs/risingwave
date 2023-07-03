@@ -31,7 +31,7 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave.java</groupId>
-            <artifactId>risingwave-sink-es</artifactId>
+            <artifactId>risingwave-sink-es-7</artifactId>
         </dependency>
         <dependency>
             <groupId>com.risingwave.java</groupId>

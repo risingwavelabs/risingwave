@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
@@ -161,22 +159,6 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
             .iter()
             .map(|f| (&f.partition_by, &f.order_by))
             .all_equal()
-    }
-}
-
-impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        let window_funcs_display = self
-            .window_functions
-            .iter()
-            .map(|func| PlanWindowFunctionDisplay {
-                window_function: func,
-                input_schema: self.input.schema(),
-            })
-            .collect::<Vec<_>>();
-        builder.field("window_functions", &window_funcs_display);
-        builder.finish()
     }
 }
 

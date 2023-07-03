@@ -640,7 +640,6 @@ service HummockManagerService {
   rpc RiseCtlResumeVersionCheckpoint(RiseCtlResumeVersionCheckpointRequest) returns (RiseCtlResumeVersionCheckpointResponse);
   rpc RiseCtlGetCheckpointVersion(RiseCtlGetCheckpointVersionRequest) returns (RiseCtlGetCheckpointVersionResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
-  rpc GetScaleCompactor(GetScaleCompactorRequest) returns (GetScaleCompactorResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
   rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
@@ -684,15 +683,6 @@ message TableStats {
 message HummockVersionStats {
   uint64 hummock_version_id = 1;
   map<uint32, TableStats> table_stats = 2;
-}
-
-message GetScaleCompactorRequest {}
-
-message GetScaleCompactorResponse {
-  uint64 suggest_cores = 1;
-  uint64 running_cores = 2;
-  uint64 total_cores = 3;
-  uint64 waiting_compaction_bytes = 4;
 }
 
 message WriteLimits {

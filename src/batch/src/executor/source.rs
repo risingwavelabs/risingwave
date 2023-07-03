@@ -82,6 +82,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             RowFormatType::Native => SourceFormat::Native,
             RowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
             RowFormatType::UpsertJson => SourceFormat::UpsertJson,
+            RowFormatType::Bytes => SourceFormat::Bytes,
             _ => unreachable!(),
         };
         if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {

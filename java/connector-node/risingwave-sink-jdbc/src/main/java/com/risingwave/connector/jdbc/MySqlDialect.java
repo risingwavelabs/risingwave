@@ -27,19 +27,31 @@ import org.apache.commons.lang3.StringUtils;
 public class MySqlDialect implements JdbcDialect {
 
     @Override
+    public SchemaTableName createSchemaTableName(String schemaName, String tableName) {
+        return new SchemaTableName(schemaName, tableName);
+    }
+
+    @Override
+    public String getNormalizedTableName(SchemaTableName schemaTableName) {
+        return quoteIdentifier(schemaTableName.getTableName());
+    }
+
+    @Override
     public String quoteIdentifier(String identifier) {
         return "`" + identifier + "`";
     }
 
     @Override
     public Optional<String> getUpsertStatement(
-            String tableName, List<String> fieldNames, List<String> uniqueKeyFields) {
+            SchemaTableName schemaTableName,
+            List<String> fieldNames,
+            List<String> uniqueKeyFields) {
         String updateClause =
                 fieldNames.stream()
                         .map(f -> quoteIdentifier(f) + "=VALUES(" + quoteIdentifier(f) + ")")
                         .collect(Collectors.joining(", "));
         return Optional.of(
-                getInsertIntoStatement(tableName, fieldNames)
+                getInsertIntoStatement(schemaTableName, fieldNames)
                         + " ON DUPLICATE KEY UPDATE "
                         + updateClause);
     }
