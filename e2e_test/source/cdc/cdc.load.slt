@@ -11,7 +11,7 @@ create table products ( id INT,
  port = '3306',
  username = 'root',
  password = '123456',
- database.name = 'mydb',
+ database.name = 'my@db',
  table.name = 'products',
  server.id = '5085'
 );
@@ -34,7 +34,7 @@ create table orders (
  port = '3306',
  username = 'root',
  password = '123456',
- database.name = 'mydb',
+ database.name = 'my@db',
  table.name = 'orders',
  server.id = '5086'
 );
@@ -83,7 +83,7 @@ create table mytable (
  port = '3306',
  username = 'root',
  password = '123456',
- database.name = 'mydb',
+ database.name = 'my@db',
  table.name = 'mytable',
  server.id = '5087'
 );
@@ -101,7 +101,7 @@ create table orders_2 (
  port = '3306',
  username = 'root',
  password = '123456',
- database.name = 'mydb',
+ database.name = 'my@db',
  table.name = 'orders',
  server.id = '5088'
 );
