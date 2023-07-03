@@ -76,11 +76,12 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::Endpoint;
 use tonic::{Code, Streaming};
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
+use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
 type ConnectionId = u32;
@@ -1515,13 +1516,16 @@ impl GrpcMetaClient {
     }
 
     async fn connect_to_endpoint(endpoint: Endpoint) -> Result<Channel> {
-        endpoint
+        let channel = endpoint
             .http2_keep_alive_interval(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
             .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await
-            .map_err(RpcError::TransportError)
+            .map_err(RpcError::TransportError)?
+            .tracing_injected();
+
+        Ok(channel)
     }
 
     pub(crate) fn retry_strategy_to_bound(
