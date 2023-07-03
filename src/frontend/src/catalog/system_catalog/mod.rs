@@ -297,5 +297,6 @@ prepare_sys_catalog! {
     { RW_CATALOG, RW_PARALLEL_UNITS, vec![0], read_rw_parallel_units_info },
     { RW_CATALOG, RW_META_SNAPSHOT, vec![], read_meta_snapshot await },
     { RW_CATALOG, RW_DDL_PROGRESS, vec![], read_ddl_progress await },
+    { RW_CATALOG, RW_TABLE_STATS, vec![], read_table_stats },
     { RW_CATALOG, RW_RELATION_INFO, vec![], read_relation_info await },
 }
