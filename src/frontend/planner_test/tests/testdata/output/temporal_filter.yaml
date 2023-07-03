@@ -116,7 +116,7 @@
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
 
-- name: Temporal filter in on clause 1
+- name: Temporal filter in on clause for inner join's left side
   sql: |
     create table t1 (a int, ta timestamp with time zone);
     create table t2 (b int, tb timestamp with time zone);
@@ -136,7 +136,7 @@
       │       └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t2.b) }
         └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
-- name: Temporal filter in on clause 2
+- name: Temporal filter in on clause for left join's left side
   sql: |
     create table t1 (a int, ta timestamp with time zone);
     create table t2 (b int, tb timestamp with time zone);
@@ -144,7 +144,7 @@
   stream_error: |-
     Not supported: now() expression in ON clause
     HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
-- name: Temporal filter in on clause 3
+- name: Temporal filter in on clause for right join's left side
   sql: |
     create table t1 (a int, ta timestamp with time zone);
     create table t2 (b int, tb timestamp with time zone);
@@ -164,7 +164,7 @@
           └─StreamExchange { dist: Broadcast }
             └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
               └─StreamNow { output: [now] }
-- name: Temporal filter in on clause 4
+- name: Temporal filter in on clause for full join's left side
   sql: |
     create table t1 (a int, ta timestamp with time zone);
     create table t2 (b int, tb timestamp with time zone);
@@ -172,7 +172,7 @@
   stream_error: |-
     Not supported: now() expression in ON clause
     HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
-- name: Temporal filter in on clause 5
+- name: Temporal filter in on clause for left join's right side
   sql: |
     create table t1 (a int, ta timestamp with time zone);
     create table t2 (b int, tb timestamp with time zone);
@@ -192,7 +192,7 @@
           └─StreamExchange { dist: Broadcast }
             └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
               └─StreamNow { output: [now] }
-- name: Temporal filter in on clause 6
+- name: Temporal filter in on clause for right join's right side
   sql: |
     create table t1 (a int, ta timestamp with time zone);
     create table t2 (b int, tb timestamp with time zone);
