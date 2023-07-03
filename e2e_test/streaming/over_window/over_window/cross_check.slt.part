@@ -21,7 +21,8 @@ select * from mv_a_c where not exists (
         mv_a_c.id = t.id and
         (mv_a_c.out1 = t.out1 or mv_a_c.out1 is null and t.out1 is null) and
         (mv_a_c.out7 = t.out7 or mv_a_c.out7 is null and t.out7 is null) and
-        (mv_a_c.out8 = t.out8 or mv_a_c.out8 is null and t.out8 is null)
+        (mv_a_c.out8 = t.out8 or mv_a_c.out8 is null and t.out8 is null) and
+        (mv_a_c.out9 = t.out9 or mv_a_c.out9 is null and t.out9 is null)
 );
 ----
 
@@ -35,7 +36,8 @@ select * from mv_b_c where not exists (
         (mv_b_c.out3 = t.out3 or mv_b_c.out3 is null or t.out3 is null) and
         (mv_b_c.out4 = t.out4 or mv_b_c.out4 is null or t.out4 is null) and
         (mv_b_c.out7 = t.out7 or mv_b_c.out7 is null or t.out7 is null) and
-        (mv_b_c.out8 = t.out8 or mv_b_c.out8 is null or t.out8 is null)
+        (mv_b_c.out8 = t.out8 or mv_b_c.out8 is null or t.out8 is null) and
+        (mv_b_c.out9 = t.out9 or mv_b_c.out9 is null or t.out9 is null)
 );
 ----
 
@@ -53,6 +55,7 @@ select * from mv_a_b_c where not exists (
         (mv_a_b_c.out5 = t.out5 or mv_a_b_c.out5 is null or t.out5 is null) and
         (mv_a_b_c.out6 = t.out6 or mv_a_b_c.out6 is null or t.out6 is null) and
         (mv_a_b_c.out7 = t.out7 or mv_a_b_c.out7 is null or t.out7 is null) and
-        (mv_a_b_c.out8 = t.out8 or mv_a_b_c.out8 is null or t.out8 is null)
+        (mv_a_b_c.out8 = t.out8 or mv_a_b_c.out8 is null or t.out8 is null) and
+        (mv_a_b_c.out9 = t.out9 or mv_a_b_c.out9 is null or t.out9 is null)
 );
 ----
