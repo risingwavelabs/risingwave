@@ -17,14 +17,12 @@ package com.risingwave.connector.source.common;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.proto.Data;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class PostgresValidator extends DatabaseValidator implements AutoCloseable {
     static final Logger LOG = LoggerFactory.getLogger(PostgresValidator.class);
