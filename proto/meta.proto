@@ -368,6 +368,7 @@ message SubscribeResponse {
     RelationGroup relation_group = 21;
     catalog.Connection connection = 22;
     FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
+    hummock.HummockVersionStats hummock_stats = 24;
   }
 }
 

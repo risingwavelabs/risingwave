@@ -27,6 +27,7 @@ mod rw_schemas;
 mod rw_sinks;
 mod rw_sources;
 mod rw_table_fragments;
+mod rw_table_stats;
 mod rw_tables;
 mod rw_users;
 mod rw_views;
@@ -54,6 +55,7 @@ pub use rw_schemas::*;
 pub use rw_sinks::*;
 pub use rw_sources::*;
 pub use rw_table_fragments::*;
+pub use rw_table_stats::*;
 pub use rw_tables::*;
 pub use rw_users::*;
 pub use rw_views::*;
@@ -661,5 +663,20 @@ impl SysCatalogReaderImpl {
                 ])
             })
             .collect_vec())
+    }
+
+    pub(super) fn read_table_stats(&self) -> Result<Vec<OwnedRow>> {
+        let catalog = self.catalog_reader.read_guard();
+        let table_stats = catalog.table_stats();
+        let mut rows = vec![];
+        for (id, stats) in &table_stats.table_stats {
+            rows.push(OwnedRow::new(vec![
+                Some(ScalarImpl::Int32(*id as i32)),
+                Some(ScalarImpl::Int64(stats.total_key_count)),
+                Some(ScalarImpl::Int64(stats.total_key_size)),
+                Some(ScalarImpl::Int64(stats.total_value_size)),
+            ]));
+        }
+        Ok(rows)
     }
 }
