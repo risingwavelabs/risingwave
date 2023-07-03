@@ -63,6 +63,11 @@ pub trait Aggregator: Send + DynClone + 'static {
         end_row_id: usize,
     ) -> Result<()>;
 
+    /// Update the aggregator with all rows in the chunk.
+    async fn update(&mut self, input: &StreamChunk) -> Result<()> {
+        self.update_multi(input, 0, input.capacity()).await
+    }
+
     /// Output the aggregate state and reset to initial state.
     fn output(&mut self) -> Result<Datum>;
 

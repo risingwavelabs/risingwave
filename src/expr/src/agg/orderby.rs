@@ -109,7 +109,7 @@ impl Aggregator for ProjectionOrderBy {
             if let Some(data_chunk) = chunk_builder.append_one_row(row) {
                 let chunk = StreamChunk::from(data_chunk);
                 self.inner
-                    .update_multi(&chunk, 0, chunk.capacity())
+                    .update(&chunk)
                     .now_or_never()
                     .expect("todo: support async aggregation with orderby")?;
             }
@@ -117,7 +117,7 @@ impl Aggregator for ProjectionOrderBy {
         if let Some(data_chunk) = chunk_builder.consume_all() {
             let chunk = StreamChunk::from(data_chunk);
             self.inner
-                .update_multi(&chunk, 0, chunk.capacity())
+                .update(&chunk)
                 .now_or_never()
                 .expect("todo: support async aggregation with orderby")?;
         }

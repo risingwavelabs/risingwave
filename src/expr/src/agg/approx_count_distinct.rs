@@ -183,10 +183,7 @@ mod tests {
         for range in [0..20000, 20000..30000, 30000..35000] {
             let col = I32Array::from_iter(range.clone()).into_ref();
             let input = StreamChunk::from(DataChunk::new(vec![col], range.len()));
-            agg.update_multi(&input, 0, input.capacity())
-                .now_or_never()
-                .unwrap()
-                .unwrap();
+            agg.update(&input).now_or_never().unwrap().unwrap();
             let count = agg.output().unwrap().unwrap().into_int64() as usize;
             let actual = range.len();
             // FIXME: the error is too large?

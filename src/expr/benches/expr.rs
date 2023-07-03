@@ -304,12 +304,9 @@ fn bench_expr(c: &mut Criterion) {
         let agg = RefCell::new(agg);
         c.bench_function(&format!("{sig:?}"), |bencher| {
             #[allow(clippy::await_holding_refcell_ref)]
-            bencher.to_async(FuturesExecutor).iter(|| async {
-                agg.borrow_mut()
-                    .update_multi(&input, 0, CHUNK_SIZE)
-                    .await
-                    .unwrap()
-            })
+            bencher
+                .to_async(FuturesExecutor)
+                .iter(|| async { agg.borrow_mut().update(&input).await.unwrap() })
         });
     }
 }

@@ -47,7 +47,7 @@ mod tests {
         let mut agg = crate::agg::build(AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
+        agg.update(&chunk).await?;
         assert_eq!(agg.output()?, Some("aaa,bbb,ccc,ddd".into()));
         Ok(())
     }
@@ -64,7 +64,7 @@ mod tests {
         let mut agg = crate::agg::build(AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
+        agg.update(&chunk).await?;
         assert_eq!(agg.output()?, Some("aaa_cccddd".into()));
         Ok(())
     }
@@ -81,7 +81,7 @@ mod tests {
         let mut agg = crate::agg::build(AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $3:desc $0:desc)",
         ))?;
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
+        agg.update(&chunk).await?;
         assert_eq!(agg.output()?, Some("ccc_bbb_ddd_aaa".into()));
         Ok(())
     }

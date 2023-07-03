@@ -158,13 +158,10 @@ impl BatchAggregatorWrapper<'_> {
 
         let mut aggregator = builg_agg(self.agg_call.clone())?;
         aggregator
-            .update_multi(&chunk, 0, n_values)
+            .update(&chunk)
             .now_or_never()
             .expect("we don't support UDAF currently, so the function should return immediately")?;
-
-        let mut ret_value_builder = aggregator.return_type().create_array_builder(1);
-        aggregator.output(&mut ret_value_builder)?;
-        Ok(ret_value_builder.finish().to_datum())
+        Ok(aggregator.output()?)
     }
 }
 

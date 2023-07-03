@@ -56,7 +56,7 @@ mod tests {
             + 789",
         );
         let mut agg = crate::agg::build(AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
-        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
+        agg.update(&chunk).await?;
         let actual = agg.output()?;
         assert_eq!(
             actual,
@@ -75,7 +75,7 @@ mod tests {
             " i
             + .",
         );
-        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
+        agg.update(&chunk).await?;
         assert_eq!(agg.output()?, Some(ListValue::new(vec![None]).into()));
         Ok(())
     }
@@ -92,7 +92,7 @@ mod tests {
         let mut agg = crate::agg::build(AggCall::from_pretty(
             "(array_agg:int4[] $0:int4 orderby $1:asc $0:desc)",
         ))?;
-        agg.update_multi(&chunk, 0, chunk.capacity()).await?;
+        agg.update(&chunk).await?;
         assert_eq!(
             agg.output()?,
             Some(
