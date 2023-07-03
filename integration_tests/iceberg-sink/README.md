@@ -38,20 +38,18 @@ select user_id, count(*) from iceberg.demo_db.demo_table group by user_id
 ## Demo: Iceberg Compaction With Airflow
 
 We can use airflow to trigger iceberg's compaction task at regular intervals, It can avoid the slowdown of queries due to too many small files.
-
+In this demo, The compression method uses the default configuration(https://iceberg.apache.org/docs/latest/spark-procedures). The interval of
+rewrite small files and manifests is 1 hours, The interval of remove orphan snapshots and files is 1 days. We can modiy it by modifying DAGS(Storage directory: airflow_dags and iceberg-compaction-sql)
 1. Add directory and build docker image
 We need to set the properties of the associated directory to prevent permission errors
 ```sh
 mkdir .airflow .airflow/logs .airflow/plugins
 echo -e "AIRFLOW_UID=$(id -u)\nAIRFLOW_GID=0" > .env
 ```
+
 Build the image, and start docker
 ```sh
-docker build . --target airflow -t airflow-spark && docker build . --target spark -t spark-air
-```
-```sh
-docker-compose up airflow-init
-docker-compose up
+docker-compose up --build
 ```
 2. Build sink like the last demo
 3. Connect to the airflow ui
@@ -70,9 +68,7 @@ In airflow ui, add `conn_id` for spark host. We can find it in `Admin`->`Connect
 We can find it in `Admin`->`Connection`.
 
 5. Stark airflow task
-In airflow ui(DAGS), we can find `remove_iceberg_orphan_files` and `rewrite_iceberg_small_files` ,open it by clicking on them. They will trigger tasks at regular intervals(default: rewrite latency is 3h, remove latency is 1 days)
-
-This is just a demo, we can improve it by expanding the DAGS (airflow_dags and iceberg-compaction-sql). 
+In airflow ui(DAGS), we can find `remove_iceberg_orphan_files` and `rewrite_iceberg_small_files` ,open it by clicking on them. They will trigger tasks at regular intervals.
 
 This demo uses `spark` and `airflow`. We can find more at https://spark.apache.org/, https://airflow.apache.org/ and https://iceberg.apache.org/docs/latest/spark-procedures/.
 

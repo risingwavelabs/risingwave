@@ -13,7 +13,7 @@ with DAG(
     start_date=pendulum.datetime(2021, 1, 1, tz="UTC"),
     catchup=False,
     dagrun_timeout=datetime.timedelta(minutes=60),
-    schedule_interval= datetime.timedelta(hours=3),
+    schedule_interval= datetime.timedelta(hours=1),
     tags=["iceberg"],
 ) as dag:
 

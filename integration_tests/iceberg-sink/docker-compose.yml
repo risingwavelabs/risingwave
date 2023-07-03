@@ -2,7 +2,10 @@
 version: "3"
 x-airflow-common:
     &airflow-common
-    image: airflow-spark:latest
+    image: apache/airflow:2.6.2-python3.10
+    build: 
+      context: .
+      target: airflow
     environment:
       &airflow-common-env
       AIRFLOW__CORE__EXECUTOR: CeleryExecutor
@@ -17,11 +20,20 @@ x-airflow-common:
       - ./iceberg-compaction-sql:/opt/airflow/iceberg-compaction-sql
       - ./.airflow/logs:/opt/airflow/logs
       - ./.airflow/plugins:/opt/airflow/plugins
+    depends_on:
+      &airflow-common-depends-on
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    
 
 services:
   spark:
-    image: spark-air:latest
-    build: Dockerfile.Spark
+    image: bitnami/spark:3.3
+    build: 
+      context: .
+      target: spark
     environment:
       - SPARK_MODE=master
       - AWS_ACCESS_KEY=hummockadmin
@@ -122,28 +134,40 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - ./db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
   redis:
     image: 'redis:latest'
     expose:
       - 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 50
   airflow-webserver:
     <<: *airflow-common
     command: webserver
     ports:
       - 8080:8080
     depends_on:
+      <<: *airflow-common-depends-on
       airflow-init:
           condition: service_completed_successfully
   airflow-scheduler:
     <<: *airflow-common
     command: scheduler
     depends_on:
+      <<: *airflow-common-depends-on
       airflow-init:
           condition: service_completed_successfully
   airflow-worker:
     <<: *airflow-common
     command: celery worker
     depends_on:
+      <<: *airflow-common-depends-on
       airflow-init:
           condition: service_completed_successfully
   airflow-init:
