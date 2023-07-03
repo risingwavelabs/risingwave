@@ -58,6 +58,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::info;
 
+use self::transaction::TransactionState;
 use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
@@ -85,6 +86,8 @@ use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
 use crate::{FrontendOpts, PgResponseStream};
+
+pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
 #[derive(Clone)]
@@ -435,6 +438,8 @@ pub struct SessionImpl {
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
 
+    txn: Arc<RwLock<TransactionState>>,
+
     /// Query cancel flag.
     /// This flag is set only when current query is executed in local mode, and used to cancel
     /// local query.
@@ -471,6 +476,7 @@ impl SessionImpl {
             user_authenticator,
             config_map: Default::default(),
             id,
+            txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
         }
@@ -489,6 +495,7 @@ impl SessionImpl {
             config_map: Default::default(),
             // Mock session use non-sense id.
             id: (0, 0),
+            txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
         }

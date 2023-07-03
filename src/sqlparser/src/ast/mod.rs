@@ -1122,7 +1122,7 @@ pub enum Statement {
     /// `START TRANSACTION ...`
     StartTransaction { modes: Vec<TransactionMode> },
     /// `BEGIN [ TRANSACTION | WORK ]`
-    BEGIN { modes: Vec<TransactionMode> },
+    Begin { modes: Vec<TransactionMode> },
     /// ABORT
     Abort,
     /// `SET TRANSACTION ...`
@@ -1679,7 +1679,7 @@ impl fmt::Display for Statement {
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
-            Statement::BEGIN { modes } => {
+            Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;
                 if !modes.is_empty() {
                     write!(f, " {}", display_comma_separated(modes))?;

@@ -170,9 +170,12 @@ pub async fn handle(
     sql: &str,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
-    session.clear_cancel_query_flag();
-    let handler_args = HandlerArgs::new(session, &stmt, sql)?;
     const IGNORE_NOTICE: &str = "Ignored temporarily. See details in https://github.com/risingwavelabs/risingwave/issues/2541";
+
+    session.clear_cancel_query_flag();
+    let _guard = session.begin_impicit();
+
+    let handler_args = HandlerArgs::new(session, &stmt, sql)?;
 
     match stmt {
         Statement::Explain {
@@ -472,12 +475,16 @@ pub async fn handle(
         // 1. Fully support transaction is too hard and gives few benefits to us.
         // 2. Some client e.g. psycopg2 will use this statement.
         // TODO: Tracking issues #2595 #2541
-        Statement::StartTransaction { .. } => Ok(PgResponse::builder(START_TRANSACTION)
-            .notice(IGNORE_NOTICE)
-            .into()),
-        Statement::BEGIN { .. } => Ok(PgResponse::builder(BEGIN).notice(IGNORE_NOTICE).into()),
+        Statement::StartTransaction { .. } => {
+            handler_args.session.begin_explicit();
+            Ok(PgResponse::empty_result(START_TRANSACTION))
+        }
+        Statement::Begin { .. } => Ok(PgResponse::builder(BEGIN).notice(IGNORE_NOTICE).into()),
         Statement::Abort { .. } => Ok(PgResponse::builder(ABORT).notice(IGNORE_NOTICE).into()),
-        Statement::Commit { .. } => Ok(PgResponse::builder(COMMIT).notice(IGNORE_NOTICE).into()),
+        Statement::Commit { .. } => {
+            handler_args.session.end_explicit();
+            Ok(PgResponse::empty_result(COMMIT))
+        }
         Statement::Rollback { .. } => {
             Ok(PgResponse::builder(ROLLBACK).notice(IGNORE_NOTICE).into())
         }

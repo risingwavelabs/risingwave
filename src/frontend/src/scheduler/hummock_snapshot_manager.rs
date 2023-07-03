@@ -33,6 +33,7 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 const UNPIN_INTERVAL_SECS: u64 = 10;
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
+
 pub enum PinnedHummockSnapshot {
     FrontendPinned(
         HummockSnapshotGuard,
@@ -45,6 +46,8 @@ pub enum PinnedHummockSnapshot {
     /// Currently it's only used for querying meta snapshot backup.
     Other(Epoch),
 }
+
+pub type PinnedHummockSnapshotRef = Arc<PinnedHummockSnapshot>;
 
 impl PinnedHummockSnapshot {
     pub fn get_batch_query_epoch(&self) -> BatchQueryEpoch {
