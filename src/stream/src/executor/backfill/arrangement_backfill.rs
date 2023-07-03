@@ -230,6 +230,93 @@ where
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
 
+                // NOTE(kwannoel): Scope it so that immutable reference to `upstream_table` can be dropped.
+                // Then we can write to `upstream_table` on barrier in the next block.
+                {
+                    let left_upstream = upstream.by_ref().map(Either::Left);
+
+                    let right_snapshot = pin!(Self::snapshot_read_per_vnode(
+                        schema.clone(),
+                        &upstream_table,
+                        &mut current_pos_map
+                    )
+                    .map(Either::Right),);
+
+                    // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
+                    // comes.
+                    let backfill_stream =
+                        select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
+                            stream::PollNext::Left
+                        });
+
+                    #[for_await]
+                    for either in backfill_stream {
+                        match either {
+                            // Upstream
+                            Either::Left(msg) => {
+                                match msg? {
+                                    Message::Barrier(barrier) => {
+                                        // We have to process the barrier outside of the loop.
+                                        // This is because our state_table reference is still live
+                                        // here, we have to break the loop to drop it,
+                                        // so we can do replication of upstream state_table.
+                                        pending_barrier = Some(barrier);
+
+                                        // Break the for loop and start a new snapshot read stream.
+                                        break;
+                                    }
+                                    Message::Chunk(chunk) => {
+                                        // Buffer the upstream chunk.
+                                        upstream_chunk_buffer.push(chunk.compact());
+                                    }
+                                    Message::Watermark(_) => {
+                                        // Ignore watermark during backfill.
+                                    }
+                                }
+                            }
+                            // Snapshot read
+                            Either::Right(msg) => {
+                                match msg? {
+                                    None => {
+                                        // End of the snapshot read stream.
+                                        // We should not mark the chunk anymore,
+                                        // otherwise, we will ignore some rows
+                                        // in the buffer. Here we choose to never mark the chunk.
+                                        // Consume with the renaming stream buffer chunk without
+                                        // mark.
+                                        for chunk in upstream_chunk_buffer.drain(..) {
+                                            let chunk_cardinality = chunk.cardinality() as u64;
+                                            cur_barrier_snapshot_processed_rows +=
+                                                chunk_cardinality;
+                                            total_snapshot_processed_rows += chunk_cardinality;
+                                            yield Message::Chunk(mapping_chunk(
+                                                chunk,
+                                                &self.output_indices,
+                                            ));
+                                        }
+
+                                        break 'backfill_loop;
+                                    }
+                                    Some(chunk) => {
+                                        // Raise the current position.
+                                        // As snapshot read streams are ordered by pk, so we can
+                                        // just use the last row to update `current_pos`.
+                                        current_pos = update_pos(&chunk, &pk_in_output_indices);
+
+                                        let chunk_cardinality = chunk.cardinality() as u64;
+                                        cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                                        total_snapshot_processed_rows += chunk_cardinality;
+                                        yield Message::Chunk(mapping_chunk(
+                                            chunk,
+                                            &self.output_indices,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Process barrier
                 // Each time we break out of the backfill_stream loop,
                 // it is typically due to barrier (except the first time).
@@ -300,87 +387,6 @@ where
                     .await?;
 
                     yield Message::Barrier(barrier);
-                }
-
-                let left_upstream = upstream.by_ref().map(Either::Left);
-
-                let right_snapshot = pin!(Self::snapshot_read_per_vnode(
-                    schema.clone(),
-                    &upstream_table,
-                    &mut current_pos_map
-                )
-                .map(Either::Right),);
-
-                // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
-                // comes.
-                let backfill_stream =
-                    select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
-                        stream::PollNext::Left
-                    });
-
-                #[for_await]
-                for either in backfill_stream {
-                    match either {
-                        // Upstream
-                        Either::Left(msg) => {
-                            match msg? {
-                                Message::Barrier(barrier) => {
-                                    // We have to process the barrier outside of the loop.
-                                    // This is because our state_table reference is still live
-                                    // here, we have to break the loop to drop it,
-                                    // so we can do replication of upstream state_table.
-                                    pending_barrier = Some(barrier);
-
-                                    // Break the for loop and start a new snapshot read stream.
-                                    break;
-                                }
-                                Message::Chunk(chunk) => {
-                                    // Buffer the upstream chunk.
-                                    upstream_chunk_buffer.push(chunk.compact());
-                                }
-                                Message::Watermark(_) => {
-                                    // Ignore watermark during backfill.
-                                }
-                            }
-                        }
-                        // Snapshot read
-                        Either::Right(msg) => {
-                            match msg? {
-                                None => {
-                                    // End of the snapshot read stream.
-                                    // We should not mark the chunk anymore,
-                                    // otherwise, we will ignore some rows
-                                    // in the buffer. Here we choose to never mark the chunk.
-                                    // Consume with the renaming stream buffer chunk without mark.
-                                    for chunk in upstream_chunk_buffer.drain(..) {
-                                        let chunk_cardinality = chunk.cardinality() as u64;
-                                        cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                                        total_snapshot_processed_rows += chunk_cardinality;
-                                        yield Message::Chunk(mapping_chunk(
-                                            chunk,
-                                            &self.output_indices,
-                                        ));
-                                    }
-
-                                    break 'backfill_loop;
-                                }
-                                Some(chunk) => {
-                                    // Raise the current position.
-                                    // As snapshot read streams are ordered by pk, so we can
-                                    // just use the last row to update `current_pos`.
-                                    current_pos = update_pos(&chunk, &pk_in_output_indices);
-
-                                    let chunk_cardinality = chunk.cardinality() as u64;
-                                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                                    total_snapshot_processed_rows += chunk_cardinality;
-                                    yield Message::Chunk(mapping_chunk(
-                                        chunk,
-                                        &self.output_indices,
-                                    ));
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
