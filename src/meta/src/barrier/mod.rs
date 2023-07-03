@@ -561,10 +561,8 @@ where
             let new_epoch = state.in_flight_prev_epoch().next();
 
             self.set_status(BarrierManagerStatus::Recovering).await;
-            let new_epoch = self
-                .recovery(new_epoch)
-                .instrument(tracing::info_span!("bootstrap_recovery"))
-                .await;
+            let span = tracing::info_span!("bootstrap_recovery", new_epoch = new_epoch.value().0);
+            let new_epoch = self.recovery(new_epoch).instrument(span).await;
             state
                 .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)
                 .await
@@ -892,14 +890,12 @@ where
             let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::new();
             let prev_epoch = state.in_flight_prev_epoch();
-            let new_epoch = self
-                .recovery(prev_epoch.clone())
-                .instrument(tracing::info_span!(
-                    "failure_recovery",
-                    %err,
-                    prev_epoch = prev_epoch.value().0
-                ))
-                .await;
+            let span = tracing::info_span!(
+                "failure_recovery",
+                %err,
+                prev_epoch = prev_epoch.value().0
+            );
+            let new_epoch = self.recovery(prev_epoch).instrument(span).await;
             state
                 .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)
                 .await
