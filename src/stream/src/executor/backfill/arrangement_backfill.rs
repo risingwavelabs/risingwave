@@ -22,7 +22,7 @@ use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_storage::StateStore;
@@ -30,7 +30,8 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk_ref, persist_state, update_pos,
+    mapping_chunk, mapping_message, mark_chunk_ref, mark_chunk_ref_by_vnode, persist_state,
+    update_pos,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -38,6 +39,8 @@ use crate::executor::{
     Message, PkIndices, PkIndicesRef, StreamExecutorError,
 };
 use crate::task::{ActorId, CreateMviewProgress};
+
+type CurrentPosMap = HashMap<VirtualNode, OwnedRow>;
 
 /// Similar to [`BackfillExecutor`].
 /// Main differences:
@@ -154,7 +157,7 @@ where
 
         // Current position of upstream_table primary key.
         // Current position is computed **per vnode**.
-        let mut current_pos_map: HashMap<VirtualNode, OwnedRow> = HashMap::new();
+        let mut current_pos_map: CurrentPosMap = HashMap::new();
 
         // Current position of the upstream_table primary key.
         // `None` means it starts from the beginning.
@@ -232,9 +235,9 @@ where
                         // Also means we don't need propagate any updates <= current_pos.
                         if let Some(current_pos) = &current_pos {
                             yield Message::Chunk(mapping_chunk(
-                                mark_chunk_ref(
+                                mark_chunk_ref_by_vnode(
                                     &chunk,
-                                    current_pos,
+                                    &current_pos_map,
                                     &pk_in_output_indices,
                                     &pk_order,
                                 ),
@@ -429,6 +432,53 @@ where
                 yield msg;
             }
         }
+    }
+
+    /// Read snapshot per vnode.
+    /// These streams should be sorted in storage layer.
+    /// 1. Get row iterator / vnode.
+    /// 2. Merge it with futures unordered.
+    /// 3. Change it into a chunk iterator with `iter_chunks`.
+    #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
+    async fn snapshot_read_per_vnode<'a>(
+        schema: Arc<Schema>,
+        upstream_table: &'a ReplicatedStateTable<S>,
+        current_pos_map: &'a CurrentPosMap,
+    ) {
+        for vnode in upstream_table.vnodes().iter_vnodes() {
+            let current_pos = current_pos_map.get(&vnode);
+            let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.cloned());
+            if range_bounds.is_none() {
+                yield None;
+                return Ok(());
+            }
+            let range_bounds = range_bounds.unwrap();
+            let iter = upstream_table
+                .iter_all_with_pk_range(&range_bounds, Default::default())
+                .await?;
+            pin_mut!(iter);
+
+            #[for_await]
+            for chunk in iter_chunks(iter, &schema, CHUNK_SIZE) {
+                yield chunk?;
+            }
+        }
+        // let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
+        // if range_bounds.is_none() {
+        //     yield None;
+        //     return Ok(());
+        // }
+        // let range_bounds = range_bounds.unwrap();
+        // let iter = upstream_table
+        //     .iter_all_with_pk_range(&range_bounds, Default::default())
+        //     .await?;
+        // pin_mut!(iter);
+        //
+        // #[for_await]
+        // for chunk in iter_chunks(iter, &schema, CHUNK_SIZE) {
+        //     yield chunk?;
+        // }
+        yield None;
     }
 
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
