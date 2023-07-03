@@ -206,23 +206,21 @@ mod tests {
         ];
         let mut output = vec![];
         let mut merged = merge(streams).boxed();
-        for _ in 0..9 {
-            let out = merged.next().await.unwrap().unwrap();
-            output.push(out);
+
+        let result = vec![
+            Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
+            Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
+            Message::Barrier(Barrier::new_test_barrier(1)),
+            Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
+            Message::Barrier(Barrier::new_test_barrier(2)),
+            Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
+            Message::Barrier(Barrier::new_test_barrier(3)),
+            Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(4))),
+            Message::Barrier(Barrier::new_test_barrier(4)),
+        ];
+        for _ in 0..result.len() {
+            output.push(merged.next().await.unwrap().unwrap());
         }
-        assert_eq!(
-            output,
-            vec![
-                Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-                Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-                Message::Barrier(Barrier::new_test_barrier(1)),
-                Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
-                Message::Barrier(Barrier::new_test_barrier(2)),
-                Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
-                Message::Barrier(Barrier::new_test_barrier(3)),
-                Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(4))),
-                Message::Barrier(Barrier::new_test_barrier(4)),
-            ]
-        );
+        assert_eq!(output, result);
     }
 }
