@@ -207,7 +207,7 @@ impl Binder {
             }
             JoinConstraint::On(expr) => {
                 let clause = self.context.clause;
-                self.context.clause = Some(Clause::On);
+                self.context.clause = Some(Clause::JoinOn);
                 let bound_expr: ExprImpl = self
                     .bind_expr(expr)
                     .and_then(|expr| expr.enforce_bool_clause("JOIN ON"))?;

@@ -1238,7 +1238,9 @@ impl ToStream for LogicalJoin {
             .iter()
             .any(|cond| cond.count_nows() > 0)
         {
-            return Err(ErrorCode::NotSupported("now() expression in ON clause".to_string(), "please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information".to_string()).into());
+            return Err(ErrorCode::NotSupported(
+                "optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?".to_string(),
+                 "please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information".to_string()).into());
         }
 
         let predicate = EqJoinPredicate::create(
