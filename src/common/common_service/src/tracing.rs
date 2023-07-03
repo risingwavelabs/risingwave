@@ -12,44 +12,44 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures::Future;
 use hyper::Body;
+use risingwave_common::util::tracing::TracingContext;
 use tower::{Layer, Service};
+use tracing::Instrument;
 
-use crate::rpc::metrics::MetaMetrics;
-
-#[derive(Clone)]
-pub struct MetricsMiddlewareLayer {
-    metrics: Arc<MetaMetrics>,
+/// A layer that decorates the inner service with [`TracingExtract`].
+#[derive(Clone, Default)]
+pub struct TracingExtractLayer {
+    _private: (),
 }
 
-impl MetricsMiddlewareLayer {
-    pub fn new(metrics: Arc<MetaMetrics>) -> Self {
-        Self { metrics }
+impl TracingExtractLayer {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
-impl<S> Layer<S> for MetricsMiddlewareLayer {
-    type Service = MetricsMiddleware<S>;
+impl<S> Layer<S> for TracingExtractLayer {
+    type Service = TracingExtract<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        MetricsMiddleware {
-            inner: service,
-            metrics: self.metrics.clone(),
-        }
+        TracingExtract { inner: service }
     }
 }
 
+/// A service wrapper that extracts the [`TracingContext`] from the HTTP headers and uses it to
+/// create a new tracing span for the request handler, if one exists.
+///
+/// See also `TracingInject` in the `rpc_client` crate.
 #[derive(Clone)]
-pub struct MetricsMiddleware<S> {
+pub struct TracingExtract<S> {
     inner: S,
-    metrics: Arc<MetaMetrics>,
 }
 
-impl<S> Service<hyper::Request<Body>> for MetricsMiddleware<S>
+impl<S> Service<hyper::Request<Body>> for TracingExtract<S>
 where
     S: Service<hyper::Request<Body>> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -70,20 +70,21 @@ where
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
-        let metrics = self.metrics.clone();
-
         async move {
-            let path = req.uri().path();
-            let timer = metrics
-                .grpc_latency
-                .with_label_values(&[path])
-                .start_timer();
+            let span = if let Some(tracing_context) =
+                TracingContext::from_http_headers(req.headers())
+            {
+                let span = tracing::info_span!(
+                    "grpc_serve",
+                    "otel.name" = req.uri().path(),
+                    uri = %req.uri()
+                );
+                tracing_context.attach(span)
+            } else {
+                tracing::Span::none() // if there's no parent span, disable tracing for this request
+            };
 
-            let response = inner.call(req).await?;
-
-            timer.observe_duration();
-
-            Ok(response)
+            inner.call(req).instrument(span).await
         }
     }
 }

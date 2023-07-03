@@ -27,6 +27,7 @@ use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -293,6 +294,7 @@ pub async fn start_service_as_election_follower(
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
+        .layer(TracingExtractLayer::new())
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(HealthServer::new(health_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
@@ -677,6 +679,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
+        .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))
