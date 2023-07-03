@@ -17,7 +17,7 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use either::Either;
-use futures::stream::select_with_strategy;
+use futures::stream::{select_with_strategy, FuturesUnordered};
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
@@ -25,6 +25,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
+use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::ReplicatedStateTable;
@@ -439,48 +440,43 @@ where
     /// 1. Get row iterator / vnode.
     /// 2. Merge it with futures unordered.
     /// 3. Change it into a chunk iterator with `iter_chunks`.
+    /// This means it should fetch a row from each iterator to form a chunk.
+    /// Within each vnode, rows will be ordered by pk.
+    /// TODO: What if one of the range bounds yields none??
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         schema: Arc<Schema>,
         upstream_table: &'a ReplicatedStateTable<S>,
         current_pos_map: &'a CurrentPosMap,
     ) {
+        let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
         for vnode in upstream_table.vnodes().iter_vnodes() {
             let current_pos = current_pos_map.get(&vnode);
             let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.cloned());
             if range_bounds.is_none() {
-                yield None;
-                return Ok(());
+                continue;
+                // TODO: Highlight this change to reviewers.
+                // yield None;
+                // return Ok(());
             }
             let range_bounds = range_bounds.unwrap();
-            let iter = upstream_table
+            let vnode_iter = upstream_table
                 .iter_all_with_pk_range(&range_bounds, Default::default())
                 .await?;
-            pin_mut!(iter);
-
-            #[for_await]
-            for chunk in iter_chunks(iter, &schema, CHUNK_SIZE) {
-                yield chunk?;
-            }
+            streams.push(Box::pin(vnode_iter));
         }
-        // let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
-        // if range_bounds.is_none() {
-        //     yield None;
-        //     return Ok(());
-        // }
-        // let range_bounds = range_bounds.unwrap();
-        // let iter = upstream_table
-        //     .iter_all_with_pk_range(&range_bounds, Default::default())
-        //     .await?;
-        // pin_mut!(iter);
-        //
-        // #[for_await]
-        // for chunk in iter_chunks(iter, &schema, CHUNK_SIZE) {
-        //     yield chunk?;
-        // }
+        let iter = select_all(streams);
+        #[for_await]
+        for chunk in iter_chunks(iter, &schema, CHUNK_SIZE) {
+            yield chunk?;
+        }
+        // TODO: Highlight this change to reviewers.
+        // yield None;
         yield None;
+        return Ok(());
     }
 
+    // FIXME: Remove
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read(
         schema: Arc<Schema>,

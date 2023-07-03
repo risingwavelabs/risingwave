@@ -936,6 +936,7 @@ where
             .map(get_second))
     }
 
+    // FIXME: Remove this.
     async fn iter_all_pk_and_val_with_pk_range(
         &self,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
@@ -953,6 +954,7 @@ where
         Ok(iter)
     }
 
+    // FIXME: Remove this.
     pub async fn iter_all_with_pk_range(
         &self,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
