@@ -4642,6 +4642,7 @@ dependencies = [
  "itertools",
  "madsim-tokio",
  "openssl",
+ "panic-message",
  "risingwave_common",
  "risingwave_sqlparser",
  "thiserror",
