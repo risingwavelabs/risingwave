@@ -176,6 +176,15 @@ where
             .generate::<{ IdCategory::Worker }>()
             .await? as WorkerId;
 
+        let machine_id = match core.available_machine_ids.first() {
+            None => {
+                return Err(MetaError::unavailable(
+                    "no available reusable machine id".to_string(),
+                ))
+            }
+            Some(id) => *id,
+        };
+
         // Generate parallel units.
         let parallel_units = if r#type == WorkerType::ComputeNode {
             self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
@@ -191,6 +200,7 @@ where
             state: State::Starting as i32,
             parallel_units,
             property,
+            reusable_machine_id: machine_id,
         };
 
         let worker = Worker::from_protobuf(worker_node.clone());
@@ -498,9 +508,15 @@ pub struct ClusterManagerCore {
 
     /// Record for parallel units.
     parallel_units: Vec<ParallelUnit>,
+
+    /// Record for tracking available machine ids, one is available.
+    available_machine_ids: Vec<u32>,
 }
 
 impl ClusterManagerCore {
+    pub const MAX_WORKER_REUSABLE_ID_BITS: usize = 10;
+    pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
+
     async fn new<S>(meta_store: Arc<S>) -> MetaResult<Self>
     where
         S: MetaStore,
@@ -508,6 +524,15 @@ impl ClusterManagerCore {
         let workers = Worker::list(&*meta_store).await?;
         let mut worker_map = HashMap::new();
         let mut parallel_units = Vec::new();
+
+        let used_machine_ids: HashSet<_> = workers
+            .iter()
+            .map(|w| w.worker_node.reusable_machine_id)
+            .collect();
+
+        let available_machine_ids = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT as u32)
+            .filter(|id| !used_machine_ids.contains(id))
+            .collect::<Vec<u32>>();
 
         workers.into_iter().for_each(|w| {
             worker_map.insert(WorkerKey(w.key().unwrap()), w.clone());
@@ -517,6 +542,7 @@ impl ClusterManagerCore {
         Ok(Self {
             workers: worker_map,
             parallel_units,
+            available_machine_ids,
         })
     }
 
@@ -542,6 +568,9 @@ impl ClusterManagerCore {
     }
 
     fn add_worker_node(&mut self, worker: Worker) {
+        self.available_machine_ids
+            .drain_filter(|id| *id == worker.worker_node.reusable_machine_id);
+
         self.parallel_units
             .extend(worker.worker_node.parallel_units.clone());
 
@@ -563,6 +592,9 @@ impl ClusterManagerCore {
                 self.parallel_units.retain(|p| p.id != parallel_unit.id);
             });
         self.workers.remove(&WorkerKey(worker.key().unwrap()));
+
+        self.available_machine_ids
+            .push(worker.worker_node.reusable_machine_id);
     }
 
     pub fn list_worker_node(

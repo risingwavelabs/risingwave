@@ -78,6 +78,10 @@ impl Worker {
         self.worker_node.id
     }
 
+    pub fn reusable_machine_id(&self) -> u32 {
+        self.worker_node.reusable_machine_id
+    }
+
     pub fn worker_type(&self) -> WorkerType {
         self.worker_node.r#type()
     }
