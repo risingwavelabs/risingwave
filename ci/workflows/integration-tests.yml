@@ -7,6 +7,7 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+      - ./ci/plugins/docker-compose-logs
     matrix:
       setup:
         testcase:
@@ -86,6 +87,7 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+      - ./ci/plugins/docker-compose-logs
     matrix:
       setup:
         testcase:
