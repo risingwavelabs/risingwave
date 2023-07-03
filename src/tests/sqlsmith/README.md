@@ -59,15 +59,29 @@ RUST_LOG=info RUST_BACKTRACE=1 MADSIM_TEST_SEED=1 ./target/sim/ci-sim/risingwave
 cat sqlsmith.log | less
 ```
 
-## E2E
+## E2E - random fuzzing
 
-In the second mode, it will test the entire query handling end-to-end. We provide a CLI tool that represents a Postgres client. You can run this tool via:
+This mode will test the entire query handling end-to-end. We provide a CLI tool that represents a Postgres client. You can run this tool via:
 
 ```sh
 cargo build
 ./risedev d
 ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
 ```
+
+## E2E - differential testing
+
+This mode will generate batch and stream queries and **diff them after sorting**.
+
+You can run this tool like so:
+
+```sh
+cargo build
+./risedev d
+./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata --differential-testing
+```
+
+## Generating function signatures
 
 Additionally, in some cases where you may want to debug whether we have defined some function/operator incorrectly,
 you can try:

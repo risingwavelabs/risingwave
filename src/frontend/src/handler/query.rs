@@ -358,7 +358,7 @@ async fn execute(
         }
     };
 
-    let rows_count: Option<i32> = match stmt_type {
+    let row_cnt: Option<i32> = match stmt_type {
         StatementType::SELECT
         | StatementType::INSERT_RETURNING
         | StatementType::DELETE_RETURNING
@@ -384,7 +384,7 @@ async fn execute(
                     i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
                         .unwrap()
                         .try_into()
-                        .expect("affected rows count large than i32"),
+                        .expect("affected rows count large than i64"),
                 )
             } else {
                 Some(
@@ -442,14 +442,11 @@ async fn execute(
         Ok(())
     };
 
-    Ok(PgResponse::new_for_stream_extra(
-        stmt_type,
-        rows_count,
-        row_stream,
-        pg_descs,
-        vec![],
-        callback,
-    ))
+    Ok(PgResponse::builder(stmt_type)
+        .row_cnt_opt(row_cnt)
+        .values(row_stream, pg_descs)
+        .callback(callback)
+        .into())
 }
 
 async fn distribute_execute(

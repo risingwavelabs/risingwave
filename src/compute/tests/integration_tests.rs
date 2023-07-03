@@ -102,7 +102,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_common::types::DataType;
 
     let memory_state_store = MemoryStateStore::new();
-    let dml_manager = Arc::new(DmlManager::default());
+    let dml_manager = Arc::new(DmlManager::for_test());
     let table_id = TableId::default();
     let schema = Schema {
         fields: vec![
@@ -291,7 +291,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let mut col_row_ids = vec![];
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].as_serial();
@@ -370,7 +370,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let message = materialize.next().await.unwrap()?;
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].as_serial();

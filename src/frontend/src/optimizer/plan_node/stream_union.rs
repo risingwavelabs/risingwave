@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::ops::BitAnd;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use pretty_xmlish::XmlNode;
-use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::UnionNode;
 
-use super::utils::{childless_record, formatter_debug_plan_node, watermark_pretty, Distill};
+use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanRef};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -61,26 +58,6 @@ impl StreamUnion {
     }
 }
 
-impl fmt::Display for StreamUnion {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamUnion");
-        self.logical.fmt_fields_with_builder(&mut builder);
-
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        builder.finish()
-    }
-}
 impl Distill for StreamUnion {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let mut vec = self.logical.fields_pretty();

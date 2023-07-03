@@ -163,10 +163,10 @@ _JAVA_OPTIONS="--add-opens=java.base/java.nio=ALL-UNNAMED" mvn exec:java -Dexec.
 
 ```sql
 create function gcd(int, int) returns int
-language java as gcd using link 'http://localhost:8815';
+as gcd using link 'http://localhost:8815';
 
 create function series(int) returns table (x int)
-language java as series using link 'http://localhost:8815';
+as series using link 'http://localhost:8815';
 ```
 
 For more detailed information and examples, please refer to the official RisingWave [documentation](https://www.risingwave.dev/docs/current/user-defined-functions/#4-declare-your-functions-in-risingwave).
@@ -228,7 +228,7 @@ public class JsonbAccess implements ScalarFunction {
 
 ```sql
 create function jsonb_access(jsonb, int) returns jsonb
-language java as jsonb_access using link 'http://localhost:8815';
+as jsonb_access using link 'http://localhost:8815';
 ```
 
 ### Struct Type
@@ -253,7 +253,7 @@ public static class IpPort implements ScalarFunction {
 
 ```sql
 create function ip_port(varchar) returns struct<host varchar, port smallint>
-language java as ip_port using link 'http://localhost:8815';
+as ip_port using link 'http://localhost:8815';
 ```
 
 ## Full Example

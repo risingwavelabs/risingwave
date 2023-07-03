@@ -199,8 +199,16 @@ impl PlanRoot {
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
-        assert!(*plan.distribution() == Distribution::Single, "{}", plan);
-        assert!(!has_batch_exchange(plan.clone()), "{}", plan);
+        assert!(
+            *plan.distribution() == Distribution::Single,
+            "{}",
+            plan.explain_to_string()
+        );
+        assert!(
+            !has_batch_exchange(plan.clone()),
+            "{}",
+            plan.explain_to_string()
+        );
 
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
@@ -521,8 +529,9 @@ impl PlanRoot {
         sink_name: String,
         definition: String,
         properties: WithOptions,
+        emit_on_window_close: bool,
     ) -> Result<StreamSink> {
-        let stream_plan = self.gen_optimized_stream_plan(false)?;
+        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamSink::create(
             stream_plan,

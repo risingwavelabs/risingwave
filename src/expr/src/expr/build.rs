@@ -210,7 +210,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-enum Token {
+pub(crate) enum Token {
     LParen,
     RParen,
     Colon,
@@ -218,7 +218,7 @@ enum Token {
     Literal(String),
 }
 
-fn lexer(input: &str) -> Vec<Token> {
+pub(crate) fn lexer(input: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut chars = input.chars().peekable();
     while let Some(c) = chars.next() {
@@ -251,7 +251,7 @@ fn lexer(input: &str) -> Vec<Token> {
     tokens
 }
 
-trait ExpectExt<T> {
+pub(crate) trait ExpectExt<T> {
     fn expect_str(self, what: &str, s: &str) -> T;
 }
 
