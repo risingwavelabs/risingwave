@@ -289,9 +289,17 @@ impl Binder {
                         for expr in exprs {
                             let bound = self.bind_expr(expr)?;
                             if let ExprImpl::InputRef(inner) = bound {
-                                except_indices.insert(inner.index);
+                                if !except_indices.insert(inner.index) {
+                                    return Err(ErrorCode::BindError(
+                                        "Duplicate entry in except list".into(),
+                                    )
+                                    .into());
+                                }
                             } else {
-                                unreachable!();
+                                return Err(ErrorCode::BindError(
+                                    "Need column name in except list".into(),
+                                )
+                                .into());
                             }
                         }
                     }

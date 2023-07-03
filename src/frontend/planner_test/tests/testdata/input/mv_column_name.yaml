@@ -30,6 +30,13 @@
   expected_outputs:
   - batch_plan
   - stream_error
+- name: column name specified more than once
+  sql: |
+    create table t1 (a int, b int);
+    select * except (a), b from t1;
+  expected_outputs:
+  - batch_plan
+  - stream_error
 - name: expression name specified more than once
   sql: |
     create table t (a int);
