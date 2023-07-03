@@ -40,7 +40,6 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;
 use tokio::sync::watch::Receiver;
-use uuid::Uuid;
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
@@ -128,7 +127,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             plan: Some(PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
-                    identity: Uuid::new_v4().to_string(),
+                    identity: "SeqScan".to_string(),
                     node_body: Some(self.create_row_seq_scan_node(id)?),
                 }),
                 exchange_info: Some(ExchangeInfo {
@@ -148,7 +147,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
                     // stage_id and task_id, we can not do it now. Now just make sure it will not
                     // conflict.
                     query_id: self.task_id.query_id.clone(),
-                    stage_id: 10000 + self.next_stage_id as u32,
+                    stage_id: self.task_id.stage_id + 10000 + self.next_stage_id as u32,
                     task_id: *id,
                 }),
                 output_id: 0,
