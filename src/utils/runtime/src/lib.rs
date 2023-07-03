@@ -58,7 +58,8 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("risingwave_storage", Level::DEBUG)
         // force a higher level for noisy logs
         .with_target("risingwave_sqlparser", Level::INFO)
-        .with_target("pgwire", Level::ERROR)
+        .with_target("pgwire", Level::INFO)
+        .with_target(PGWIRE_QUERY_LOG, Level::OFF)
         // disable events that are too verbose
         // if you want to enable any of them, find the target name and set it to `TRACE`
         // .with_target("events::stream::mview::scan", Level::TRACE)

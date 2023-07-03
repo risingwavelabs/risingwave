@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{FieldDisplay, Schema};
 
@@ -31,19 +28,6 @@ pub struct Dedup<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Dedup<PlanRef> {
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field("dedup_cols", &self.dedup_cols_display());
-        builder.finish()
-    }
-
-    fn dedup_cols_display(&self) -> Vec<FieldDisplay<'_>> {
-        self.dedup_cols
-            .iter()
-            .map(|i| FieldDisplay(self.input.schema().fields.get(*i).unwrap()))
-            .collect_vec()
-    }
-
     fn dedup_cols_pretty<'a>(&self) -> Pretty<'a> {
         Pretty::Array(
             self.dedup_cols

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
@@ -44,10 +42,6 @@ impl LogicalIntersect {
 
     pub fn create(all: bool, inputs: Vec<PlanRef>) -> PlanRef {
         LogicalIntersect::new(all, inputs).into()
-    }
-
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        self.core.fmt_fields_with_builder(builder)
     }
 
     pub fn all(&self) -> bool {

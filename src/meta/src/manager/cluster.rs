@@ -165,6 +165,7 @@ where
             }
 
             worker.insert(self.env.meta_store()).await?;
+            // FIXME: should update cache after txn success.
             return Ok(worker.to_protobuf());
         }
 
