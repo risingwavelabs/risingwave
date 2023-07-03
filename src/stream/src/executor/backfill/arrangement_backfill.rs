@@ -115,7 +115,6 @@ where
             .map(|&i| self.output_indices.iter().position(|&j| i == j))
             .collect::<Option<Vec<_>>>()
             .unwrap();
-        // FIXME: This is wrong, it should use pk.
         let state_len = pk_in_output_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
@@ -457,7 +456,6 @@ where
     /// 3. Change it into a chunk iterator with `iter_chunks`.
     /// This means it should fetch a row from each iterator to form a chunk.
     /// Within each vnode, rows will be ordered by pk.
-    /// TODO: What if one of the range bounds yields none??
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         schema: Arc<Schema>,

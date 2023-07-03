@@ -62,7 +62,8 @@ pub(crate) fn mark_chunk_ref_by_vnode(
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
     // Use project to avoid allocation.
     for v in data.rows().map(|row| {
-        let vnode = VirtualNode::ZERO; // FIXME: compute vnode from row + state table.
+        // TODO: Ask for review of this.
+        let vnode = VirtualNode::compute_row(row, pk_in_output_indices);
         let current_pos = current_pos_map.get(&vnode).unwrap();
         let lhs = row.project(pk_in_output_indices);
         let rhs = current_pos.project(pk_in_output_indices);
