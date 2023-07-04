@@ -17,7 +17,7 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use either::Either;
-use futures::stream::{select_with_strategy, FuturesUnordered};
+use futures::stream::{select_with_strategy};
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
@@ -31,7 +31,7 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk_ref, mark_chunk_ref_by_vnode, persist_state,
+    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state,
     update_pos,
 };
 use crate::executor::monitor::StreamingMetrics;
@@ -135,7 +135,7 @@ where
 
         // Current position of upstream_table primary key.
         // Current position is computed **per vnode**.
-        let mut current_pos_map: CurrentPosMap = HashMap::new();
+        let current_pos_map: CurrentPosMap = HashMap::new();
 
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
@@ -328,7 +328,7 @@ where
                         // Flush downstream.
                         // If no current_pos, means no snapshot processed yet.
                         // Also means we don't need propagate any updates <= current_pos.
-                        if let Some(current_pos) = &current_pos {
+                        if let Some(_current_pos) = &current_pos {
                             yield Message::Chunk(mapping_chunk(
                                 mark_chunk_ref_by_vnode(
                                     &chunk,

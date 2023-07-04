@@ -14,7 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::hash::Hash;
+
 use std::ops::Bound;
 
 use await_tree::InstrumentAwait;
