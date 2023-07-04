@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::fmt;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
@@ -71,28 +70,6 @@ impl Distill for LogicalApply {
         }
 
         childless_record("LogicalApply", vec)
-    }
-}
-impl fmt::Display for LogicalApply {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("LogicalApply");
-
-        builder.field("type", &self.join_type);
-
-        let concat_schema = self.concat_schema();
-        let condition_display = ConditionDisplay {
-            condition: &self.on,
-            input_schema: &concat_schema,
-        };
-        builder.field("on", &condition_display);
-
-        builder.field("correlated_id", &self.correlated_id);
-
-        if self.max_one_row {
-            builder.field("max_one_row", &true);
-        }
-
-        builder.finish()
     }
 }
 

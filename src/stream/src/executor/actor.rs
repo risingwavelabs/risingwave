@@ -164,9 +164,17 @@ where
 
         let span_name = format!("Actor {id}");
 
-        let new_span =
-            || tracing::info_span!(parent: None, "actor", "otel.name" = span_name, actor_id = id);
-        let mut span = new_span();
+        let new_span = |epoch: Option<EpochPair>| {
+            tracing::info_span!(
+                parent: None,
+                "actor",
+                "otel.name" = span_name,
+                actor_id = id,
+                prev_epoch = epoch.map(|e| e.prev),
+                curr_epoch = epoch.map(|e| e.curr),
+            )
+        };
+        let mut span = new_span(None);
 
         let mut last_epoch: Option<EpochPair> = None;
         let mut stream = Box::pin(Box::new(self.consumer).execute());
@@ -196,7 +204,7 @@ where
 
             // Tracing related work
             last_epoch = Some(barrier.epoch);
-            span = barrier.tracing_context().attach(new_span());
+            span = barrier.tracing_context().attach(new_span(last_epoch));
         };
 
         spawn_blocking_drop_stream(stream).await;

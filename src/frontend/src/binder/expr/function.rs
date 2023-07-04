@@ -779,6 +779,38 @@ impl Binder {
                         ))))
                     }
                 ))),
+                ("pg_table_size", guard_by_len(1, raw(|binder, inputs|{
+                        let input = &inputs[0];
+                        let bound_query = binder.bind_get_table_size_select("pg_table_size", input)?;
+                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                            BoundQuery {
+                                body: BoundSetExpr::Select(Box::new(bound_query)),
+                                order: vec![],
+                                limit: None,
+                                offset: None,
+                                with_ties: false,
+                                extra_order_exprs: vec![],
+                            },
+                            SubqueryKind::Scalar,
+                        ))))
+                    }
+                ))),
+                ("pg_indexes_size", guard_by_len(1, raw(|binder, inputs|{
+                        let input = &inputs[0];
+                        let bound_query = binder.bind_get_indexes_size_select(input)?;
+                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                            BoundQuery {
+                                body: BoundSetExpr::Select(Box::new(bound_query)),
+                                order: vec![],
+                                limit: None,
+                                offset: None,
+                                with_ties: false,
+                                extra_order_exprs: vec![],
+                            },
+                            SubqueryKind::Scalar,
+                        ))))
+                    }
+                ))),
                 ("pg_get_expr", raw(|_binder, inputs|{
                     if inputs.len() == 2 || inputs.len() == 3 {
                         // TODO: implement pg_get_expr rather than just return empty as an workaround.
@@ -933,7 +965,8 @@ impl Binder {
                 | Clause::Having
                 | Clause::Filter
                 | Clause::GeneratedColumn
-                | Clause::From => {
+                | Clause::From
+                | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
                         clause
@@ -949,11 +982,11 @@ impl Binder {
         if self.is_for_stream()
             && !matches!(
                 self.context.clause,
-                Some(Clause::Where) | Some(Clause::Having)
+                Some(Clause::Where) | Some(Clause::Having) | Some(Clause::JoinOn)
             )
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
+                "For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: {:?}. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information",
                 self.context.clause
             ))
             .into());
@@ -981,7 +1014,11 @@ impl Binder {
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::From | Clause::GeneratedColumn => {
+                Clause::Where
+                | Clause::Values
+                | Clause::From
+                | Clause::GeneratedColumn
+                | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
                         clause
@@ -1004,7 +1041,11 @@ impl Binder {
                     ))
                     .into());
                 }
-                Clause::GroupBy | Clause::Having | Clause::Filter | Clause::From => {}
+                Clause::JoinOn
+                | Clause::GroupBy
+                | Clause::Having
+                | Clause::Filter
+                | Clause::From => {}
             }
         }
         Ok(())

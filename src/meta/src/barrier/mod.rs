@@ -617,6 +617,7 @@ where
                     self.handle_new_barrier(&barrier_complete_tx, &mut state, &mut checkpoint_control).await;
                 }
             }
+            checkpoint_control.update_barrier_nums_metrics();
         }
     }
 
@@ -803,8 +804,6 @@ where
         state: &mut BarrierManagerState,
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
-        checkpoint_control.update_barrier_nums_metrics();
-
         let BarrierCompletion { prev_epoch, result } = completion;
 
         // Received barrier complete responses with an epoch that is not managed by checkpoint

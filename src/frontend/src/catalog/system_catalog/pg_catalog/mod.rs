@@ -140,6 +140,21 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
+    pub(super) fn read_table_stats(&self) -> Result<Vec<OwnedRow>> {
+        let catalog = self.catalog_reader.read_guard();
+        let table_stats = catalog.table_stats();
+        let mut rows = vec![];
+        for (id, stats) in &table_stats.table_stats {
+            rows.push(OwnedRow::new(vec![
+                Some(ScalarImpl::Int32(*id as i32)),
+                Some(ScalarImpl::Int64(stats.total_key_count)),
+                Some(ScalarImpl::Int64(stats.total_key_size)),
+                Some(ScalarImpl::Int64(stats.total_value_size)),
+            ]));
+        }
+        Ok(rows)
+    }
+
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
     pub(super) fn read_opclass_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])

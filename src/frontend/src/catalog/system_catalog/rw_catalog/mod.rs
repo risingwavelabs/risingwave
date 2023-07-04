@@ -19,15 +19,19 @@ mod rw_functions;
 mod rw_indexes;
 mod rw_materialized_views;
 mod rw_meta_snapshot;
+mod rw_parallel_units;
 mod rw_relation_info;
 mod rw_schemas;
 mod rw_sinks;
 mod rw_sources;
+mod rw_table_stats;
 mod rw_tables;
 mod rw_users;
 mod rw_views;
+mod rw_worker_nodes;
 
 use itertools::Itertools;
+use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{ScalarImpl, Timestamp};
@@ -40,13 +44,16 @@ pub use rw_functions::*;
 pub use rw_indexes::*;
 pub use rw_materialized_views::*;
 pub use rw_meta_snapshot::*;
+pub use rw_parallel_units::*;
 pub use rw_relation_info::*;
 pub use rw_schemas::*;
 pub use rw_sinks::*;
 pub use rw_sources::*;
+pub use rw_table_stats::*;
 pub use rw_tables::*;
 pub use rw_users::*;
 pub use rw_views::*;
+pub use rw_worker_nodes::*;
 use serde_json::json;
 
 use super::SysCatalogReaderImpl;
@@ -405,43 +412,43 @@ impl SysCatalogReaderImpl {
 
         Ok(schemas
             .flat_map(|schema| {
-                schema.iter_source().map(|source| {
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Int32(source.id as i32)),
-                        Some(ScalarImpl::Utf8(source.name.clone().into())),
-                        Some(ScalarImpl::Int32(schema.id() as i32)),
-                        Some(ScalarImpl::Int32(source.owner as i32)),
-                        Some(ScalarImpl::Utf8(
-                            source
-                                .properties
-                                .get(UPSTREAM_SOURCE_KEY)
-                                .cloned()
-                                .unwrap_or("".to_string())
-                                .to_uppercase()
-                                .into(),
-                        )),
-                        Some(ScalarImpl::Utf8(
-                            format!(
-                                "[{}]",
-                                source.columns.iter().map(|c| c.name().clone()).join(", ")
-                            )
-                            .into(),
-                        )),
-                        Some(ScalarImpl::Utf8(
-                            format!("[{}]", &source.pk_col_ids.iter().join(", ")).into(),
-                        )),
-                        Some(ScalarImpl::Utf8(
-                            source.info.get_row_format().unwrap().as_str_name().into(),
-                        )),
-                        Some(ScalarImpl::Bool(source.append_only)),
-                        source.connection_id.map(|id| ScalarImpl::Int32(id as i32)),
-                        Some(ScalarImpl::Utf8(source.create_sql().into())),
-                        Some(
-                            get_acl_items(&Object::SourceId(source.id), &users, username_map)
-                                .into(),
-                        ),
-                    ])
-                })
+                schema
+                    .iter_source()
+                    .filter(|s| s.associated_table_id.is_none())
+                    .map(|source| {
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Int32(source.id as i32)),
+                            Some(ScalarImpl::Utf8(source.name.clone().into())),
+                            Some(ScalarImpl::Int32(schema.id() as i32)),
+                            Some(ScalarImpl::Int32(source.owner as i32)),
+                            Some(ScalarImpl::Utf8(
+                                source
+                                    .properties
+                                    .get(UPSTREAM_SOURCE_KEY)
+                                    .cloned()
+                                    .unwrap_or("".to_string())
+                                    .to_uppercase()
+                                    .into(),
+                            )),
+                            Some(ScalarImpl::List(ListValue::new(
+                                source
+                                    .columns
+                                    .iter()
+                                    .map(|c| Some(ScalarImpl::Utf8(c.name().into())))
+                                    .collect_vec(),
+                            ))),
+                            Some(ScalarImpl::Utf8(
+                                source.info.get_row_format().unwrap().as_str_name().into(),
+                            )),
+                            Some(ScalarImpl::Bool(source.append_only)),
+                            source.connection_id.map(|id| ScalarImpl::Int32(id as i32)),
+                            Some(ScalarImpl::Utf8(source.create_sql().into())),
+                            Some(
+                                get_acl_items(&Object::SourceId(source.id), &users, username_map)
+                                    .into(),
+                            ),
+                        ])
+                    })
             })
             .collect_vec())
     }
@@ -522,13 +529,13 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Int32(schema.id() as i32)),
                         Some(ScalarImpl::Int32(function.owner as i32)),
                         Some(ScalarImpl::Utf8(function.kind.to_string().into())),
-                        Some(ScalarImpl::Utf8(
-                            format!(
-                                "[{}]",
-                                function.arg_types.iter().map(|t| t.to_oid()).join(", ")
-                            )
-                            .into(),
-                        )),
+                        Some(ScalarImpl::List(ListValue::new(
+                            function
+                                .arg_types
+                                .iter()
+                                .map(|t| Some(ScalarImpl::Int32(t.to_oid())))
+                                .collect_vec(),
+                        ))),
                         Some(ScalarImpl::Int32(function.return_type.to_oid())),
                         Some(ScalarImpl::Utf8(function.language.clone().into())),
                         Some(ScalarImpl::Utf8(function.link.clone().into())),
@@ -540,6 +547,49 @@ impl SysCatalogReaderImpl {
                             )
                             .into(),
                         )),
+                    ])
+                })
+            })
+            .collect_vec())
+    }
+
+    pub(super) fn read_rw_worker_nodes_info(&self) -> Result<Vec<OwnedRow>> {
+        let workers = self.worker_node_manager.list_worker_nodes();
+
+        Ok(workers
+            .into_iter()
+            .map(|worker| {
+                let host = worker.host.as_ref().unwrap();
+                let property = worker.property.as_ref().unwrap();
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int32(worker.id as i32)),
+                    Some(ScalarImpl::Utf8(host.host.clone().into())),
+                    Some(ScalarImpl::Utf8(host.port.to_string().into())),
+                    Some(ScalarImpl::Utf8(
+                        worker.get_type().unwrap().as_str_name().into(),
+                    )),
+                    Some(ScalarImpl::Utf8(
+                        worker.get_state().unwrap().as_str_name().into(),
+                    )),
+                    Some(ScalarImpl::Int32(worker.parallel_units.len() as i32)),
+                    Some(ScalarImpl::Bool(property.is_streaming)),
+                    Some(ScalarImpl::Bool(property.is_serving)),
+                    Some(ScalarImpl::Bool(property.is_unschedulable)),
+                ])
+            })
+            .collect_vec())
+    }
+
+    pub(super) fn read_rw_parallel_units_info(&self) -> Result<Vec<OwnedRow>> {
+        let workers = self.worker_node_manager.list_worker_nodes();
+
+        Ok(workers
+            .into_iter()
+            .flat_map(|worker| {
+                worker.parallel_units.into_iter().map(|unit| {
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int32(unit.id as i32)),
+                        Some(ScalarImpl::Int32(unit.worker_node_id as i32)),
                     ])
                 })
             })

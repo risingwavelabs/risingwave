@@ -170,22 +170,30 @@ impl WriteHandle {
         }
     }
 
-    pub fn begin(&mut self) -> Result<oneshot::Receiver<usize>> {
+    pub fn begin(&mut self) -> Result<()> {
         assert_eq!(self.txn_state, TxnState::Init);
         self.txn_state = TxnState::Begin;
-        self.write_txn_control_msg(TxnMsg::Begin(self.txn_id))
+        // Ignore the notifier.
+        self.write_txn_control_msg(TxnMsg::Begin(self.txn_id))?;
+        Ok(())
     }
 
-    pub async fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+    pub async fn write_chunk(&self, chunk: StreamChunk) -> Result<()> {
         assert_eq!(self.txn_state, TxnState::Begin);
+        // Ignore the notifier.
         self.write_txn_data_msg(TxnMsg::Data(self.txn_id, chunk))
-            .await
+            .await?;
+        Ok(())
     }
 
-    pub fn end(mut self) -> Result<oneshot::Receiver<usize>> {
+    pub async fn end(mut self) -> Result<()> {
         assert_eq!(self.txn_state, TxnState::Begin);
         self.txn_state = TxnState::Committed;
-        self.write_txn_control_msg(TxnMsg::End(self.txn_id))
+        // Await the notifier.
+        self.write_txn_control_msg(TxnMsg::End(self.txn_id))?
+            .await
+            .context("failed to wait the end message")?;
+        Ok(())
     }
 
     pub fn rollback(mut self) -> Result<oneshot::Receiver<usize>> {
@@ -334,7 +342,11 @@ mod tests {
         write_chunk!(1);
         check_next_chunk!(1);
 
-        write_handle.end().unwrap();
+        // Since the end will wait the notifier which is sent by the reader,
+        // we need to spawn a task here to avoid dead lock.
+        tokio::spawn(async move {
+            write_handle.end().await.unwrap();
+        });
 
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
 
