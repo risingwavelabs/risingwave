@@ -220,6 +220,13 @@ pub struct CommandContext<S: MetaStore> {
     pub checkpoint: bool,
 
     source_manager: SourceManagerRef<S>,
+
+    /// The tracing span of this command.
+    ///
+    /// Differs from [`TracedEpoch`], this span focuses on the lifetime of the corresponding
+    /// barrier, including the process of waiting for the barrier to be sent, flowing through the
+    /// stream graph on compute nodes, and finishing its `post_collect` stuffs.
+    pub span: tracing::Span,
 }
 
 impl<S: MetaStore> CommandContext<S> {
@@ -233,6 +240,7 @@ impl<S: MetaStore> CommandContext<S> {
         command: Command,
         checkpoint: bool,
         source_manager: SourceManagerRef<S>,
+        span: tracing::Span,
     ) -> Self {
         Self {
             fragment_manager,
@@ -243,6 +251,7 @@ impl<S: MetaStore> CommandContext<S> {
             command,
             checkpoint,
             source_manager,
+            span,
         }
     }
 }
