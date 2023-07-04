@@ -432,6 +432,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .unwrap(),
     );
 
+    let (sink_manager, shutdown_handle) = SinkManager::start_worker();
+    let mut sub_tasks = vec![shutdown_handle];
+
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
         scheduled_barriers,
         env.clone(),
@@ -440,6 +443,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         fragment_manager.clone(),
         hummock_manager.clone(),
         source_manager.clone(),
+        sink_manager.clone(),
         meta_metrics.clone(),
     ));
 
@@ -527,8 +531,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         catalog_manager.clone(),
         fragment_manager.clone(),
     );
-    let (sink_manager, shutdown_handle) = SinkManager::start_worker();
-    let mut sub_tasks = vec![shutdown_handle];
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),

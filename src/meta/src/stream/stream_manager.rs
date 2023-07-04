@@ -576,6 +576,7 @@ mod tests {
     use super::*;
     use crate::barrier::GlobalBarrierManager;
     use crate::hummock::{CompactorManager, HummockManager};
+    use crate::manager::sink_manager::SinkManager;
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
         StreamingClusterInfo,
@@ -767,6 +768,8 @@ mod tests {
                 .await?,
             );
 
+            let (sink_manager, _) = SinkManager::start_worker();
+
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 scheduled_barriers,
                 env.clone(),
@@ -775,6 +778,7 @@ mod tests {
                 fragment_manager.clone(),
                 hummock_manager.clone(),
                 source_manager.clone(),
+                sink_manager,
                 meta_metrics.clone(),
             ));
 

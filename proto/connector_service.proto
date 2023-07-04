@@ -176,11 +176,16 @@ message SinkWriterToCoordinatorMsg {
   message StartCoordinationRequest {
     common.Buffer vnode_bitmap = 1;
     BuildSinkParam param = 2;
-    uint64 epoch = 3;
+  }
+
+  message CommitRequest {
+    bytes metadata = 1;
+    uint64 epoch = 2;
   }
 
   oneof msg {
     StartCoordinationRequest start_request = 1;
+    CommitRequest commit_request = 2;
   }
 }
 
@@ -190,8 +195,13 @@ message SinkCoordinatorToWriterMsg {
     string err_msg = 2;
   }
 
+  message CommitResponse {
+    uint64 epoch = 1;
+  }
+
   oneof msg {
     StartCoordinationResponse start_response = 1;
+    CommitResponse commit_response = 2;
   }
 }
 

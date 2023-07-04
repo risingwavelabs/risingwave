@@ -18,18 +18,21 @@ use std::future::{pending, Future};
 use std::iter::once;
 use std::pin::pin;
 
-use futures::future::{select, BoxFuture, Either};
+use bytes::Bytes;
+use futures::future::{join_all, select, BoxFuture, Either};
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
-use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_connector::sink::catalog::{SinkId, SinkType};
-use risingwave_connector::sink::{build_sink, BuildSinkParam, SinkConfig, SinkError, SinkImpl};
-use risingwave_pb::catalog::PbSinkType;
+use risingwave_connector::dispatch_sink;
+use risingwave_connector::sink::catalog::SinkId;
+use risingwave_connector::sink::{
+    build_sink, BuildSinkParam, Sink, SinkCommitCoordinator, SinkConfig, SinkError, SinkImpl,
+};
+use risingwave_pb::connector_service::sink_coordinator_to_writer_msg::CommitResponse;
+use risingwave_pb::connector_service::sink_writer_to_coordinator_msg::{CommitRequest, Msg};
 use risingwave_pb::connector_service::{
-    sink_writer_to_coordinator_msg, PbBuildSinkParam, SinkCoordinatorToWriterMsg,
+    sink_coordinator_to_writer_msg, sink_writer_to_coordinator_msg, SinkCoordinatorToWriterMsg,
     SinkWriterToCoordinatorMsg,
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -56,7 +59,6 @@ struct NewSinkWriterRequest {
     response_tx: SinkCoordinatorResponseSender,
     param: BuildSinkParam,
     vnode_bitmap: Bitmap,
-    epoch: u64,
 }
 
 enum SinkManagerRequest {
@@ -65,7 +67,7 @@ enum SinkManagerRequest {
 }
 
 #[derive(Clone)]
-pub(crate) struct SinkManager {
+pub struct SinkManager {
     request_tx: UnboundedSender<SinkManagerRequest>,
 }
 
@@ -87,20 +89,18 @@ impl SinkManager {
         &self,
         mut request_stream: SinkWriterInputStream,
     ) -> Result<impl Stream<Item = Result<SinkCoordinatorToWriterMsg, Status>>, Status> {
-        let (param, vnode_bitmap, epoch) = match request_stream.try_next().await? {
+        let (param, vnode_bitmap) = match request_stream.try_next().await? {
             Some(SinkWriterToCoordinatorMsg {
                 msg:
                     Some(sink_writer_to_coordinator_msg::Msg::StartRequest(
                         sink_writer_to_coordinator_msg::StartCoordinationRequest {
                             param: Some(param),
                             vnode_bitmap: Some(vnode_bitmap),
-                            epoch,
                         },
                     )),
             }) => (
                 BuildSinkParam::from_proto(param),
                 Bitmap::from(&vnode_bitmap),
-                epoch,
             ),
             msg => {
                 return Err(Status::invalid_argument(format!(
@@ -116,7 +116,6 @@ impl SinkManager {
                 response_tx,
                 param,
                 vnode_bitmap,
-                epoch,
             }))
             .map_err(|_| {
                 Status::unavailable(
@@ -298,10 +297,9 @@ enum SinkCoordinatorWorkerRequest {
 
 struct SinkCoordinatorWorker {
     sink: Option<SinkImpl>,
-    epoch: u64,
     request_streams: Vec<SinkWriterInputStream>,
     response_response_senders: Vec<SinkCoordinatorResponseSender>,
-    request_rx: UnboundedReceiver<SinkCoordinatorWorkerRequest>,
+    _request_rx: UnboundedReceiver<SinkCoordinatorWorkerRequest>,
 }
 
 impl SinkCoordinatorWorker {
@@ -335,8 +333,6 @@ impl SinkCoordinatorWorker {
             }
         };
 
-        let epoch = first_writer_request.epoch;
-
         let mut remaining_count = VirtualNode::COUNT;
         let mut registered_vnode = HashSet::with_capacity(VirtualNode::COUNT);
         let mut pending_request_streams = vec![first_writer_request.request_stream];
@@ -352,23 +348,6 @@ impl SinkCoordinatorWorker {
             if let Some(request) = request_rx.recv().await {
                 match request {
                     SinkCoordinatorWorkerRequest::NewWriter(request) => {
-                        if request.epoch != epoch {
-                            error!(
-                                "get unmatched epoch: {} with param: {:?}. Current epoch {}",
-                                request.epoch, request.param, epoch
-                            );
-                            for sender in pending_response_senders
-                                .into_iter()
-                                .chain(once(request.response_tx))
-                            {
-                                send_with_err_check!(
-                                    sender,
-                                    Err(Status::cancelled("unmatched epoch")),
-                                    "send unmatched epoch error"
-                                );
-                            }
-                            return None;
-                        }
                         for vnode in request.vnode_bitmap.iter_vnodes() {
                             if registered_vnode.contains(&vnode) {
                                 error!(
@@ -415,12 +394,71 @@ impl SinkCoordinatorWorker {
         }
         Some(Self {
             sink: Some(sink),
-            epoch,
             request_streams: pending_request_streams,
             response_response_senders: pending_response_senders,
-            request_rx,
+            _request_rx: request_rx,
         })
     }
 
-    async fn execute(self) {}
+    async fn execute(mut self) {
+        let sink = self.sink.take().expect("should be Some when first execute");
+        dispatch_sink!(sink, sink, {
+            // TODO: pass the connector param
+            let mut coordinator = match sink.new_coordinator(None).await {
+                Ok(coordinator) => coordinator,
+                Err(e) => {
+                    error!("unable to create coordinator: {:?}", e);
+                    for sender in self.response_response_senders {
+                        send_with_err_check!(
+                            sender,
+                            Err(Status::unavailable("unable to create coordinator")),
+                            "send coordinator create failure"
+                        );
+                    }
+                    return;
+                }
+            };
+            // TODO: return on error
+            coordinator.init().await.unwrap();
+            self.execute_inner(coordinator).await;
+        })
+    }
+
+    async fn execute_inner(mut self, mut coordinator: impl SinkCommitCoordinator) {
+        loop {
+            // TODO: check epoch
+            // TODO: poll request_tx for stop request
+            // TODO: ensure type
+            let commit_infos: Vec<(Vec<u8>, u64)> =
+                join_all(self.request_streams.iter_mut().map(|stream| {
+                    stream
+                        .next()
+                        .map(|event| match event.unwrap().unwrap().msg.unwrap() {
+                            Msg::CommitRequest(CommitRequest { metadata, epoch }) => {
+                                (metadata, epoch)
+                            }
+                            _ => unreachable!("should be commit"),
+                        })
+                }))
+                .await;
+            let epoch = commit_infos[0].1;
+            let mut metadatas = Vec::with_capacity(commit_infos.len());
+            for (metadata, other_epoch) in commit_infos {
+                metadatas.push(Bytes::from(metadata));
+                assert_eq!(epoch, other_epoch);
+            }
+            // TODO: return on error
+            coordinator.commit(epoch, metadatas).await.unwrap();
+            for sender in &self.response_response_senders {
+                // TODO: return on error
+                sender
+                    .send(Ok(SinkCoordinatorToWriterMsg {
+                        msg: Some(sink_coordinator_to_writer_msg::Msg::CommitResponse(
+                            CommitResponse { epoch },
+                        )),
+                    }))
+                    .unwrap();
+            }
+        }
+    }
 }
