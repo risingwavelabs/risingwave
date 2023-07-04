@@ -381,3 +381,87 @@ pub fn quote_ident(s: &str, writer: &mut dyn Write) {
     }
     write!(writer, "\"").unwrap();
 }
+
+/// Returns the first n characters in the string.
+/// If n is a negative value, the function will return an empty string.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select left('RisingWave', 6)
+/// ----
+/// Rising
+///
+/// query T
+/// select left('RisingWave', 0)
+/// ----
+///
+///
+/// query T
+/// select left('RisingWave', -1)
+/// ----
+#[function("left(varchar, int32) -> varchar")]
+pub fn left(s: &str, n: i32, writer: &mut dyn Write) {
+    s.chars()
+        .take(n.max(0) as usize)
+        .for_each(|c| writer.write_char(c).unwrap());
+}
+
+/// Returns the last n characters in the string.
+/// If n is a negative value, the function will return an empty string.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select right('RisingWave', 4)
+/// ----
+/// Wave
+///
+/// query T
+/// select right('RisingWave', 0)
+/// ----
+///
+///
+/// query T
+/// select right('RisingWave', -1)
+/// ----
+#[function("right(varchar, int32) -> varchar")]
+pub fn right(s: &str, n: i32, writer: &mut dyn Write) {
+    let take = n.max(0) as usize;
+    let skip = s.chars().count().saturating_sub(take);
+
+    s.chars()
+        .skip(skip)
+        .for_each(|c| writer.write_char(c).unwrap());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_left_and_right() {
+        let s = "cxscgccdd";
+        let us = "上海自来水来自海上";
+
+        let cases = [
+            (s, 3, "cxs", "cdd"),
+            (s, -3, "", ""),
+            (s, 0, "", ""),
+            (s, 15, "cxscgccdd", "cxscgccdd"),
+            // Unicode test
+            (us, 5, "上海自来水", "水来自海上"),
+        ];
+
+        for (s, n, left_expected, right_expected) in cases {
+            let mut left_writer = String::new();
+            let mut right_writer = String::new();
+            left(s, n, &mut left_writer);
+            right(s, n, &mut right_writer);
+            assert_eq!(left_writer, left_expected);
+            assert_eq!(right_writer, right_expected);
+        }
+    }
+}
