@@ -52,10 +52,6 @@ where
         fail_point!("release_contexts_internal_err", |_| Err(Error::Internal(
             anyhow::anyhow!("failpoint internal error")
         )));
-        let mut compaction_guard = write_lock!(self, compaction).await;
-        let compaction = compaction_guard.deref_mut();
-        let (compact_statuses, compact_task_assignment) =
-            compaction.cancel_assigned_tasks_for_context_ids(context_ids.as_ref());
 
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
@@ -69,8 +65,6 @@ where
             self,
             None,
             Transaction::default(),
-            compact_statuses,
-            compact_task_assignment,
             pinned_versions,
             pinned_snapshots
         )?;
@@ -78,7 +72,6 @@ where
         #[cfg(test)]
         {
             drop(versioning_guard);
-            drop(compaction_guard);
             self.check_state_consistency().await;
         }
 

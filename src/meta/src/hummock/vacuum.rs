@@ -402,7 +402,9 @@ mod tests {
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0
         );
-        let _receiver = compactor_manager.add_compactor(context_id, u64::MAX, 16);
+        let core_num = 16;
+        let _receiver = compactor_manager.add_compactor(context_id, core_num);
+        compactor_manager.update_compactor_pending_task(context_id, Some(core_num), false);
         // SST deletion is scheduled.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
@@ -461,7 +463,9 @@ mod tests {
             .await
             .unwrap());
 
-        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX, 16);
+        let core_num = 16;
+        let mut receiver = compactor_manager.add_compactor(context_id, core_num);
+        compactor_manager.update_compactor_pending_task(context_id, Some(core_num), false);
 
         assert!(vacuum
             .start_full_gc(Duration::from_secs(

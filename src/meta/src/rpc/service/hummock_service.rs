@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
@@ -254,14 +255,24 @@ where
         let compactor_manager = self.hummock_manager.compactor_manager.clone();
 
         let cancel_tasks = compactor_manager.update_task_heartbeats(&req.progress);
-        compactor_manager.update_compactor_pending_task(req.context_id, req.pull_task_count);
+        compactor_manager.update_compactor_pending_task(req.context_id, req.pull_task_count, false);
 
-        for task in cancel_tasks {
+        for mut task in cancel_tasks {
             tracing::info!(
                 "Task with task_id {} with context_id {} has expired due to lack of visible progress",
                 req.context_id,
                 task.task_id
             );
+
+            if let Err(e) = self
+                .hummock_manager
+                .cancel_compact_task(&mut task, TaskStatus::HeartbeatCanceled)
+                .await
+            {
+                tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
+                                until we can successfully report its status. task_id: {}, ERR: {e:?}", task.task_id);
+            }
+
             if let Some(compactor) = compactor_manager.get_compactor(req.context_id) {
                 // Forcefully cancel the task so that it terminates
                 // early on the compactor

@@ -178,17 +178,12 @@ impl CompactorManagerInner {
     }
 
     pub fn next_idle_compactor(&self) -> Option<(Arc<Compactor>, u32)> {
+        if self.compactors.is_empty() || self.compactor_pending_io_counts.is_empty() {
+            return None;
+        }
+
         use rand::Rng;
         let rand_index = rand::thread_rng().gen_range(0..self.compactors.len());
-
-        if self.compactors.is_empty() {
-            return None;
-        }
-
-        if self.compactor_pending_io_counts.is_empty() {
-            return None;
-        }
-
         let context_id = self.compactors[rand_index];
 
         let compactor = self.compactor_map.get(&context_id).unwrap().clone();
@@ -246,24 +241,20 @@ impl CompactorManagerInner {
 
     /// Used when meta exiting to support graceful shutdown.
     pub fn abort_all_compactors(&mut self) {
-        // let mut policy = self.policy.write();
         while let Some(compactor) = self.next_compactor() {
             self.remove_compactor(compactor.context_id);
         }
     }
 
     pub fn pause_compactor(&mut self, context_id: HummockContextId) {
-        // let mut policy = self.policy.write();
         self.remove_compactor(context_id);
         tracing::info!("Paused compactor session {}", context_id);
     }
 
     pub fn remove_compactor(&mut self, context_id: HummockContextId) {
-        // let mut policy = self.policy.write();
-        // policy.remove_compactor(context_id);
-
         self.compactors.retain(|c| *c != context_id);
         self.compactor_map.remove(&context_id);
+        self.compactor_pending_io_counts.remove(&context_id);
 
         // To remove the heartbeats, they need to be forcefully purged,
         // which is only safe when the context has been completely removed from meta.
@@ -271,34 +262,14 @@ impl CompactorManagerInner {
     }
 
     pub fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {
-        // self.policy.read().get_compactor(context_id)
         self.compactor_map.get(&context_id).cloned()
     }
-
-    // pub fn assign_compact_task(
-    //     &self,
-    //     context_id: HummockContextId,
-    //     compact_task: &CompactTask,
-    // ) -> Result<()> {
-    //     self.policy
-    //         .write()
-    //         .assign_compact_task(context_id, compact_task)
-    // }
-
-    // Report the completion of a compaction task to adjust the compaction schedule policy.
-    // pub fn report_compact_task(&self, context_id: HummockContextId, compact_task: &CompactTask) {
-    //     self.policy
-    //         .write()
-    //         .report_compact_task(context_id, compact_task)
-    // }
 
     pub fn check_tasks_status(
         &self,
         tasks: &[HummockCompactionTaskId],
         slow_task_duration: Duration,
     ) -> HashMap<HummockCompactionTaskId, (Duration, &'static str)> {
-        // let guard = self.task_heartbeats.read();
-        // let task_heartbeats = self.task_heartbeats.deref();
         let tasks_ids: HashSet<u64> = HashSet::from_iter(tasks.to_vec());
         let mut ret = HashMap::default();
         for TaskHeartbeat {
@@ -329,8 +300,6 @@ impl CompactorManagerInner {
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
             .as_secs();
-        // let guard = self.task_heartbeats.read();
-        // let task_heartbeats = guard.deref();
         Self::get_heartbeat_expired_tasks(&self.task_heartbeats, now)
     }
 
@@ -392,7 +361,6 @@ impl CompactorManagerInner {
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
             .as_secs();
-        // let mut guard = self.task_heartbeats.write();
         self.task_heartbeats.insert(
             task.task_id,
             TaskHeartbeat {
@@ -409,7 +377,6 @@ impl CompactorManagerInner {
     }
 
     pub fn remove_task_heartbeat(&mut self, task_id: u64) {
-        // let mut guard = self.task_heartbeats.write();
         self.task_heartbeats.remove(&task_id).unwrap();
     }
 
@@ -422,7 +389,6 @@ impl CompactorManagerInner {
             .expect("Clock may have gone backwards")
             .as_secs();
         let mut cancel_tasks = vec![];
-        // let mut guard = self.task_heartbeats.write();
         for progress in progress_list {
             if let Some(task_ref) = self.task_heartbeats.get_mut(&progress.task_id) {
                 if task_ref.num_ssts_sealed < progress.num_ssts_sealed
@@ -450,7 +416,6 @@ impl CompactorManagerInner {
     }
 
     pub fn compactor_num(&self) -> usize {
-        // self.policy.read().compactor_num()
         self.compactors.len()
     }
 
@@ -458,28 +423,23 @@ impl CompactorManagerInner {
         &mut self,
         context_id: HummockContextId,
         pull_task_count: Option<u32>,
+        check_exist: bool,
     ) {
-        match pull_task_count {
-            Some(pull_task_count) => {
-                if pull_task_count == 0 {
-                    self.compactor_pending_io_counts
-                        .remove(&context_id)
-                        .unwrap();
-                } else {
-                    let value = self
-                        .compactor_pending_io_counts
-                        .entry(context_id)
-                        .or_default();
-                    *value = pull_task_count;
+        use std::collections::hash_map::Entry::{Occupied, Vacant};
+        if let Some(pull_task_count) = pull_task_count {
+            if pull_task_count == 0 {
+                let _ = self.compactor_pending_io_counts.remove(&context_id);
+            } else {
+                match self.compactor_pending_io_counts.entry(context_id) {
+                    Occupied(mut value) => *value.get_mut() = pull_task_count,
+                    Vacant(entry) => {
+                        if !check_exist {
+                            // Avoid pull_task_handle incorrectly updating the state of a deprecated
+                            // compactor
+                            entry.insert(pull_task_count);
+                        }
+                    }
                 }
-            }
-
-            None => {
-                // if self.compactor_pending_io_counts.contains_key(&context_id) {
-                //     self.compactor_pending_io_counts
-                //         .remove(&context_id)
-                //         .unwrap();
-                // }
             }
         }
     }
@@ -599,10 +559,11 @@ impl CompactorManager {
         &self,
         context_id: HummockContextId,
         pull_task_count: Option<u32>,
+        check_exist: bool,
     ) {
         self.inner
             .write()
-            .update_compactor_pending_task(context_id, pull_task_count)
+            .update_compactor_pending_task(context_id, pull_task_count, check_exist)
     }
 
     pub fn get_progress(&self) -> Vec<CompactTaskProgress> {
@@ -634,6 +595,10 @@ impl CompactorPullTaskHandle {
                 self.compactor.context_id(),
                 e
             );
+
+            // try cancel on compactor
+            let _ = self.compactor.cancel_task(compact_task.task_id).await;
+
             self.compactor_manager
                 .write()
                 .pause_compactor(self.compactor.context_id());
@@ -643,11 +608,11 @@ impl CompactorPullTaskHandle {
         }
 
         self.pending_pull_task_count -= 1;
-        return ScheduleStatus::Ok;
+        ScheduleStatus::Ok
     }
 
     pub fn valid(&self) -> bool {
-        return self.pending_pull_task_count > 0;
+        self.pending_pull_task_count > 0
     }
 }
 
@@ -658,6 +623,7 @@ impl Drop for CompactorPullTaskHandle {
             .update_compactor_pending_task(
                 self.compactor.context_id,
                 Some(self.pending_pull_task_count),
+                true, // check exist
             );
     }
 }
@@ -690,7 +656,6 @@ mod tests {
             .await;
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
             let _receiver = compactor_manager.add_compactor(context_id, 1);
-            let _compactor = hummock_manager.get_idle_compactor().unwrap();
             hummock_manager
                 .get_compact_task(
                     StaticCompactionGroupId::StateDefault.into(),

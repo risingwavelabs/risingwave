@@ -79,9 +79,13 @@ where
         .compactor_num()
         == 0
     {
+        let core_num = 16;
         hummock_manager
             .compactor_manager_ref_for_test()
-            .add_compactor(context_id, 16);
+            .add_compactor(context_id, core_num);
+        hummock_manager
+            .compactor_manager
+            .update_compactor_pending_task(context_id, Some(core_num), false);
         temp_compactor = true;
     }
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
