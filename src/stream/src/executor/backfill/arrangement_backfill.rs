@@ -351,10 +351,8 @@ where
                     upstream_table.commit(barrier.epoch).await?;
                 }
 
-                // TODO(kwannoel): use different counters, otherwise both
-                // backfill + arrangement backfill executors can't co-exist in same cluster.
                 self.metrics
-                    .backfill_snapshot_read_row_count
+                    .arrangement_backfill_snapshot_read_row_count
                     .with_label_values(&[
                         upstream_table_id.to_string().as_str(),
                         self.actor_id.to_string().as_str(),
@@ -362,7 +360,7 @@ where
                     .inc_by(cur_barrier_snapshot_processed_rows);
 
                 self.metrics
-                    .backfill_upstream_output_row_count
+                    .arrangement_backfill_upstream_output_row_count
                     .with_label_values(&[
                         upstream_table_id.to_string().as_str(),
                         self.actor_id.to_string().as_str(),
@@ -470,9 +468,6 @@ where
             let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.cloned());
             if range_bounds.is_none() {
                 continue;
-                // TODO: Highlight this change to reviewers.
-                // yield None;
-                // return Ok(());
             }
             let range_bounds = range_bounds.unwrap();
             let vnode_iter = upstream_table
@@ -480,15 +475,11 @@ where
                 .await?;
             streams.push(Box::pin(vnode_iter));
         }
-        // TODO: Highlight this change to patrick vs `FuturesUnordered`, since `FuturesUnordered`
-        // merges `Futures` -> `Stream`, whereas `select_all` merges `Streams` -> `Stream`.
         let iter = select_all(streams);
         #[for_await]
         for chunk in iter_chunks(iter, &schema, CHUNK_SIZE) {
             yield chunk?;
         }
-        // TODO: Highlight this change to reviewers.
-        // yield None;
         yield None;
         return Ok(());
     }
