@@ -394,9 +394,13 @@ pub fn quote_ident(s: &str, writer: &mut dyn Write) {
 /// Rising
 ///
 /// query T
+/// select left('RisingWave', 42)
+/// ----
+/// RisingWave
+///
+/// query T
 /// select left('RisingWave', 0)
 /// ----
-///
 ///
 /// query T
 /// select left('RisingWave', -1)
@@ -420,9 +424,13 @@ pub fn left(s: &str, n: i32, writer: &mut dyn Write) {
 /// Wave
 ///
 /// query T
+/// select left('RisingWave', 42)
+/// ----
+/// RisingWave
+///
+/// query T
 /// select right('RisingWave', 0)
 /// ----
-///
 ///
 /// query T
 /// select right('RisingWave', -1)
