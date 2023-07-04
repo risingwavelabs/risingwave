@@ -141,6 +141,8 @@ impl LevelCompactionPicker {
                 continue;
             }
 
+            // The size of target level may be too large, we shall skip this compact task and wait
+            //  the data in base level compact to lower level.
             if target_level_size > self.config.max_compaction_bytes {
                 continue;
             }
@@ -164,6 +166,11 @@ impl LevelCompactionPicker {
                 .get_pending_tasks()
                 .iter()
                 .any(|task| task.target_level != 0);
+            // If the write-amplification of all candidate task are large, we may hope to wait base
+            // level compact more data to lower level.  But if we skip all task, I'm
+            // afraid the data will be blocked in level0 and will be never compacted to base level.
+            // So we only allow one task exceed write-amplification-limit running in
+            // level0 to base-level.
             if is_base_level_task_pending {
                 return None;
             }
