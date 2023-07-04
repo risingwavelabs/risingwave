@@ -22,6 +22,8 @@ pub struct SourceMetrics {
     pub partition_input_bytes: GenericCounterVec<AtomicU64>,
     /// User error reporting
     pub user_source_error_count: GenericCounterVec<AtomicU64>,
+    /// Report latest message id
+    pub latest_message_id: GenericCounterVec<AtomicU64>,
 }
 
 impl SourceMetrics {
@@ -53,11 +55,19 @@ impl SourceMetrics {
             registry,
         )
         .unwrap();
+        let latest_message_id = register_int_counter_vec_with_registry!(
+            "latest_message_id",
+            "Latest message id for a exec per partition",
+            &["source_id", "actor_id", "partition"],
+            registry,
+        )
+        .unwrap();
         SourceMetrics {
             registry,
             partition_input_count,
             partition_input_bytes,
             user_source_error_count,
+            latest_message_id,
         }
     }
 
