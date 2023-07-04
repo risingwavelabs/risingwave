@@ -220,31 +220,13 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
             .collect();
-        let all_data_types = table_columns
-            .iter()
-            .map(|d| d.data_type.clone())
-            .collect_vec();
-        let data_types = value_indices
-            .iter()
-            .map(|idx| all_data_types[*idx].clone())
-            .collect_vec();
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
 
         let row_serde = {
             if versioned {
-                ColumnAwareSerde::new(
-                    Arc::from(value_indices.into_boxed_slice()),
-                    Arc::from(data_types.into_boxed_slice()),
-                    Arc::from(table_columns.into_boxed_slice()),
-                )
-                .into()
+                ColumnAwareSerde::new(value_indices.into(), table_columns.into()).into()
             } else {
-                BasicSerde::new(
-                    Arc::from_iter(std::iter::empty()),
-                    Arc::from(data_types.into_boxed_slice()),
-                    Arc::from_iter(std::iter::empty()),
-                )
-                .into()
+                BasicSerde::new(value_indices.into(), table_columns.into()).into()
             }
         };
 

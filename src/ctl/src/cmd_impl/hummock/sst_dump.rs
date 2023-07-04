@@ -368,15 +368,10 @@ fn print_table_column(
             .iter()
             .map(|idx| table_catalog.columns[*idx].column_desc.name.clone())
             .collect_vec();
-        let data_types = table_catalog
-            .value_indices
-            .iter()
-            .map(|idx| table_catalog.columns[*idx].data_type().clone())
-            .collect_vec();
+
         let row_deserializer: EitherSerde = if table_catalog.version().is_some() {
             ColumnAwareSerde::new(
-                Arc::from(table_catalog.value_indices.clone().into_boxed_slice()),
-                Arc::from(data_types.into_boxed_slice()),
+                table_catalog.value_indices.clone().into(),
                 Arc::from_iter(
                     table_catalog
                         .columns()
@@ -388,9 +383,14 @@ fn print_table_column(
             .into()
         } else {
             BasicSerde::new(
-                Arc::from_iter(std::iter::empty()),
-                Arc::from(data_types.into_boxed_slice()),
-                Arc::from_iter(std::iter::empty()),
+                table_catalog.value_indices.clone().into(),
+                Arc::from_iter(
+                    table_catalog
+                        .columns()
+                        .iter()
+                        .cloned()
+                        .map(|c| c.column_desc),
+                ),
             )
             .into()
         };

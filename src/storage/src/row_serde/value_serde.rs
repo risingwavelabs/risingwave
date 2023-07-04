@@ -38,11 +38,7 @@ pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
 /// Part of `ValueRowSerde` that implements `new` a serde given `column_ids` and `schema`
 pub trait ValueRowSerdeNew: Clone {
-    fn new(
-        value_indices: Arc<[usize]>,
-        schema: Arc<[DataType]>,
-        table_columns: Arc<[ColumnDesc]>,
-    ) -> Self;
+    fn new(value_indices: Arc<[usize]>, table_columns: Arc<[ColumnDesc]>) -> Self;
 }
 
 /// The compound trait used in `StateTableInner`, implemented by `BasicSerde` and `ColumnAwareSerde`
@@ -53,24 +49,21 @@ pub trait ValueRowSerde:
 }
 
 impl ValueRowSerdeNew for EitherSerde {
-    fn new(
-        _value_indices: Arc<[usize]>,
-        _schema: Arc<[DataType]>,
-        _table_columns: Arc<[ColumnDesc]>,
-    ) -> EitherSerde {
+    fn new(_value_indices: Arc<[usize]>, _table_columns: Arc<[ColumnDesc]>) -> EitherSerde {
         unreachable!("should construct manually")
     }
 }
 
 impl ValueRowSerdeNew for BasicSerde {
-    fn new(
-        _value_indices: Arc<[usize]>,
-        schema: Arc<[DataType]>,
-        _table_columns: Arc<[ColumnDesc]>,
-    ) -> BasicSerde {
+    fn new(value_indices: Arc<[usize]>, table_columns: Arc<[ColumnDesc]>) -> BasicSerde {
         BasicSerde {
             serializer: BasicSerializer {},
-            deserializer: BasicDeserializer::new(schema.as_ref().to_owned()),
+            deserializer: BasicDeserializer::new(
+                value_indices
+                    .iter()
+                    .map(|idx| table_columns[*idx].data_type.clone())
+                    .collect_vec(),
+            ),
         }
     }
 }
@@ -88,14 +81,14 @@ impl ValueRowSerde for BasicSerde {
 }
 
 impl ValueRowSerdeNew for ColumnAwareSerde {
-    fn new(
-        value_indices: Arc<[usize]>,
-        schema: Arc<[DataType]>,
-        table_columns: Arc<[ColumnDesc]>,
-    ) -> ColumnAwareSerde {
+    fn new(value_indices: Arc<[usize]>, table_columns: Arc<[ColumnDesc]>) -> ColumnAwareSerde {
         let column_ids = value_indices
             .iter()
             .map(|idx| table_columns[*idx].column_id)
+            .collect_vec();
+        let schema = value_indices
+            .iter()
+            .map(|idx| table_columns[*idx].data_type.clone())
             .collect_vec();
         if cfg!(debug_assertions) {
             let duplicates = column_ids.iter().duplicates().collect_vec();
@@ -126,7 +119,7 @@ impl ValueRowSerdeNew for ColumnAwareSerde {
         });
 
         let serializer = Serializer::new(&column_ids);
-        let deserializer = Deserializer::new(&column_ids, schema, column_with_default);
+        let deserializer = Deserializer::new(&column_ids, schema.into(), column_with_default);
         ColumnAwareSerde {
             serializer,
             deserializer,
@@ -216,10 +209,8 @@ mod tests {
     #[test]
     fn test_row_hard1() {
         let row = OwnedRow::new(vec![Some(Int16(233)); 20000]);
-        let data_types = vec![DataType::Int16; 20000];
         let serde = ColumnAwareSerde::new(
             Arc::from_iter(0..20000),
-            Arc::from(data_types.into_boxed_slice()),
             Arc::from_iter(
                 (0..20000).map(|id| ColumnDesc::unnamed(ColumnId::new(id), DataType::Int16)),
             ),
@@ -235,11 +226,8 @@ mod tests {
         data.extend(vec![Some(Utf8("risingwave risingwave".into())); 5000]);
         data.extend(vec![None; 5000]);
         let row = OwnedRow::new(data.clone());
-        let mut data_types = vec![DataType::Int16; 10000];
-        data_types.extend(vec![DataType::Varchar; 10000]);
         let serde = ColumnAwareSerde::new(
             Arc::from_iter(0..20000),
-            Arc::from(data_types.into_boxed_slice()),
             Arc::from_iter(
                 (0..10000)
                     .map(|id| ColumnDesc::unnamed(ColumnId::new(id), DataType::Int16))
@@ -259,14 +247,11 @@ mod tests {
         data.extend(vec![None; 250000]);
         data.extend(vec![Some(Utf8("risingwave risingwave".into())); 250000]);
         let row = OwnedRow::new(data.clone());
-        let mut data_types = vec![DataType::Int64; 500000];
-        data_types.extend(vec![DataType::Varchar; 500000]);
         let serde = ColumnAwareSerde::new(
             Arc::from_iter(0..1000000),
-            Arc::from(data_types.into_boxed_slice()),
             Arc::from_iter(
                 (0..500000)
-                    .map(|id| ColumnDesc::unnamed(ColumnId::new(id), DataType::Int16))
+                    .map(|id| ColumnDesc::unnamed(ColumnId::new(id), DataType::Int64))
                     .chain(
                         (500000..1000000)
                             .map(|id| ColumnDesc::unnamed(ColumnId::new(id), DataType::Varchar)),

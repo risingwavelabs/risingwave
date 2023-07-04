@@ -218,11 +218,6 @@ where
             .map(|val| *val as usize)
             .collect_vec();
 
-        let data_types = input_value_indices
-            .iter()
-            .map(|idx| table_columns[*idx].data_type.clone())
-            .collect_vec();
-
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
 
         // if value_indices is the no shuffle full columns.
@@ -236,7 +231,6 @@ where
 
         let row_serde = SD::new(
             Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
-            Arc::from(data_types.into_boxed_slice()),
             Arc::from(table_columns.into_boxed_slice()),
         );
         assert_eq!(
@@ -397,16 +391,6 @@ where
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
-        let data_types = match &value_indices {
-            Some(value_indices) => value_indices
-                .iter()
-                .map(|idx| table_columns[*idx].data_type.clone())
-                .collect_vec(),
-            None => table_columns
-                .iter()
-                .map(|c| c.data_type.clone())
-                .collect_vec(),
-        };
         Self {
             table_id,
             local_store: local_state_store,
@@ -418,7 +402,6 @@ where
                         .unwrap_or_else(|| (0..table_columns.len()).collect_vec())
                         .into_boxed_slice(),
                 ),
-                Arc::from(data_types.into_boxed_slice()),
                 Arc::from(table_columns.into_boxed_slice()),
             ),
             pk_indices,
