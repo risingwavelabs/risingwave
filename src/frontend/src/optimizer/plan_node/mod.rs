@@ -28,7 +28,7 @@
 //! - all field should be valued in construction, so the properties' derivation should be finished
 //!   in the `new()` function.
 
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -70,7 +70,6 @@ pub trait PlanNode:
     + DynHash
     + Distill
     + Debug
-    + Display
     + Downcast
     + ColPrunable
     + ExprRewritable
@@ -126,12 +125,6 @@ impl Deref for PlanRef {
 impl<T: PlanNode> From<T> for PlanRef {
     fn from(value: T) -> Self {
         PlanRef(Rc::new(value))
-    }
-}
-
-impl Display for PlanRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.0, f)
     }
 }
 
@@ -455,14 +448,18 @@ impl Explain for PlanRef {
         let plan = reorganize_elements_id(self.clone());
 
         let mut output = String::with_capacity(2048);
-        let mut config = PrettyConfig {
-            indent: 3,
-            need_boundaries: false,
-            width: 2048,
-            reduced_spaces: true,
-        };
+        let mut config = pretty_config();
         config.unicode(&mut output, &plan.explain());
         output
+    }
+}
+
+pub(crate) fn pretty_config() -> PrettyConfig {
+    PrettyConfig {
+        indent: 3,
+        need_boundaries: false,
+        width: 2048,
+        reduced_spaces: true,
     }
 }
 
@@ -528,7 +525,7 @@ impl dyn PlanNode {
         // TODO: support pk_indices and operator_id
         StreamPlanPb {
             input,
-            identity: format!("{}", self),
+            identity: self.explain_myself_to_string(),
             node_body: node,
             operator_id: self.id().0 as _,
             stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
@@ -554,12 +551,16 @@ impl dyn PlanNode {
         BatchPlanPb {
             children,
             identity: if identity {
-                format!("{:?}", self)
+                self.explain_myself_to_string()
             } else {
                 "".into()
             },
             node_body,
         }
+    }
+
+    pub fn explain_myself_to_string(&self) -> String {
+        self.distill_to_string()
     }
 }
 
@@ -655,6 +656,7 @@ mod stream_hash_join;
 mod stream_hop_window;
 mod stream_materialize;
 mod stream_now;
+mod stream_over_window;
 mod stream_project;
 mod stream_project_set;
 mod stream_row_id_gen;
@@ -737,6 +739,7 @@ pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_now::StreamNow;
+pub use stream_over_window::StreamOverWindow;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
@@ -853,6 +856,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
             , { Stream, Sort }
+            , { Stream, OverWindow }
         }
     };
 }
@@ -958,6 +962,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
             , { Stream, Sort }
+            , { Stream, OverWindow }
         }
     };
 }

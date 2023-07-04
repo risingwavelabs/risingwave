@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, INITIAL_TABLE_VERSION_ID};
@@ -58,15 +56,6 @@ impl StreamDml {
     }
 }
 
-impl fmt::Display for StreamDml {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamDml {{ columns: {} }}",
-            format_args!("[{}]", &self.column_names().join(", "))
-        )
-    }
-}
 impl Distill for StreamDml {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let col = self

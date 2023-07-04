@@ -473,6 +473,15 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_preload_wait_time_mill")]
     pub max_preload_wait_time_mill: u64,
 
+    #[serde(default = "default::storage::object_store_streaming_read_timeout_ms")]
+    pub object_store_streaming_read_timeout_ms: u64,
+    #[serde(default = "default::storage::object_store_streaming_upload_timeout_ms")]
+    pub object_store_streaming_upload_timeout_ms: u64,
+    #[serde(default = "default::storage::object_store_upload_timeout_ms")]
+    pub object_store_upload_timeout_ms: u64,
+    #[serde(default = "default::storage::object_store_read_timeout_ms")]
+    pub object_store_read_timeout_ms: u64,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -561,6 +570,11 @@ pub struct StreamingDeveloperConfig {
     /// The maximum number of concurrent barriers in an exchange channel.
     #[serde(default = "default::developer::stream_exchange_concurrent_barriers")]
     pub exchange_concurrent_barriers: usize,
+
+    /// The initial permits for a dml channel, i.e., the maximum row count can be buffered in
+    /// the channel.
+    #[serde(default = "default::developer::stream_dml_channel_initial_permits")]
+    pub dml_channel_initial_permits: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -820,6 +834,22 @@ mod default {
         pub fn max_preload_wait_time_mill() -> u64 {
             10
         }
+
+        pub fn object_store_streaming_read_timeout_ms() -> u64 {
+            10 * 60 * 1000
+        }
+
+        pub fn object_store_streaming_upload_timeout_ms() -> u64 {
+            10 * 60 * 1000
+        }
+
+        pub fn object_store_upload_timeout_ms() -> u64 {
+            60 * 60 * 1000
+        }
+
+        pub fn object_store_read_timeout_ms() -> u64 {
+            60 * 60 * 1000
+        }
     }
 
     pub mod streaming {
@@ -899,6 +929,10 @@ mod default {
 
         pub fn stream_exchange_concurrent_barriers() -> usize {
             1
+        }
+
+        pub fn stream_dml_channel_initial_permits() -> usize {
+            32768
         }
     }
 

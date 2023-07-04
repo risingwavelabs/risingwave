@@ -206,17 +206,6 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
             .collect()
     }
 
-    pub fn fmt_with_name(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        name: &str,
-        schema: &Schema,
-    ) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        self.fmt_fields_with_builder(&mut builder, schema);
-        builder.finish()
-    }
-
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         let exprs = &self.exprs;
         let input_len = self.input.schema().len();

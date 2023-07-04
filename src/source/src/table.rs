@@ -50,13 +50,13 @@ pub struct TableDmlHandle {
 
     /// All columns in this table.
     pub column_descs: Vec<ColumnDesc>,
+
+    /// The initial permits of the channel between each [`TableDmlHandle`] and the dml executors.
+    dml_channel_initial_permits: usize,
 }
 
-/// The max chunk permits of the channel between each [`TableDmlHandle`] and the dml executors.
-const DML_MAX_CHUNK_PERMITS: usize = 32 * 1024;
-
 impl TableDmlHandle {
-    pub fn new(column_descs: Vec<ColumnDesc>) -> Self {
+    pub fn new(column_descs: Vec<ColumnDesc>, dml_channel_initial_permits: usize) -> Self {
         let core = TableDmlHandleCore {
             changes_txs: vec![],
         };
@@ -64,6 +64,7 @@ impl TableDmlHandle {
         Self {
             core: RwLock::new(core),
             column_descs,
+            dml_channel_initial_permits,
         }
     }
 
@@ -71,7 +72,7 @@ impl TableDmlHandle {
         let mut core = self.core.write();
         // The `txn_channel` is used to limit the maximum chunk permits to avoid the producer
         // produces chunks too fast and cause an out of memory error.
-        let (tx, rx) = txn_channel(DML_MAX_CHUNK_PERMITS);
+        let (tx, rx) = txn_channel(self.dml_channel_initial_permits);
         core.changes_txs.push(tx);
 
         TableStreamReader { rx }
@@ -169,22 +170,30 @@ impl WriteHandle {
         }
     }
 
-    pub fn begin(&mut self) -> Result<oneshot::Receiver<usize>> {
+    pub fn begin(&mut self) -> Result<()> {
         assert_eq!(self.txn_state, TxnState::Init);
         self.txn_state = TxnState::Begin;
-        self.write_txn_control_msg(TxnMsg::Begin(self.txn_id))
+        // Ignore the notifier.
+        self.write_txn_control_msg(TxnMsg::Begin(self.txn_id))?;
+        Ok(())
     }
 
-    pub async fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+    pub async fn write_chunk(&self, chunk: StreamChunk) -> Result<()> {
         assert_eq!(self.txn_state, TxnState::Begin);
+        // Ignore the notifier.
         self.write_txn_data_msg(TxnMsg::Data(self.txn_id, chunk))
-            .await
+            .await?;
+        Ok(())
     }
 
-    pub fn end(mut self) -> Result<oneshot::Receiver<usize>> {
+    pub async fn end(mut self) -> Result<()> {
         assert_eq!(self.txn_state, TxnState::Begin);
         self.txn_state = TxnState::Committed;
-        self.write_txn_control_msg(TxnMsg::End(self.txn_id))
+        // Await the notifier.
+        self.write_txn_control_msg(TxnMsg::End(self.txn_id))?
+            .await
+            .context("failed to wait the end message")?;
+        Ok(())
     }
 
     pub fn rollback(mut self) -> Result<oneshot::Receiver<usize>> {
@@ -291,10 +300,10 @@ mod tests {
     const TEST_TRANSACTION_ID: TxnId = 0;
 
     fn new_table_dml_handle() -> TableDmlHandle {
-        TableDmlHandle::new(vec![ColumnDesc::unnamed(
-            ColumnId::from(0),
-            DataType::Int64,
-        )])
+        TableDmlHandle::new(
+            vec![ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)],
+            32768,
+        )
     }
 
     #[tokio::test]
@@ -333,7 +342,11 @@ mod tests {
         write_chunk!(1);
         check_next_chunk!(1);
 
-        write_handle.end().unwrap();
+        // Since the end will wait the notifier which is sent by the reader,
+        // we need to spawn a task here to avoid dead lock.
+        tokio::spawn(async move {
+            write_handle.end().await.unwrap();
+        });
 
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
 

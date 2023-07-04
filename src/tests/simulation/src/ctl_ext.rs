@@ -27,6 +27,7 @@ use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
 use risingwave_pb::stream_plan::StreamNode;
 
@@ -301,24 +302,39 @@ impl Cluster {
         Ok(response)
     }
 
-    // mark a worker node as unschedulable
-    pub async fn update_worker_node_schedulability(
+    // update node schedulability
+    async fn update_worker_node_schedulability(
         &self,
         worker_ids: Vec<u32>,
-        is_unschedulable: bool,
+        target: Schedulability,
     ) -> Result<()> {
+        let worker_ids = worker_ids
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect_vec();
+
         let _ = self
             .ctl
             .spawn(async move {
                 risingwave_ctl::cmd_impl::scale::update_schedulability(
                     &risingwave_ctl::common::CtlContext::default(),
-                    worker_ids.iter().map(|id| id.to_string()).collect_vec(),
-                    is_unschedulable,
+                    worker_ids,
+                    target,
                 )
                 .await
             })
             .await?;
         Ok(())
+    }
+
+    pub async fn cordon_worker(&self, id: u32) -> Result<()> {
+        self.update_worker_node_schedulability(vec![id], Schedulability::Unschedulable)
+            .await
+    }
+
+    pub async fn uncordon_worker(&self, id: u32) -> Result<()> {
+        self.update_worker_node_schedulability(vec![id], Schedulability::Schedulable)
+            .await
     }
 
     /// Reschedule with the given `plan`. Check the document of

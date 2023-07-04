@@ -175,7 +175,7 @@ def test_file_sink(file_name, use_json):
 def test_jdbc_sink(input_file, input_binary_file, use_json):
     type = "jdbc"
     prop = {"jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
-            "table.name": "test"}
+            "table.name": "test", "type" : "upsert"}
     file_name = input_file if use_json else input_binary_file
     test_sink(type, prop, construct_payload(
         file_name, use_json), use_json)
@@ -186,7 +186,7 @@ def test_jdbc_sink(input_file, input_binary_file, use_json):
 def test_elasticsearch_sink(file_name, use_json):
     prop = {"url": "http://127.0.0.1:9200",
             "index": "test"}
-    type = "elasticsearch"
+    type = "elasticsearch-7"
     test_sink(type, prop, construct_payload(
         file_name, use_json), use_json)
 
