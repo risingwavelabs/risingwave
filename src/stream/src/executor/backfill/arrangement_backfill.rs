@@ -382,6 +382,7 @@ where
                 );
 
                 // Persist state on barrier
+                // FIXME: This should persist state per vnode.
                 persist_state(
                     barrier.epoch,
                     &mut self.state_table,
