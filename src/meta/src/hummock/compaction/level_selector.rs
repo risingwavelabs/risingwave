@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 //  Copyright 2023 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,6 +16,7 @@ use std::collections::HashMap;
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableOption;
@@ -224,11 +224,12 @@ impl DynamicLevelSelectorCore {
                 let total_size = levels.l0.as_ref().unwrap().total_file_size
                     - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
                 let base_level_size = levels.get_level(ctx.base_level).total_file_size;
+                let base_level_sst_count =
+                    levels.get_level(ctx.base_level).table_infos.len() as u64;
 
                 // size limit
                 let non_overlapping_size_score = total_size * SCORE_BASE
                     / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
-
                 // level count limit
                 let non_overlapping_level_count = levels
                     .l0
@@ -237,10 +238,12 @@ impl DynamicLevelSelectorCore {
                     .sub_levels
                     .iter()
                     .filter(|level| level.level_type() == LevelType::Nonoverlapping)
-                    .count();
-
-                let non_overlapping_level_score = non_overlapping_level_count as u64 * SCORE_BASE
-                    / self.config.level0_sub_level_compact_level_count as u64;
+                    .count() as u64;
+                let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
+                    / std::cmp::max(
+                        base_level_sst_count / 16,
+                        self.config.level0_sub_level_compact_level_count as u64,
+                    );
 
                 std::cmp::max(non_overlapping_size_score, non_overlapping_level_score)
             };

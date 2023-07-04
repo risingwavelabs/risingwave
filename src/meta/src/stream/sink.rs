@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use itertools::Itertools;
+use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_connector::sink::kafka::KAFKA_SINK;
-use risingwave_connector::sink::{SinkConfig, SinkImpl, DOWNSTREAM_SINK_KEY};
+use risingwave_connector::sink::{build_sink, Sink, SinkConfig, DOWNSTREAM_SINK_KEY};
 use risingwave_pb::catalog::PbSink;
 
 use crate::{MetaError, MetaResult};
@@ -33,7 +35,15 @@ pub async fn validate_sink(
     let sink_config = SinkConfig::from_hashmap(properties)
         .map_err(|err| MetaError::from(anyhow!(err.to_string())))?;
 
-    SinkImpl::validate(sink_config, sink_catalog, connector_rpc_endpoint)
-        .await
-        .map_err(|err| MetaError::from(anyhow!(err.to_string())))
+    let sink = build_sink(
+        sink_config,
+        &sink_catalog.visible_columns().cloned().collect_vec(),
+        sink_catalog.downstream_pk_indices(),
+        sink_catalog.sink_type,
+        sink_catalog.id,
+    )?;
+
+    dispatch_sink!(sink, sink, {
+        Ok(sink.validate(connector_rpc_endpoint).await?)
+    })
 }

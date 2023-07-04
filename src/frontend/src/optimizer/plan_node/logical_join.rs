@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::max;
 use std::collections::HashMap;
 
 use fixedbitset::FixedBitSet;
@@ -360,19 +359,24 @@ impl LogicalJoin {
         let order_key = table_desc.order_column_indices();
         let dist_key = table_desc.distribution_key.clone();
         // The at least prefix of order key that contains distribution key.
-        let at_least_prefix_len = {
-            let mut max_pos = 0;
-            for d in dist_key {
-                max_pos = max(
-                    max_pos,
-                    order_key
-                        .iter()
-                        .position(|&x| x == d)
-                        .expect("dist_key must in order_key"),
-                );
-            }
-            max_pos + 1
-        };
+        let mut dist_key_in_order_key_pos = vec![];
+        for d in dist_key {
+            let pos = order_key
+                .iter()
+                .position(|&x| x == d)
+                .expect("dist_key must in order_key");
+            dist_key_in_order_key_pos.push(pos);
+        }
+        // The at least prefix of order key that contains distribution key.
+        let at_least_prefix_len = dist_key_in_order_key_pos
+            .iter()
+            .max()
+            .map_or(0, |pos| pos + 1);
+
+        // Distributed lookup join can't support lookup table with a singleton distribution.
+        if at_least_prefix_len == 0 {
+            return None;
+        }
 
         // Reorder the join equal predicate to match the order key.
         let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);

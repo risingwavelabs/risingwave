@@ -161,17 +161,37 @@ impl_plan_tree_node_for_unary! { BatchLookupJoin }
 
 impl ToDistributedBatch for BatchLookupJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
+        // Align left distribution keys with the right table.
+        let mut exchange_dist_keys = vec![];
+        let left_eq_indexes = self.eq_join_predicate.left_eq_indexes();
+        let right_table_desc = self.right_table_desc();
+        for dist_col_index in &right_table_desc.distribution_key {
+            let dist_col_id = right_table_desc.columns[*dist_col_index].column_id;
+            let output_pos = self
+                .right_output_column_ids
+                .iter()
+                .position(|p| *p == dist_col_id)
+                .unwrap();
+            let dist_in_eq_indexes = self
+                .eq_join_predicate
+                .right_eq_indexes()
+                .iter()
+                .position(|col| *col == output_pos)
+                .unwrap();
+            assert!(dist_in_eq_indexes < self.lookup_prefix_len);
+            exchange_dist_keys.push(left_eq_indexes[dist_in_eq_indexes]);
+        }
+
+        assert!(!exchange_dist_keys.is_empty());
+
         let input = self.input().to_distributed_with_required(
             &Order::any(),
             &RequiredDist::PhysicalDist(Distribution::UpstreamHashShard(
-                self.eq_join_predicate
-                    .left_eq_indexes()
-                    .into_iter()
-                    .take(self.lookup_prefix_len)
-                    .collect(),
+                exchange_dist_keys,
                 self.right_table_desc.table_id,
             )),
         )?;
+
         Ok(self.clone_with_distributed_lookup(input, true).into())
     }
 }
