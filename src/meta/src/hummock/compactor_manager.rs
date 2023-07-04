@@ -168,7 +168,6 @@ impl CompactorManagerInner {
     /// Only used for unit test.
     pub fn for_test() -> Self {
         Self {
-            // policy: RwLock::new(Box::new(RoundRobinPolicy::new())),
             task_expiry_seconds: 1,
             task_heartbeats: Default::default(),
             compactor_pending_io_counts: Default::default(),
@@ -184,12 +183,20 @@ impl CompactorManagerInner {
 
         use rand::Rng;
         let rand_index = rand::thread_rng().gen_range(0..self.compactors.len());
-        let context_id = self.compactors[rand_index];
 
-        let compactor = self.compactor_map.get(&context_id).unwrap().clone();
-        let pending_pull_task_count = *self.compactor_pending_io_counts.get(&context_id).unwrap();
+        for context_id in self.compactors[rand_index..]
+            .iter()
+            .chain(self.compactors[..rand_index].iter())
+        {
+            if let Some(pending_pull_task_count) = self.compactor_pending_io_counts.get(context_id)
+            {
+                // Avoid picking compactors that have not yet executed heartbeat
+                let compactor = self.compactor_map.get(context_id).unwrap().clone();
+                return Some((compactor, *pending_pull_task_count));
+            }
+        }
 
-        Some((compactor, pending_pull_task_count))
+        None
     }
 
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {

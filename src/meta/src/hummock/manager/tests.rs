@@ -1052,6 +1052,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::CompactTaskProgress;
 
+    use crate::hummock::compaction_scheduler::ScheduleStatus;
     use crate::hummock::HummockManager;
     let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
