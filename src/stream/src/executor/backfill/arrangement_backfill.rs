@@ -21,6 +21,7 @@ use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::OwnedRow;
@@ -317,76 +318,78 @@ where
                 }
 
                 // Process barrier
-                // Each time we break out of the backfill_stream loop,
-                // it is typically due to barrier (except the first time).
-                // So we should immediately process barrier if there's one pending.
-                if let Some(barrier) = pending_barrier.clone() {
-                    let upstream_chunk_buffer_is_empty = upstream_chunk_buffer.is_empty();
-                    for chunk in upstream_chunk_buffer.drain(..) {
-                        cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
-                        // Flush downstream.
-                        // If no current_pos, means no snapshot processed yet.
-                        // Also means we don't need propagate any updates <= current_pos.
-                        if let Some(_current_pos) = &current_pos {
-                            yield Message::Chunk(mapping_chunk(
-                                mark_chunk_ref_by_vnode(
-                                    &chunk,
-                                    &current_pos_map,
-                                    &pk_in_output_indices,
-                                    &pk_order,
-                                ),
-                                &self.output_indices,
-                            ));
-                        }
-                        // Replicate
-                        upstream_table.write_chunk(chunk);
+                // When we break out of inner backfill_stream loop, it means we have a barrier.
+                // If there are no updates and there are no snapshots left,
+                // we already finished backfill and should have exited the outer backfill loop.
+                let barrier = match pending_barrier.take() {
+                    Some(barrier) => barrier,
+                    None => bail!("BUG: current_backfill loop exited without a barrier"),
+                };
+                let upstream_chunk_buffer_is_empty = upstream_chunk_buffer.is_empty();
+                for chunk in upstream_chunk_buffer.drain(..) {
+                    cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
+                    // Flush downstream.
+                    // If no current_pos, means no snapshot processed yet.
+                    // Also means we don't need propagate any updates <= current_pos.
+                    if let Some(_current_pos) = &current_pos {
+                        yield Message::Chunk(mapping_chunk(
+                            mark_chunk_ref_by_vnode(
+                                &chunk,
+                                &current_pos_map,
+                                &pk_in_output_indices,
+                                &pk_order,
+                            ),
+                            &self.output_indices,
+                        ));
                     }
-                    if upstream_chunk_buffer_is_empty {
-                        upstream_table.commit_no_data_expected(barrier.epoch)
-                    } else {
-                        upstream_table.commit(barrier.epoch).await?;
-                    }
-
-                    // TODO(kwannoel): use different counters, otherwise both
-                    // backfill + arrangement backfill executors can't co-exist in same cluster.
-                    self.metrics
-                        .backfill_snapshot_read_row_count
-                        .with_label_values(&[
-                            upstream_table_id.to_string().as_str(),
-                            self.actor_id.to_string().as_str(),
-                        ])
-                        .inc_by(cur_barrier_snapshot_processed_rows);
-
-                    self.metrics
-                        .backfill_upstream_output_row_count
-                        .with_label_values(&[
-                            upstream_table_id.to_string().as_str(),
-                            self.actor_id.to_string().as_str(),
-                        ])
-                        .inc_by(cur_barrier_upstream_processed_rows);
-
-                    // Update snapshot read epoch.
-                    snapshot_read_epoch = barrier.epoch.prev;
-
-                    self.progress.update(
-                        barrier.epoch.curr,
-                        snapshot_read_epoch,
-                        total_snapshot_processed_rows,
-                    );
-
-                    // Persist state on barrier
-                    persist_state(
-                        barrier.epoch,
-                        &mut self.state_table,
-                        false,
-                        &current_pos,
-                        &mut old_state,
-                        &mut current_state,
-                    )
-                    .await?;
-
-                    yield Message::Barrier(barrier);
+                    // Replicate
+                    upstream_table.write_chunk(chunk);
                 }
+                if upstream_chunk_buffer_is_empty {
+                    upstream_table.commit_no_data_expected(barrier.epoch)
+                } else {
+                    upstream_table.commit(barrier.epoch).await?;
+                }
+
+                // TODO(kwannoel): use different counters, otherwise both
+                // backfill + arrangement backfill executors can't co-exist in same cluster.
+                self.metrics
+                    .backfill_snapshot_read_row_count
+                    .with_label_values(&[
+                        upstream_table_id.to_string().as_str(),
+                        self.actor_id.to_string().as_str(),
+                    ])
+                    .inc_by(cur_barrier_snapshot_processed_rows);
+
+                self.metrics
+                    .backfill_upstream_output_row_count
+                    .with_label_values(&[
+                        upstream_table_id.to_string().as_str(),
+                        self.actor_id.to_string().as_str(),
+                    ])
+                    .inc_by(cur_barrier_upstream_processed_rows);
+
+                // Update snapshot read epoch.
+                snapshot_read_epoch = barrier.epoch.prev;
+
+                self.progress.update(
+                    barrier.epoch.curr,
+                    snapshot_read_epoch,
+                    total_snapshot_processed_rows,
+                );
+
+                // Persist state on barrier
+                persist_state(
+                    barrier.epoch,
+                    &mut self.state_table,
+                    false,
+                    &current_pos,
+                    &mut old_state,
+                    &mut current_state,
+                )
+                .await?;
+
+                yield Message::Barrier(barrier);
             }
         }
 
