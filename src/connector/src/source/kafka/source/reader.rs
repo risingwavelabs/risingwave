@@ -195,7 +195,10 @@ impl KafkaSplitReader {
             for msg in msgs {
                 let msg: BorrowedMessage<'_> = msg?;
                 let cur_offset = msg.offset();
-                bytes_current_second += msg.payload_len();
+                bytes_current_second += match &msg.payload() {
+                    None => 0,
+                    Some(payload) => payload.len(),
+                };
                 num_messages += 1;
                 if self.enable_upsert {
                     res.push(SourceMessage::from_kafka_message_upsert(&msg));
