@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-
 use std::ops::Bound;
 
 use await_tree::InstrumentAwait;
@@ -77,19 +76,6 @@ pub(crate) fn mark_chunk_ref_by_vnode(
     }
     let (columns, _) = data.into_parts();
     StreamChunk::new(ops, columns, Some(new_visibility.finish()))
-}
-
-/// Mark chunk:
-/// For each row of the chunk, forward it to downstream if its pk <= `current_pos`, otherwise
-/// ignore it. We implement it by changing the visibility bitmap.
-pub(crate) fn mark_chunk_ref(
-    chunk: &StreamChunk,
-    current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
-    pk_order: &[OrderType],
-) -> StreamChunk {
-    let chunk = chunk.clone();
-    mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
 }
 
 /// Mark chunk:

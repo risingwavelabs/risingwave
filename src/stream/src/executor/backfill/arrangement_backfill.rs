@@ -17,7 +17,7 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use either::Either;
-use futures::stream::{select_with_strategy};
+use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
@@ -31,8 +31,7 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state,
-    update_pos,
+    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state, update_pos,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -489,31 +488,6 @@ where
         // yield None;
         yield None;
         return Ok(());
-    }
-
-    // FIXME: Remove
-    #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read(
-        schema: Arc<Schema>,
-        upstream_table: &ReplicatedStateTable<S>,
-        current_pos: Option<OwnedRow>,
-    ) {
-        // FIXME(kwannoel): `let-else` pattern does not work in generator.
-        let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
-        if range_bounds.is_none() {
-            yield None;
-            return Ok(());
-        }
-        let range_bounds = range_bounds.unwrap();
-        let iter = upstream_table
-            .iter_all_with_pk_range(&range_bounds, Default::default())
-            .await?;
-        pin_mut!(iter);
-
-        #[for_await]
-        for chunk in iter_chunks(iter, &schema, CHUNK_SIZE) {
-            yield chunk?;
-        }
     }
 }
 
