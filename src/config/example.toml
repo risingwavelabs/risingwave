@@ -24,7 +24,6 @@ backend = "Mem"
 periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
 periodic_split_compact_group_interval_sec = 180
-max_compactor_task_multiplier = 2
 move_table_size_limit = 4294967296
 split_group_size_limit = 68719476736
 do_not_config_object_storage_lifecycle = false

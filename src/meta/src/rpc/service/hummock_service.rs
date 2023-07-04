@@ -232,16 +232,10 @@ where
             ));
         }
         let compactor_manager = self.hummock_manager.compactor_manager.clone();
-        let max_compactor_task_multiplier =
-            self.hummock_manager.env.opts.max_compactor_task_multiplier;
 
         let rx: tokio::sync::mpsc::Receiver<
             Result<SubscribeCompactTasksResponse, crate::MetaError>,
-        > = compactor_manager.add_compactor(
-            context_id,
-            (req.cpu_core_num * max_compactor_task_multiplier) as u64,
-            req.cpu_core_num,
-        );
+        > = compactor_manager.add_compactor(context_id, req.cpu_core_num);
 
         // Trigger compaction on all compaction groups.
         for cg_id in self.hummock_manager.compaction_group_ids().await {

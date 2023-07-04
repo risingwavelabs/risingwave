@@ -81,7 +81,7 @@ where
     {
         hummock_manager
             .compactor_manager_ref_for_test()
-            .add_compactor(context_id, u64::MAX, 16);
+            .add_compactor(context_id, 16);
         temp_compactor = true;
     }
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);

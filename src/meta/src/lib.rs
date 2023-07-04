@@ -280,7 +280,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_split_compact_group_interval_sec: config
                     .meta
                     .periodic_split_compact_group_interval_sec,
-                max_compactor_task_multiplier: config.meta.max_compactor_task_multiplier,
                 split_group_size_limit: config.meta.split_group_size_limit,
                 min_table_split_size: config.meta.move_table_size_limit,
                 table_write_throughput_threshold: config.meta.table_write_throughput_threshold,

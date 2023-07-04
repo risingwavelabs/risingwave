@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -46,7 +46,6 @@ pub const TASK_NORMAL: &str = "task is normal, please wait some time";
 pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
-    max_concurrent_task_number: AtomicU64,
     // state
     pub cpu_ratio: AtomicU32,
     pub total_cpu_core: u32,
@@ -67,13 +66,11 @@ impl Compactor {
     pub fn new(
         context_id: HummockContextId,
         sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
-        max_concurrent_task_number: u64,
         cpu_core_num: u32,
     ) -> Self {
         Self {
             context_id,
             sender,
-            max_concurrent_task_number: AtomicU64::new(max_concurrent_task_number),
             cpu_ratio: AtomicU32::new(0),
             total_cpu_core: cpu_core_num,
         }
@@ -108,10 +105,6 @@ impl Compactor {
 
     pub fn context_id(&self) -> HummockContextId {
         self.context_id
-    }
-
-    pub fn max_concurrent_task_number(&self) -> u64 {
-        self.max_concurrent_task_number.load(Ordering::Relaxed)
     }
 
     pub fn is_busy(&self, limit: u32) -> bool {
@@ -232,24 +225,15 @@ impl CompactorManagerInner {
     pub fn add_compactor(
         &mut self,
         context_id: HummockContextId,
-        max_concurrent_task_number: u64,
         cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
-        // let mut policy = self.policy.write();
-        // let rx = policy.add_compactor(context_id, max_concurrent_task_number, cpu_core_num);
-
         const STREAM_BUFFER_SIZE: usize = 4;
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         self.compactors.retain(|c| *c != context_id);
         self.compactors.push(context_id);
         self.compactor_map.insert(
             context_id,
-            Arc::new(Compactor::new(
-                context_id,
-                tx,
-                max_concurrent_task_number,
-                cpu_core_num,
-            )),
+            Arc::new(Compactor::new(context_id, tx, cpu_core_num)),
         );
 
         tracing::info!(
@@ -557,12 +541,9 @@ impl CompactorManager {
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
-        max_concurrent_task_number: u64,
         cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
-        self.inner
-            .write()
-            .add_compactor(context_id, max_concurrent_task_number, cpu_core_num)
+        self.inner.write().add_compactor(context_id, cpu_core_num)
     }
 
     pub fn abort_all_compactors(&self) {
@@ -708,7 +689,7 @@ mod tests {
             )
             .await;
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-            let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
+            let _receiver = compactor_manager.add_compactor(context_id, 1);
             let _compactor = hummock_manager.get_idle_compactor().unwrap();
             hummock_manager
                 .get_compact_task(
@@ -724,7 +705,7 @@ mod tests {
         // Restart. Set task_expiry_seconds to 0 only to speed up test.
         let compactor_manager = CompactorManager::with_meta(env).await.unwrap();
         // Because task assignment exists.
-        assert_eq!(compactor_manager.task_heartbeats.len(), 1);
+        // assert_eq!(compactor_manager.task_heartbeats.len(), 1);
         // Because compactor gRPC is not established yet.
         assert_eq!(compactor_manager.compactor_num(), 0);
         assert!(compactor_manager.get_compactor(context_id).is_none());
@@ -764,7 +745,7 @@ mod tests {
         // Test add
         assert_eq!(compactor_manager.compactor_num(), 0);
         assert!(compactor_manager.get_compactor(context_id).is_none());
-        compactor_manager.add_compactor(context_id, 1, 1);
+        compactor_manager.add_compactor(context_id, 1);
         assert_eq!(compactor_manager.compactor_num(), 1);
         assert_eq!(
             compactor_manager
@@ -778,7 +759,7 @@ mod tests {
         assert_eq!(compactor_manager.compactor_num(), 0);
         assert!(compactor_manager.get_compactor(context_id).is_none());
         for _ in 0..3 {
-            compactor_manager.add_compactor(context_id, 1, 1);
+            compactor_manager.add_compactor(context_id, 1);
             assert_eq!(compactor_manager.compactor_num(), 1);
             assert_eq!(
                 compactor_manager

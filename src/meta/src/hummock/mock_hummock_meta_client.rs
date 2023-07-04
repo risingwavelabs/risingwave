@@ -212,7 +212,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         let _ = self
             .hummock_manager
             .compactor_manager_ref_for_test()
-            .add_compactor(context_id, 8, 8);
+            .add_compactor(context_id, 8);
         self.compact_context_id.store(context_id, Ordering::Release);
 
         let hummock_manager_compact = self.hummock_manager.clone();

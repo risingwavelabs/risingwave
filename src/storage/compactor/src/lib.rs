@@ -79,11 +79,6 @@ struct OverrideConfigOpts {
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,
 
-    /// It's a hint used by meta node.
-    #[clap(long, env = "RW_MAX_CONCURRENT_TASK_NUMBER")]
-    #[override_opts(path = storage.max_concurrent_compaction_task_number)]
-    pub max_concurrent_task_number: Option<u64>,
-
     /// Enable async stack tracing through `await-tree` for risectl.
     #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]

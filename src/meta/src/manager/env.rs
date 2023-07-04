@@ -127,9 +127,6 @@ pub struct MetaOpts {
     /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
-    ///  compactor task limit = max_compactor_task_multiplier * cpu_core_num
-    pub max_compactor_task_multiplier: u32,
-
     /// Schedule split_compaction_group for all compaction groups with this interval.
     pub periodic_split_compact_group_interval_sec: u64,
 
@@ -174,7 +171,6 @@ impl MetaOpts {
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_split_compact_group_interval_sec: 60,
-            max_compactor_task_multiplier: 2,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
             min_table_split_size: 2 * 1024 * 1024 * 1024,
             table_write_throughput_threshold: 128 * 1024 * 1024,
