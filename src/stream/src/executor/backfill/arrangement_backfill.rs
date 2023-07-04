@@ -294,7 +294,7 @@ where
 
                                         break 'backfill_loop;
                                     }
-                                    Some(chunk) => {
+                                    Some((_, chunk)) => {
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
@@ -456,7 +456,7 @@ where
     /// NOTE(kwannoel): We interleave at chunk per vnode level rather than rows.
     /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
     /// vnode.
-    #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
+    #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         schema: Arc<Schema>,
         upstream_table: &'a ReplicatedStateTable<S>,
@@ -475,7 +475,8 @@ where
                 .await?;
             // TODO: Is there some way to avoid double-pin here?
             let vnode_row_iter = Box::pin(vnode_row_iter);
-            let vnode_chunk_iter = iter_chunks(vnode_row_iter, &schema, CHUNK_SIZE);
+            let vnode_chunk_iter = iter_chunks(vnode_row_iter, &schema, CHUNK_SIZE)
+                .map_ok(move |chunk_opt| chunk_opt.map(|chunk| (vnode, chunk)));
             // TODO: Is there some way to avoid double-pin
             streams.push(Box::pin(vnode_chunk_iter));
         }
