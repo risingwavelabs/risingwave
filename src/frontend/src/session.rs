@@ -340,6 +340,9 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's catalog writer.
+    ///
+    /// This method is intentionally private, and a write guard is required for the caller to
+    /// prove that the write operations are permitted in the current transaction.
     fn catalog_writer(&self, _guard: transaction::WriteGuard) -> &dyn CatalogWriter {
         &*self.catalog_writer
     }
@@ -350,6 +353,9 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's user info writer.
+    ///
+    /// This method is intentionally private, and a write guard is required for the caller to
+    /// prove that the write operations are permitted in the current transaction.
     fn user_info_writer(&self, _guard: transaction::WriteGuard) -> &dyn UserInfoWriter {
         &*self.user_info_writer
     }
@@ -437,6 +443,9 @@ pub struct SessionImpl {
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
 
+    /// Transaction state.
+    // TODO: get rid of the `Mutex` here as a workaround if the `Send` requirement of
+    // async functions, there should actually be no contention.
     txn: Arc<Mutex<transaction::State>>,
 
     /// Query cancel flag.

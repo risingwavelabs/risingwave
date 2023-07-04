@@ -311,6 +311,7 @@ async fn execute(
         ..
     } = plan_fragmenter_result;
 
+    // Acquire the write guard for DML statements.
     match stmt_type {
         StatementType::INSERT
         | StatementType::INSERT_RETURNING
@@ -462,6 +463,7 @@ async fn distribute_execute(
 
 async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQueryStream> {
     let front_env = session.env();
+    // TODO: if there's no table scan, we don't need to acquire snapshot.
     let snapshot = session.pinned_snapshot(query.query_id()).await?;
 
     // TODO: Passing sql here

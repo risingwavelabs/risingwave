@@ -25,6 +25,7 @@ macro_rules! not_impl {
     };
 }
 
+#[expect(clippy::unused_async)]
 pub async fn handle_begin(
     handler_args: HandlerArgs,
     stmt_type: StatementType,
@@ -55,9 +56,11 @@ pub async fn handle_begin(
 
     session.txn_begin_explicit(access_mode);
 
-    Ok(RwPgResponse::empty_result(stmt_type).into())
+    // TODO: pgwire integration of the transaction state
+    Ok(RwPgResponse::empty_result(stmt_type))
 }
 
+#[expect(clippy::unused_async)]
 pub async fn handle_commit(
     handler_args: HandlerArgs,
     stmt_type: StatementType,
@@ -71,5 +74,6 @@ pub async fn handle_commit(
 
     session.txn_end_explicit();
 
-    Ok(RwPgResponse::empty_result(stmt_type).into())
+    // TODO: pgwire integration of the transaction state
+    Ok(RwPgResponse::empty_result(stmt_type))
 }

@@ -24,41 +24,76 @@ use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::{PinnedHummockSnapshot, PinnedHummockSnapshotRef, SchedulerResult};
 use crate::user::user_service::UserInfoWriter;
 
+/// Transaction access mode.
+// TODO: WriteOnly, DdlOnly
 pub enum AccessMode {
+    /// Read-write transaction. All operations are permitted.
+    ///
+    /// Since we cannot handle "read your own writes" in the current implementation, this mode is
+    /// only used for single-statement implicit transactions.
     ReadWrite,
+
+    /// Read-only transaction. Only read operations are permitted.
+    ///
+    /// All reads (except for the system table) are performed on a consistent snapshot acquired at
+    /// the first read operation in the transaction.
     ReadOnly,
-    // WriteOnly,
-    // DdlOnly,
 }
 
+/// Transaction context.
 pub struct Context {
+    /// The access mode of the transaction, defined by the `START TRANSACTION` and the `SET
+    /// TRANSACTION` statements
     access_mode: AccessMode,
+
+    /// The snapshot of the transaction, acquired lazily at the first read operation in the
+    /// transaction.
     snapshot: Arc<OnceCell<PinnedHummockSnapshotRef>>,
 }
 
+/// Transaction state.
+// TODO: failed state
 #[derive(Default)]
 pub enum State {
+    /// Initial state, used as a placeholder.
     #[default]
     Initial,
+
+    /// Implicit single-statement transaction.
+    ///
+    /// Before handling each statement, the session always implicitly starts a transaction with
+    /// this state. The state will be reset to `Initial` after the statement is handled unless
+    /// the user explicitly starts a transaction with `START TRANSACTION`.
+    // TODO: support implicit multi-statement transaction, see [55.2.2.1] Multiple Statements In A
+    // Simple Query @ https://www.postgresql.org/docs/15/protocol-flow.html#id-1.10.6.7.4
     Implicit(Context),
+
+    /// Explicit transaction started with `START TRANSACTION`.
     Explicit(Context),
 }
 
-pub struct WriteGuard {
-    _private: (),
+/// A guard that auto commits an implicit transaction when dropped. Do nothing if an explicit
+/// transaction is in progress.
+#[must_use]
+pub struct ImplicitAutoCommitGuard(Weak<Mutex<State>>);
+
+impl Drop for ImplicitAutoCommitGuard {
+    fn drop(&mut self) {
+        if let Some(txn) = self.0.upgrade() {
+            let mut txn = txn.lock();
+            if let State::Implicit(_) = &*txn {
+                *txn = State::Initial;
+            }
+        }
+    }
 }
 
 impl SessionImpl {
-    fn txn_ctx(&self) -> MappedMutexGuard<'_, Context> {
-        MutexGuard::map(self.txn.lock(), |txn| match txn {
-            State::Initial => unreachable!(),
-            State::Implicit(ctx) => ctx,
-            State::Explicit(ctx) => ctx,
-        })
-    }
-
-    #[must_use]
-    pub fn txn_begin_impicit(&self) -> impl Drop + Send + Sync + 'static {
+    /// Starts an implicit transaction if there's no explicit transaction in progress. Called at the
+    /// beginning of handling each statement.
+    ///
+    /// Returns a guard that auto commits the implicit transaction when dropped.
+    pub fn txn_begin_implicit(&self) -> ImplicitAutoCommitGuard {
         let mut txn = self.txn.lock();
 
         match &mut *txn {
@@ -69,29 +104,20 @@ impl SessionImpl {
                 })
             }
             State::Implicit(_) => unreachable!(),
-            State::Explicit(_) => {}
+            State::Explicit(_) => {} /* do nothing since an explicit transaction is already in
+                                      * progress */
         }
 
-        struct ResetGuard(Weak<Mutex<State>>);
-
-        impl Drop for ResetGuard {
-            fn drop(&mut self) {
-                if let Some(txn) = self.0.upgrade() {
-                    let mut txn = txn.lock();
-                    if let State::Implicit(_) = &mut *txn {
-                        *txn = State::Initial;
-                    }
-                }
-            }
-        }
-
-        ResetGuard(Arc::downgrade(&self.txn))
+        ImplicitAutoCommitGuard(Arc::downgrade(&self.txn))
     }
 
+    /// Starts an explicit transaction with the specified access mode from `START TRANSACTION`.
     pub fn txn_begin_explicit(&self, access_mode: AccessMode) {
         let mut txn = self.txn.lock();
 
         match &mut *txn {
+            // Since an implicit transaction is always started, we only need to upgrade it to an
+            // explicit transaction.
             State::Initial => unreachable!(),
             State::Implicit(ctx) => {
                 *txn = State::Explicit(Context {
@@ -106,6 +132,8 @@ impl SessionImpl {
         }
     }
 
+    /// Ends an explicit transaction.
+    // TODO: handle failed transaction and rollback
     pub fn txn_end_explicit(&self) {
         let mut txn = self.txn.lock();
 
@@ -119,9 +147,21 @@ impl SessionImpl {
         }
     }
 
+    /// Returns the transaction context.
+    fn txn_ctx(&self) -> MappedMutexGuard<'_, Context> {
+        MutexGuard::map(self.txn.lock(), |txn| match txn {
+            State::Initial => unreachable!(),
+            State::Implicit(ctx) => ctx,
+            State::Explicit(ctx) => ctx,
+        })
+    }
+
+    /// Acquires and pins a snapshot for the current transaction.
+    ///
+    /// If a snapshot is already acquired, returns it directly.
     pub async fn pinned_snapshot(
         &self,
-        query_id: &QueryId,
+        query_id: &QueryId, // TODO: use transaction id
     ) -> SchedulerResult<PinnedHummockSnapshotRef> {
         let snapshot = self.txn_ctx().snapshot.clone();
 
@@ -133,7 +173,6 @@ impl SessionImpl {
                     PinnedHummockSnapshot::Other(query_epoch)
                 } else {
                     // Acquire hummock snapshot for execution.
-                    // TODO: if there's no table scan, we don't need to acquire snapshot.
                     let is_barrier_read = self.is_barrier_read();
                     let hummock_snapshot_manager = self.env().hummock_snapshot_manager();
                     let pinned_snapshot = hummock_snapshot_manager.acquire(query_id).await?;
@@ -145,7 +184,19 @@ impl SessionImpl {
             .await
             .cloned()
     }
+}
 
+/// A guard that permits write operations in the current transaction.
+///
+/// Currently, this is required for [`CatalogWriter`] (including all DDLs), [`UserInfoWriter`]
+/// (including `USER` and `GRANT`), and DML operations.
+pub struct WriteGuard {
+    _private: (),
+}
+
+impl SessionImpl {
+    /// Returns a [`WriteGuard`], or an error if write operations are not permitted in the current
+    /// transaction.
     pub fn txn_write_guard(&self) -> Result<WriteGuard> {
         let permitted = match self.txn_ctx().access_mode {
             AccessMode::ReadWrite => true,
@@ -161,11 +212,13 @@ impl SessionImpl {
         }
     }
 
+    /// Returns the catalog writer, if write operations are permitted in the current transaction.
     pub fn catalog_writer(&self) -> Result<&dyn CatalogWriter> {
         self.txn_write_guard()
             .map(|guard| self.env().catalog_writer(guard))
     }
 
+    /// Returns the user info writer, if write operations are permitted in the current transaction.
     pub fn user_info_writer(&self) -> Result<&dyn UserInfoWriter> {
         self.txn_write_guard()
             .map(|guard| self.env().user_info_writer(guard))
