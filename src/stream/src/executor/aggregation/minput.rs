@@ -241,15 +241,7 @@ mod tests {
         col_mapping: &StateTableColumnMapping,
     ) -> StreamChunk {
         let chunk = StreamChunk::from_pretty(pretty);
-        table.write_chunk(StreamChunk::new(
-            chunk.ops().to_vec(),
-            col_mapping
-                .upstream_columns()
-                .iter()
-                .map(|col_idx| chunk.columns()[*col_idx].clone())
-                .collect(),
-            chunk.visibility().cloned(),
-        ));
+        table.write_chunk(chunk.clone().project(col_mapping.upstream_columns()));
         chunk
     }
 

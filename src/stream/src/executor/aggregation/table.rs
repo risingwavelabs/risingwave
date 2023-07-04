@@ -88,7 +88,7 @@ impl<S: StateStore> TableState<S> {
 
     /// Apply a chunk of data to the state.
     pub fn apply_chunk(&mut self, chunk: &StreamChunk) -> StreamExecutorResult<()> {
-        let chunk = chunk.clone().reorder_columns(&self.arg_indices);
+        let chunk = chunk.clone().project(&self.arg_indices);
         self.inner.apply_batch(&chunk)
     }
 

@@ -60,7 +60,7 @@ impl StatelessSimpleAggExecutor {
     ) -> StreamExecutorResult<()> {
         for (agg_call, state) in agg_calls.iter().zip_eq_fast(aggregators) {
             let vis = agg_call_filter_res(ctx, identity, agg_call, chunk).await?;
-            let mut input = chunk.clone().reorder_columns(agg_call.args.val_indices());
+            let mut input = chunk.clone().project(agg_call.args.val_indices());
             input.set_vis(vis);
             state.update(&input).await?;
         }

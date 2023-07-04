@@ -44,7 +44,7 @@ impl Aggregator for Projection {
     ) -> Result<()> {
         self.inner
             .update_multi(
-                &input.clone().reorder_columns(&self.indices),
+                &input.clone().project(&self.indices),
                 start_row_id,
                 end_row_id,
             )

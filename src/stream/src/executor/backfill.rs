@@ -509,7 +509,7 @@ where
 
     /// Builds a new stream chunk with `output_indices`.
     fn mapping_chunk(chunk: StreamChunk, output_indices: &[usize]) -> StreamChunk {
-        chunk.reorder_columns(output_indices)
+        chunk.project(output_indices)
     }
 
     fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {

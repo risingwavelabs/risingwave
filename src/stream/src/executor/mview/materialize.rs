@@ -309,14 +309,14 @@ impl MaterializeBuffer {
         let (data_chunk, ops) = stream_chunk.into_parts();
 
         let value_chunk = if let Some(ref value_indices) = value_indices {
-            data_chunk.clone().reorder_columns(value_indices)
+            data_chunk.clone().project(value_indices)
         } else {
             data_chunk.clone()
         };
         let values = value_chunk.serialize();
 
         let mut pks = vec![vec![]; data_chunk.capacity()];
-        let key_chunk = data_chunk.reorder_columns(pk_indices);
+        let key_chunk = data_chunk.project(pk_indices);
         key_chunk
             .rows_with_holes()
             .zip_eq_fast(pks.iter_mut())
@@ -331,7 +331,9 @@ impl MaterializeBuffer {
         let mut buffer = MaterializeBuffer::new();
         match vis {
             Vis::Bitmap(vis) => {
-                for ((op, key, value), vis) in izip!(ops.iter(), pks, values).zip_eq_debug(vis.iter()) {
+                for ((op, key, value), vis) in
+                    izip!(ops.iter(), pks, values).zip_eq_debug(vis.iter())
+                {
                     if vis {
                         match op {
                             Op::Insert | Op::UpdateInsert => buffer.insert(key, value),

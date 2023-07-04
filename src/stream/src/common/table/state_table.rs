@@ -722,13 +722,13 @@ where
         );
 
         let value_chunk = if let Some(ref value_indices) = self.value_indices {
-            chunk.clone().reorder_columns(value_indices)
+            chunk.clone().project(value_indices)
         } else {
             chunk.clone()
         };
         let values = value_chunk.serialize_with(&self.row_serde);
 
-        let key_chunk = chunk.reorder_columns(self.pk_indices());
+        let key_chunk = chunk.project(self.pk_indices());
         let vnode_and_pks = key_chunk
             .rows_with_holes()
             .zip_eq_fast(vnodes.iter())

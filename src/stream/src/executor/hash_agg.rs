@@ -349,7 +349,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .zip_eq_fast(call_visibilities.iter())
         {
             if let AggStateStorage::MaterializedInput { table, mapping } = storage {
-                let mut chunk = chunk.clone().reorder_columns(mapping.upstream_columns());
+                let mut chunk = chunk.clone().project(mapping.upstream_columns());
                 chunk.set_vis(visibility.clone());
                 table.write_chunk(chunk);
             }

@@ -479,7 +479,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
-            let chunk = chunk.reorder_columns(&self.output_indices);
+            let chunk = chunk.project(&self.output_indices);
             self.outputs[self.cur].send(Message::Chunk(chunk)).await?;
             self.cur += 1;
             self.cur %= self.outputs.len();
@@ -615,7 +615,7 @@ impl Dispatcher for HashDataDispatcher {
             let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
             // Apply output indices after calculating the vnode.
-            let chunk = chunk.reorder_columns(&self.output_indices);
+            let chunk = chunk.project(&self.output_indices);
 
             for ((vnode, &op), visible) in vnodes
                 .iter()
@@ -726,7 +726,7 @@ impl Dispatcher for BroadcastDispatcher {
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
-            let chunk = chunk.reorder_columns(&self.output_indices);
+            let chunk = chunk.project(&self.output_indices);
             for output in self.outputs.values_mut() {
                 output.send(Message::Chunk(chunk.clone())).await?;
             }
@@ -835,7 +835,7 @@ impl Dispatcher for SimpleDispatcher {
                 .exactly_one()
                 .expect("expect exactly one output");
 
-            let chunk = chunk.reorder_columns(&self.output_indices);
+            let chunk = chunk.project(&self.output_indices);
             output.send(Message::Chunk(chunk)).await
         }
     }

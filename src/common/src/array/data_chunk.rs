@@ -427,16 +427,17 @@ impl DataChunk {
         }
     }
 
-    /// Reorder (and possibly remove) columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
-    /// the chunk contains column `[a, b, c]`, then the output will be
-    /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`
+    /// Reorder (and possibly remove) columns.
+    ///
+    /// e.g. if `indices` is `[2, 1, 0]`, and the chunk contains column `[a, b, c]`, then the output
+    /// will be `[c, b, a]`. If `indices` is [2, 0], then the output will be `[c, a]`.
     /// If the input mapping is identity mapping, no reorder will be performed.
-    pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
-        if column_mapping.iter().copied().eq(0..self.columns().len()) {
+    pub fn project(self, indices: &[usize]) -> Self {
+        if indices.iter().copied().eq(0..self.columns().len()) {
             return self;
         }
-        let mut new_columns = Vec::with_capacity(column_mapping.len());
-        for &idx in column_mapping {
+        let mut new_columns = Vec::with_capacity(indices.len());
+        for &idx in indices {
             new_columns.push(self.columns[idx].clone());
         }
         Self {
@@ -1027,7 +1028,7 @@ mod tests {
              6 9 3",
         );
         assert_eq!(
-            chunk.clone().reorder_columns(&[2, 1, 0]),
+            chunk.clone().project(&[2, 1, 0]),
             DataChunk::from_pretty(
                 "I I I
                  1 5 2
@@ -1036,7 +1037,7 @@ mod tests {
             )
         );
         assert_eq!(
-            chunk.clone().reorder_columns(&[2, 0]),
+            chunk.clone().project(&[2, 0]),
             DataChunk::from_pretty(
                 "I I
                  1 2
@@ -1044,8 +1045,8 @@ mod tests {
                  3 6",
             )
         );
-        assert_eq!(chunk.clone().reorder_columns(&[0, 1, 2]), chunk);
-        assert_eq!(chunk.reorder_columns(&[]).cardinality(), 3);
+        assert_eq!(chunk.clone().project(&[0, 1, 2]), chunk);
+        assert_eq!(chunk.project(&[]).cardinality(), 3);
     }
 
     #[test]
