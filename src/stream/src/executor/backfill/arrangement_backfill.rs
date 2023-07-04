@@ -346,10 +346,10 @@ where
                         yield Message::Chunk(mapping_chunk(
                             mark_chunk_ref_by_vnode(
                                 &chunk,
-                                &current_pos_map,
+                                &backfill_state,
                                 &pk_in_output_indices,
                                 &pk_order,
-                            ),
+                            )?,
                             &self.output_indices,
                         ));
                     }
@@ -431,6 +431,7 @@ where
                     // Or snapshot was empty and we construct a placeholder state.
                     debug_assert_ne!(current_pos, None);
 
+                    // FIXME
                     persist_state(
                         barrier.epoch,
                         &mut self.state_table,
@@ -492,13 +493,7 @@ where
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
         for vnode in upstream_table.vnodes().iter_vnodes() {
-            let backfill_progress = match backfill_state.get_progress(&vnode) {
-                None => bail!(
-                    "Backfill progress for vnode {:#?} not found, backfill_state not initialized properly",
-                    vnode,
-                ),
-                Some(p) => p,
-            };
+            let backfill_progress = backfill_state.get_progress_infallible(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::Completed => {
                     continue;

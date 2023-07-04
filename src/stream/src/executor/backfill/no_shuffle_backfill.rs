@@ -259,6 +259,8 @@ where
                                     // upstream buffer chunk
 
                                     // Consume upstream buffer chunk
+                                    // If no current_pos, means we did not process any snapshot yet.
+                                    // In that case we can just ignore the upstream buffer chunk.
                                     if let Some(current_pos) = &current_pos {
                                         for chunk in upstream_chunk_buffer.drain(..) {
                                             cur_barrier_upstream_processed_rows +=

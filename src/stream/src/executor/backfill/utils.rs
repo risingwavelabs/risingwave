@@ -21,6 +21,7 @@ use futures::Stream;
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
@@ -56,8 +57,18 @@ impl BackfillState {
         self.inner.is_empty()
     }
 
-    pub fn get_progress(&self, vnode: &VirtualNode) -> Option<&BackfillProgressPerVnode> {
-        self.inner.get(vnode)
+    // Expects the vnode to always have progress, otherwise it will return an error.
+    pub fn get_progress_infallible(
+        &self,
+        vnode: &VirtualNode,
+    ) -> StreamExecutorResult<&BackfillProgressPerVnode> {
+        match self.inner.get(vnode) {
+            Some(p) => Ok(p),
+            None => bail!(
+                    "Backfill progress for vnode {:#?} not found, backfill_state not initialized properly",
+                    vnode,
+                ),
+        }
     }
 
     pub fn update_progress(
@@ -109,31 +120,39 @@ pub(crate) fn mark_chunk(
 /// TODO(kwannoel): We should always forward rows with status `FINISHED`.
 pub(crate) fn mark_chunk_ref_by_vnode(
     chunk: &StreamChunk,
-    current_pos_map: &HashMap<VirtualNode, OwnedRow>,
+    backfill_state: &BackfillState,
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
-) -> StreamChunk {
+) -> StreamExecutorResult<StreamChunk> {
     let chunk = chunk.clone();
     let (data, ops) = chunk.into_parts();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
     // Use project to avoid allocation.
-    for v in data.rows().map(|row| {
+    for row in data.rows() {
         // TODO(kwannoel): Is this logic correct for computing vnode?
         // I will revisit it again when arrangement_backfill is implemented e2e.
         let vnode = VirtualNode::compute_row(row, pk_in_output_indices);
-        let current_pos = current_pos_map.get(&vnode).unwrap();
-        let lhs = row.project(pk_in_output_indices);
-        let rhs = current_pos.project(pk_in_output_indices);
-        let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-        match order {
-            Ordering::Less | Ordering::Equal => true,
-            Ordering::Greater => false,
-        }
-    }) {
+        let v = match backfill_state.get_progress_infallible(&vnode)? {
+            BackfillProgressPerVnode::Completed => true,
+            BackfillProgressPerVnode::NotStarted => false,
+            BackfillProgressPerVnode::InProgress(current_pos) => {
+                let lhs = row.project(pk_in_output_indices);
+                let rhs = current_pos.project(pk_in_output_indices);
+                let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+                match order {
+                    Ordering::Less | Ordering::Equal => true,
+                    Ordering::Greater => false,
+                }
+            }
+        };
         new_visibility.append(v);
     }
     let (columns, _) = data.into_parts();
-    StreamChunk::new(ops, columns, Some(new_visibility.finish()))
+    Ok(StreamChunk::new(
+        ops,
+        columns,
+        Some(new_visibility.finish()),
+    ))
 }
 
 /// Mark chunk:
