@@ -683,15 +683,6 @@ impl Binder {
         })
     }
 
-    fn generate_except_indices_helper(except_indices: &mut HashSet<usize>, index: usize) -> Result<()> {
-        if !except_indices.insert(index) {
-            return Err(
-                ErrorCode::BindError("Duplicate entry in except list".into()).into(),
-            );
-        }
-        Ok(())
-    }
-
     fn generate_except_indices(&mut self, except: Option<Vec<Expr>>) -> Result<HashSet<usize>> {
         let mut except_indices: HashSet<usize> = HashSet::new();
         if let Some(exprs) = except {
@@ -699,17 +690,11 @@ impl Binder {
                 let bound = self.bind_expr(expr)?;
                 match bound {
                     ExprImpl::InputRef(inner) => {
-                        Self::generate_except_indices_helper(&mut except_indices, inner.index)?;
-                    }
-                    ExprImpl::FunctionCall(inner) => {
-                        for input in inner.inputs() {
-                            if let ExprImpl::InputRef(inner) = input {
-                                Self::generate_except_indices_helper(&mut except_indices, inner.index)?;
-                            }
+                        if !except_indices.insert(inner.index) {
+                            return Err(
+                                ErrorCode::BindError("Duplicate entry in except list".into()).into(),
+                            );
                         }
-                    }
-                    ExprImpl::CorrelatedInputRef(inner) => {
-                        Self::generate_except_indices_helper(&mut except_indices, inner.index())?;
                     }
                     _ => return Err(
                         ErrorCode::BindError("Only support column name in except list".into()).into(),
