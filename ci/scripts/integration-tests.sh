@@ -44,6 +44,8 @@ if [[ -n "${RW_IMAGE_VERSION+x}" ]]; then
 fi
 sed -i "s|risingwave:latest|risingwave:$rw_image_tag|g" docker/docker-compose.yml
 
+grep "risingwave:" docker/docker-compose.yml
+
 cd integration_tests/scripts
 
 echo "--- case: ${case}, format: ${format}"
