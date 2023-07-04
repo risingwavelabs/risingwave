@@ -31,9 +31,9 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::{
-    check_all_vnode_finished, compute_bounds, construct_initial_finished_state, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state, update_pos_by_vnode,
-    CurrentPosMap,
+    check_all_vnode_finished, compute_bounds, construct_initial_finished_state,
+    get_progress_per_vnode, iter_chunks, mapping_chunk, mapping_message, mark_chunk_ref_by_vnode,
+    persist_state, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState, CurrentPosMap,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -127,10 +127,16 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         self.state_table.init_epoch(first_barrier.epoch);
 
-        let is_finished = check_all_vnode_finished(&self.state_table, state_len).await?;
-        if is_finished {
+        let progress_per_vnode = get_progress_per_vnode(&self.state_table, state_len).await?;
+
+        let is_completely_finished = progress_per_vnode
+            .iter()
+            .all(|(_, p)| *p == BackfillProgressPerVnode::Completed);
+        if is_completely_finished {
             assert!(!first_barrier.is_newly_added(self.actor_id));
         }
+
+        let mut backfill_state: BackfillState = progress_per_vnode.into();
 
         // Current position of upstream_table primary key.
         // Current position is computed **per vnode**.
@@ -142,7 +148,7 @@ where
         // finished state to state store first.
         // As such we will wait for next barrier.
         let is_snapshot_empty: bool = {
-            if is_finished {
+            if is_completely_finished {
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
@@ -161,7 +167,7 @@ where
         // | t                    | t/f            | -> | f                |
         // | f                    | t              | -> | f                |
         // | f                    | f              | -> | t                |
-        let to_backfill = !is_finished && !is_snapshot_empty;
+        let to_backfill = !is_completely_finished && !is_snapshot_empty;
 
         // Current position of the upstream_table primary key.
         // `None` means it starts from the beginning.
@@ -408,7 +414,7 @@ where
         while let Some(Ok(msg)) = upstream.next().await {
             if let Some(msg) = mapping_message(msg, &self.output_indices) {
                 // If not finished then we need to update state, otherwise no need.
-                if let Message::Barrier(barrier) = &msg && !is_finished {
+                if let Message::Barrier(barrier) = &msg && !is_completely_finished {
                     // If snapshot was empty, we do not need to backfill,
                     // but we still need to persist the finished state.
                     // We currently persist it on the second barrier here rather than first.

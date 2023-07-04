@@ -41,24 +41,32 @@ pub type CurrentPosMap = HashMap<VirtualNode, OwnedRow>;
 
 pub struct BackfillState {
     /// Used to track backfill progress.
-    backfill_progress: HashMap<VirtualNode, BackfillProgressPerVnode>,
+    inner: HashMap<VirtualNode, BackfillProgressPerVnode>,
 }
 
 impl BackfillState {
     fn new() -> Self {
         Self {
-            backfill_progress: HashMap::new(),
+            inner: HashMap::new(),
         }
     }
 
     fn has_no_progress(&self) -> bool {
-        self.backfill_progress.is_empty()
+        self.inner.is_empty()
     }
 
     fn iter_backfill_progress(
         &self,
     ) -> impl Iterator<Item = (&VirtualNode, &BackfillProgressPerVnode)> {
-        self.backfill_progress.iter()
+        self.inner.iter()
+    }
+}
+
+impl From<Vec<(VirtualNode, BackfillProgressPerVnode)>> for BackfillState {
+    fn from(v: Vec<(VirtualNode, BackfillProgressPerVnode)>) -> Self {
+        Self {
+            inner: v.into_iter().collect(),
+        }
     }
 }
 
@@ -167,12 +175,12 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
 pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
     state_len: usize,
-) -> StreamExecutorResult<Vec<BackfillProgressPerVnode>> {
+) -> StreamExecutorResult<Vec<(VirtualNode, BackfillProgressPerVnode)>> {
     debug_assert!(!state_table.vnode_bitmap().is_empty());
-    let vnodes = state_table.vnodes().iter_vnodes_scalar();
+    let vnodes = state_table.vnodes().iter_vnodes();
     let mut result = Vec::with_capacity(state_table.vnodes().len());
     for vnode in vnodes {
-        let vnode_key: &[Datum] = &[Some(vnode.into())];
+        let vnode_key: &[Datum] = &[Some(vnode.to_scalar().into())];
         let state_for_vnode_key = state_table.get_row(vnode_key).await?;
 
         // original_backfill_datum_pos = (state_len - 1)
@@ -189,7 +197,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
             }
             None => BackfillProgressPerVnode::NotStarted,
         };
-        result.push(backfill_progress);
+        result.push((vnode, backfill_progress));
     }
     Ok(result)
 }
