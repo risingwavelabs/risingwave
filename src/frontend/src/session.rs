@@ -340,7 +340,7 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's catalog writer.
-    pub fn catalog_writer(&self, _guard: transaction::WriteGuard) -> &dyn CatalogWriter {
+    fn catalog_writer(&self, _guard: transaction::WriteGuard) -> &dyn CatalogWriter {
         &*self.catalog_writer
     }
 
@@ -350,7 +350,7 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's user info writer.
-    pub fn user_info_writer(&self, _guard: transaction::WriteGuard) -> &dyn UserInfoWriter {
+    fn user_info_writer(&self, _guard: transaction::WriteGuard) -> &dyn UserInfoWriter {
         &*self.user_info_writer
     }
 

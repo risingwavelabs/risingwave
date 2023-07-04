@@ -174,7 +174,7 @@ pub async fn handle(
     const IGNORE_NOTICE: &str = "Ignored temporarily. See details in https://github.com/risingwavelabs/risingwave/issues/2541";
 
     session.clear_cancel_query_flag();
-    let _guard = session.begin_impicit();
+    let _guard = session.txn_begin_impicit();
 
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
 

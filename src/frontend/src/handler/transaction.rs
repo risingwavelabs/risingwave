@@ -33,13 +33,13 @@ pub async fn handle_begin(
             Some(TransactionAccessMode::ReadOnly) => AccessMode::ReadOnly,
             Some(TransactionAccessMode::ReadWrite) => not_impl!("READ WRITE")?,
             None => {
-                session.notice_to_user("Access mode is not specified, using default READ ONLY");
+                session.notice_to_user("access mode is not specified, using default READ ONLY");
                 AccessMode::ReadOnly
             }
         }
     };
 
-    session.begin_explicit(access_mode);
+    session.txn_begin_explicit(access_mode);
 
     Ok(RwPgResponse::empty_result(stmt_type).into())
 }
@@ -55,7 +55,7 @@ pub async fn handle_commit(
         not_impl!("COMMIT AND CHAIN")?;
     }
 
-    session.end_explicit();
+    session.txn_end_explicit();
 
     Ok(RwPgResponse::empty_result(stmt_type).into())
 }

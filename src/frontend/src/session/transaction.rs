@@ -10,16 +10,13 @@ use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::{PinnedHummockSnapshot, PinnedHummockSnapshotRef, SchedulerResult};
 use crate::user::user_service::UserInfoWriter;
 
-#[derive(Default)]
 pub enum AccessMode {
-    #[default]
-    Initial,
+    ReadWrite,
     ReadOnly,
     // WriteOnly,
     // DdlOnly,
 }
 
-#[derive(Default)]
 pub struct Context {
     access_mode: AccessMode,
     snapshot: Arc<OnceCell<PinnedHummockSnapshotRef>>,
@@ -38,12 +35,25 @@ pub struct WriteGuard {
 }
 
 impl SessionImpl {
+    fn txn_ctx(&self) -> MappedMutexGuard<'_, Context> {
+        MutexGuard::map(self.txn.lock(), |txn| match txn {
+            State::Initial => unreachable!(),
+            State::Implicit(ctx) => ctx,
+            State::Explicit(ctx) => ctx,
+        })
+    }
+
     #[must_use]
-    pub fn begin_impicit(&self) -> impl Drop + Send + Sync + 'static {
+    pub fn txn_begin_impicit(&self) -> impl Drop + Send + Sync + 'static {
         let mut txn = self.txn.lock();
 
         match &mut *txn {
-            State::Initial => *txn = State::Implicit(Context::default()),
+            State::Initial => {
+                *txn = State::Implicit(Context {
+                    access_mode: AccessMode::ReadWrite,
+                    snapshot: Default::default(),
+                })
+            }
             State::Implicit(_) => unreachable!(),
             State::Explicit(_) => {}
         }
@@ -64,7 +74,7 @@ impl SessionImpl {
         ResetGuard(Arc::downgrade(&self.txn))
     }
 
-    pub fn begin_explicit(&self, access_mode: AccessMode) {
+    pub fn txn_begin_explicit(&self, access_mode: AccessMode) {
         let mut txn = self.txn.lock();
 
         match &mut *txn {
@@ -72,7 +82,7 @@ impl SessionImpl {
             State::Implicit(ctx) => {
                 *txn = State::Explicit(Context {
                     access_mode,
-                    ..std::mem::take(ctx)
+                    snapshot: ctx.snapshot.clone(),
                 })
             }
             State::Explicit(_) => {
@@ -82,7 +92,7 @@ impl SessionImpl {
         }
     }
 
-    pub fn end_explicit(&self) {
+    pub fn txn_end_explicit(&self) {
         let mut txn = self.txn.lock();
 
         match &mut *txn {
@@ -95,19 +105,11 @@ impl SessionImpl {
         }
     }
 
-    fn transaction_ctx(&self) -> MappedMutexGuard<'_, Context> {
-        MutexGuard::map(self.txn.lock(), |txn| match txn {
-            State::Initial => unreachable!(),
-            State::Implicit(ctx) => ctx,
-            State::Explicit(ctx) => ctx,
-        })
-    }
-
     pub async fn pinned_snapshot(
         &self,
         query_id: &QueryId,
     ) -> SchedulerResult<PinnedHummockSnapshotRef> {
-        let snapshot = self.transaction_ctx().snapshot.clone();
+        let snapshot = self.txn_ctx().snapshot.clone();
 
         snapshot
             .get_or_try_init(|| async move {
@@ -130,16 +132,10 @@ impl SessionImpl {
             .cloned()
     }
 
-    pub fn write_guard(&self) -> Result<WriteGuard> {
-        let txn = self.txn.lock();
-
-        let permitted = match &*txn {
-            State::Initial => unreachable!(),
-            State::Implicit(_) => true,
-            State::Explicit(ctx) => match ctx.access_mode {
-                AccessMode::Initial => unreachable!(),
-                AccessMode::ReadOnly => false,
-            },
+    pub fn txn_write_guard(&self) -> Result<WriteGuard> {
+        let permitted = match self.txn_ctx().access_mode {
+            AccessMode::ReadWrite => true,
+            AccessMode::ReadOnly => false,
         };
 
         if permitted {
@@ -152,12 +148,12 @@ impl SessionImpl {
     }
 
     pub fn catalog_writer(&self) -> Result<&dyn CatalogWriter> {
-        self.write_guard()
+        self.txn_write_guard()
             .map(|guard| self.env().catalog_writer(guard))
     }
 
     pub fn user_info_writer(&self) -> Result<&dyn UserInfoWriter> {
-        self.write_guard()
+        self.txn_write_guard()
             .map(|guard| self.env().user_info_writer(guard))
     }
 }

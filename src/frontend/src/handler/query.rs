@@ -311,6 +311,18 @@ async fn execute(
         ..
     } = plan_fragmenter_result;
 
+    match stmt_type {
+        StatementType::INSERT
+        | StatementType::INSERT_RETURNING
+        | StatementType::DELETE
+        | StatementType::DELETE_RETURNING
+        | StatementType::UPDATE
+        | StatementType::UPDATE_RETURNING => {
+            session.txn_write_guard()?;
+        }
+        _ => {}
+    }
+
     let query_start_time = Instant::now();
     let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
