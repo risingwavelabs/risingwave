@@ -34,7 +34,7 @@ use crate::sink::utils::{
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
 use crate::sink::{
-    NoSinkCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterEnv, SINK_TYPE_APPEND_ONLY,
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterEnv, SINK_TYPE_APPEND_ONLY,
     SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 
@@ -66,7 +66,7 @@ impl KinesisSink {
 
 #[async_trait::async_trait]
 impl Sink for KinesisSink {
-    type Coordinator = NoSinkCoordinator;
+    type Coordinator = DummySinkCommitCoordinator;
     type Writer = KinesisSinkWriter;
 
     async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {

@@ -300,7 +300,7 @@ impl TestCase {
         format!(
             r#"CREATE {} {}
     WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
+    ROW FORMAT {} (message = '.test.TestRecord', schema.location = 'file://"#,
             object_to_create, connector_name, connector_row_format
         )
     }
@@ -316,7 +316,7 @@ impl TestCase {
                         Self::create_connector_sql(true, connector.name, connector.row_format);
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
-                        &(sql + temp_file.path().to_str().unwrap() + "'"),
+                        &(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
@@ -342,7 +342,7 @@ impl TestCase {
                     let sql = Self::create_connector_sql(false, source.name, source.row_format);
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
-                        &(sql + temp_file.path().to_str().unwrap() + "'"),
+                        &(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,

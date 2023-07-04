@@ -3,7 +3,9 @@
 ## Tracing
 
 ### Config
-In your config file, we must disable the vacuum of the compactor.
+There is a default config file in `src/config/hummock-trace.toml`.
+
+In our config file, we must disable the vacuum of the compactor.
 ```toml
 [meta]
 # Put a very large number
@@ -17,7 +19,7 @@ Put env variables in `risedev-components.user.env`
 ```toml
 # Path of log file
 HM_TRACE_PATH=".trace/hummock.ht"
-# Runtime tracing flag. False disables tracing even it is compiled
+# Runtime tracing flag. False disables tracing even it is compiled(cfg set)
 USE_HM_TRACE=true
 ```
 It makes `risingdev` put flag `hm_trace` in env variables `RUSTFLAGS`.
@@ -33,7 +35,7 @@ We must manually enable `tokio_unstable` because extra flag sources are mutually
 For example, to start a traced playground
 
 ```
-RUSTFLAGS="--cfg hm_trace --cfg tokio_unstable" cargo run --bin risingwave playground
+RUSTFLAGS="--cfg hm_trace --cfg tokio_unstable" USE_HM_TRACE=true cargo run --bin risingwave playground
 ```
 
 ### Development
@@ -50,6 +52,11 @@ rustflags = [
 
 If we set the flag in root `Cargo.toml`, we don't need to set the env variable.
 
+You may also use `risedev` to start tracing with profile "hm-trace".
+Example:
+```
+USE_HM_TRACE=true ./risedev d hummock-trace
+```
 ## Replay
 
 ### Config
@@ -67,7 +74,7 @@ ngwave/bin/minio server --address 127.0.0.1:9301 --console-address 127
 ```
 
 
-Default storage config file, it uses `src/config/risingwave.toml`
+Default storage config file, it uses `src/config/risingwave.user.toml`
 ```
 cargo run --package risingwave_hummock_test --bin replay --
 --path <your-path-to-log-file>
