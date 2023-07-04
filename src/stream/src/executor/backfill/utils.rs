@@ -114,8 +114,6 @@ pub(crate) fn mark_chunk(
 /// For each row of the chunk, forward it to downstream if its pk <= `current_pos` for the
 /// corresponding `vnode`, otherwise ignore it.
 /// We implement it by changing the visibility bitmap.
-///
-/// TODO(kwannoel): We should always forward rows with status `FINISHED`.
 pub(crate) fn mark_chunk_ref_by_vnode(
     chunk: &StreamChunk,
     backfill_state: &BackfillState,
