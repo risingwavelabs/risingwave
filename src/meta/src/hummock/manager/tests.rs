@@ -41,7 +41,6 @@ use crate::hummock::compaction::{
     default_level_selector, CompactStatus, LevelSelector, ManualCompactionOption,
     SpaceReclaimCompactionSelector,
 };
-use crate::hummock::compaction_scheduler::ScheduleStatus;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{
@@ -922,6 +921,7 @@ async fn test_hummock_compaction_task_heartbeat() {
 
     use crate::hummock::compaction_scheduler::ScheduleStatus;
     use crate::hummock::HummockManager;
+
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_num = 2;
