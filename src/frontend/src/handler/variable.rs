@@ -14,9 +14,11 @@
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::session_config::ConfigReporter;
 use risingwave_common::system_param::is_mutable;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
@@ -39,14 +41,34 @@ pub fn handle_set(
         })
         .collect_vec();
 
+    let mut status = ParameterStatus::default();
+
+    struct Reporter<'a> {
+        status: &'a mut ParameterStatus,
+    }
+
+    impl<'a> ConfigReporter for Reporter<'a> {
+        fn report_status(&mut self, key: &str, new_val: String) {
+            if key == "APPLICATION_NAME" {
+                self.status.application_name = Some(new_val);
+            }
+        }
+    }
+
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
     // We remark that the name of session parameter is always case-insensitive.
-    handler_args
-        .session
-        .set_config(&name.real_value().to_lowercase(), string_vals)?;
+    handler_args.session.set_config_report(
+        &name.real_value().to_lowercase(),
+        string_vals,
+        Reporter {
+            status: &mut status,
+        },
+    )?;
 
-    Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
+    Ok(PgResponse::builder(StatementType::SET_VARIABLE)
+        .status(status)
+        .into())
 }
 
 pub(super) fn handle_set_time_zone(

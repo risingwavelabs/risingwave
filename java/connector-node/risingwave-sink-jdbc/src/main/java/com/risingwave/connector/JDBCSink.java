@@ -59,7 +59,8 @@ public class JDBCSink extends SinkBase {
         try {
             this.conn = DriverManager.getConnection(config.getJdbcUrl());
             this.conn.setAutoCommit(false);
-            this.pkColumnNames = getPkColumnNames(conn, config.getTableName());
+            this.pkColumnNames =
+                    getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -68,19 +69,19 @@ public class JDBCSink extends SinkBase {
         }
 
         try {
+            var schemaTableName =
+                    jdbcDialect.createSchemaTableName(
+                            config.getSchemaName(), config.getTableName());
             var upsertSql =
                     jdbcDialect.getUpsertStatement(
-                            config.getTableName(),
-                            List.of(tableSchema.getColumnNames()),
-                            pkColumnNames);
+                            schemaTableName, List.of(tableSchema.getColumnNames()), pkColumnNames);
             // MySQL and Postgres have upsert SQL
             assert (upsertSql.isPresent());
             this.upsertPreparedStmt =
                     conn.prepareStatement(upsertSql.get(), Statement.RETURN_GENERATED_KEYS);
             // upsert sink will handle DELETE events
             if (config.isUpsertSink()) {
-                var deleteSql =
-                        jdbcDialect.getDeleteStatement(config.getTableName(), pkColumnNames);
+                var deleteSql = jdbcDialect.getDeleteStatement(schemaTableName, pkColumnNames);
                 this.deletePreparedStmt =
                         conn.prepareStatement(deleteSql, Statement.RETURN_GENERATED_KEYS);
             }
@@ -92,10 +93,11 @@ public class JDBCSink extends SinkBase {
         }
     }
 
-    private static List<String> getPkColumnNames(Connection conn, String tableName) {
+    private static List<String> getPkColumnNames(
+            Connection conn, String tableName, String schemaName) {
         List<String> pkColumnNames = new ArrayList<>();
         try {
-            var pks = conn.getMetaData().getPrimaryKeys(null, null, tableName);
+            var pks = conn.getMetaData().getPrimaryKeys(null, schemaName, tableName);
             while (pks.next()) {
                 pkColumnNames.add(pks.getString(JDBC_COLUMN_NAME_KEY));
             }

@@ -211,8 +211,14 @@ message DeleteWorkerNodeResponse {
 
 // Mark CN as schedulable or as unschedulable
 message UpdateWorkerNodeSchedulabilityRequest {
-  common.HostAddress host = 1;
-  bool set_is_unschedulable = 2;
+  enum Schedulability {
+    UNSPECIFIED = 0;
+    SCHEDULABLE = 1;
+    UNSCHEDULABLE = 2;
+  }
+
+  repeated uint32 worker_ids = 1;
+  Schedulability schedulability = 2;
 }
 
 message UpdateWorkerNodeSchedulabilityResponse {
@@ -324,6 +330,7 @@ message SubscribeResponse {
     RelationGroup relation_group = 21;
     catalog.Connection connection = 22;
     FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
+    hummock.HummockVersionStats hummock_stats = 24;
   }
 }
 

@@ -3497,9 +3497,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-aws-sdk-s3"
-version = "0.2.23+0.28"
+version = "0.2.25+0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eab6f17267ffa9ab9ea0f30c11b6829690e7112745958a45dfa57fd7f74929b3"
+checksum = "84ab622f10406b583fb75af6f94811d5ae003c1197b9fbaec011ff1d323fc9b6"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -4116,9 +4116,9 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "opendal"
-version = "0.37.0"
+version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a37de9fe637d53550bf3f76d5c731f69cb6f9685ada6afd390ada98994a3f91"
+checksum = "717f47be1760a6a651f81eeba8239444a077d0d229409a016298d2b2483c408c"
 dependencies = [
  "anyhow",
  "async-compat",
@@ -4642,6 +4642,7 @@ dependencies = [
  "itertools",
  "madsim-tokio",
  "openssl",
+ "panic-message",
  "risingwave_common",
  "risingwave_sqlparser",
  "thiserror",
@@ -5786,6 +5787,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "hex",
+ "http",
  "humantime",
  "hytra",
  "itertools",
@@ -5818,6 +5820,7 @@ dependencies = [
  "rusty-fork",
  "ryu",
  "serde",
+ "serde_bytes",
  "serde_default",
  "serde_json",
  "serde_with 2.3.3",
@@ -5857,6 +5860,7 @@ name = "risingwave_common_service"
 version = "1.0.0-alpha"
 dependencies = [
  "async-trait",
+ "futures",
  "hyper",
  "madsim-tokio",
  "madsim-tonic",
@@ -6146,7 +6150,6 @@ dependencies = [
  "futures-async-stream",
  "iana-time-zone",
  "itertools",
- "lazy_static",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -6182,6 +6185,7 @@ dependencies = [
  "thiserror",
  "tokio-stream",
  "tracing",
+ "tracing-futures",
  "uuid",
  "workspace-hack",
 ]
@@ -6263,7 +6267,6 @@ dependencies = [
  "itertools",
  "jni",
  "madsim-tokio",
- "once_cell",
  "prost",
  "risingwave_common",
  "risingwave_expr",
@@ -6423,8 +6426,10 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
+ "easy-ext",
  "either",
  "futures",
+ "hyper",
  "itertools",
  "lru 0.10.0",
  "madsim-tokio",
@@ -6437,6 +6442,7 @@ dependencies = [
  "thiserror",
  "tokio-retry",
  "tokio-stream",
+ "tower",
  "tracing",
  "url",
  "workspace-hack",
@@ -6710,6 +6716,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "smallvec",
+ "spin 0.9.8",
  "static_assertions",
  "task_stats_alloc",
  "thiserror",
@@ -7075,6 +7082,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float 2.10.0",
+ "serde",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "416bda436f9aab92e02c8e10d49a15ddd339cea90b6e340fe51ed97abb548294"
+dependencies = [
  "serde",
 ]
 
@@ -8292,6 +8308,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc6b213177105856957181934e4920de57730fc69bf42c37ee5bb664d406d9e1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8302,6 +8328,8 @@ dependencies = [
  "once_cell",
  "parking_lot 0.12.1",
  "regex",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
@@ -8309,6 +8337,7 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]

@@ -217,6 +217,7 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 #[function("cast(interval) -> varchar")]
 #[function("cast(timestamp) -> varchar")]
 #[function("cast(jsonb) -> varchar")]
+#[function("cast(bytea) -> varchar")]
 #[function("cast(list) -> varchar")]
 pub fn general_to_text(elem: impl ToText, mut writer: &mut dyn Write) -> Result<()> {
     elem.write(&mut writer).unwrap();

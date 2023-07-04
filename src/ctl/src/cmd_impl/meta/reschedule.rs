@@ -232,24 +232,62 @@ pub async fn get_reschedule_plan(
     Ok(response)
 }
 
-pub async fn delete_workers(context: &CtlContext, worker_ids: Vec<u32>, yes: bool) -> Result<()> {
+pub async fn unregister_workers(
+    context: &CtlContext,
+    workers: Vec<String>,
+    yes: bool,
+    ignore_not_found: bool,
+) -> Result<()> {
     let meta_client = context.meta_client().await?;
 
     let GetClusterInfoResponse {
         worker_nodes,
         table_fragments: all_table_fragments,
         ..
-    } = meta_client.get_cluster_info().await?;
+    } = match meta_client.get_cluster_info().await {
+        Ok(info) => info,
+        Err(e) => {
+            println!("Failed to get cluster info: {}", e);
+            exit(1);
+        }
+    };
 
-    let target_worker_ids: HashSet<_> = worker_ids.into_iter().collect();
+    let worker_index_by_host: HashMap<_, _> = worker_nodes
+        .iter()
+        .map(|worker| {
+            let host = worker.get_host().expect("host should not be empty");
+            (format!("{}:{}", host.host, host.port), worker.id)
+        })
+        .collect();
+
+    let mut target_worker_ids: HashSet<_> = HashSet::new();
 
     let worker_ids: HashSet<_> = worker_nodes.iter().map(|worker| worker.id).collect();
 
-    let missed_worker_ids: HashSet<_> = target_worker_ids.difference(&worker_ids).collect();
+    for worker in workers {
+        let worker_id = worker
+            .parse::<u32>()
+            .ok()
+            .or_else(|| worker_index_by_host.get(&worker).cloned());
 
-    if !missed_worker_ids.is_empty() {
-        println!("Worker ids {:?} not found", missed_worker_ids);
-        return Err(anyhow!("worker ids not found"));
+        if let Some(worker_id) = worker_id && worker_ids.contains(&worker_id) {
+            if !target_worker_ids.insert(worker_id) {
+                println!("Warn: {} and {} are the same worker", worker, worker_id);
+            }
+        } else {
+            if ignore_not_found {
+                println!("Warn: worker {} not found, ignored", worker);
+                continue;
+            }
+
+            println!("Could not find worker {}", worker);
+            exit(1);
+        }
+    }
+
+    if target_worker_ids.is_empty() {
+        println!("No worker provided");
+        exit(1);
     }
 
     let target_workers = worker_nodes
@@ -314,8 +352,10 @@ pub async fn delete_workers(context: &CtlContext, worker_ids: Vec<u32>, yes: boo
             Some(host) => host,
         };
 
-        println!("Deleting worker #{}, address: {:?}", id, host);
-        meta_client.delete_worker_node(host).await?;
+        println!("Unregistering worker #{}, address: {:?}", id, host);
+        if let Err(e) = meta_client.delete_worker_node(host).await {
+            println!("Failed to delete worker #{}: {}", id, e);
+        };
     }
 
     println!("Done");

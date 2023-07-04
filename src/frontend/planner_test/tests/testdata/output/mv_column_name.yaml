@@ -38,6 +38,15 @@
       └─BatchExchange { order: [], dist: HashShard(t2.a) }
         └─BatchScan { table: t2, columns: [t2.a], distribution: SomeShard }
   stream_error: 'Invalid input syntax: column "a" specified more than once'
+- name: column name specified more than once
+  sql: |
+    create table t1 (a int, b int);
+    select * except (a), b from t1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t1.b, t1.b] }
+      └─BatchScan { table: t1, columns: [t1.b], distribution: SomeShard }
+  stream_error: 'Invalid input syntax: column "b" specified more than once'
 - name: expression name specified more than once
   sql: |
     create table t (a int);

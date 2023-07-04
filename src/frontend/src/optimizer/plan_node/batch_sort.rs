@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -39,19 +37,6 @@ impl BatchSort {
         let dist = input.distribution().clone();
         let base = PlanBase::new_batch(ctx, schema, dist, order);
         BatchSort { base, input }
-    }
-}
-
-impl fmt::Display for BatchSort {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchSort {{ order: {} }}",
-            OrderDisplay {
-                order: self.order(),
-                input_schema: self.input.schema()
-            }
-        )
     }
 }
 

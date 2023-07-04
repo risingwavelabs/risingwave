@@ -47,7 +47,7 @@ use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionCheckpoint, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
-    IntraLevelDelta, LevelType, TableOption,
+    IntraLevelDelta, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
@@ -56,9 +56,7 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
-use crate::hummock::compaction::{
-    CompactStatus, LocalSelectorStatistic, ManualCompactionOption, ScaleCompactorInfo,
-};
+use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCompactionOption};
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
@@ -101,7 +99,7 @@ const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 16;
 //   succeeds, the in-mem state will be updated by the way.
 pub struct HummockManager<S: MetaStore> {
     pub env: MetaSrvEnv<S>,
-    cluster_manager: ClusterManagerRef<S>,
+    pub cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     // `CompactionGroupManager` manages `CompactionGroup`'s members.
     // Note that all hummock state store user should register to `CompactionGroupManager`. It
@@ -836,6 +834,7 @@ where
             .member_table_ids
             .clone();
         let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
+        let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
 
         if is_trivial_reclaim {
             compact_task.set_task_status(TaskStatus::Success);
@@ -851,7 +850,7 @@ where
                     .sum::<usize>(),
                 start_time.elapsed()
             );
-        } else if CompactStatus::is_trivial_move_task(&compact_task) && can_trivial_move {
+        } else if is_trivial_move && can_trivial_move {
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
@@ -908,50 +907,31 @@ where
             let (compact_task_size, compact_task_file_count, _) =
                 estimate_state_for_compaction(&compact_task);
 
+            let level_type_label = format!(
+                "L{}->L{}",
+                compact_task.input_ssts[0].level_idx,
+                compact_task.input_ssts.last().unwrap().level_idx,
+            );
+
+            let level_count = compact_task.input_ssts.len();
             if compact_task.input_ssts[0].level_idx == 0 {
-                let level_type_label = if compact_task.input_ssts.len() == 2
-                    && compact_task.input_ssts[1].table_infos.is_empty()
-                {
-                    "l0_trivial_move".to_string()
-                } else if compact_task.input_ssts[0].level_type() == LevelType::Overlapping {
-                    "l0_overlapping".to_string()
-                } else if compact_task.target_level == 0 {
-                    "l0_intra".to_string()
-                } else {
-                    let is_trivial_move = if compact_task.input_ssts.len() == 2
-                        && compact_task.input_ssts[1].table_infos.is_empty()
-                    {
-                        "trivial-move"
-                    } else if is_trivial_reclaim {
-                        "trivial-space-reclaim"
-                    } else {
-                        ""
-                    };
-                    format!(
-                        "L0->L{} {}",
-                        compact_task.input_ssts.last().unwrap().level_idx,
-                        is_trivial_move
-                    )
-                };
-
-                let level_count = compact_task.input_ssts.len();
-
                 self.metrics
                     .l0_compact_level_count
                     .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
                     .observe(level_count as _);
+            }
 
-                self.metrics
-                    .compact_task_size
-                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                    .observe(compact_task_size as _);
+            self.metrics
+                .compact_task_size
+                .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                .observe(compact_task_size as _);
 
-                self.metrics
-                    .compact_task_file_count
-                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                    .observe(compact_task_file_count as _);
+            self.metrics
+                .compact_task_file_count
+                .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                .observe(compact_task_file_count as _);
 
-                tracing::trace!(
+            tracing::trace!(
                     "For compaction group {}: pick up {} {} sub_level in level {} file_count {} file_size {} to compact to target {}. cost time: {:?}",
                     compaction_group_id,
                     level_count,
@@ -962,42 +942,8 @@ where
                     compact_task.target_level,
                     start_time.elapsed()
                 );
-            } else {
-                let level_type_label = format!(
-                    "L{}->L{} {}",
-                    compact_task.input_ssts[0].level_idx,
-                    compact_task.input_ssts[1].level_idx,
-                    if CompactStatus::is_trivial_move_task(&compact_task) {
-                        "trivial-move"
-                    } else if is_trivial_reclaim {
-                        "trivial-space-reclaim"
-                    } else {
-                        ""
-                    }
-                );
-
-                self.metrics
-                    .compact_task_size
-                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                    .observe(compact_task_size as _);
-
-                self.metrics
-                    .compact_task_file_count
-                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                    .observe(compact_task_file_count as _);
-
-                tracing::trace!(
-                    "For compaction group {}: pick up {} tables in level {} file_count {} file_size {} to compact to target {}.  cost time: {:?}",
-                    compaction_group_id,
-                    compact_task.input_ssts[0].table_infos.len(),
-                    compact_task.input_ssts[0].level_idx,
-                    file_count,
-                    file_size,
-                    compact_task.target_level,
-                    start_time.elapsed()
-                );
-            }
         }
+
         #[cfg(test)]
         {
             drop(compaction_guard);
@@ -1347,6 +1293,7 @@ where
 
                 trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
+                self.notify_stats(&versioning.version_stats);
 
                 if !deterministic_mode {
                     self.notify_last_version_delta(versioning);
@@ -1669,6 +1616,7 @@ where
 
         self.notify_last_version_delta(versioning);
         trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
+        self.notify_stats(&versioning.version_stats);
         let mut table_groups = HashMap::<u32, usize>::default();
         for group in versioning.current_version.levels.values() {
             for table_id in &group.member_table_ids {
@@ -2092,47 +2040,6 @@ where
         &self.cluster_manager
     }
 
-    pub async fn report_scale_compactor_info(&self) {
-        let info = self.get_scale_compactor_info().await;
-        let suggest_scale_out_core = info.scale_out_cores();
-        self.metrics
-            .scale_compactor_core_num
-            .set(suggest_scale_out_core as i64);
-
-        tracing::debug!(
-            "report_scale_compactor_info {:?} suggest_scale_out_core {:?}",
-            info,
-            suggest_scale_out_core
-        );
-    }
-
-    #[named]
-    pub async fn get_scale_compactor_info(&self) -> ScaleCompactorInfo {
-        let total_cpu_core = self.compactor_manager.total_cpu_core_num();
-        let total_running_cpu_core = self.compactor_manager.total_running_cpu_core_num();
-        let (version, configs) = {
-            let guard = read_lock!(self, versioning).await;
-            let c = self.get_compaction_group_map().await;
-            (guard.current_version.clone(), c)
-        };
-        let mut global_info = ScaleCompactorInfo {
-            total_cores: total_cpu_core as u64,
-            running_cores: total_running_cpu_core as u64,
-            ..Default::default()
-        };
-
-        let compaction = read_lock!(self, compaction).await;
-        for (group_id, status) in &compaction.compaction_statuses {
-            if let Some(levels) = version.levels.get(group_id) {
-                let info =
-                    status.get_compaction_info(levels, configs[group_id].compaction_config());
-                global_info.add(&info);
-                tracing::debug!("cg {} info {:?}", group_id, info);
-            }
-        }
-        global_info
-    }
-
     fn notify_last_version_delta(&self, versioning: &Versioning) {
         self.env
             .notification_manager()
@@ -2147,6 +2054,12 @@ where
                         .clone()],
                 }),
             );
+    }
+
+    fn notify_stats(&self, stats: &HummockVersionStats) {
+        self.env
+            .notification_manager()
+            .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats.clone()));
     }
 
     #[named]

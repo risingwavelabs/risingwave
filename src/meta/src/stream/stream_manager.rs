@@ -735,10 +735,8 @@ mod tests {
             let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
 
-            // TODO: what should we choose the task heartbeat interval to be? Anyway, we don't run a
-            // heartbeat thread here, so it doesn't matter.
             let compactor_manager =
-                Arc::new(CompactorManager::with_meta(env.clone(), 1).await.unwrap());
+                Arc::new(CompactorManager::with_meta(env.clone()).await.unwrap());
 
             let hummock_manager = HummockManager::new(
                 env.clone(),
@@ -810,7 +808,8 @@ mod tests {
                 let StreamingClusterInfo {
                     worker_nodes,
                     parallel_units,
-                } = self
+                    unschedulable_parallel_units: _,
+                }: StreamingClusterInfo = self
                     .global_stream_manager
                     .cluster_manager
                     .get_streaming_cluster_info()

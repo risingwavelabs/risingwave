@@ -19,13 +19,9 @@ use std::ffi::OsStr;
 pub fn env_var_is_true(key: impl AsRef<OsStr>) -> bool {
     env::var(key)
         .map(|value| {
-            let value = value.to_lowercase();
-            value == "1" || value == "true"
+            ["1", "t", "true"]
+                .iter()
+                .any(|&s| value.eq_ignore_ascii_case(s))
         })
         .unwrap_or(false)
-}
-
-/// Returns whether the environment variable indicating that we're running in CI is set.
-pub fn is_ci() -> bool {
-    env_var_is_true("RISINGWAVE_CI")
 }

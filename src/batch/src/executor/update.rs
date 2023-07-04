@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
-use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{
@@ -120,12 +118,10 @@ impl UpdateExecutor {
             .table_dml_handle(self.table_id, self.table_version_id)?;
         let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
 
-        let mut notifiers = Vec::new();
-
-        notifiers.push(write_handle.begin()?);
+        write_handle.begin()?;
 
         // Transform the data chunk to a stream chunk, then write to the source.
-        let write_txn_data = |chunk: DataChunk| {
+        let write_txn_data = |chunk: DataChunk| async {
             // TODO: if the primary key is updated, we should use plain `+,-` instead of `U+,U-`.
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
@@ -137,8 +133,13 @@ impl UpdateExecutor {
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);
 
-            write_handle.write_chunk(stream_chunk)
+            let cardinality = stream_chunk.cardinality();
+            write_handle.write_chunk(stream_chunk).await?;
+
+            Result::Ok(cardinality / 2)
         };
+
+        let mut rows_updated = 0;
 
         #[for_await]
         for data_chunk in self.child.execute() {
@@ -165,24 +166,16 @@ impl UpdateExecutor {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };
                 if let Some(chunk) = builder.append_one_row(row_insert) {
-                    notifiers.push(write_txn_data(chunk)?);
+                    rows_updated += write_txn_data(chunk).await?;
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            notifiers.push(write_txn_data(chunk)?);
+            rows_updated += write_txn_data(chunk).await?;
         }
 
-        notifiers.push(write_handle.end()?);
-
-        // Wait for all chunks to be taken / written.
-        let rows_updated = try_join_all(notifiers)
-            .await
-            .context("failed to wait chunks to be written")?
-            .into_iter()
-            .sum::<usize>()
-            / 2;
+        write_handle.end().await?;
 
         // Create ret value
         if !self.returning {
@@ -241,7 +234,6 @@ mod tests {
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::util::worker_util::WorkerNodeId;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_source::dml_manager::DmlManager;
 
@@ -251,7 +243,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_executor() -> Result<()> {
-        let dml_manager = Arc::new(DmlManager::new(WorkerNodeId::default()));
+        let dml_manager = Arc::new(DmlManager::for_test());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();

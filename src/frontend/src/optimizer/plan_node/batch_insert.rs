@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::XmlNode;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -52,11 +50,6 @@ impl Distill for BatchInsert {
             .logical
             .fields_pretty(self.base.ctx.is_explain_verbose());
         childless_record("BatchInsert", vec)
-    }
-}
-impl fmt::Display for BatchInsert {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchInsert")
     }
 }
 
