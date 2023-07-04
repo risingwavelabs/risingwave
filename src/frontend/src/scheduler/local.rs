@@ -154,10 +154,7 @@ impl LocalQueryExecution {
             }
         };
 
-        #[cfg(madsim)]
         tokio::spawn(future);
-        #[cfg(not(madsim))]
-        tokio::task::spawn_blocking(move || futures::executor::block_on(future));
 
         ReceiverStream::new(receiver)
     }
