@@ -29,3 +29,45 @@
   expected_outputs:
   - stream_plan
   - stream_dist_plan
+- name: Temporal filter in on clause for inner join's left side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 join t2 on a = b AND ta < now() - interval '1 hour' and ta >= now() - interval '2 hour';
+  expected_outputs:
+  - stream_plan
+- name: Temporal filter in on clause for left join's left side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 left join t2 on a = b AND ta < now() - interval '1 hour' and ta >= now() - interval '2 hour';
+  expected_outputs:
+  - stream_error
+- name: Temporal filter in on clause for right join's left side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 right join t2 on a = b AND ta < now() - interval '1 hour' and ta >= now() - interval '2 hour';
+  expected_outputs:
+  - stream_plan
+- name: Temporal filter in on clause for full join's left side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 full join t2 on a = b AND ta < now() - interval '1 hour' and ta >= now() - interval '2 hour';
+  expected_outputs:
+  - stream_error
+- name: Temporal filter in on clause for left join's right side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 left join t2 on a = b AND tb < now() - interval '1 hour' and tb >= now() - interval '2 hour';
+  expected_outputs:
+  - stream_plan
+- name: Temporal filter in on clause for right join's right side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 right join t2 on a = b AND tb < now() - interval '1 hour' and tb >= now() - interval '2 hour';
+  expected_outputs:
+  - stream_error
