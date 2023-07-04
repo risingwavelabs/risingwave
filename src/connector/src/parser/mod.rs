@@ -552,8 +552,10 @@ pub enum EncodingProperties {
 #[derive(Default)]
 pub enum ProtocolProperties {
     Debezium,
+    Maxwell,
+    Canal,
     #[default]
-    None,
+    Plain,
 }
 
 pub struct ParserProperties {
@@ -626,7 +628,7 @@ impl ParserProperties {
             }),
             _ => EncodingProperties::None,
         };
-        let protocol_config = ProtocolProperties::None;
+        let protocol_config = ProtocolProperties::Plain;
         Ok(ParserProperties {
             encoding_config,
             protocol_config,
