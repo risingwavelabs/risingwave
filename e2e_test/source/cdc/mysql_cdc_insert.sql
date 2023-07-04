@@ -1,4 +1,4 @@
-USE mydb;
+USE `my@db`;
 
 -- Insert new records
 INSERT INTO products

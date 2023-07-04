@@ -1230,6 +1230,7 @@ where
 
                 trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
+                self.notify_stats(&versioning.version_stats);
 
                 if !deterministic_mode {
                     self.notify_last_version_delta(versioning);
@@ -1523,6 +1524,7 @@ where
 
         self.notify_last_version_delta(versioning);
         trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
+        self.notify_stats(&versioning.version_stats);
         let mut table_groups = HashMap::<u32, usize>::default();
         for group in versioning.current_version.levels.values() {
             for table_id in &group.member_table_ids {
@@ -1909,6 +1911,12 @@ where
                         .clone()],
                 }),
             );
+    }
+
+    fn notify_stats(&self, stats: &HummockVersionStats) {
+        self.env
+            .notification_manager()
+            .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats.clone()));
     }
 
     #[named]
