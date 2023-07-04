@@ -90,7 +90,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     )))
                 }
             }
-            A::FirstValue => None,
             A::ApproxCountDistinct => {
                 if self.is_distinct_allowed {
                     None
