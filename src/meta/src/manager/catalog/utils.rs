@@ -353,8 +353,7 @@ impl QueryRewriter<'_> {
             | SelectItem::ExprQualifiedWildcard(expr, _)
             | SelectItem::ExprWithAlias { expr, .. } => self.visit_expr(expr),
             SelectItem::QualifiedWildcard(_, None) | SelectItem::Wildcard(None) => {}
-            SelectItem::QualifiedWildcard(_, Some(exprs))
-            | SelectItem::Wildcard(Some(exprs)) => {
+            SelectItem::QualifiedWildcard(_, Some(exprs)) | SelectItem::Wildcard(Some(exprs)) => {
                 for expr in exprs {
                     self.visit_expr(expr);
                 }

@@ -691,14 +691,18 @@ impl Binder {
                 match bound {
                     ExprImpl::InputRef(inner) => {
                         if !except_indices.insert(inner.index) {
-                            return Err(
-                                ErrorCode::BindError("Duplicate entry in except list".into()).into(),
-                            );
+                            return Err(ErrorCode::BindError(
+                                "Duplicate entry in except list".into(),
+                            )
+                            .into());
                         }
                     }
-                    _ => return Err(
-                        ErrorCode::BindError("Only support column name in except list".into()).into(),
-                    )
+                    _ => {
+                        return Err(ErrorCode::BindError(
+                            "Only support column name in except list".into(),
+                        )
+                        .into())
+                    }
                 }
             }
         }

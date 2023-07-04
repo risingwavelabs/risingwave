@@ -4333,7 +4333,9 @@ impl Parser {
                     Some(alias) => SelectItem::ExprWithAlias { expr, alias },
                     None => SelectItem::UnnamedExpr(expr),
                 }),
-            WildcardOrExpr::QualifiedWildcard(prefix, except) => Ok(SelectItem::QualifiedWildcard(prefix, except)),
+            WildcardOrExpr::QualifiedWildcard(prefix, except) => {
+                Ok(SelectItem::QualifiedWildcard(prefix, except))
+            }
             WildcardOrExpr::ExprQualifiedWildcard(expr, prefix) => {
                 Ok(SelectItem::ExprQualifiedWildcard(expr, prefix))
             }

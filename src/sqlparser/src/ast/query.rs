@@ -343,8 +343,7 @@ impl fmt::Display for SelectItem {
                 Some(cols) => write!(
                     f,
                     "* EXCEPT ({})",
-                    cols
-                        .iter()
+                    cols.iter()
                         .map(|v| v.to_string())
                         .collect::<Vec<String>>()
                         .as_slice()
