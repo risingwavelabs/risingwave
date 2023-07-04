@@ -122,7 +122,7 @@ impl Rule for ApplyJoinTransposeRule {
 
         assert!(
             join.is_full_out(),
-            "ApplyJoinTransposeRule requires the join containing no output indices"
+            "ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule"
         );
 
         let (push_left, push_right) = match join.join_type() {
