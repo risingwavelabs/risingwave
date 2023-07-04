@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
-use super::utils::{formatter_debug_plan_node, Distill};
+use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::utils::column_names_pretty;
@@ -62,29 +61,16 @@ impl StreamSource {
 
 impl_plan_tree_node_for_leaf! { StreamSource }
 
-impl fmt::Display for StreamSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamSource");
-        if let Some(catalog) = self.source_catalog() {
-            builder
-                .field("source", &catalog.name)
-                .field("columns", &self.schema().names_str());
-        }
-        builder.finish()
-    }
-}
 impl Distill for StreamSource {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = if let Some(catalog) = self.source_catalog() {
             let src = Pretty::from(catalog.name.clone());
-            vec![
-                ("source", src),
-                ("columns", column_names_pretty(self.schema())),
-            ]
+            let col = column_names_pretty(self.schema());
+            vec![("source", src), ("columns", col)]
         } else {
             vec![]
         };
-        Pretty::childless_record("StreamSource", fields)
+        childless_record("StreamSource", fields)
     }
 }
 

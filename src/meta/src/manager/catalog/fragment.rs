@@ -96,6 +96,10 @@ impl FragmentManagerCore {
             })
             .collect()
     }
+
+    pub fn table_fragments(&self) -> &BTreeMap<TableId, TableFragments> {
+        &self.table_fragments
+    }
 }
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
@@ -160,22 +164,21 @@ where
     }
 
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
+        // Notify all fragment mapping to frontend nodes
         for fragment in table_fragment.fragments.values() {
-            if !fragment.state_table_ids.is_empty() {
-                let mapping = fragment
-                    .vnode_mapping
-                    .clone()
-                    .expect("no data distribution found");
-                let fragment_mapping = FragmentParallelUnitMapping {
-                    fragment_id: fragment.fragment_id,
-                    mapping: Some(mapping),
-                };
+            let mapping = fragment
+                .vnode_mapping
+                .clone()
+                .expect("no data distribution found");
+            let fragment_mapping = FragmentParallelUnitMapping {
+                fragment_id: fragment.fragment_id,
+                mapping: Some(mapping),
+            };
 
-                self.env
-                    .notification_manager()
-                    .notify_frontend(operation, Info::ParallelUnitMapping(fragment_mapping))
-                    .await;
-            }
+            self.env
+                .notification_manager()
+                .notify_frontend(operation, Info::ParallelUnitMapping(fragment_mapping))
+                .await;
         }
 
         // Update serving vnode mappings.
@@ -236,14 +239,23 @@ where
         &self,
         table_fragment: TableFragments,
     ) -> MetaResult<()> {
-        let map = &mut self.core.write().await.table_fragments;
+        let mut guard = self.core.write().await;
+        let current_revision = guard.table_revision;
+        let map = &mut guard.table_fragments;
         let table_id = table_fragment.table_id();
         if map.contains_key(&table_id) {
             bail!("table_fragment already exist: id={}", table_id);
         }
+
         let mut table_fragments = BTreeMapTransaction::new(map);
         table_fragments.insert(table_id, table_fragment);
-        commit_meta!(self, table_fragments)
+        let mut trx = Transaction::default();
+
+        let next_revision = current_revision.next();
+        next_revision.store(&mut trx);
+        commit_meta_with_trx!(self, trx, table_fragments)?;
+        guard.table_revision = next_revision;
+        Ok(())
     }
 
     /// Called after the barrier collection of `CreateStreamingJob` command, which updates the
@@ -842,13 +854,12 @@ where
 
                 *fragment.vnode_mapping.as_mut().unwrap() = vnode_mapping.clone();
 
-                if !fragment.state_table_ids.is_empty() {
-                    let fragment_mapping = FragmentParallelUnitMapping {
-                        fragment_id: fragment_id as FragmentId,
-                        mapping: Some(vnode_mapping),
-                    };
-                    fragment_mapping_to_notify.push(fragment_mapping);
-                }
+                // Notify fragment mapping to frontend nodes.
+                let fragment_mapping = FragmentParallelUnitMapping {
+                    fragment_id: fragment_id as FragmentId,
+                    mapping: Some(vnode_mapping),
+                };
+                fragment_mapping_to_notify.push(fragment_mapping);
 
                 // Second step, update upstream fragments
                 // Update the dispatcher of the upstream fragments.

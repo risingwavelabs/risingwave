@@ -27,8 +27,33 @@ def make_mock_schema():
     # todo
     schema = connector_service_pb2.TableSchema(
         columns=[
-            connector_service_pb2.TableSchema.Column(name="id", data_type=data_pb2.DataType(type_name=2)),
-            connector_service_pb2.TableSchema.Column(name="name", data_type=data_pb2.DataType(type_name=7))
+            connector_service_pb2.TableSchema.Column(
+                name="id", data_type=data_pb2.DataType(type_name=2)),
+            connector_service_pb2.TableSchema.Column(
+                name="name", data_type=data_pb2.DataType(type_name=7))
+        ],
+        pk_indices=[0]
+    )
+    return schema
+
+
+def make_mock_schema_stream_chunk():
+    schema = connector_service_pb2.TableSchema(
+        columns=[
+            connector_service_pb2.TableSchema.Column(
+                name="v1", data_type=data_pb2.DataType(type_name=1)),
+            connector_service_pb2.TableSchema.Column(
+                name="v2", data_type=data_pb2.DataType(type_name=2)),
+            connector_service_pb2.TableSchema.Column(
+                name="v3", data_type=data_pb2.DataType(type_name=3)),
+            connector_service_pb2.TableSchema.Column(
+                name="v4", data_type=data_pb2.DataType(type_name=4)),
+            connector_service_pb2.TableSchema.Column(
+                name="v5", data_type=data_pb2.DataType(type_name=5)),
+            connector_service_pb2.TableSchema.Column(
+                name="v6", data_type=data_pb2.DataType(type_name=6)),
+            connector_service_pb2.TableSchema.Column(
+                name="v7", data_type=data_pb2.DataType(type_name=7)),
         ],
         pk_indices=[0]
     )
@@ -41,77 +66,66 @@ def load_input(input_file):
     return sink_input
 
 
-def test_upsert_sink(type, prop, input_file):
-    sink_input = load_input(input_file)
-    with grpc.insecure_channel('localhost:50051') as channel:
-        stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
-        request_list = [
-            connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
-                format=connector_service_pb2.SinkPayloadFormat.JSON,
-                sink_config=connector_service_pb2.SinkConfig(
-                    connector_type=type,
-                    properties=prop,
-                    table_schema=make_mock_schema()
-                )
-            ))]
-        epoch = 0
-        batch_id = 1
+def load_binary_input(input_file):
+    with open(input_file, 'rb') as file:
+        sink_input = file.read()
+    return sink_input
+
+
+def construct_payload(input_file, use_json):
+    payloads = []
+    if use_json:
+        sink_input = load_input(input_file)
         for batch in sink_input:
-            request_list.append(connector_service_pb2.SinkStreamRequest(
-                start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
             row_ops = []
             for row in batch:
                 row_ops.append(connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload.RowOp(
                     op_type=row['op_type'], line=str(row['line'])))
-            request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
-                json_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload(row_ops=row_ops),
-                batch_id=batch_id,
-                epoch=epoch
-            )))
-            request_list.append(connector_service_pb2.SinkStreamRequest(sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
-            epoch += 1
-            batch_id += 1
+            payloads.append(connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload(
+                row_ops=row_ops))
+    else:
+        sink_input = load_binary_input(input_file)
+        payloads.append(connector_service_pb2.SinkStreamRequest.WriteBatch.StreamChunkPayload(
+            binary_data=sink_input))
+    return payloads
 
-        response_iter = stub.SinkStream(iter(request_list))
-        for req in request_list:
-            try:
-                print("REQUEST", req)
-                print("RESPONSE OK:", next(response_iter))
-            except Exception as e:
-                print("Integration test failed: ", e)
-                exit(1)
 
-def test_sink(type, prop, input_file):
-    sink_input = load_input(input_file)
+def test_sink(type, prop, payload_input, use_json, table_schema=make_mock_schema()):
+    # read input, Add StartSink request
+    request_list = [connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
+        format=connector_service_pb2.SinkPayloadFormat.JSON if use_json else connector_service_pb2.SinkPayloadFormat.STREAM_CHUNK,
+        sink_config=connector_service_pb2.SinkConfig(
+            connector_type=type,
+            properties=prop,
+            table_schema=table_schema
+        )
+    ))]
+
     with grpc.insecure_channel('localhost:50051') as channel:
         stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
-        request_list = [
-            connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
-                format=connector_service_pb2.SinkPayloadFormat.JSON,
-                sink_config=connector_service_pb2.SinkConfig(
-                    connector_type=type,
-                    properties=prop,
-                    table_schema=make_mock_schema()
-                )
-            ))]
         epoch = 0
         batch_id = 1
-        for batch in sink_input:
+        # construct request
+        for payload in payload_input:
             request_list.append(connector_service_pb2.SinkStreamRequest(
                 start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
-            row_ops = []
-            for row in batch:
-                row_ops.append(connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload.RowOp(
-                    op_type=1, line=str(row)))
             request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
-                json_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.JsonPayload(row_ops=row_ops),
+                json_payload=payload,
                 batch_id=batch_id,
                 epoch=epoch
-            )))
-            request_list.append(connector_service_pb2.SinkStreamRequest(sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
+            )) if use_json else
+                connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
+                    stream_chunk_payload=payload,
+                    batch_id=batch_id,
+                    epoch=epoch
+                ))
+            )
+
+            request_list.append(connector_service_pb2.SinkStreamRequest(
+                sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
             epoch += 1
             batch_id += 1
-
+        # send request
         response_iter = stub.SinkStream(iter(request_list))
         for req in request_list:
             try:
@@ -121,33 +135,27 @@ def test_sink(type, prop, input_file):
                 print("Integration test failed: ", e)
                 exit(1)
 
-
-def test_file_sink(input_file):
-    test_sink("file", {"output.path": "/tmp/connector",}, input_file)
-
-
-def test_jdbc_sink(input_file):
-    test_sink("jdbc",
-              {"jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
-               "table.name": "test"},
-              input_file)
-
-    # validate results
-    validate_jdbc_sink(input_file)
-
-
 def validate_jdbc_sink(input_file):
-    conn = psycopg2.connect("dbname=test user=test password=connector host=localhost port=5432")
+    conn = psycopg2.connect(
+        "dbname=test user=test password=connector host=localhost port=5432")
     cur = conn.cursor()
     cur.execute("SELECT * FROM test")
     rows = cur.fetchall()
-    expected = [list(row.values()) for batch in load_input(input_file) for row in batch]
+    expected = [list(row.values())
+                for batch in load_input(input_file) for row in batch]
+
+    def convert(b):
+        return [(item[1]['id'], item[1]['name']) for item in b]
+    expected = convert(expected)
+
     if len(rows) != len(expected):
-        print("Integration test failed: expected {} rows, but got {}".format(len(expected), len(rows)))
+        print("Integration test failed: expected {} rows, but got {}".format(
+            len(expected), len(rows)))
         exit(1)
     for i in range(len(rows)):
         if len(rows[i]) != len(expected[i]):
-            print("Integration test failed: expected {} columns, but got {}".format(len(expected[i]), len(rows[i])))
+            print("Integration test failed: expected {} columns, but got {}".format(
+                len(expected[i]), len(rows[i])))
             exit(1)
         for j in range(len(rows[i])):
             if rows[i][j] != expected[i][j]:
@@ -157,54 +165,123 @@ def validate_jdbc_sink(input_file):
                 exit(1)
 
 
-def test_iceberg_sink(input_file):
-    test_sink("iceberg",
-              {"type":"append-only",
-               "warehouse.path":"s3a://bucket",
-               "s3.endpoint": "http://127.0.0.1:9000",
-               "s3.access.key": "minioadmin",
-               "s3.secret.key": "minioadmin",
-               "database.name":"demo_db",
-               "table.name":"demo_table"},
-              input_file)
+def test_file_sink(file_name, use_json):
+    type = "file"
+    prop = {"output.path": "/tmp/connector", }
+    test_sink(type, prop, construct_payload(
+        file_name, use_json), use_json)
 
-def test_upsert_iceberg_sink(input_file):
-    test_upsert_sink("iceberg",
-              {"type":"upsert",
-               "warehouse.path":"s3a://bucket",
-               "s3.endpoint": "http://127.0.0.1:9000",
-               "s3.access.key": "minioadmin",
-               "s3.secret.key": "minioadmin",
-               "database.name":"demo_db",
-               "table.name":"demo_table"},
-              input_file)
 
-def test_deltalake_sink(input_file):
-    test_sink("deltalake",
-              {
-                "location":"s3a://bucket/delta",
-                "s3.access.key": "minioadmin",
-                "s3.secret.key": "minioadmin",
-                "s3.endpoint": "127.0.0.1:9000",
-              },
-              input_file)
+def test_jdbc_sink(input_file, input_binary_file, use_json):
+    type = "jdbc"
+    prop = {"jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
+            "table.name": "test", "type" : "upsert"}
+    file_name = input_file if use_json else input_binary_file
+    test_sink(type, prop, construct_payload(
+        file_name, use_json), use_json)
+    # validate results
+    validate_jdbc_sink(input_file)
+
+
+def test_elasticsearch_sink(file_name, use_json):
+    prop = {"url": "http://127.0.0.1:9200",
+            "index": "test"}
+    type = "elasticsearch-7"
+    test_sink(type, prop, construct_payload(
+        file_name, use_json), use_json)
+
+
+def test_iceberg_sink(file_name, use_json):
+    prop = {"type": "append-only",
+            "warehouse.path": "s3a://bucket",
+            "s3.endpoint": "http://127.0.0.1:9000",
+            "s3.access.key": "minioadmin",
+            "s3.secret.key": "minioadmin",
+            "database.name": "demo_db",
+            "table.name": "demo_table"}
+    type = "iceberg"
+    test_sink(type, prop, construct_payload(
+        file_name, use_json), use_json)
+
+
+def test_upsert_iceberg_sink(file_name, use_json):
+    prop = {"type": "upsert",
+            "warehouse.path": "s3a://bucket",
+            "s3.endpoint": "http://127.0.0.1:9000",
+            "s3.access.key": "minioadmin",
+            "s3.secret.key": "minioadmin",
+            "database.name": "demo_db",
+            "table.name": "demo_table"}
+    type = "iceberg"
+    # need to make sure all ops as Insert
+    test_sink(type, prop, construct_payload(
+        file_name, use_json), use_json)
+
+
+def test_deltalake_sink(file_name, use_json):
+    prop = {
+        "location": "s3a://bucket/delta",
+        "s3.access.key": "minioadmin",
+        "s3.secret.key": "minioadmin",
+        "s3.endpoint": "127.0.0.1:9000",
+    }
+    type = "deltalake"
+    test_sink(type, prop, construct_payload(
+        file_name, use_json), use_json)
+
+
+def test_stream_chunk_data_format(file_name):
+    type = "file"
+    prop = {"output.path": "/tmp/connector", }
+    test_sink(type, prop, construct_payload(
+        file_name, use_json), use_json, make_mock_schema_stream_chunk())
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--file_sink', action='store_true', help="run file sink test")
-    parser.add_argument('--jdbc_sink', action='store_true', help="run jdbc sink test")
-    parser.add_argument('--iceberg_sink', action='store_true', help="run iceberg sink test")
-    parser.add_argument('--upsert_iceberg_sink', action='store_true', help="run upsert iceberg sink test")
-    parser.add_argument('--deltalake_sink', action='store_true', help="run deltalake sink test")
-    parser.add_argument('--input_file', default="./data/sink_input.json", help="input data to run tests")
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--file_sink', action='store_true',
+                        help="run file sink test")
+    parser.add_argument('--jdbc_sink', action='store_true',
+                        help="run jdbc sink test")
+    parser.add_argument('--stream_chunk_format_test', action='store_true',
+                        help="run print stream chunk sink test")
+    parser.add_argument('--iceberg_sink', action='store_true',
+                        help="run iceberg sink test")
+    parser.add_argument('--upsert_iceberg_sink',
+                        action='store_true', help="run upsert iceberg sink test")
+    parser.add_argument('--deltalake_sink', action='store_true',
+                        help="run deltalake sink test")
+    parser.add_argument(
+        '--input_file', default="./data/sink_input.json", help="input data to run tests")
+    parser.add_argument('--input_binary_file', default="./data/sink_input",
+                        help="input stream chunk data to run tests")
+    parser.add_argument('--es_sink', action='store_true',
+                        help='run elasticsearch sink test')
+    parser.add_argument(
+        '--data_format_use_json', default=True, help="choose json or streamchunk")
     args = parser.parse_args()
+    use_json = args.data_format_use_json == True or args.data_format_use_json == 'True'
+    if use_json:
+        file_name = args.input_file
+    else:
+        file_name = args.input_binary_file
+
+    # stream chunk format
+    if args.stream_chunk_format_test:
+        test_stream_chunk_data_format(file_name)
+
     if args.file_sink:
-        test_file_sink(args.input_file)
+        test_file_sink(file_name, use_json)
     if args.jdbc_sink:
-        test_jdbc_sink(args.input_file)
+        test_jdbc_sink(args.input_file, args.input_binary_file, use_json)
     if args.iceberg_sink:
-        test_iceberg_sink(args.input_file)
-    if args.upsert_iceberg_sink:
-        test_upsert_iceberg_sink(args.input_file)
+        test_iceberg_sink(file_name, use_json)
     if args.deltalake_sink:
-        test_deltalake_sink(args.input_file)
+        test_deltalake_sink(file_name, use_json)
+    if args.es_sink:
+        test_elasticsearch_sink(file_name, use_json)
+
+    # json format
+    if args.upsert_iceberg_sink:
+        test_upsert_iceberg_sink(file_name, use_json)

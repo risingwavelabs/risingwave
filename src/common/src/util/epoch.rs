@@ -44,7 +44,8 @@ impl Epoch {
     pub fn next(self) -> Self {
         let physical_now = Epoch::physical_now();
         let prev_physical_time = self.physical_time();
-        match physical_now.cmp(&prev_physical_time) {
+
+        let next_epoch = match physical_now.cmp(&prev_physical_time) {
             Ordering::Greater => Self::from_physical_time(physical_now),
             Ordering::Equal => {
                 tracing::warn!("New generate epoch is too close to the previous one.");
@@ -58,7 +59,10 @@ impl Epoch {
                 );
                 Epoch(self.0 + 1)
             }
-        }
+        };
+
+        assert!(next_epoch.0 > self.0);
+        next_epoch
     }
 
     pub fn physical_time(&self) -> u64 {

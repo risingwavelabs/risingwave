@@ -23,7 +23,7 @@ use parking_lot::Mutex;
 use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::compact_task::{self, TaskStatus};
+use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::error::SendError;
@@ -73,7 +73,7 @@ impl CompactionRequestChannel {
     pub fn try_sched_compaction(
         &self,
         compaction_group: CompactionGroupId,
-        task_type: compact_task::TaskType,
+        task_type: TaskType,
     ) -> Result<bool, SendError<CompactionRequestChannelItem>> {
         let mut guard = self.scheduled.lock();
         let key = (compaction_group, task_type);
@@ -318,6 +318,7 @@ where
     ) {
         use futures::pin_mut;
         pin_mut!(event_stream);
+        let mut skip_tasks: HashSet<(CompactionGroupId, TaskType)> = HashSet::new();
 
         loop {
             let item = futures::future::select(event_stream.next(), shutdown_rx.clone()).await;
@@ -336,11 +337,17 @@ where
                                     )
                                     .await
                                 {
+                                    skip_tasks.insert((compaction_group, task_type));
                                     self.hummock_manager
                                         .metrics
                                         .compact_skip_frequency
                                         .with_label_values(&["total", "no-compactor"])
                                         .inc();
+                                } else if !skip_tasks.is_empty() {
+                                    for (compaction_group, task_type) in skip_tasks.drain() {
+                                        let _ = sched_channel
+                                            .try_sched_compaction(compaction_group, task_type);
+                                    }
                                 }
                             }
                             SchedulerEvent::DynamicTrigger => {
@@ -436,7 +443,9 @@ where
         // Wait for a compactor to become available.
         let compactor = match self.hummock_manager.get_idle_compactor().await {
             Some(compactor) => compactor,
-            None => return false,
+            None => {
+                return false;
+            }
         };
         let selector = compaction_selectors.get_mut(&task_type).unwrap();
         self.pick_and_assign(compaction_group, compactor, sched_channel, selector)
@@ -513,7 +522,9 @@ mod tests {
     use crate::hummock::compaction_scheduler::{
         CompactionRequestChannel, CompactionRequestChannelItem, ScheduleStatus,
     };
-    use crate::hummock::test_utils::{add_ssts, setup_compute_env};
+    use crate::hummock::test_utils::{
+        add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
+    };
     use crate::hummock::CompactionScheduler;
 
     #[tokio::test]
@@ -546,7 +557,15 @@ mod tests {
                 .await
         );
 
+        register_table_ids_to_compaction_group(
+            hummock_manager.as_ref(),
+            &[1],
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
+        let _sst_infos = add_ssts(2, hummock_manager.as_ref(), context_id).await;
+        let _sst_infos = add_ssts(3, hummock_manager.as_ref(), context_id).await;
 
         let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         // Cannot assign because of invalid compactor
@@ -580,7 +599,7 @@ mod tests {
         );
 
         // Add more SSTs for compaction.
-        let _sst_infos = add_ssts(2, hummock_manager.as_ref(), context_id).await;
+        let _sst_infos = add_ssts(4, hummock_manager.as_ref(), context_id).await;
 
         // No idle compactor
         assert_eq!(
@@ -635,6 +654,12 @@ mod tests {
             tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
+        register_table_ids_to_compaction_group(
+            hummock_manager.as_ref(),
+            &[1],
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
         let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
 

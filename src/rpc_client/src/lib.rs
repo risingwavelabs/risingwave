@@ -24,6 +24,8 @@
 #![feature(iterator_try_collect)]
 #![feature(hash_drain_filter)]
 #![feature(try_blocks)]
+#![feature(let_chains)]
+#![feature(impl_trait_in_assoc_type)]
 
 #[cfg(madsim)]
 use std::collections::HashMap;
@@ -50,8 +52,11 @@ mod connector_client;
 mod hummock_meta_client;
 mod meta_client;
 // mod sink_client;
+mod compactor_client;
 mod stream_client;
+mod tracing;
 
+pub use compactor_client::CompactorClient;
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::ConnectorClient;
 pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};

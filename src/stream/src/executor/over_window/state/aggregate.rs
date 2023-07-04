@@ -24,21 +24,21 @@ use risingwave_expr::agg::{build as builg_agg, AggArgs, AggCall};
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
-use super::buffer::StreamWindowBuffer;
+use super::buffer::WindowBuffer;
 use super::{StateEvictHint, StateKey, StatePos, WindowState};
 use crate::executor::StreamExecutorResult;
 
 pub(super) struct AggregateState {
     agg_call: AggCall,
     arg_data_types: Vec<DataType>,
-    buffer: StreamWindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
+    buffer: WindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
     buffer_heap_size: KvSize,
 }
 
 impl AggregateState {
     pub fn new(call: &WindowFuncCall) -> StreamExecutorResult<Self> {
-        if !call.frame.bounds.is_valid() || call.frame.bounds.end_is_unbounded() {
-            bail!("the window frame must be valid and end-bounded");
+        if !call.frame.bounds.is_valid() {
+            bail!("the window frame must be valid");
         }
         let agg_kind = must_match!(call.kind, WindowFuncKind::Aggregate(agg_kind) => agg_kind);
         let arg_data_types = call.args.arg_types().to_vec();
@@ -61,7 +61,7 @@ impl AggregateState {
         Ok(Self {
             agg_call,
             arg_data_types,
-            buffer: StreamWindowBuffer::new(call.frame.clone()),
+            buffer: WindowBuffer::new(call.frame.clone()),
             buffer_heap_size: KvSize::new(),
         })
     }
@@ -85,7 +85,6 @@ impl WindowState for AggregateState {
     }
 
     fn curr_output(&self) -> StreamExecutorResult<Datum> {
-        assert!(self.curr_window().is_ready);
         let wrapper = BatchAggregatorWrapper {
             agg_call: &self.agg_call,
             arg_data_types: &self.arg_data_types,
@@ -94,7 +93,6 @@ impl WindowState for AggregateState {
     }
 
     fn slide_forward(&mut self) -> StateEvictHint {
-        assert!(self.curr_window().is_ready);
         let removed_keys: BTreeSet<_> = self
             .buffer
             .slide()

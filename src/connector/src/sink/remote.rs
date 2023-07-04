@@ -44,7 +44,7 @@ use super::catalog::SinkCatalog;
 use crate::sink::{record_to_json, Result, Sink, SinkError, TimestampHandlingMode};
 use crate::ConnectorParams;
 
-pub const VALID_REMOTE_SINKS: [&str; 3] = ["jdbc", "file", "iceberg"];
+pub const VALID_REMOTE_SINKS: [&str; 4] = ["jdbc", "iceberg", "deltalake", "elasticsearch-7"];
 
 pub fn is_valid_remote_sink(connector_type: &str) -> bool {
     VALID_REMOTE_SINKS.contains(&connector_type)
@@ -190,8 +190,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
     ) -> Result<()> {
         // FIXME: support struct and array in stream sink
         let columns = sink_catalog
-            .columns
-            .iter()
+            .visible_columns()
             .map(|column| {
                 if matches!(
                 column.column_desc.data_type,

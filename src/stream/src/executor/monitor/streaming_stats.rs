@@ -43,6 +43,7 @@ pub struct StreamingMetrics {
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
+    pub source_split_change_count: GenericCounterVec<AtomicU64>,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
@@ -105,6 +106,7 @@ pub struct StreamingMetrics {
     pub lru_physical_now_ms: IntGauge,
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
+    pub lru_evicted_watermark_time_diff_ms: GenericGaugeVec<AtomicI64>,
     pub jemalloc_allocated_bytes: IntGauge,
     pub jemalloc_active_bytes: IntGauge,
 
@@ -141,6 +143,14 @@ impl StreamingMetrics {
             "stream_source_rows_per_barrier_counts",
             "Total number of rows that have been output from source per barrier",
             &["actor_id", "executor_id"],
+            registry
+        )
+        .unwrap();
+
+        let source_split_change_count = register_int_counter_vec_with_registry!(
+            "stream_source_split_change_event_count",
+            "Total number of split change events that have been operated by source",
+            &["source_id", "source_name", "actor_id"],
             registry
         )
         .unwrap();
@@ -588,6 +598,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let lru_evicted_watermark_time_diff_ms = register_int_gauge_vec_with_registry!(
+            "lru_evicted_watermark_time_diff_ms",
+            "The diff between current watermark and latest evicted watermark time by actors",
+            &["table_id", "actor_id", "desc"],
+            registry
+        )
+        .unwrap();
+
         let jemalloc_allocated_bytes = register_int_gauge_with_registry!(
             "jemalloc_allocated_bytes",
             "The allocated memory jemalloc, got from jemalloc_ctl",
@@ -656,6 +674,7 @@ impl StreamingMetrics {
             actor_sampled_deserialize_duration_ns,
             source_output_row_count,
             source_row_per_barrier,
+            source_split_change_count,
             exchange_frag_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
@@ -695,6 +714,7 @@ impl StreamingMetrics {
             lru_physical_now_ms,
             lru_runtime_loop_count,
             lru_watermark_step,
+            lru_evicted_watermark_time_diff_ms,
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
             user_compute_error_count,

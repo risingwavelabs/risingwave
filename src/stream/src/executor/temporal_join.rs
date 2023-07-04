@@ -123,7 +123,7 @@ pub async fn chunks_until_barrier(stream: impl MessageStream, expected_barrier: 
     for item in stream {
         match item? {
             Message::Watermark(_) => {
-                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
             }
             Message::Chunk(c) => yield c,
             Message::Barrier(b) if b.epoch != expected_barrier.epoch => {
@@ -175,7 +175,9 @@ async fn align_input(left: Box<dyn Executor>, right: Box<dyn Executor>) {
                 Some(
                     Either::Left(Ok(Message::Watermark(_)))
                     | Either::Right(Ok(Message::Watermark(_))),
-                ) => todo!("https://github.com/risingwavelabs/risingwave/issues/6042"),
+                ) => {
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
+                }
                 None => return Ok(()),
             }
         }

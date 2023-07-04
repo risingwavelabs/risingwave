@@ -22,6 +22,7 @@ use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentParallelUnitMapping, MetaSnapshot, SubscribeResponse};
@@ -88,6 +89,9 @@ impl ObserverState for FrontendObserverNode {
             }
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
+            }
+            Info::HummockStats(stats) => {
+                self.handle_table_stats_notification(stats);
             }
             Info::ServingParallelUnitMappings(m) => {
                 self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation());
@@ -194,6 +198,11 @@ impl FrontendObserverNode {
             hummock_snapshot_manager,
             system_params_manager,
         }
+    }
+
+    fn handle_table_stats_notification(&mut self, table_stats: HummockVersionStats) {
+        let mut catalog_guard = self.catalog.write();
+        catalog_guard.set_table_stats(table_stats);
     }
 
     fn handle_catalog_notification(&mut self, resp: SubscribeResponse) {

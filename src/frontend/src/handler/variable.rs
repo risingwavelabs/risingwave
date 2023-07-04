@@ -14,9 +14,11 @@
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::session_config::ConfigReporter;
 use risingwave_common::system_param::is_mutable;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
@@ -39,14 +41,34 @@ pub fn handle_set(
         })
         .collect_vec();
 
+    let mut status = ParameterStatus::default();
+
+    struct Reporter<'a> {
+        status: &'a mut ParameterStatus,
+    }
+
+    impl<'a> ConfigReporter for Reporter<'a> {
+        fn report_status(&mut self, key: &str, new_val: String) {
+            if key == "APPLICATION_NAME" {
+                self.status.application_name = Some(new_val);
+            }
+        }
+    }
+
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
     // We remark that the name of session parameter is always case-insensitive.
-    handler_args
-        .session
-        .set_config(&name.real_value().to_lowercase(), string_vals)?;
+    handler_args.session.set_config_report(
+        &name.real_value().to_lowercase(),
+        string_vals,
+        Reporter {
+            status: &mut status,
+        },
+    )?;
 
-    Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
+    Ok(PgResponse::builder(StatementType::SET_VARIABLE)
+        .status(status)
+        .into())
 }
 
 pub(super) fn handle_set_time_zone(
@@ -84,16 +106,16 @@ pub(super) async fn handle_show(
     }
     let row = Row::new(vec![Some(config_reader.get(&name)?.into())]);
 
-    Ok(PgResponse::new_for_stream(
-        StatementType::SHOW_VARIABLE,
-        None,
-        vec![row].into(),
-        vec![PgFieldDescriptor::new(
-            name.to_ascii_lowercase(),
-            DataType::Varchar.to_oid(),
-            DataType::Varchar.type_len(),
-        )],
-    ))
+    Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)
+        .values(
+            vec![row].into(),
+            vec![PgFieldDescriptor::new(
+                name.to_ascii_lowercase(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            )],
+        )
+        .into())
 }
 
 fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
@@ -112,28 +134,28 @@ fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
         })
         .collect_vec();
 
-    Ok(RwPgResponse::new_for_stream(
-        StatementType::SHOW_VARIABLE,
-        None,
-        rows.into(),
-        vec![
-            PgFieldDescriptor::new(
-                "Name".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Setting".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Description".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ],
-    ))
+    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
+        .values(
+            rows.into(),
+            vec![
+                PgFieldDescriptor::new(
+                    "Name".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Setting".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Description".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+            ],
+        )
+        .into())
 }
 
 async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResponse> {
@@ -154,26 +176,26 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
         })
         .collect_vec();
 
-    Ok(RwPgResponse::new_for_stream(
-        StatementType::SHOW_VARIABLE,
-        None,
-        rows.into(),
-        vec![
-            PgFieldDescriptor::new(
-                "Name".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Value".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Mutable".to_string(),
-                DataType::Boolean.to_oid(),
-                DataType::Boolean.type_len(),
-            ),
-        ],
-    ))
+    Ok(RwPgResponse::builder(StatementType::SHOW_VARIABLE)
+        .values(
+            rows.into(),
+            vec![
+                PgFieldDescriptor::new(
+                    "Name".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Value".to_string(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Mutable".to_string(),
+                    DataType::Boolean.to_oid(),
+                    DataType::Boolean.type_len(),
+                ),
+            ],
+        )
+        .into())
 }

@@ -19,7 +19,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
@@ -61,6 +61,20 @@ pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (St
     let mut gen = SqlGenerator::new_for_mview(rng, tables);
     let (mview, table) = gen.gen_mview_stmt(name);
     (mview.to_string(), table)
+}
+
+pub fn differential_sql_gen<R: Rng>(
+    rng: &mut R,
+    tables: Vec<Table>,
+    name: &str,
+) -> Result<(String, String, Table)> {
+    let mut gen = SqlGenerator::new_for_mview(rng, tables);
+    let (stream, table) = gen.gen_mview_stmt(name);
+    let batch = match stream {
+        Statement::CreateView { ref query, .. } => query.to_string(),
+        _ => bail!("Differential pair should be mview statement!"),
+    };
+    Ok((batch, stream.to_string(), table))
 }
 
 /// TODO(noel): Eventually all session variables should be fuzzed.

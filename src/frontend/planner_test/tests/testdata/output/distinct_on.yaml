@@ -2,8 +2,8 @@
 - sql: |
     create table t1 (k int, v int) append only;
     select distinct on (k) k + v as sum from t1;
-  stream_plan: |
-    StreamMaterialize { columns: [sum, t1.k(hidden)], stream_key: [t1.k], pk_columns: [t1.k], pk_conflict: "NoCheck" }
+  stream_plan: |-
+    StreamMaterialize { columns: [sum, t1.k(hidden)], stream_key: [t1.k], pk_columns: [t1.k], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr1, t1.k] }
       └─StreamAppendOnlyDedup { dedup_cols: [t1.k] }
         └─StreamExchange { dist: HashShard(t1.k) }
@@ -12,10 +12,10 @@
 - sql: |
     create table t2 (k int, v int);
     select distinct on (k) k + v as sum from t2;
-  stream_plan: |
-    StreamMaterialize { columns: [sum, t2.k(hidden)], stream_key: [t2.k], pk_columns: [t2.k], pk_conflict: "NoCheck" }
+  stream_plan: |-
+    StreamMaterialize { columns: [sum, t2.k(hidden)], stream_key: [t2.k], pk_columns: [t2.k], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr1, t2.k] }
-      └─StreamGroupTopN { order: "[]", limit: 1, offset: 0, group_key: [1] }
+      └─StreamGroupTopN { order: [], limit: 1, offset: 0, group_key: [1] }
         └─StreamExchange { dist: HashShard(t2.k) }
           └─StreamProject { exprs: [(t2.k + t2.v) as $expr1, t2.k, t2._row_id] }
             └─StreamTableScan { table: t2, columns: [t2.k, t2.v, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }

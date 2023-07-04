@@ -23,6 +23,7 @@ pub mod addr;
 pub mod chunk_coalesce;
 pub mod column_index_mapping;
 pub mod compress;
+pub mod deployment;
 pub mod env_var;
 pub mod epoch;
 mod future_utils;
@@ -41,6 +42,7 @@ pub mod schema_check;
 pub mod sort_util;
 pub mod stream_cancel;
 pub mod stream_graph_visitor;
+pub mod tracing;
 pub mod value_encoding;
 pub mod worker_util;
 

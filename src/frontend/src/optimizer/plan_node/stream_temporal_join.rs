@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
-use risingwave_common::catalog::FieldDisplay;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
 
-use super::utils::formatter_debug_plan_node;
+use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -93,42 +91,32 @@ impl StreamTemporalJoin {
     }
 }
 
-impl fmt::Display for StreamTemporalJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamTemporalJoin");
-
+impl Distill for StreamTemporalJoin {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
-        builder.field("type", &self.logical.join_type);
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.logical.join_type)));
 
         let concat_schema = self.logical.concat_schema();
-        builder.field(
+        vec.push((
             "predicate",
-            &EqJoinPredicateDisplay {
+            Pretty::debug(&EqJoinPredicateDisplay {
                 eq_join_predicate: self.eq_join_predicate(),
                 input_schema: &concat_schema,
-            },
-        );
+            }),
+        ));
 
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        if verbose {
-            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
-                None => builder.field("output", &format_args!("all")),
-                Some(id) => builder.field("output", &id),
-            };
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+            vec.push(("output_watermarks", ow));
         }
 
-        builder.finish()
+        if verbose {
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema)
+                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            vec.push(("output", data));
+        }
+
+        childless_record("StreamTemporalJoin", vec)
     }
 }
 

@@ -37,7 +37,6 @@
 
 pub mod backup_restore;
 mod barrier;
-pub(crate) mod batch;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
 mod error;
@@ -45,6 +44,7 @@ pub mod hummock;
 pub mod manager;
 mod model;
 mod rpc;
+pub(crate) mod serving;
 pub mod storage;
 mod stream;
 pub(crate) mod telemetry;
@@ -112,6 +112,12 @@ pub struct MetaNodeOpts {
     /// colocated with Meta node in the cloud environment
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
+
+    /// Default tag for the endpoint created when creating a privatelink connection.
+    /// Will be appended to the tags specified in the `tags` field in with clause in `create
+    /// connection`.
+    #[clap(long, env = "RW_PRIVATELINK_ENDPOINT_DEFAULT_TAGS")]
+    pub privatelink_endpoint_default_tags: Option<String>,
 
     /// The path of `risingwave.toml` configuration file.
     ///
@@ -216,6 +222,15 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = config.streaming.in_flight_barrier_nums;
+        let privatelink_endpoint_default_tags =
+            opts.privatelink_endpoint_default_tags.map(|tags| {
+                tags.split(',')
+                    .map(|s| {
+                        let key_val = s.split_once('=').unwrap();
+                        (key_val.0.to_string(), key_val.1.to_string())
+                    })
+                    .collect()
+            });
 
         info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -235,6 +250,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 in_flight_barrier_nums,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
+                default_parallelism: config.meta.default_parallelism,
                 vacuum_interval_sec: config.meta.vacuum_interval_sec,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
@@ -253,6 +269,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
+                privatelink_endpoint_default_tags,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,
@@ -265,11 +282,16 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .periodic_split_compact_group_interval_sec,
                 max_compactor_task_multiplier: config.meta.max_compactor_task_multiplier,
                 split_group_size_limit: config.meta.split_group_size_limit,
-                move_table_size_limit: config.meta.move_table_size_limit,
+                min_table_split_size: config.meta.move_table_size_limit,
+                table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
+                min_table_split_write_throughput: config.meta.min_table_split_write_throughput,
                 partition_vnode_count: config.meta.partition_vnode_count,
                 do_not_config_object_storage_lifecycle: config
                     .meta
                     .do_not_config_object_storage_lifecycle,
+                compaction_task_max_heartbeat_interval_secs: config
+                    .meta
+                    .compaction_task_max_heartbeat_interval_secs,
             },
             config.system.into_init_system_params(),
         )

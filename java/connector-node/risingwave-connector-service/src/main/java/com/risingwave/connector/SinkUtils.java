@@ -29,6 +29,8 @@ public class SinkUtils {
                 return new IcebergSinkFactory();
             case "deltalake":
                 return new DeltaLakeSinkFactory();
+            case "elasticsearch-7":
+                return new EsSink7Factory();
             default:
                 throw UNIMPLEMENTED
                         .withDescription("unknown sink type: " + sinkType)

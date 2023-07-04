@@ -30,6 +30,7 @@ use risingwave_common::error::RwError;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_cancel::{cancellable_stream, Tripwire};
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -42,6 +43,7 @@ use risingwave_pb::common::WorkerNode;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
+use tracing_futures::Instrument;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
@@ -75,12 +77,14 @@ impl LocalQueryExecution {
         auth_context: Arc<AuthContext>,
         cancel_flag: Tripwire<Result<DataChunk, BoxedError>>,
     ) -> Self {
+        let sql = sql.into();
         let worker_node_manager = WorkerNodeSelector::new(
             front_env.worker_node_manager_ref(),
             snapshot.support_barrier_read(),
         );
+
         Self {
-            sql: sql.into(),
+            sql,
             query,
             front_env,
             snapshot,
@@ -92,10 +96,7 @@ impl LocalQueryExecution {
 
     #[try_stream(ok = DataChunk, error = RwError)]
     pub async fn run_inner(self) {
-        debug!(
-            "Starting to run query: {:?}, sql: '{}'",
-            self.query.query_id, self.sql
-        );
+        debug!(%self.query.query_id, self.sql, "Starting to run query");
 
         let context =
             FrontendBatchTaskContext::new(self.front_env.clone(), self.auth_context.clone());
@@ -109,7 +110,7 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
 
-        // TODO(ZENOTME): For now this rx is only used as placehodler, it didn't take effect.
+        // TODO(ZENOTME): For now this rx is only used as placeholder, it didn't take effect.
         // Refactor later to make use it.
         let (_tx, rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
         let executor = ExecutorBuilder::new(
@@ -128,7 +129,12 @@ impl LocalQueryExecution {
     }
 
     pub fn run(self) -> BoxedDataChunkStream {
-        Box::pin(self.run_inner())
+        let span = tracing::info_span!(
+            "local_execute",
+            query_id = self.query.query_id.id,
+            epoch = ?self.snapshot.get_batch_query_epoch(),
+        );
+        Box::pin(self.run_inner().instrument(span))
     }
 
     pub fn stream_rows(mut self) -> LocalQueryStream {
@@ -241,6 +247,8 @@ impl LocalQueryExecution {
                 };
                 assert!(sources.is_empty());
 
+                let tracing_context = TracingContext::from_current_span().to_protobuf();
+
                 if let Some(table_scan_info) = second_stage.table_scan_info.clone()
                     && let Some(vnode_bitmaps) = table_scan_info.partitions()
                 {
@@ -268,6 +276,7 @@ impl LocalQueryExecution {
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
+                            tracing_context: tracing_context.clone(),
                         };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
@@ -300,6 +309,7 @@ impl LocalQueryExecution {
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
+                            tracing_context: tracing_context.clone(),
                         };
                         // NOTE: select a random work node here.
                         let worker_node = self.worker_node_manager.next_random_worker()?;
@@ -331,6 +341,7 @@ impl LocalQueryExecution {
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
                         epoch: Some(self.snapshot.get_batch_query_epoch()),
+                        tracing_context,
                     };
 
                     let workers = self.choose_worker(&second_stage)?;
@@ -465,26 +476,31 @@ impl LocalQueryExecution {
     }
 
     #[inline(always)]
-    fn get_streaming_vnode_mapping(
+    fn get_table_dml_vnode_mapping(
         &self,
         table_id: &TableId,
     ) -> SchedulerResult<ParallelUnitMapping> {
-        let fragment_id = self
-            .front_env
-            .catalog_reader()
-            .read_guard()
+        let guard = self.front_env.catalog_reader().read_guard();
+
+        let table = guard
             .get_table_by_id(table_id)
-            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?
-            .fragment_id;
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
+
+        let fragment_id = match table.dml_fragment_id.as_ref() {
+            Some(dml_fragment_id) => dml_fragment_id,
+            // Backward compatibility for those table without `dml_fragment_id`.
+            None => &table.fragment_id,
+        };
+
         self.worker_node_manager
             .manager
-            .get_streaming_fragment_mapping(&fragment_id)
+            .get_streaming_fragment_mapping(fragment_id)
     }
 
     fn choose_worker(&self, stage: &Arc<QueryStage>) -> SchedulerResult<Vec<WorkerNode>> {
         if let Some(table_id) = stage.dml_table_id.as_ref() {
             // dml should use streaming vnode mapping
-            let vnode_mapping = self.get_streaming_vnode_mapping(table_id)?;
+            let vnode_mapping = self.get_table_dml_vnode_mapping(table_id)?;
             let worker_node = {
                 let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
                 let candidates = self

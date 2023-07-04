@@ -31,6 +31,7 @@ pub struct MemoryContext {
     inner: Option<Arc<MemoryContextInner>>,
 }
 
+#[derive(Debug)]
 pub enum MemCounter {
     /// Used when the add/sub operation don't have much conflicts.
     Atomic(IntGauge),
@@ -68,11 +69,9 @@ impl From<TrAdderGauge> for MemCounter {
 
 impl MemoryContext {
     pub fn new(parent: Option<MemoryContext>, counter: impl Into<MemCounter>) -> Self {
+        let c = counter.into();
         Self {
-            inner: Some(Arc::new(MemoryContextInner {
-                counter: counter.into(),
-                parent,
-            })),
+            inner: Some(Arc::new(MemoryContextInner { counter: c, parent })),
         }
     }
 

@@ -22,10 +22,6 @@ pub struct Empty {
 }
 
 impl Row for Empty {
-    type Iter<'a> = std::iter::Empty<DatumRef<'a>>
-    where
-        Self: 'a;
-
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         panic!("index out of bounds: the len of `Empty` is 0 but the index is {index}")
@@ -43,7 +39,7 @@ impl Row for Empty {
     }
 
     #[inline]
-    fn iter(&self) -> Self::Iter<'_> {
+    fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
         std::iter::empty()
     }
 }

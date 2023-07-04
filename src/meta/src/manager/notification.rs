@@ -242,12 +242,26 @@ where
             .await
     }
 
+    pub fn notify_compute_without_version(&self, operation: Operation, info: Info) {
+        self.notify_without_version(SubscribeType::Compute.into(), operation, info)
+    }
+
     pub fn notify_frontend_without_version(&self, operation: Operation, info: Info) {
         self.notify_without_version(SubscribeType::Frontend.into(), operation, info)
     }
 
     pub fn notify_hummock_without_version(&self, operation: Operation, info: Info) {
         self.notify_without_version(SubscribeType::Hummock.into(), operation, info)
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn notify_hummock_with_version(
+        &self,
+        operation: Operation,
+        info: Info,
+        version: Option<NotificationVersion>,
+    ) {
+        self.notify(SubscribeType::Hummock.into(), operation, info, version)
     }
 
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {

@@ -34,6 +34,7 @@ mod merge;
 mod mview;
 mod no_op;
 mod now;
+mod over_window;
 mod project;
 mod project_set;
 mod row_id_gen;
@@ -73,6 +74,7 @@ use self::merge::*;
 use self::mview::*;
 use self::no_op::*;
 use self::now::NowExecutorBuilder;
+use self::over_window::*;
 use self::project::*;
 use self::project_set::*;
 use self::row_id_gen::RowIdGenExecutorBuilder;
@@ -163,5 +165,6 @@ pub async fn create_executor(
         NodeBody::AppendOnlyDedup => AppendOnlyDedupExecutorBuilder,
         NodeBody::NoOp => NoOpExecutorBuilder,
         NodeBody::EowcOverWindow => EowcOverWindowExecutorBuilder,
+        NodeBody::OverWindow => OverWindowExecutorBuilder,
     }
 }
