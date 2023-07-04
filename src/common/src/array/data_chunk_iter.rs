@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::TrustedLen;
+use std::iter::{FusedIterator, TrustedLen};
 
 use super::ArrayRef;
 use crate::array::DataChunk;
@@ -81,6 +81,8 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
         }
     }
 }
+
+impl<'a> FusedIterator for DataChunkRefIter<'a> {}
 
 pub struct DataChunkRefIterWithHoles<'a> {
     chunk: &'a DataChunk,
