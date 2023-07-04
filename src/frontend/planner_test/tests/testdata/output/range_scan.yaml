@@ -42,12 +42,12 @@
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 'a'
-  batch_error: 'Expr error: Parse error: i64'
+  batch_error: 'Expr error: Parse error: invalid digit found in string'
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id > 'a'
-  batch_error: 'Expr error: Parse error: i64'
+  batch_error: 'Expr error: Parse error: invalid digit found in string'
 - before:
   - create_table_and_mv
   sql: |
@@ -129,7 +129,7 @@
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id in ('42', '43.0')
-  batch_error: 'Expr error: Parse error: i64'
+  batch_error: 'Expr error: Parse error: invalid digit found in string'
 - before:
   - create_table_and_mv
   sql: |

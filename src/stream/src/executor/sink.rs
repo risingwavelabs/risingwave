@@ -353,7 +353,7 @@ mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
 
     use super::*;
-    use crate::common::log_store::BoundedInMemLogStoreFactory;
+    use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
     use crate::executor::test_utils::*;
     use crate::executor::ActorContext;
 

@@ -559,6 +559,14 @@ message EowcOverWindowNode {
   catalog.Table state_table = 4;
 }
 
+// Note this is not exactly the same as EowcOverWindowNode in terms of future extension, so better to split as 2 different nodes.
+message OverWindowNode {
+  repeated expr.WindowFunction calls = 1;
+  repeated uint32 partition_by = 2;
+  repeated common.ColumnOrder order_by = 3;
+  catalog.Table state_table = 4;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -598,6 +606,7 @@ message StreamNode {
     DedupNode append_only_dedup = 134;
     NoOpNode no_op = 135;
     EowcOverWindowNode eowc_over_window = 136;
+    OverWindowNode over_window = 137;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

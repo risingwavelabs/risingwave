@@ -28,21 +28,25 @@ use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub fn gen_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         match self.rng.gen_bool(0.1) {
-            true => self.gen_variadic_func(ret, context),
+            true => self.gen_special_func(ret, context),
             false => self.gen_fixed_func(ret, context),
         }
     }
 
-    /// Generates functions with variable arity:
-    /// `CASE`, `COALESCE`, `CONCAT`, `CONCAT_WS`
-    fn gen_variadic_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
+    /// Generates functions with special properties, e.g.
+    /// `CASE`, `COALESCE`, `CONCAT`, `CONCAT_WS`, `OVERLAY`.
+    /// These require custom logic for arguments.
+    /// For instance, `OVERLAY` requires a positive length argument,
+    /// and `CONCAT` and `CONCAT_WS` require variable number of arguments.
+    fn gen_special_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         use DataType as T;
         match ret {
-            T::Varchar => match self.rng.gen_range(0..=3) {
+            T::Varchar => match self.rng.gen_range(0..=4) {
                 0 => self.gen_case(ret, context),
                 1 => self.gen_coalesce(ret, context),
                 2 => self.gen_concat(context),
                 3 => self.gen_concat_ws(context),
+                4 => self.gen_overlay(context),
                 _ => unreachable!(),
             },
             _ => match self.rng.gen_bool(0.5) {
@@ -51,6 +55,27 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             },
             // TODO: gen_regexpr
             // TODO: gen functions which return list, struct
+        }
+    }
+
+    /// We do custom generation for the `OVERLAY` function call.
+    /// See: [`https://github.com/risingwavelabs/risingwave/issues/10695`] for rationale.
+    fn gen_overlay(&mut self, context: SqlGeneratorContext) -> Expr {
+        let expr = Box::new(self.gen_expr(&DataType::Varchar, context));
+        let new_substring = Box::new(self.gen_expr(&DataType::Varchar, context));
+        let start = Box::new(self.gen_range_scalar(&DataType::Int32, 1, 10).unwrap());
+        let count = if self.flip_coin() {
+            None
+        } else {
+            Some(Box::new(
+                self.gen_range_scalar(&DataType::Int32, 1, 10).unwrap(),
+            ))
+        };
+        Expr::Overlay {
+            expr,
+            new_substring,
+            start,
+            count,
         }
     }
 
@@ -144,6 +169,7 @@ fn make_unary_op(func: ExprType, expr: &Expr) -> Option<Expr> {
     })
 }
 
+/// General expressions do not fall under unary / binary op, so they are constructed differently.
 fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
     use ExprType as E;
 
@@ -177,7 +203,9 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Sha512 => Some(Expr::Function(make_simple_func("sha512", &exprs))),
         // TODO: Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
         // E::Translate => Some(Expr::Function(make_simple_func("translate", &exprs))),
-        E::Overlay => Some(make_overlay(exprs)),
+        // NOTE(kwannoel): I disabled `Overlay`, its arguments require special handling.
+        // We generate it in `gen_special_func` instead.
+        // E::Overlay => Some(make_overlay(exprs)),
         _ => None,
     }
 }
@@ -200,24 +228,6 @@ fn make_trim(func: ExprType, exprs: Vec<Expr>) -> Expr {
         expr: Box::new(exprs[0].clone()),
         trim_where: Some(trim_type),
         trim_what,
-    }
-}
-
-fn make_overlay(exprs: Vec<Expr>) -> Expr {
-    if exprs.len() == 3 {
-        Expr::Overlay {
-            expr: Box::new(exprs[0].clone()),
-            new_substring: Box::new(exprs[1].clone()),
-            start: Box::new(exprs[2].clone()),
-            count: None,
-        }
-    } else {
-        Expr::Overlay {
-            expr: Box::new(exprs[0].clone()),
-            new_substring: Box::new(exprs[1].clone()),
-            start: Box::new(exprs[2].clone()),
-            count: Some(Box::new(exprs[3].clone())),
-        }
     }
 }
 
