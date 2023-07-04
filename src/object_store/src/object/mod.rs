@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -262,6 +261,41 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
         }
     }
+
+    pub fn set_opts(
+        &mut self,
+        streaming_read_timeout_ms: u64,
+        streaming_upload_timeout_ms: u64,
+        read_timeout_ms: u64,
+        upload_timeout_ms: u64,
+    ) {
+        match self {
+            ObjectStoreImpl::InMem(s) => {
+                s.set_opts(
+                    streaming_read_timeout_ms,
+                    streaming_upload_timeout_ms,
+                    read_timeout_ms,
+                    upload_timeout_ms,
+                );
+            }
+            ObjectStoreImpl::Opendal(s) => {
+                s.set_opts(
+                    streaming_read_timeout_ms,
+                    streaming_upload_timeout_ms,
+                    read_timeout_ms,
+                    upload_timeout_ms,
+                );
+            }
+            ObjectStoreImpl::S3(s) => {
+                s.set_opts(
+                    streaming_read_timeout_ms,
+                    streaming_upload_timeout_ms,
+                    read_timeout_ms,
+                    upload_timeout_ms,
+                );
+            }
+        }
+    }
 }
 
 fn try_update_failure_metric<T>(
@@ -294,6 +328,7 @@ pub struct MonitoredStreamingUploader {
     /// Length of data uploaded with this uploader.
     operation_size: usize,
     media_type: &'static str,
+    streaming_upload_timeout: Option<Duration>,
 }
 
 impl MonitoredStreamingUploader {
@@ -301,12 +336,14 @@ impl MonitoredStreamingUploader {
         media_type: &'static str,
         handle: BoxedStreamingUploader,
         object_store_metrics: Arc<ObjectStoreMetrics>,
+        streaming_upload_timeout: Option<Duration>,
     ) -> Self {
         Self {
             inner: handle,
             object_store_metrics,
             operation_size: 0,
             media_type,
+            streaming_upload_timeout,
         }
     }
 }
@@ -329,10 +366,20 @@ impl MonitoredStreamingUploader {
             .start_timer();
         self.operation_size += data_len;
 
-        let ret = self.inner.write_bytes(data).await;
+        let future = async { self.inner.write_bytes(data).await };
+        let res = match self.streaming_upload_timeout.as_ref() {
+            None => future.await,
+            Some(timeout) => tokio::time::timeout(*timeout, future)
+                .await
+                .unwrap_or_else(|_| {
+                    Err(ObjectError::internal(
+                        "streaming_upload write_bytes timeout",
+                    ))
+                }),
+        };
 
-        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
-        ret
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        res
     }
 
     pub async fn finish(self) -> ObjectResult<()> {
@@ -347,10 +394,16 @@ impl MonitoredStreamingUploader {
             .with_label_values(&[self.media_type, operation_type])
             .start_timer();
 
-        let ret = self.inner.finish().await;
+        let future = async { self.inner.finish().await };
+        let res = match self.streaming_upload_timeout.as_ref() {
+            None => future.await,
+            Some(timeout) => tokio::time::timeout(*timeout, future)
+                .await
+                .unwrap_or_else(|_| Err(ObjectError::internal("streaming_upload finish timeout"))),
+        };
 
-        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
-        ret
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        res
     }
 
     pub fn get_memory_usage(&self) -> u64 {
@@ -365,7 +418,7 @@ pub struct MonitoredStreamingReader {
     operation_size: usize,
     media_type: &'static str,
     timer: Option<HistogramTimer>,
-    streaming_read_bytes_timeout: Duration,
+    streaming_read_timeout: Option<Duration>,
 }
 
 impl MonitoredStreamingReader {
@@ -373,7 +426,7 @@ impl MonitoredStreamingReader {
         media_type: &'static str,
         handle: BoxedStreamingReader,
         object_store_metrics: Arc<ObjectStoreMetrics>,
-        streaming_read_bytes_timeout: Duration,
+        streaming_read_timeout: Option<Duration>,
     ) -> Self {
         let operation_type = "streaming_read";
         let timer = object_store_metrics
@@ -386,7 +439,7 @@ impl MonitoredStreamingReader {
             operation_size: 0,
             media_type,
             timer: Some(timer),
-            streaming_read_bytes_timeout,
+            streaming_read_timeout,
         }
     }
 
@@ -404,15 +457,22 @@ impl MonitoredStreamingReader {
             .with_label_values(&[self.media_type, operation_type])
             .start_timer();
         self.operation_size += data_len;
-        let ret = tokio::time::timeout(self.streaming_read_bytes_timeout, async {
+        let future = async {
             self.inner.read_exact(buf).await.map_err(|err| {
                 ObjectError::internal(format!("read_bytes failed, error: {:?}", err))
             })
-        })
-        .await
-        .unwrap_or_else(|_| Err(ObjectError::internal("read_bytes timeout")));
-        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
-        ret
+        };
+        let res = match self.streaming_read_timeout.as_ref() {
+            None => future.await,
+            Some(timeout) => tokio::time::timeout(*timeout, future)
+                .await
+                .unwrap_or_else(|_| {
+                    Err(ObjectError::internal("streaming_read read_bytes timeout"))
+                }),
+        };
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        res
     }
 }
 
@@ -430,8 +490,10 @@ impl Drop for MonitoredStreamingReader {
 pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
-    streaming_read_bytes_timeout: Duration,
-    read_timeout: Duration,
+    streaming_read_timeout: Option<Duration>,
+    streaming_upload_timeout: Option<Duration>,
+    read_timeout: Option<Duration>,
+    upload_timeout: Option<Duration>,
 }
 
 /// Manually dispatch trait methods.
@@ -452,19 +514,13 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
 ///   - `failure-count`
 impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub fn new(store: OS, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
-        let streaming_read_bytes_timeout = Duration::from_millis(from_env_or_default(
-            "RW_OBJECT_STORE_STREAMING_READ_BYTES_TIMEOUT_MS",
-            600000,
-        ));
-        let read_timeout = Duration::from_millis(from_env_or_default(
-            "RW_OBJECT_STORE_READ_TIMEOUT_MS",
-            600000,
-        ));
         Self {
             inner: store,
             object_store_metrics,
-            streaming_read_bytes_timeout,
-            read_timeout,
+            streaming_read_timeout: None,
+            streaming_upload_timeout: None,
+            read_timeout: None,
+            upload_timeout: None,
         }
     }
 
@@ -490,15 +546,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
+        let future = async {
+            self.inner
+                .upload(path, obj)
+                .verbose_instrument_await("object_store_upload")
+                .await
+        };
+        let res = match self.upload_timeout.as_ref() {
+            None => future.await,
+            Some(timeout) => tokio::time::timeout(*timeout, future)
+                .await
+                .unwrap_or_else(|_| Err(ObjectError::internal("upload timeout"))),
+        };
 
-        let ret = self
-            .inner
-            .upload(path, obj)
-            .verbose_instrument_await("object_store_upload")
-            .await;
-
-        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
-        ret
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        res
     }
 
     pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
@@ -509,14 +571,20 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
+        let future = async { self.inner.streaming_upload(path).await };
+        let res = match self.streaming_upload_timeout.as_ref() {
+            None => future.await,
+            Some(timeout) => tokio::time::timeout(*timeout, future)
+                .await
+                .unwrap_or_else(|_| Err(ObjectError::internal("streaming_upload init timeout"))),
+        };
 
-        let handle_res = self.inner.streaming_upload(path).await;
-
-        try_update_failure_metric(&self.object_store_metrics, &handle_res, operation_type);
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         Ok(MonitoredStreamingUploader::new(
             media_type,
-            handle_res?,
+            res?,
             self.object_store_metrics.clone(),
+            self.streaming_upload_timeout,
         ))
     }
 
@@ -527,8 +595,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
-
-        let res = tokio::time::timeout(self.read_timeout, async {
+        let future = async {
             self.inner
                 .read(path, block_loc)
                 .verbose_instrument_await("object_store_read")
@@ -539,9 +606,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
                         path, block_loc, err
                     ))
                 })
-        })
-        .await
-        .unwrap_or_else(|_| Err(ObjectError::internal("read timeout")));
+        };
+        let res = match self.read_timeout.as_ref() {
+            None => future.await,
+            Some(read_timeout) => tokio::time::timeout(*read_timeout, future)
+                .await
+                .unwrap_or_else(|_| Err(ObjectError::internal("read timeout"))),
+        };
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
 
@@ -568,14 +639,18 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
 
-        let res = tokio::time::timeout(self.read_timeout, async {
+        let future = async {
             self.inner
                 .readv(path, block_locs)
                 .verbose_instrument_await("object_store_readv")
                 .await
-        })
-        .await
-        .unwrap_or_else(|_| Err(ObjectError::internal("readv timeout")));
+        };
+        let res = match self.read_timeout.as_ref() {
+            None => future.await,
+            Some(timeout) => tokio::time::timeout(*timeout, future)
+                .await
+                .unwrap_or_else(|_| Err(ObjectError::internal("readv timeout"))),
+        };
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
 
@@ -604,13 +679,20 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
-        let ret = self.inner.streaming_read(path, start_pos).await;
-        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        let future = async { self.inner.streaming_read(path, start_pos).await };
+        let res = match self.streaming_read_timeout.as_ref() {
+            None => future.await,
+            Some(timeout) => tokio::time::timeout(*timeout, future)
+                .await
+                .unwrap_or_else(|_| Err(ObjectError::internal("streaming_read init timeout"))),
+        };
+
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
         Ok(MonitoredStreamingReader::new(
             media_type,
-            ret?,
+            res?,
             self.object_store_metrics.clone(),
-            self.streaming_read_bytes_timeout,
+            self.streaming_read_timeout,
         ))
     }
 
@@ -622,14 +704,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
 
-        let ret = self
-            .inner
-            .metadata(path)
-            .verbose_instrument_await("object_store_metadata")
-            .await;
+        let future = async {
+            self.inner
+                .metadata(path)
+                .verbose_instrument_await("object_store_metadata")
+                .await
+        };
+        let res = match self.read_timeout.as_ref() {
+            None => future.await,
+            Some(timeout) => tokio::time::timeout(*timeout, future)
+                .await
+                .unwrap_or_else(|_| Err(ObjectError::internal("metadata timeout"))),
+        };
 
-        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
-        ret
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        res
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
@@ -640,14 +729,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
 
-        let ret = self
-            .inner
-            .delete(path)
-            .verbose_instrument_await("object_store_delete")
-            .await;
+        let future = async {
+            self.inner
+                .delete(path)
+                .verbose_instrument_await("object_store_delete")
+                .await
+        };
+        let res = match self.read_timeout.as_ref() {
+            None => future.await,
+            Some(timeout) => tokio::time::timeout(*timeout, future)
+                .await
+                .unwrap_or_else(|_| Err(ObjectError::internal("delete timeout"))),
+        };
 
-        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
-        ret
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        res
     }
 
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
@@ -658,14 +754,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
 
-        let ret = self
-            .inner
-            .delete_objects(paths)
-            .verbose_instrument_await("object_store_delete_objects")
-            .await;
+        let future = async {
+            self.inner
+                .delete_objects(paths)
+                .verbose_instrument_await("object_store_delete_objects")
+                .await
+        };
+        let res = match self.read_timeout.as_ref() {
+            None => future.await,
+            Some(timeout) => tokio::time::timeout(*timeout, future)
+                .await
+                .unwrap_or_else(|_| Err(ObjectError::internal("delete_objects timeout"))),
+        };
 
-        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
-        ret
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        res
     }
 
     pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
@@ -676,14 +779,34 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[self.media_type(), operation_type])
             .start_timer();
 
-        let ret = self
-            .inner
-            .list(prefix)
-            .verbose_instrument_await("object_store_list")
-            .await;
+        let future = async {
+            self.inner
+                .list(prefix)
+                .verbose_instrument_await("object_store_list")
+                .await
+        };
+        let res = match self.read_timeout.as_ref() {
+            None => future.await,
+            Some(timeout) => tokio::time::timeout(*timeout, future)
+                .await
+                .unwrap_or_else(|_| Err(ObjectError::internal("list timeout"))),
+        };
 
-        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
-        ret
+        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
+        res
+    }
+
+    fn set_opts(
+        &mut self,
+        streaming_read_timeout_ms: u64,
+        streaming_upload_timeout_ms: u64,
+        read_timeout_ms: u64,
+        upload_timeout_ms: u64,
+    ) {
+        self.streaming_read_timeout = Some(Duration::from_millis(streaming_read_timeout_ms));
+        self.streaming_upload_timeout = Some(Duration::from_millis(streaming_upload_timeout_ms));
+        self.read_timeout = Some(Duration::from_millis(read_timeout_ms));
+        self.upload_timeout = Some(Duration::from_millis(upload_timeout_ms));
     }
 }
 
@@ -799,18 +922,4 @@ pub async fn parse_remote_object_store(
             )
         }
     }
-}
-
-fn from_env_or_default<T: Copy + FromStr + std::fmt::Display>(env: &str, default: T) -> T {
-    std::env::var(env)
-        .map(|c| {
-            c.parse::<T>().unwrap_or_else(|_| {
-                tracing::warn!("Failed to parse {}, fall back to {}.", env, default);
-                default
-            })
-        })
-        .unwrap_or_else(|_| {
-            tracing::info!("{} is not set, use default {}.", env, default);
-            default
-        })
 }

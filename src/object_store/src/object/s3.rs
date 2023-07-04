@@ -31,7 +31,6 @@ use aws_smithy_client::http_connector::ConnectorSettings;
 use aws_smithy_http::body::SdkBody;
 use aws_smithy_http::result::SdkError;
 use aws_smithy_types::retry::RetryConfig;
-use aws_smithy_types::timeout::TimeoutConfig;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::stream;
@@ -46,7 +45,7 @@ use super::{
     BlockLocation, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult,
     ObjectStore, StreamingUploader,
 };
-use crate::object::{from_env_or_default, try_update_failure_metric};
+use crate::object::try_update_failure_metric;
 
 type PartId = i32;
 
@@ -610,24 +609,9 @@ impl S3ObjectStore {
             .connector_settings(ConnectorSettings::builder().build())
             .build(native_tls());
 
-        let connect_timeout =
-            Duration::from_millis(from_env_or_default("RW_S3_CONNECT_TIMEOUT_MS", 3100));
-        let read_timeout =
-            Duration::from_millis(from_env_or_default("RW_S3_READ_TIMEOUT_MS", 10000));
-        let operation_attempt_timeout = Duration::from_millis(from_env_or_default(
-            "RW_S3_OPERATION_ATTEMPT_TIMEOUT_MS",
-            600000,
-        ));
         // Retry 3 times if we get server-side errors or throttling errors
         let sdk_config_loader = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
-            .timeout_config(
-                TimeoutConfig::builder()
-                    .connect_timeout(connect_timeout)
-                    .read_timeout(read_timeout)
-                    .operation_attempt_timeout(operation_attempt_timeout)
-                    .build(),
-            )
             .http_connector(hyper_adapter);
 
         let sdk_config = match std::env::var("RW_S3_ENDPOINT") {
