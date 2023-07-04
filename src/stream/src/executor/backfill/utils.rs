@@ -255,6 +255,21 @@ pub(crate) fn build_temporary_state(
     row_state[current_pos.len() + 1] = Some(is_finished.into());
 }
 
+pub(crate) fn update_pos_per_vnode(
+    chunk: &StreamChunk,
+    pk_in_output_indices: &[usize],
+) -> Option<OwnedRow> {
+    Some(
+        chunk
+            .rows()
+            .last()
+            .unwrap()
+            .1
+            .project(pk_in_output_indices)
+            .into_owned_row(),
+    )
+}
+
 pub(crate) fn update_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -> Option<OwnedRow> {
     Some(
         chunk
@@ -339,6 +354,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         // state w/o vnodes.
         build_temporary_state(current_state, is_finished, current_pos);
         flush_data(table, epoch, old_state, current_state).await?;
+        // FIXME
         *old_state = Some(current_state.into());
     }
     Ok(())

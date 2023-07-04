@@ -452,7 +452,10 @@ where
     /// 2. Merge it with `select_all`.
     /// 3. Change it into a chunk iterator with `iter_chunks`.
     /// This means it should fetch a row from each iterator to form a chunk.
-    /// Within each vnode, rows will be ordered by pk.
+    ///
+    /// NOTE(kwannoel): We interleave at chunk per vnode level rather than rows.
+    /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
+    /// vnode.
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         schema: Arc<Schema>,
@@ -467,14 +470,17 @@ where
                 continue;
             }
             let range_bounds = range_bounds.unwrap();
-            let vnode_iter = upstream_table
+            let vnode_row_iter = upstream_table
                 .iter_with_pk_range(&range_bounds, vnode, Default::default())
                 .await?;
-            streams.push(Box::pin(vnode_iter));
+            // TODO: Is there some way to avoid double-pin here?
+            let vnode_row_iter = Box::pin(vnode_row_iter);
+            let vnode_chunk_iter = iter_chunks(vnode_row_iter, &schema, CHUNK_SIZE);
+            // TODO: Is there some way to avoid double-pin
+            streams.push(Box::pin(vnode_chunk_iter));
         }
-        let iter = select_all(streams);
         #[for_await]
-        for chunk in iter_chunks(iter, &schema, CHUNK_SIZE) {
+        for chunk in select_all(streams) {
             yield chunk?;
         }
         yield None;
