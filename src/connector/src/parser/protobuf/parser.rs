@@ -30,7 +30,8 @@ use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::{
-    ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard, ParserProperties, EncodingProperties,
+    ByteStreamSourceParser, EncodingProperties, ParserProperties, SourceStreamChunkRowWriter,
+    WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -427,8 +428,8 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config = ParserConfigList::from(SourceFormat::Protobuf, &HashMap::new(), &info)?;
-        let conf = ProtobufParserConfig::new(&parser_config).await?;
+        let parser_config = ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info)?;
+        let conf = ProtobufParserConfig::new(parser_config).await?;
         let parser = ProtobufParser::new(Vec::default(), conf, Default::default())?;
         let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
@@ -471,8 +472,8 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config = ParserConfigList::from(SourceFormat::Protobuf, &HashMap::new(), &info)?;
-        let conf = ProtobufParserConfig::new(&parser_config).await?;
+        let parser_config = ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info)?;
+        let conf = ProtobufParserConfig::new(parser_config).await?;
         let columns = conf.map_to_columns().unwrap();
 
         assert_eq!(columns[0].name, "id".to_string());
@@ -519,8 +520,8 @@ mod test {
             ..Default::default()
         };
         let parser_config =
-            ParserConfigList::from(SourceFormat::Protobuf, &HashMap::new(), &info).unwrap();
-        let conf = ProtobufParserConfig::new(&parser_config).await.unwrap();
+            ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info).unwrap();
+        let conf = ProtobufParserConfig::new(parser_config).await.unwrap();
         let columns = conf.map_to_columns();
         // expect error message:
         // "Err(Protocol error: circular reference detected:

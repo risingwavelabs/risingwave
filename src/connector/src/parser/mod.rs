@@ -37,10 +37,9 @@ pub use self::csv_parser::CsvParserConfig;
 use self::util::get_kafka_topic;
 use crate::aws_auth::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
-use crate::source::kafka::KafkaProperties;
 use crate::source::{
     BoxSourceStream, SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat, SourceMeta,
-    SourceWithStateStream, SplitId, StreamChunkWithState, ConnectorProperties,
+    SourceWithStateStream, SplitId, StreamChunkWithState,
 };
 
 mod avro;
@@ -553,7 +552,7 @@ pub enum EncodingProperties {
 pub enum ProtocolProperties {
     Debezium,
     #[default]
-    None
+    None,
 }
 
 pub struct ParserProperties {
@@ -569,7 +568,6 @@ pub struct ParserProperties {
 ///    client info, topic, aws config
 /// 4. DEBEZIUM AVRO: row schema location, topic, client info
 /// 5. Other: none
-///
 
 impl ParserProperties {
     pub fn new(
@@ -616,17 +614,15 @@ impl ParserProperties {
                 }
                 EncodingProperties::Protobuf(config)
             }
-            SourceFormat::DebeziumAvro => EncodingProperties::Avro(
-                AvroProperties {
-                    row_schema_location: info.row_schema_location.clone(),
-                    topic: get_kafka_topic(props).unwrap().clone(),
-                    client_config: ParserClientConfigList::from(props),
-                    ..Default::default()
-                },
-            ),
+            SourceFormat::DebeziumAvro => EncodingProperties::Avro(AvroProperties {
+                row_schema_location: info.row_schema_location.clone(),
+                topic: get_kafka_topic(props).unwrap().clone(),
+                client_config: ParserClientConfigList::from(props),
+                ..Default::default()
+            }),
             _ => EncodingProperties::None,
         };
-        let protocol_config = ProtobufProperties::None;
+        let protocol_config = ProtocolProperties::None;
         Ok(ParserProperties {
             encoding_config,
             protocol_config,
@@ -678,9 +674,9 @@ impl SpecificParserConfig {
             SourceFormat::UpsertAvro => SpecificParserConfig::UpsertAvro(
                 AvroParserConfig::new(parser_properties, true).await?,
             ),
-            SourceFormat::Protobuf => SpecificParserConfig::Protobuf(
-                ProtobufParserConfig::new(parser_properties).await?,
-            ),
+            SourceFormat::Protobuf => {
+                SpecificParserConfig::Protobuf(ProtobufParserConfig::new(parser_properties).await?)
+            }
             SourceFormat::Json => SpecificParserConfig::Json,
             SourceFormat::UpsertJson => SpecificParserConfig::UpsertJson,
             SourceFormat::DebeziumJson => SpecificParserConfig::DebeziumJson,

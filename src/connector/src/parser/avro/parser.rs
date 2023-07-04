@@ -31,7 +31,8 @@ use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    ByteStreamSourceParser, ParserConfigList, SourceStreamChunkRowWriter, WriteGuard, ParserProperties, EncodingProperties,
+    ByteStreamSourceParser, EncodingProperties, ParserProperties, SourceStreamChunkRowWriter,
+    WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -298,7 +299,7 @@ mod test {
     };
     use crate::aws_auth::AwsAuthProps;
     use crate::parser::unified::avro::unix_epoch_days;
-    use crate::parser::{ParserConfigList, SourceStreamChunkBuilder};
+    use crate::parser::{ParserProperties, SourceStreamChunkBuilder};
     use crate::source::{SourceColumnDesc, SourceFormat};
 
     fn test_data_path(file_name: &str) -> String {
@@ -373,8 +374,8 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
-        let parser_config = ParserConfigList::from(SourceFormat::Avro, &HashMap::new(), &info)?;
-        AvroParserConfig::new(&parser_config, false).await
+        let parser_config = ParserProperties::new(SourceFormat::Avro, &HashMap::new(), &info)?;
+        AvroParserConfig::new(parser_config, false).await
     }
 
     async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {

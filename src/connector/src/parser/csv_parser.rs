@@ -20,7 +20,7 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Decimal, ScalarImpl};
 
-use super::{ByteStreamSourceParser, ParserProperties, EncodingProperties};
+use super::{ByteStreamSourceParser, EncodingProperties, ParserProperties};
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -41,9 +41,9 @@ impl CsvParserConfig {
         let csv_config = match parser_properties.encoding_config {
             EncodingProperties::Csv(config) => config,
             _ => {
-                return Err(RwError::from(ProtocolError(format!(
-                    "wrong parser config list for Csv",
-                ))))
+                return Err(RwError::from(ProtocolError(
+                    "wrong parser config list for Csv".to_string(),
+                )))
             }
         };
         Ok(Self {

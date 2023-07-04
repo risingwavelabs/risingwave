@@ -31,7 +31,8 @@ use crate::parser::unified::avro::{
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    ByteStreamSourceParser, ParserConfigList, SourceStreamChunkRowWriter, WriteGuard, ParserProperties, EncodingProperties,
+    ByteStreamSourceParser, EncodingProperties, ParserProperties, SourceStreamChunkRowWriter,
+    WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -351,8 +352,8 @@ mod tests {
             row_schema_location: "http://127.0.0.1:8081".into(),
             ..Default::default()
         };
-        let parser_config = ParserConfigList::from(SourceFormat::DebeziumAvro, &props, &info)?;
-        let config = DebeziumAvroParserConfig::new(&parser_config).await?;
+        let parser_config = ParserProperties::new(SourceFormat::DebeziumAvro, &props, &info)?;
+        let config = DebeziumAvroParserConfig::new(parser_config).await?;
         let columns = config
             .map_to_columns()?
             .into_iter()
