@@ -134,6 +134,7 @@ where
 
         // Current position of upstream_table primary key.
         // Current position is computed **per vnode**.
+        // FIXME: This should be backfill state instead. We need to know which vnode is finished.
         let mut current_pos_map: CurrentPosMap = HashMap::new();
 
         // If the snapshot is empty, we don't need to backfill.
@@ -465,6 +466,14 @@ where
     /// NOTE(kwannoel): We interleave at chunk per vnode level rather than rows.
     /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
     /// vnode.
+    ///
+    /// TODO(kwannoel): Support partially complete snapshot reads.
+    /// That will require the following changes:
+    /// 1. Instead of returning stream chunk and vnode, we need to dispatch 3 diff messages:
+    ///    a. COMPLETE_VNODE(vnode): Current iterator is complete, in that case we need to handle it
+    /// in arrangement backfill.       We should not buffer updates for this vnode, and forward
+    /// all messages.    b. MESSAGE(CHUNK): Current iterator is not complete, in that case we
+    /// need to buffer updates for this vnode.    c. FINISHED: All iterators finished.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         schema: Arc<Schema>,

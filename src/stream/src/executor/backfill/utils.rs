@@ -42,9 +42,24 @@ pub type CurrentPosMap = HashMap<VirtualNode, OwnedRow>;
 pub struct BackfillState {
     /// Used to track backfill progress.
     backfill_progress: HashMap<VirtualNode, BackfillProgressPerVnode>,
+}
 
-    /// We need this to process state updates.
-    committed_progress: HashMap<VirtualNode, Option<OwnedRow>>,
+impl BackfillState {
+    fn new() -> Self {
+        Self {
+            backfill_progress: HashMap::new(),
+        }
+    }
+
+    fn has_no_progress(&self) -> bool {
+        self.backfill_progress.is_empty()
+    }
+
+    fn iter_backfill_progress(
+        &self,
+    ) -> impl Iterator<Item = (&VirtualNode, &BackfillProgressPerVnode)> {
+        self.backfill_progress.iter()
+    }
 }
 
 /// Used for tracking backfill state per vnode
@@ -69,6 +84,8 @@ pub(crate) fn mark_chunk(
 /// For each row of the chunk, forward it to downstream if its pk <= `current_pos` for the
 /// corresponding `vnode`, otherwise ignore it.
 /// We implement it by changing the visibility bitmap.
+///
+/// TODO(kwannoel): We should always forward rows with status `FINISHED`.
 pub(crate) fn mark_chunk_ref_by_vnode(
     chunk: &StreamChunk,
     current_pos_map: &HashMap<VirtualNode, OwnedRow>,
@@ -80,7 +97,7 @@ pub(crate) fn mark_chunk_ref_by_vnode(
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
     // Use project to avoid allocation.
     for v in data.rows().map(|row| {
-        // TODO(kwannoel): Is this logic correct for compute vnode?
+        // TODO(kwannoel): Is this logic correct for computing vnode?
         // I will revisit it again when arrangement_backfill is implemented e2e.
         let vnode = VirtualNode::compute_row(row, pk_in_output_indices);
         let current_pos = current_pos_map.get(&vnode).unwrap();
@@ -244,8 +261,21 @@ pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
     table.commit(epoch).await
 }
 
-// We want to avoid building a row for every vnode.
-// Instead we can just modify a single row, and dispatch it to state table to write.
+/// We want to avoid allocating a row for every vnode.
+pub(crate) fn build_temporary_state_with_vnode(
+    row_state: &mut [Datum],
+    vnode: VirtualNode,
+    is_finished: bool,
+    current_pos: &OwnedRow,
+) {
+    build_temporary_state(row_state, is_finished, current_pos);
+    row_state[0] = Some(vnode.to_scalar().into());
+}
+
+/// We want to avoid allocating a row for every vnode.
+/// Instead we can just modify a single row, and dispatch it to state table to write.
+/// This builds the `current_pos` segment of the row.
+/// Vnode needs to be filled in as well.
 pub(crate) fn build_temporary_state(
     row_state: &mut [Datum],
     is_finished: bool,
@@ -348,25 +378,55 @@ pub(crate) async fn iter_chunks<'a, S, E>(
 
 /// Schema
 /// | vnode | pk | `backfill_finished` |
-///
-/// `current_pos_map` is the map from vnode to the current backfilled pk position.
+/// Persists the state per vnode.
+/// 1. For each (vnode, current_pos),
+///    either insert OR update the state,
+///    depending if there was an old state.
 pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
-    current_pos_map: &CurrentPosMap,
-    old_state: &mut Option<Vec<Datum>>,
-    current_state: &mut [Datum],
+    backfill_state: &mut BackfillState,
+    committed_progress: &mut HashMap<VirtualNode, Vec<Datum>>,
+    temporary_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {
-    if current_pos_map.is_empty() {
+    // No progress -> No need to commit anything.
+    if backfill_state.has_no_progress() {
         table.commit_no_data_expected(epoch);
     }
-    for current_pos in current_pos_map.values() {
-        // state w/o vnodes.
-        build_temporary_state(current_state, is_finished, current_pos);
-        flush_data(table, epoch, old_state, current_state).await?;
-        // FIXME
-        *old_state = Some(current_state.into());
+
+    for (vnode, backfill_progress) in backfill_state.iter_backfill_progress() {
+        let current_pos = match backfill_progress {
+            BackfillProgressPerVnode::Completed | BackfillProgressPerVnode::NotStarted => {
+                continue;
+            }
+            BackfillProgressPerVnode::InProgress(current_pos) => current_pos,
+        };
+        build_temporary_state_with_vnode(temporary_state, *vnode, is_finished, current_pos);
+
+        let old_state = committed_progress.get(&vnode);
+
+        if let Some(old_state) = old_state {
+            // No progress for vnode, means no data
+            if old_state == current_pos.as_inner() {
+                table.commit_no_data_expected(epoch);
+                return Ok(());
+            } else {
+                // There's some progress, update the state.
+                table.write_record(Record::Update {
+                    old_row: &old_state[..],
+                    new_row: &(*temporary_state),
+                });
+                table.commit(epoch).await?;
+            }
+        } else {
+            // No existing state, create a new entry.
+            table.write_record(Record::Insert {
+                new_row: &(*temporary_state),
+            });
+            table.commit(epoch).await?;
+        }
+        committed_progress.insert(*vnode, current_pos.as_inner().to_vec());
     }
     Ok(())
 }
