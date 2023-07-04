@@ -502,16 +502,25 @@
     select count(x), sum(distinct y), sum(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x int, y int);
     select count(y), sum(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x int, y int);
     select count(distinct x), sum(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x varchar, y int);
     select string_agg(x, ','), count(distinct y) from t;
@@ -523,6 +532,10 @@
     select max(distinct x), min(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
+
 - name: agg filter - subquery
   sql: |
     /* This case is valid in PostgreSQL */

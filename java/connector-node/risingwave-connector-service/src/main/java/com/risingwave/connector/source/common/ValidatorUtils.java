@@ -28,6 +28,10 @@ public final class ValidatorUtils {
 
     static final String VALIDATE_SQL_FILE = "validate_sql.properties";
 
+    public static RuntimeException failedPrecondition(String description) {
+        return Status.FAILED_PRECONDITION.withDescription(description).asRuntimeException();
+    }
+
     public static RuntimeException invalidArgument(String description) {
         return Status.INVALID_ARGUMENT.withDescription(description).asRuntimeException();
     }

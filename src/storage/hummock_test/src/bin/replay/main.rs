@@ -54,7 +54,7 @@ struct Args {
     path: String,
 
     // path to config file
-    #[arg(short, long, default_value = "src/config/risingwave.user.toml")]
+    #[arg(short, long, default_value = "src/config/hummock-trace.toml")]
     config: String,
 
     #[arg(short, long)]

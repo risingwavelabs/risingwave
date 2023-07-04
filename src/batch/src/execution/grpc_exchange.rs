@@ -50,6 +50,7 @@ impl GrpcExchangeSource {
                     task_id: Some(task_id),
                     plan: plan.plan,
                     epoch: plan.epoch,
+                    tracing_context: plan.tracing_context,
                 };
                 client.execute(execute_request).await?
             }

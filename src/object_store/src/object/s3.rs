@@ -26,6 +26,8 @@ use aws_sdk_s3::types::{
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
 use aws_sdk_s3::Client;
+use aws_smithy_client::conns::NativeTls;
+use aws_smithy_client::http_connector::ConnectorSettings;
 use aws_smithy_http::body::SdkBody;
 use aws_smithy_http::result::SdkError;
 use aws_smithy_types::retry::RetryConfig;
@@ -590,9 +592,28 @@ impl S3ObjectStore {
             )
         }
 
+        // Customize http connector to set keepalive.
+        let native_tls = || -> NativeTls {
+            let mut tls = hyper_tls::native_tls::TlsConnector::builder();
+            let tls = tls
+                .min_protocol_version(Some(hyper_tls::native_tls::Protocol::Tlsv12))
+                .build()
+                .unwrap_or_else(|e| panic!("Error while creating TLS connector: {}", e));
+            let mut http = hyper::client::HttpConnector::new();
+            http.set_keepalive(Some(Duration::from_secs(600)));
+            http.enforce_http(false);
+            hyper_tls::HttpsConnector::from((http, tls.into()))
+        };
+        let hyper_adapter = aws_smithy_client::hyper_ext::Adapter::builder()
+            .hyper_builder(hyper::client::Builder::default())
+            .connector_settings(ConnectorSettings::builder().build())
+            .build(native_tls());
+
         // Retry 3 times if we get server-side errors or throttling errors
-        let sdk_config_loader =
-            aws_config::from_env().retry_config(RetryConfig::standard().with_max_attempts(4));
+        let sdk_config_loader = aws_config::from_env()
+            .retry_config(RetryConfig::standard().with_max_attempts(4))
+            .http_connector(hyper_adapter);
+
         let sdk_config = match std::env::var("RW_S3_ENDPOINT") {
             Ok(endpoint) => sdk_config_loader.endpoint_url(endpoint).load().await,
             Err(_) => sdk_config_loader.load().await,
@@ -632,7 +653,6 @@ impl S3ObjectStore {
             ))
             .build();
         let client = Client::from_conf(config);
-
         Self {
             client,
             bucket: bucket.to_string(),

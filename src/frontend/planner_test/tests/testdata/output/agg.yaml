@@ -928,6 +928,13 @@
     └─LogicalAgg { aggs: [sum0(count(t.x)), sum(t.y)] }
       └─LogicalAgg { group_key: [t.y], aggs: [count(t.x)] }
         └─LogicalScan { table: t, columns: [t.x, t.y] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [sum0(count(t.x)), sum(t.y), sum(t.y)] }
+    └─LogicalAgg { aggs: [sum0(count(t.x)), sum(t.y)] }
+      └─LogicalAgg { group_key: [t.y], aggs: [count(t.x)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x int, y int);
     select count(y), sum(distinct y) from t;
@@ -935,6 +942,12 @@
     LogicalAgg { aggs: [sum0(count(t.y)), sum(t.y)] }
     └─LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
       └─LogicalScan { table: t, columns: [t.y] }
+  optimized_logical_plan_for_stream: |-
+    LogicalAgg { aggs: [sum0(count(t.y)), sum(t.y)] }
+    └─LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
+      └─LogicalScan { table: t, columns: [t.y] }
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x int, y int);
     select count(distinct x), sum(distinct y) from t;
@@ -943,6 +956,13 @@
     └─LogicalAgg { group_key: [t.x, t.y, flag], aggs: [] }
       └─LogicalExpand { column_subsets: [[t.x], [t.y]] }
         └─LogicalScan { table: t, columns: [t.x, t.y] }
+  optimized_logical_plan_for_stream: |-
+    LogicalAgg { aggs: [count(t.x) filter((flag = 0:Int64)), sum(t.y) filter((flag = 1:Int64))] }
+    └─LogicalAgg { group_key: [t.x, t.y, flag], aggs: [] }
+      └─LogicalExpand { column_subsets: [[t.x], [t.y]] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x varchar, y int);
     select string_agg(x, ','), count(distinct y) from t;
@@ -956,6 +976,11 @@
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [max(t.x), min(t.y)] }
     └─LogicalScan { table: t, columns: [t.x, t.y] }
+  optimized_logical_plan_for_stream: |-
+    LogicalAgg { aggs: [max(t.x), min(t.y)] }
+    └─LogicalScan { table: t, columns: [t.x, t.y] }
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - name: agg filter - subquery
   sql: |
     /* This case is valid in PostgreSQL */
@@ -1330,7 +1355,7 @@
             └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [sum0(count)] }
               └─BatchExchange { order: [], dist: HashShard(bid.auction, window_start) }
                 └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
-                  └─BatchHopWindow { time_col: bid.date_time, slide: Interval { months: 0, days: 0, usecs: 2000000 }, size: Interval { months: 0, days: 0, usecs: 10000000 }, output: [bid.auction, window_start] }
+                  └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
                     └─BatchFilter { predicate: IsNotNull(bid.date_time) }
                       └─BatchScan { table: bid, columns: [bid.date_time, bid.auction], distribution: SomeShard }
   stream_plan: |-
@@ -1344,7 +1369,7 @@
                 └─StreamExchange { dist: HashShard(bid.auction, window_start) }
                   └─StreamHashAgg { group_key: [bid.auction, window_start, $expr1], aggs: [count] }
                     └─StreamProject { exprs: [bid.auction, window_start, bid._row_id, Vnode(bid._row_id) as $expr1] }
-                      └─StreamHopWindow { time_col: bid.date_time, slide: Interval { months: 0, days: 0, usecs: 2000000 }, size: Interval { months: 0, days: 0, usecs: 10000000 }, output: [bid.auction, window_start, bid._row_id] }
+                      └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
                         └─StreamFilter { predicate: IsNotNull(bid.date_time) }
                           └─StreamTableScan { table: bid, columns: [bid.date_time, bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
 - name: two phase agg with stream SomeShard (via index) but pk satisfies output dist should use shuffle agg

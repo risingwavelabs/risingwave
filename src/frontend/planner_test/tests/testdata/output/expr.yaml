@@ -546,7 +546,7 @@
     Bind error: failed to bind expression: v1 >= now()
 
     Caused by:
-      Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(GroupBy)
+      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: Some(GroupBy). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: forbid now in select for stream
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
@@ -555,7 +555,7 @@
     Bind error: failed to bind expression: now()
 
     Caused by:
-      Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: None
+      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: None. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: forbid now in agg filter for stream
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
@@ -564,7 +564,7 @@
     Bind error: failed to bind expression: sum(v2) FILTER(WHERE v1 >= now())
 
     Caused by:
-      Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(Filter)
+      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: Some(Filter). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: typo pg_teminate_backend
   sql: |
     select pg_teminate_backend(1);

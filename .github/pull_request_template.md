@@ -25,6 +25,7 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 - [ ] All checks passed in `./risedev check` (or alias, `./risedev c`)
 - [ ] My PR changes performance-critical code. (Please run macro/micro-benchmarks and show the results.)
 <!-- To manually trigger a benchmark, please check out [Notion](https://www.notion.so/risingwave-labs/Manually-trigger-nexmark-performance-dashboard-test-b784f1eae1cf48889b2645d020b6b7d3). -->
+- [ ] My PR contains critical fixes that are necessary to be merged into the latest release. (Please check out the [details](https://github.com/risingwavelabs/risingwave/blob/main/CONTRIBUTING.md))
 
 ## Documentation
 

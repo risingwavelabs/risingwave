@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use await_tree::InstrumentAwait;
-use futures::{pin_mut, StreamExt};
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use multimap::MultiMap;
@@ -306,6 +306,20 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor for HashJoi
 
 struct HashJoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> {
     stream_chunk_builder: StreamChunkBuilder,
+}
+
+struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
+    ctx: &'a ActorContextRef,
+    identity: &'a str,
+    side_l: &'a mut JoinSide<K, S>,
+    side_r: &'a mut JoinSide<K, S>,
+    actual_output_data_types: &'a [DataType],
+    cond: &'a mut Option<BoxedExpression>,
+    inequality_watermarks: &'a [Option<Watermark>],
+    chunk: StreamChunk,
+    append_only_optimize: bool,
+    chunk_size: usize,
+    cnt_rows_received: &'a mut u32,
 }
 
 impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBuilder<T, SIDE> {
@@ -738,19 +752,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     let mut left_time = Duration::from_nanos(0);
                     let mut left_start_time = Instant::now();
                     #[for_await]
-                    for chunk in Self::eq_join_oneside::<{ SideType::Left }>(
-                        &self.ctx,
-                        &self.identity,
-                        &mut self.side_l,
-                        &mut self.side_r,
-                        &self.actual_output_data_types,
-                        &mut self.cond,
-                        &self.inequality_watermarks,
+                    for chunk in Self::eq_join_left(EqJoinArgs {
+                        ctx: &self.ctx,
+                        identity: &self.identity,
+                        side_l: &mut self.side_l,
+                        side_r: &mut self.side_r,
+                        actual_output_data_types: &self.actual_output_data_types,
+                        cond: &mut self.cond,
+                        inequality_watermarks: &self.inequality_watermarks,
                         chunk,
-                        self.append_only_optimize,
-                        self.chunk_size,
-                        &mut self.cnt_rows_received,
-                    ) {
+                        append_only_optimize: self.append_only_optimize,
+                        chunk_size: self.chunk_size,
+                        cnt_rows_received: &mut self.cnt_rows_received,
+                    }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
                         left_start_time = Instant::now();
@@ -765,19 +779,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     let mut right_time = Duration::from_nanos(0);
                     let mut right_start_time = Instant::now();
                     #[for_await]
-                    for chunk in Self::eq_join_oneside::<{ SideType::Right }>(
-                        &self.ctx,
-                        &self.identity,
-                        &mut self.side_l,
-                        &mut self.side_r,
-                        &self.actual_output_data_types,
-                        &mut self.cond,
-                        &self.inequality_watermarks,
+                    for chunk in Self::eq_join_right(EqJoinArgs {
+                        ctx: &self.ctx,
+                        identity: &self.identity,
+                        side_l: &mut self.side_l,
+                        side_r: &mut self.side_r,
+                        actual_output_data_types: &self.actual_output_data_types,
+                        cond: &mut self.cond,
+                        inequality_watermarks: &self.inequality_watermarks,
                         chunk,
-                        self.append_only_optimize,
-                        self.chunk_size,
-                        &mut self.cnt_rows_received,
-                    ) {
+                        append_only_optimize: self.append_only_optimize,
+                        chunk_size: self.chunk_size,
+                        cnt_rows_received: &mut self.cnt_rows_received,
+                    }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
                         right_start_time = Instant::now();
@@ -967,21 +981,36 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         OwnedRow::new(new_row)
     }
 
+    /// Used to forward `eq_join_oneside` to show join side in stack.  
+    fn eq_join_left(
+        args: EqJoinArgs<'_, K, S>,
+    ) -> impl Stream<Item = Result<StreamChunk, StreamExecutorError>> + '_ {
+        Self::eq_join_oneside::<{ SideType::Left }>(args)
+    }
+
+    /// Used to forward `eq_join_oneside` to show join side in stack.  
+    fn eq_join_right(
+        args: EqJoinArgs<'_, K, S>,
+    ) -> impl Stream<Item = Result<StreamChunk, StreamExecutorError>> + '_ {
+        Self::eq_join_oneside::<{ SideType::Right }>(args)
+    }
+
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    #[expect(clippy::too_many_arguments)]
-    async fn eq_join_oneside<'a, const SIDE: SideTypePrimitive>(
-        ctx: &'a ActorContextRef,
-        identity: &'a str,
-        side_l: &'a mut JoinSide<K, S>,
-        side_r: &'a mut JoinSide<K, S>,
-        actual_output_data_types: &'a [DataType],
-        cond: &'a mut Option<BoxedExpression>,
-        inequality_watermarks: &'a [Option<Watermark>],
-        chunk: StreamChunk,
-        append_only_optimize: bool,
-        chunk_size: usize,
-        cnt_rows_received: &'a mut u32,
-    ) {
+    async fn eq_join_oneside<const SIDE: SideTypePrimitive>(args: EqJoinArgs<'_, K, S>) {
+        let EqJoinArgs {
+            ctx,
+            identity,
+            side_l,
+            side_r,
+            actual_output_data_types,
+            cond,
+            inequality_watermarks,
+            chunk,
+            append_only_optimize,
+            chunk_size,
+            cnt_rows_received,
+        } = args;
+
         let chunk = chunk.compact();
 
         let (side_update, side_match) = if SIDE == SideType::Left {

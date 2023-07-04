@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::XmlNode;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -55,12 +53,6 @@ impl BatchProject {
 
     pub fn exprs(&self) -> &Vec<ExprImpl> {
         &self.logical.exprs
-    }
-}
-
-impl fmt::Display for BatchProject {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchProject", self.schema())
     }
 }
 
