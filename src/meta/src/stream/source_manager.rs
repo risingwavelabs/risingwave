@@ -23,7 +23,8 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_connector::source::{
-    ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
+    ConnectorProperties, SourceEnumeratorContext, SplitEnumeratorImpl, SplitId, SplitImpl,
+    SplitMetaData,
 };
 use risingwave_pb::catalog::Source;
 use risingwave_pb::connector_service::table_schema::Column;
@@ -74,7 +75,13 @@ struct ConnectorSourceWorker {
 
 impl ConnectorSourceWorker {
     async fn refresh(&mut self) -> MetaResult<()> {
-        let enumerator = SplitEnumeratorImpl::create(self.connector_properties.clone()).await?;
+        let enumerator = SplitEnumeratorImpl::create(
+            self.connector_properties.clone(),
+            Arc::new(SourceEnumeratorContext {
+                metrics: self.metrics.source_enumerator_metrics.clone(),
+            }),
+        )
+        .await?;
         self.enumerator = enumerator;
         self.fail_cnt = 0;
         tracing::info!("refreshed source enumerator: {}", self.source_name);
@@ -93,7 +100,13 @@ impl ConnectorSourceWorker {
             let table_schema = Self::extract_source_schema(source);
             properties.init_properties_for_cdc(source.id, endpoint.to_string(), Some(table_schema));
         }
-        let enumerator = SplitEnumeratorImpl::create(properties.clone()).await?;
+        let enumerator = SplitEnumeratorImpl::create(
+            properties.clone(),
+            Arc::new(SourceEnumeratorContext {
+                metrics: metrics.source_enumerator_metrics.clone(),
+            }),
+        )
+        .await?;
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {
             source_id: source.id,

@@ -24,6 +24,7 @@ use rdkafka::{Offset, TopicPartitionList};
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
+use crate::source::SourceEnumeratorContextRef;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum KafkaEnumeratorOffset {
@@ -34,6 +35,7 @@ pub enum KafkaEnumeratorOffset {
 }
 
 pub struct KafkaSplitEnumerator {
+    context: SourceEnumeratorContextRef,
     broker_address: String,
     topic: String,
     client: BaseConsumer<PrivateLinkConsumerContext>,
@@ -52,7 +54,10 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     type Properties = KafkaProperties;
     type Split = KafkaSplit;
 
-    async fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
+    async fn new(
+        properties: KafkaProperties,
+        context: SourceEnumeratorContextRef,
+    ) -> anyhow::Result<KafkaSplitEnumerator> {
         let mut config = rdkafka::ClientConfig::new();
         let common_props = &properties.common;
 
@@ -88,6 +93,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             config.create_with_context(client_ctx).await?;
 
         Ok(Self {
+            context,
             broker_address,
             topic,
             client,

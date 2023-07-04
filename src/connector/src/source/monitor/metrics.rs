@@ -16,6 +16,38 @@ use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::{register_int_counter_vec_with_registry, Registry};
 
 #[derive(Debug)]
+pub struct EnumeratorMetrics {
+    pub registry: Registry,
+    pub high_watermark: GenericCounterVec<AtomicU64>,
+}
+
+impl EnumeratorMetrics {
+    pub fn new(registry: Registry) -> Self {
+        let high_watermark = register_int_counter_vec_with_registry!(
+            "high_watermark",
+            "High watermark for a exec per partition",
+            &["source_id", "partition"],
+            registry,
+        )
+        .unwrap();
+        EnumeratorMetrics {
+            registry,
+            high_watermark,
+        }
+    }
+
+    pub fn unused() -> Self {
+        Self::new(Registry::new())
+    }
+}
+
+impl Default for EnumeratorMetrics {
+    fn default() -> Self {
+        EnumeratorMetrics::new(Registry::new())
+    }
+}
+
+#[derive(Debug)]
 pub struct SourceMetrics {
     pub registry: Registry,
     pub partition_input_count: GenericCounterVec<AtomicU64>,
