@@ -55,16 +55,17 @@ pub struct AvroParserConfig {
 }
 
 impl AvroParserConfig {
-    pub async fn new(parser_properties: ParserProperties, enable_upsert: bool) -> Result<Self> {
+    pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
         let avro_config = match parser_properties.encoding_config {
             EncodingProperties::Avro(config) => config,
             _ => {
-                return Err(RwError::from(ProtocolError(format!(
-                    "wrong parser config list for Avro",
-                ))))
+                return Err(RwError::from(ProtocolError(
+                    "wrong parser config list for Avro".to_string(),
+                )))
             }
         };
         let schema_location = &avro_config.row_schema_location;
+        let enable_upsert = avro_config.enable_upsert;
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
@@ -375,7 +376,7 @@ mod test {
             ..Default::default()
         };
         let parser_config = ParserProperties::new(SourceFormat::Avro, &HashMap::new(), &info)?;
-        AvroParserConfig::new(parser_config, false).await
+        AvroParserConfig::new(parser_config).await
     }
 
     async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {

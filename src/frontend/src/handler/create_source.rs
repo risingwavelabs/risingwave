@@ -71,7 +71,7 @@ async fn extract_avro_table_schema(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::Avro, with_properties, &info)?;
-    let conf = AvroParserConfig::new(parser_config, false).await?;
+    let conf = AvroParserConfig::new(parser_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     Ok(vec_column_desc
         .into_iter()
@@ -93,7 +93,7 @@ async fn extract_upsert_avro_table_schema(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::Avro, with_properties, &info)?;
-    let conf = AvroParserConfig::new(parser_config, true).await?;
+    let conf = AvroParserConfig::new(parser_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
 
     let vec_pk_desc = conf.extract_pks().map_err(|e| RwError::from(ErrorCode::InternalError(

@@ -521,6 +521,7 @@ pub struct AvroProperties {
     pub client_config: ParserClientConfigList,
     pub aws_auth_props: Option<AwsAuthProps>,
     pub topic: String,
+    pub enable_upsert: bool,
 }
 
 #[derive(Default)]
@@ -580,13 +581,16 @@ impl ParserProperties {
                 delimiter: info.csv_delimiter as u8,
                 has_header: info.csv_has_header,
             }),
-            SourceFormat::Avro => {
+            SourceFormat::Avro | SourceFormat::UpsertAvro => {
                 let mut config = AvroProperties {
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
                     upsert_primary_key: info.upsert_avro_primary_key.clone(),
                     ..Default::default()
                 };
+                if let SourceFormat::UpsertAvro = format {
+                    config.enable_upsert = true;
+                }
                 if info.use_schema_registry {
                     config.topic = get_kafka_topic(props)?.clone();
                     config.client_config = ParserClientConfigList::from(props);
@@ -669,11 +673,11 @@ impl SpecificParserConfig {
                 SpecificParserConfig::Csv(CsvParserConfig::new(parser_properties)?)
             }
             SourceFormat::Avro => {
-                SpecificParserConfig::Avro(AvroParserConfig::new(parser_properties, false).await?)
+                SpecificParserConfig::Avro(AvroParserConfig::new(parser_properties).await?)
             }
-            SourceFormat::UpsertAvro => SpecificParserConfig::UpsertAvro(
-                AvroParserConfig::new(parser_properties, true).await?,
-            ),
+            SourceFormat::UpsertAvro => {
+                SpecificParserConfig::UpsertAvro(AvroParserConfig::new(parser_properties).await?)
+            }
             SourceFormat::Protobuf => {
                 SpecificParserConfig::Protobuf(ProtobufParserConfig::new(parser_properties).await?)
             }

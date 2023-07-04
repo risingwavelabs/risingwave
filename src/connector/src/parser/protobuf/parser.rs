@@ -54,9 +54,9 @@ impl ProtobufParserConfig {
         let protobuf_config = match parser_properties.encoding_config {
             EncodingProperties::Protobuf(config) => config,
             _ => {
-                return Err(RwError::from(ProtocolError(format!(
-                    "wrong parser config list for Avro",
-                ))))
+                return Err(RwError::from(ProtocolError(
+                    "wrong parser config list for Protobuf".to_string(),
+                )))
             }
         };
         let location = &protobuf_config.row_schema_location;

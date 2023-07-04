@@ -62,9 +62,9 @@ impl DebeziumAvroParserConfig {
         let avro_config = match parser_properties.encoding_config {
             EncodingProperties::Avro(config) => config,
             _ => {
-                return Err(RwError::from(ProtocolError(format!(
-                    "wrong parser config list for Avro",
-                ))))
+                return Err(RwError::from(ProtocolError(
+                    "wrong parser config list for Avro".to_string(),
+                )))
             }
         };
         let schema_location = &avro_config.row_schema_location;
