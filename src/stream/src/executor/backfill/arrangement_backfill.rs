@@ -146,9 +146,6 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                // TODO: This should work.
-                // current_pos (None) -> current_pos_map::get (Should still be none per vnode,
-                // as we have not persisted the state yet).
                 let snapshot = Self::snapshot_read_per_vnode(
                     schema.clone(),
                     &upstream_table,
