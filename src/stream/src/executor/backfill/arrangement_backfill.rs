@@ -30,11 +30,7 @@ use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::ReplicatedStateTable;
-use crate::executor::backfill::utils::{
-    check_all_vnode_finished, compute_bounds, construct_initial_finished_state,
-    get_progress_per_vnode, iter_chunks, mapping_chunk, mapping_message, mark_chunk_ref_by_vnode,
-    persist_state, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState, CurrentPosMap,
-};
+use crate::executor::backfill::utils::{check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_progress_per_vnode, iter_chunks, mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState, CurrentPosMap, persist_state_per_vnode};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
@@ -390,15 +386,14 @@ where
 
                 // Persist state on barrier
                 // FIXME: This should persist state per vnode.
-                persist_state(
+                persist_state_per_vnode(
                     barrier.epoch,
                     &mut self.state_table,
                     false,
                     &current_pos,
                     &mut old_state,
                     &mut current_state,
-                )
-                .await?;
+                ).await?;
 
                 yield Message::Barrier(barrier);
             }
