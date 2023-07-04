@@ -61,7 +61,8 @@ pub(crate) fn mark_chunk_ref_by_vnode(
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
     // Use project to avoid allocation.
     for v in data.rows().map(|row| {
-        // TODO: Ask for review of this.
+        // TODO(kwannoel): Is this logic correct for compute vnode?
+        // I will revisit it again when arrangement_backfill is implemented e2e.
         let vnode = VirtualNode::compute_row(row, pk_in_output_indices);
         let current_pos = current_pos_map.get(&vnode).unwrap();
         let lhs = row.project(pk_in_output_indices);

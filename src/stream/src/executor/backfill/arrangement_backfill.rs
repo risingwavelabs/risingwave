@@ -452,7 +452,7 @@ where
     /// Read snapshot per vnode.
     /// These streams should be sorted in storage layer.
     /// 1. Get row iterator / vnode.
-    /// 2. Merge it with futures unordered.
+    /// 2. Merge it with `select_all`.
     /// 3. Change it into a chunk iterator with `iter_chunks`.
     /// This means it should fetch a row from each iterator to form a chunk.
     /// Within each vnode, rows will be ordered by pk.
