@@ -35,6 +35,7 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
+use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -632,6 +633,8 @@ impl LocalStreamManagerCore {
                     &actor_context,
                     vnode_bitmap,
                 )
+                // If hummock tracing is not enabled, it directly returns wrapped future.
+                .may_trace_hummock()
                 .await?;
 
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;

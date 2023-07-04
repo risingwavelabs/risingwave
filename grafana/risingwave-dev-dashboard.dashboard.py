@@ -689,6 +689,16 @@ def section_streaming(panels):
                 )
             ]
         ),
+        panels.timeseries_ops(
+            "Source Split Change Events frequency(events/s)",
+            "Source Split Change Events frequency by source_id and actor_id",
+            [
+                panels.target(
+                    f"rate({metric('stream_source_split_change_event_count')}[$__rate_interval])",
+                    "source={{source_name}} actor={{actor_id}} @ {{instance}}"
+                )
+            ]
+        ),
         panels.timeseries_rowsps(
             "Sink Throughput(rows/s)",
             "The figure shows the number of rows output by each sink executor actor per second.",
@@ -2687,8 +2697,8 @@ def section_connector_node(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('connector_source_rows_received')}[$__interval])",
-                            "{{source_type}} @ {{source_id}}",
+                            f"rate({metric('connector_source_rows_received')}[$__rate_interval])",
+                            "source={{source_type}} @ {{source_id}}",
                         ),
                     ],
                 ),
@@ -2697,8 +2707,8 @@ def section_connector_node(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('connector_sink_rows_received')}[$__interval])",
-                            "{{connector_type}} @ {{sink_id}}",
+                            f"rate({metric('connector_sink_rows_received')}[$__rate_interval])",
+                            "sink={{connector_type}} @ {{sink_id}}",
                         ),
                     ],
                 ),

@@ -60,10 +60,12 @@ pub async fn handle_drop_index(
                     },
                     Err(e) => {
                         if if_exists {
-                            Ok(RwPgResponse::empty_result_with_notice(
-                                StatementType::DROP_INDEX,
-                                format!("index \"{}\" does not exist, skipping", index_name),
-                            ))
+                            Ok(RwPgResponse::builder(StatementType::DROP_INDEX)
+                                .notice(format!(
+                                    "index \"{}\" does not exist, skipping",
+                                    index_name
+                                ))
+                                .into())
                         } else {
                             match e {
                                 CatalogError::NotFound(kind, name) if kind == "table" => {

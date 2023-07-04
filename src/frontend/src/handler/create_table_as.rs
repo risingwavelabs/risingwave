@@ -44,10 +44,9 @@ pub async fn handle_create_as(
 
     match session.check_relation_name_duplicated(table_name.clone()) {
         Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::empty_result_with_notice(
-                StatementType::CREATE_TABLE,
-                format!("relation \"{}\" already exists, skipping", name),
-            ));
+            return Ok(PgResponse::builder(StatementType::CREATE_TABLE)
+                .notice(format!("relation \"{}\" already exists, skipping", name))
+                .into());
         }
         Err(e) => return Err(e.into()),
         Ok(_) => {}
