@@ -39,6 +39,7 @@ use crate::executor::{
 
 pub type CurrentPosMap = HashMap<VirtualNode, OwnedRow>;
 
+#[derive(Clone, Debug)]
 pub struct BackfillState {
     /// Used to track backfill progress.
     inner: HashMap<VirtualNode, BackfillProgressPerVnode>,
@@ -53,6 +54,10 @@ impl BackfillState {
 
     fn has_no_progress(&self) -> bool {
         self.inner.is_empty()
+    }
+
+    pub fn get_progress(&self, vnode: &VirtualNode) -> Option<&BackfillProgressPerVnode> {
+        self.inner.get(vnode)
     }
 
     fn iter_backfill_progress(
@@ -71,7 +76,7 @@ impl From<Vec<(VirtualNode, BackfillProgressPerVnode)>> for BackfillState {
 }
 
 /// Used for tracking backfill state per vnode
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum BackfillProgressPerVnode {
     NotStarted,
     InProgress(OwnedRow),

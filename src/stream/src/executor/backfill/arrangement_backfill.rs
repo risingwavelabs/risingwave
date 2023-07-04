@@ -155,7 +155,7 @@ where
                 let snapshot = Self::snapshot_read_per_vnode(
                     schema.clone(),
                     &upstream_table,
-                    current_pos_map.clone(), // FIXME: temporary workaround... How to avoid it?
+                    backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
                 );
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
@@ -242,7 +242,7 @@ where
                     let right_snapshot = pin!(Self::snapshot_read_per_vnode(
                         schema.clone(),
                         &upstream_table,
-                        current_pos_map.clone(), // FIXME: temporary workaround, how to avoid it?
+                        backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
                     )
                     .map(Either::Right),);
 
@@ -475,21 +475,38 @@ where
     ///
     /// TODO(kwannoel): Support partially complete snapshot reads.
     /// That will require the following changes:
-    /// 1. Instead of returning stream chunk and vnode, we need to dispatch 3 diff messages:
-    ///    a. COMPLETE_VNODE(vnode): Current iterator is complete, in that case we need to handle it
-    /// in arrangement backfill.       We should not buffer updates for this vnode, and forward
-    /// all messages.    b. MESSAGE(CHUNK): Current iterator is not complete, in that case we
-    /// need to buffer updates for this vnode.    c. FINISHED: All iterators finished.
+    /// Instead of returning stream chunk and vnode, we need to dispatch 3 diff messages:
+    /// 1. COMPLETE_VNODE(vnode): Current iterator is complete, in that case we need to handle it
+    ///    in arrangement backfill. We should not buffer updates for this vnode, and forward
+    ///    all messages.
+    /// 2. MESSAGE(CHUNK): Current iterator is not complete, in that case we
+    ///    need to buffer updates for this vnode.
+    /// 3. FINISHED: All iterators finished.
+    ///
+    /// For now we only support the case where all iterators are complete.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         schema: Arc<Schema>,
         upstream_table: &'a ReplicatedStateTable<S>,
-        current_pos_map: CurrentPosMap,
+        backfill_state: BackfillState,
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
         for vnode in upstream_table.vnodes().iter_vnodes() {
-            let current_pos = current_pos_map.get(&vnode);
-            let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.cloned());
+            let backfill_progress = match backfill_state.get_progress(&vnode) {
+                None => bail!(
+                    "Backfill progress for vnode {:#?} not found, backfill_state not initialized properly",
+                    vnode,
+                ),
+                Some(p) => p,
+            };
+            let current_pos = match backfill_progress {
+                BackfillProgressPerVnode::Completed => {
+                    continue;
+                }
+                BackfillProgressPerVnode::NotStarted => None,
+                BackfillProgressPerVnode::InProgress(current_pos) => Some(current_pos.clone()),
+            };
+            let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.clone());
             if range_bounds.is_none() {
                 continue;
             }
