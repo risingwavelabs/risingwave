@@ -146,14 +146,14 @@ pub(crate) mod agg_kinds {
     }
     pub(crate) use single_value_state;
 
-    /// [`AggKind`]s that are implemented with a single value state (so-called stateless) iif the
+    /// [`AggKind`]s that are implemented with a single value state (so-called stateless) iff the
     /// input is append-only.
-    macro_rules! single_value_state_iif_in_append_only {
+    macro_rules! single_value_state_iff_in_append_only {
         () => {
             AggKind::Max | AggKind::Min | AggKind::ApproxCountDistinct
         };
     }
-    pub(crate) use single_value_state_iif_in_append_only;
+    pub(crate) use single_value_state_iff_in_append_only;
 }
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
@@ -242,7 +242,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     pub(crate) fn all_local_aggs_are_stateless(&self, stream_input_append_only: bool) -> bool {
         self.agg_calls.iter().all(|c| {
             matches!(c.agg_kind, agg_kinds::single_value_state!())
-                || (matches!(c.agg_kind, agg_kinds::single_value_state_iif_in_append_only!() if stream_input_append_only))
+                || (matches!(c.agg_kind, agg_kinds::single_value_state_iff_in_append_only!() if stream_input_append_only))
         })
     }
 
@@ -535,7 +535,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         self.agg_calls
             .iter()
             .map(|agg_call| match agg_call.agg_kind {
-                agg_kinds::single_value_state_iif_in_append_only!() if in_append_only => {
+                agg_kinds::single_value_state_iff_in_append_only!() if in_append_only => {
                     AggCallState::ResultValue
                 }
                 agg_kinds::single_value_state!() => AggCallState::ResultValue,
