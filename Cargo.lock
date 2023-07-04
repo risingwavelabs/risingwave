@@ -1004,9 +1004,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.2.1"
+version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24a6904aef64d73cf10ab17ebace7befb918b82164785cb89907993be7f83813"
+checksum = "630be753d4e58660abd17930c71b647fe46c27ea6b63cc59e1e3851406972e42"
 
 [[package]]
 name = "bk-tree"
@@ -1348,6 +1348,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31c789563b815f77f4250caee12365734369f942439b7defd71e18a48197130"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "cmsketch"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "467e460587e81453bf9aeb43cd534e9c5ad670042023bd6c3f377c23b76cc2f0"
+dependencies = [
+ "paste",
 ]
 
 [[package]]
@@ -2400,6 +2409,88 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9c384f161156f5260c24a097c56119f9be8c798586aecc13afbcbe7b7e26bf8"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "foyer"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=8979084#8979084a794ba969d3ea22f29a657f33d67b1119"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "cmsketch",
+ "crossbeam",
+ "foyer-common",
+ "foyer-intrusive",
+ "foyer-storage",
+ "futures",
+ "itertools",
+ "libc",
+ "memoffset 0.8.0",
+ "nix 0.26.2",
+ "parking_lot 0.12.1",
+ "paste",
+ "prometheus",
+ "rand",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "twox-hash",
+]
+
+[[package]]
+name = "foyer-common"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=8979084#8979084a794ba969d3ea22f29a657f33d67b1119"
+dependencies = [
+ "bytes",
+ "paste",
+ "tokio",
+]
+
+[[package]]
+name = "foyer-intrusive"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=8979084#8979084a794ba969d3ea22f29a657f33d67b1119"
+dependencies = [
+ "bytes",
+ "cmsketch",
+ "foyer-common",
+ "itertools",
+ "memoffset 0.8.0",
+ "parking_lot 0.12.1",
+ "paste",
+ "thiserror",
+ "tracing",
+ "twox-hash",
+]
+
+[[package]]
+name = "foyer-storage"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=8979084#8979084a794ba969d3ea22f29a657f33d67b1119"
+dependencies = [
+ "async-channel",
+ "async-trait",
+ "bitflags 2.3.3",
+ "bytes",
+ "cmsketch",
+ "foyer-common",
+ "foyer-intrusive",
+ "futures",
+ "itertools",
+ "libc",
+ "memoffset 0.8.0",
+ "nix 0.26.2",
+ "parking_lot 0.12.1",
+ "paste",
+ "pin-project",
+ "prometheus",
+ "rand",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "twox-hash",
 ]
 
 [[package]]
@@ -3691,6 +3782,15 @@ dependencies = [
 
 [[package]]
 name = "memoffset"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
+name = "memoffset"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d61c719bcfbcf5d62b3a09efa6088de8c54bc0bfcd3ea7ae39fcc186108b8de1"
@@ -3885,6 +3985,8 @@ dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
  "libc",
+ "memoffset 0.7.1",
+ "pin-utils",
  "static_assertions",
 ]
 
@@ -5769,7 +5871,7 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "auto_enums",
- "bitflags 2.2.1",
+ "bitflags 2.3.3",
  "byteorder",
  "bytes",
  "chrono",
@@ -6627,6 +6729,7 @@ dependencies = [
  "enum-as-inner",
  "fail",
  "fiemap",
+ "foyer",
  "futures",
  "futures-async-stream",
  "hex",
