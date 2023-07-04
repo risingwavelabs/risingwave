@@ -55,7 +55,6 @@ mod expr_unary;
 mod expr_vnode;
 
 mod build;
-pub(crate) mod data_types;
 pub(crate) mod template;
 pub(crate) mod template_fast;
 pub mod test_utils;
