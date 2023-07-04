@@ -93,7 +93,16 @@ impl<S: StateStore> MaterializedInputState<S> {
                 agg_call
                     .column_orders
                     .iter()
-                    .map(|p| (p.column_index, p.order_type))
+                    .map(|p| {
+                        (
+                            p.column_index,
+                            if agg_call.kind == AggKind::LastValue {
+                                p.order_type.reverse()
+                            } else {
+                                p.order_type
+                            },
+                        )
+                    })
                     .unzip()
             };
 

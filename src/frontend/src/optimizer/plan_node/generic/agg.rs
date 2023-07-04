@@ -567,7 +567,16 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                 agg_call
                                     .order_by
                                     .iter()
-                                    .map(|o| (o.order_type, o.column_index))
+                                    .map(|o| {
+                                        (
+                                            if agg_call.agg_kind == AggKind::LastValue {
+                                                o.order_type.reverse()
+                                            } else {
+                                                o.order_type
+                                            },
+                                            o.column_index,
+                                        )
+                                    })
                                     .collect()
                             }
                             _ => unreachable!(),
