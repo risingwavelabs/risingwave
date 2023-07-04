@@ -127,10 +127,46 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
     }
 }
 
+/// Used for tracking backfill state per vnode
+#[derive(Eq, PartialEq, Debug)]
+pub enum BackfillProgress {
+    NotStarted,
+    InProgress(OwnedRow),
+    Completed,
+}
+
+/// Gets progress per vnode, so we know which to backfill.
+pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
+    state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
+    state_len: usize,
+) -> StreamExecutorResult<Vec<BackfillProgress>> {
+    debug_assert!(!state_table.vnode_bitmap().is_empty());
+    let vnodes = state_table.vnodes().iter_vnodes_scalar();
+    let mut result = Vec::with_capacity(state_table.vnodes().len());
+    for vnode in vnodes {
+        let vnode_key: &[Datum] = &[Some(vnode.into())];
+        let state_for_vnode_key = state_table.get_row(vnode_key).await?;
+
+        // original_backfill_datum_pos = (state_len - 1)
+        // value indices are set, so we can -1 for the pk (a single vnode).
+        let backfill_datum_pos = state_len - 2;
+        let backfill_progress = match state_for_vnode_key {
+            Some(row) => {
+                let vnode_is_finished = row.datum_at(backfill_datum_pos).unwrap();
+                if vnode_is_finished.into_bool() {
+                    BackfillProgress::Completed
+                } else {
+                    BackfillProgress::InProgress(row)
+                }
+            }
+            None => BackfillProgress::NotStarted,
+        };
+        result.push(backfill_progress);
+    }
+    Ok(result)
+}
+
 /// All vnodes should be persisted with status finished.
-/// TODO: In the future we will support partial backfill recovery.
-/// When that is done, this logic may need to be rewritten to handle
-/// partially complete states per vnode.
 pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
     state_len: usize,
