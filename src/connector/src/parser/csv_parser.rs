@@ -38,13 +38,13 @@ pub struct CsvParserConfig {
 
 impl CsvParserConfig {
     pub fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let csv_config = match parser_properties.encoding_config {
-            EncodingProperties::Csv(config) => config,
-            _ => {
-                return Err(RwError::from(ProtocolError(
-                    "wrong parser config list for Csv".to_string(),
-                )))
-            }
+        let csv_config = if let EncodingProperties::Csv(config) = parser_properties.encoding_config
+        {
+            config
+        } else {
+            return Err(RwError::from(ProtocolError(
+                "wrong parser config list for Csv".to_string(),
+            )));
         };
         Ok(Self {
             delimiter: csv_config.delimiter,

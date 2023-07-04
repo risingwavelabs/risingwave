@@ -51,14 +51,14 @@ pub struct ProtobufParserConfig {
 
 impl ProtobufParserConfig {
     pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let protobuf_config = match parser_properties.encoding_config {
-            EncodingProperties::Protobuf(config) => config,
-            _ => {
+        let protobuf_config =
+            if let EncodingProperties::Protobuf(config) = parser_properties.encoding_config {
+                config
+            } else {
                 return Err(RwError::from(ProtocolError(
                     "wrong parser config list for Protobuf".to_string(),
-                )))
-            }
-        };
+                )));
+            };
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;
         let url = Url::parse(location)
