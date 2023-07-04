@@ -41,6 +41,7 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServ
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
 use risingwave_pb::meta::SystemParams;
+use risingwave_pb::sink_coordination::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
@@ -57,6 +58,7 @@ use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
+use crate::manager::sink_manager::SinkManager;
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
     SystemParamsManager,
@@ -69,6 +71,7 @@ use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::meta_member_service::MetaMemberServiceImpl;
+use crate::rpc::service::sink_coordination_service::SinkCoordinationServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
 use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
@@ -522,6 +525,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         catalog_manager.clone(),
         fragment_manager.clone(),
     );
+    let (sink_manager, shutdown_handle) = SinkManager::start_worker();
+    let mut sub_tasks = vec![shutdown_handle];
+    let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         vacuum_manager.clone(),
@@ -557,12 +563,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     ));
 
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
-    let mut sub_tasks = hummock::start_hummock_workers(
+    sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager.clone(),
         vacuum_manager,
         compaction_scheduler,
         &env.opts,
-    );
+    ));
     sub_tasks.push(
         start_worker_info_monitor(
             cluster_manager.clone(),
@@ -691,6 +697,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(SystemParamsServiceServer::new(system_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
+        .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 res = svc_shutdown_rx.changed() => {

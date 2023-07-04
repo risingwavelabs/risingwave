@@ -64,7 +64,8 @@ use risingwave_pb::meta::serving_service_client::ServingServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
-use risingwave_pb::meta::{PbReschedule, *};
+use risingwave_pb::meta::*;
+use risingwave_pb::sink_coordination::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -1170,6 +1171,7 @@ struct GrpcMetaClientCore {
     telemetry_client: TelemetryInfoServiceClient<Channel>,
     system_params_client: SystemParamsServiceClient<Channel>,
     serving_client: ServingServiceClient<Channel>,
+    _sink_coordination_client: SinkCoordinationServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1186,7 +1188,8 @@ impl GrpcMetaClientCore {
         let backup_client = BackupServiceClient::new(channel.clone());
         let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
-        let serving_client = ServingServiceClient::new(channel);
+        let serving_client = ServingServiceClient::new(channel.clone());
+        let sink_coordination_client = SinkCoordinationServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1202,6 +1205,7 @@ impl GrpcMetaClientCore {
             telemetry_client,
             system_params_client,
             serving_client,
+            _sink_coordination_client: sink_coordination_client,
         }
     }
 }
