@@ -57,7 +57,7 @@ pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 #[async_trait]
 pub trait Sink {
     type Writer: SinkWriter;
-    type Coordinator: SinkCommitter;
+    type Coordinator: SinkCommitCoordinator;
 
     async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()>;
     async fn new_writer(&self, connector_params: ConnectorParams) -> Result<Self::Writer>;
@@ -86,8 +86,8 @@ pub trait SinkWriter {
 }
 
 #[async_trait]
-pub trait SinkCommitter {
-    /// Initialize the sink committer
+pub trait SinkCommitCoordinator {
+    /// Initialize the sink committer coordinator
     async fn init(&mut self) -> Result<()>;
     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
@@ -96,10 +96,10 @@ pub trait SinkCommitter {
     async fn commit(&mut self, epoch: u64, metadata: Vec<Bytes>) -> Result<()>;
 }
 
-pub struct DummySinkCommitter;
+pub struct DummySinkCommitCoordinator;
 
 #[async_trait]
-impl SinkCommitter for DummySinkCommitter {
+impl SinkCommitCoordinator for DummySinkCommitCoordinator {
     async fn init(&mut self) -> Result<()> {
         Ok(())
     }
@@ -125,7 +125,7 @@ pub struct BlackHoleSink;
 
 #[async_trait]
 impl Sink for BlackHoleSink {
-    type Coordinator = DummySinkCommitter;
+    type Coordinator = DummySinkCommitCoordinator;
     type Writer = Self;
 
     async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {

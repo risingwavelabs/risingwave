@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
-use crate::sink::{DummySinkCommitter, Result, Sink, SinkWriter};
+use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter};
 use crate::ConnectorParams;
 
 #[derive(Clone, Debug)]
@@ -33,7 +33,7 @@ impl RedisSink {
 
 #[async_trait]
 impl Sink for RedisSink {
-    type Coordinator = DummySinkCommitter;
+    type Coordinator = DummySinkCommitCoordinator;
     type Writer = RedisSinkWriter;
 
     async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {
