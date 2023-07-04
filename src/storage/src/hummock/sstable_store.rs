@@ -821,66 +821,21 @@ impl StreamingSstableWriterFactory {
 
 #[async_trait::async_trait]
 impl SstableWriterFactory for StreamingSstableWriterFactory {
-    type Writer = AnySstableWriter;
+    type Writer = StreamingUploadWriter;
 
     async fn create_sst_writer(
         &mut self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
-        if self.sstable_store.store.support_streaming_upload() {
-            let path = self.sstable_store.get_sst_data_path(object_id);
-            let uploader = self.sstable_store.store.streaming_upload(&path).await?;
-            Ok(AnySstableWriter::StreamingUploadWriter(
-                StreamingUploadWriter::new(
-                    object_id,
-                    self.sstable_store.clone(),
-                    uploader,
-                    options,
-                ),
-            ))
-        } else {
-            Ok(AnySstableWriter::BatchSstableWriter(
-                BatchUploadWriter::new(object_id, self.sstable_store.clone(), options),
-            ))
-        }
-    }
-}
-
-pub enum AnySstableWriter {
-    StreamingUploadWriter(StreamingUploadWriter),
-    BatchSstableWriter(BatchUploadWriter),
-}
-
-#[async_trait::async_trait]
-impl SstableWriter for AnySstableWriter {
-    type Output = UploadJoinHandle;
-
-    async fn write_block(&mut self, block_data: &[u8], meta: &BlockMeta) -> HummockResult<()> {
-        match self {
-            AnySstableWriter::StreamingUploadWriter(w) => {
-                w.write_block(block_data, meta).await?;
-                Ok(())
-            }
-            AnySstableWriter::BatchSstableWriter(w) => {
-                w.write_block(block_data, meta).await?;
-                Ok(())
-            }
-        }
-    }
-
-    async fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
-        match self {
-            AnySstableWriter::StreamingUploadWriter(w) => Ok(w.finish(meta).await?),
-            AnySstableWriter::BatchSstableWriter(w) => Ok(w.finish(meta).await?),
-        }
-    }
-
-    fn data_len(&self) -> usize {
-        match self {
-            AnySstableWriter::StreamingUploadWriter(w) => w.data_len(),
-            AnySstableWriter::BatchSstableWriter(w) => w.data_len(),
-        }
+        let path = self.sstable_store.get_sst_data_path(object_id);
+        let uploader = self.sstable_store.store.streaming_upload(&path).await?;
+        Ok(StreamingUploadWriter::new(
+            object_id,
+            self.sstable_store.clone(),
+            uploader,
+            options,
+        ))
     }
 }
 

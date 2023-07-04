@@ -275,14 +275,6 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::S3(_) => true,
         }
     }
-
-    pub fn get_store_type(&self) -> &'static str {
-        match self {
-            ObjectStoreImpl::InMem(_) => "InMemory",
-            ObjectStoreImpl::Opendal(store) => store.inner.store_media_type(),
-            ObjectStoreImpl::S3(_) => "S3",
-        }
-    }
 }
 
 fn try_update_failure_metric<T>(

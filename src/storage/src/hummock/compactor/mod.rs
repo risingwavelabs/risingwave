@@ -869,6 +869,11 @@ impl Compactor {
 
         let (split_table_outputs, table_stats_map) = if self.options.capacity as u64
             > self.context.storage_opts.min_sst_size_for_streaming_upload
+            && self
+                .context
+                .sstable_store
+                .store()
+                .support_streaming_upload()
         {
             let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
             if self.task_config.is_target_l0_or_lbase {
