@@ -331,7 +331,7 @@ impl MaterializeBuffer {
         let mut buffer = MaterializeBuffer::new();
         match vis {
             Vis::Bitmap(vis) => {
-                for ((op, key, value), vis) in izip!(ops, pks, values).zip_eq_debug(vis.iter()) {
+                for ((op, key, value), vis) in izip!(ops.iter(), pks, values).zip_eq_debug(vis.iter()) {
                     if vis {
                         match op {
                             Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
@@ -341,7 +341,7 @@ impl MaterializeBuffer {
                 }
             }
             Vis::Compact(_) => {
-                for (op, key, value) in izip!(ops, pks, values) {
+                for (op, key, value) in izip!(ops.iter(), pks, values) {
                     match op {
                         Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
                         Op::Delete | Op::UpdateDelete => buffer.delete(key, value),

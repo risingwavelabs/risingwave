@@ -17,9 +17,7 @@ use std::marker::PhantomData;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, RowExt};
@@ -157,16 +155,9 @@ impl<S: StateStore> MaterializedInputState<S> {
     }
 
     /// Apply a chunk of data to the state cache.
-    pub fn apply_chunk(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-    ) -> StreamExecutorResult<()> {
+    pub fn apply_chunk(&mut self, chunk: &StreamChunk) -> StreamExecutorResult<()> {
         self.cache.apply_batch(StateCacheInputBatch::new(
-            ops,
-            visibility,
-            columns,
+            chunk,
             &self.cache_key_serializer,
             &self.arg_col_indices,
             &self.order_col_indices,
@@ -233,7 +224,6 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
-    use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::agg::AggCall;
     use risingwave_storage::memory::MemoryStateStore;
@@ -336,9 +326,7 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -361,9 +349,7 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -445,9 +431,7 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -470,9 +454,7 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -587,31 +569,18 @@ mod tests {
                 &mapping_2,
             );
 
-            [chunk_1, chunk_2]
-                .into_iter()
-                .zip_eq_fast([&mut state_1, &mut state_2])
-                .try_for_each(|(chunk, state)| {
-                    let (ops, columns, visibility) = chunk.into_inner();
-                    let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-                    state.apply_chunk(&ops, visibility.as_ref(), &columns)
-                })?;
+            state_1.apply_chunk(&chunk_1)?;
+            state_2.apply_chunk(&chunk_2)?;
 
             epoch.inc();
             table_1.commit(epoch).await.unwrap();
             table_2.commit(epoch).await.unwrap();
 
-            match state_1.get_output(&table_1, group_key.as_ref()).await? {
-                Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(s.as_ref(), "a");
-                }
-                _ => panic!("unexpected output"),
-            }
-            match state_2.get_output(&table_2, group_key.as_ref()).await? {
-                Some(ScalarImpl::Int32(s)) => {
-                    assert_eq!(s, 9);
-                }
-                _ => panic!("unexpected output"),
-            }
+            let out1 = state_1.get_output(&table_1, group_key.as_ref()).await?;
+            assert_eq!(out1, Some("a".into()));
+
+            let out2 = state_2.get_output(&table_2, group_key.as_ref()).await?;
+            assert_eq!(out2, Some(9i32.into()));
         }
 
         Ok(())
@@ -664,9 +633,7 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -689,9 +656,7 @@ mod tests {
                 &mapping,
             );
 
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -787,9 +752,7 @@ mod tests {
             }
 
             let chunk = create_chunk(&pretty_lines.join("\n"), &mut table, &mapping);
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -821,9 +784,7 @@ mod tests {
             }
 
             let chunk = create_chunk(&pretty_lines.join("\n"), &mut table, &mapping);
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -883,9 +844,7 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -910,9 +869,7 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -939,9 +896,7 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -1010,9 +965,7 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -1034,9 +987,7 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -1100,9 +1051,7 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();
@@ -1129,9 +1078,7 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
-            state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
+            state.apply_chunk(&chunk)?;
 
             epoch.inc();
             table.commit(epoch).await.unwrap();

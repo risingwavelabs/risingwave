@@ -142,7 +142,7 @@ impl StreamChunk {
         }
 
         let (ops, columns, visibility) = self.into_inner();
-        let visibility = visibility.unwrap();
+        let visibility = visibility.as_visibility().unwrap();
 
         let cardinality = visibility
             .iter()
@@ -167,10 +167,9 @@ impl StreamChunk {
         Self::new(ops, columns, vis.into_visibility())
     }
 
-    pub fn into_inner(self) -> (Arc<[Op]>, Vec<ArrayRef>, Option<Bitmap>) {
+    pub fn into_inner(self) -> (Arc<[Op]>, Vec<ArrayRef>, Vis) {
         let (columns, vis) = self.data.into_parts();
-        let visibility = vis.into_visibility();
-        (self.ops, columns, visibility)
+        (self.ops, columns, vis)
     }
 
     pub fn to_protobuf(&self) -> PbStreamChunk {

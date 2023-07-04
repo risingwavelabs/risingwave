@@ -746,7 +746,7 @@ where
         match vis {
             Vis::Bitmap(vis) => {
                 for ((op, key, value), vis) in
-                    izip!(op, vnode_and_pks, values).zip_eq_debug(vis.iter())
+                    izip!(op.iter(), vnode_and_pks, values).zip_eq_debug(vis.iter())
                 {
                     if vis {
                         match op {
@@ -757,7 +757,7 @@ where
                 }
             }
             Vis::Compact(_) => {
-                for (op, key, value) in izip!(op, vnode_and_pks, values) {
+                for (op, key, value) in izip!(op.iter(), vnode_and_pks, values) {
                     match op {
                         Op::Insert | Op::UpdateInsert => self.insert_inner(key, value),
                         Op::Delete | Op::UpdateDelete => self.delete_inner(key, value),

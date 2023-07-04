@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayImpl, Op};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, DatumRef};
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
@@ -31,9 +29,7 @@ type CacheKey = MemcmpEncoded;
 // usage in the future. https://github.com/risingwavelabs/risingwave/pull/5908#discussion_r1002896176
 pub struct StateCacheInputBatch<'a> {
     idx: usize,
-    ops: Ops<'a>,
-    visibility: Option<&'a Bitmap>,
-    columns: &'a [&'a ArrayImpl],
+    chunk: &'a StreamChunk,
     cache_key_serializer: &'a OrderedRowSerde,
     arg_col_indices: &'a [usize],
     order_col_indices: &'a [usize],
@@ -41,19 +37,17 @@ pub struct StateCacheInputBatch<'a> {
 
 impl<'a> StateCacheInputBatch<'a> {
     pub fn new(
-        ops: Ops<'a>,
-        visibility: Option<&'a Bitmap>,
-        columns: &'a [&'a ArrayImpl],
+        chunk: &'a StreamChunk,
         cache_key_serializer: &'a OrderedRowSerde,
         arg_col_indices: &'a [usize],
         order_col_indices: &'a [usize],
     ) -> Self {
-        let first_idx = visibility.map_or(0, |v| v.next_set_bit(0).unwrap_or(ops.len()));
+        let first_idx = chunk
+            .visibility()
+            .map_or(0, |v| v.next_set_bit(0).unwrap_or(chunk.capacity()));
         Self {
             idx: first_idx,
-            ops,
-            visibility,
-            columns,
+            chunk,
             cache_key_serializer,
             arg_col_indices,
             order_col_indices,
@@ -65,30 +59,30 @@ impl<'a> Iterator for StateCacheInputBatch<'a> {
     type Item = (Op, CacheKey, SmallVec<[DatumRef<'a>; 2]>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.idx >= self.ops.len() {
-            None
-        } else {
-            let op = self.ops[self.idx];
-            let key = {
-                let mut key = Vec::new();
-                self.cache_key_serializer.serialize_datums(
-                    self.order_col_indices
-                        .iter()
-                        .map(|col_idx| self.columns[*col_idx].value_at(self.idx)),
-                    &mut key,
-                );
-                key.into()
-            };
-            let value = self
-                .arg_col_indices
-                .iter()
-                .map(|col_idx| self.columns[*col_idx].value_at(self.idx))
-                .collect();
-            self.idx = self.visibility.map_or(self.idx + 1, |v| {
-                v.next_set_bit(self.idx + 1).unwrap_or(self.ops.len())
-            });
-            Some((op, key, value))
+        if self.idx >= self.chunk.capacity() {
+            return None;
         }
+        let op = self.chunk.ops()[self.idx];
+        let key = {
+            let mut key = Vec::new();
+            self.cache_key_serializer.serialize_datums(
+                self.order_col_indices
+                    .iter()
+                    .map(|col_idx| self.chunk.column_at(*col_idx).value_at(self.idx)),
+                &mut key,
+            );
+            key.into()
+        };
+        let value = self
+            .arg_col_indices
+            .iter()
+            .map(|col_idx| self.chunk.column_at(*col_idx).value_at(self.idx))
+            .collect();
+        self.idx = self.chunk.visibility().map_or(self.idx + 1, |v| {
+            v.next_set_bit(self.idx + 1)
+                .unwrap_or(self.chunk.capacity())
+        });
+        Some((op, key, value))
     }
 }
 

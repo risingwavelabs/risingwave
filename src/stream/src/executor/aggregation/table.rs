@@ -21,7 +21,6 @@ use risingwave_common::types::Datum;
 use risingwave_expr::agg::{AggCall, AggKind};
 use risingwave_storage::StateStore;
 
-use super::agg_impl::AppendOnlyStreamingApproxCountDistinct;
 use super::GroupKey;
 use crate::common::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
@@ -40,12 +39,7 @@ pub trait TableStateImpl<S: StateStore>: EstimateSize + Send + Sync + 'static {
         group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<()>;
 
-    fn apply_batch(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
-    ) -> StreamExecutorResult<()>;
+    fn apply_batch(&mut self, chunk: &StreamChunk) -> StreamExecutorResult<()>;
 
     /// Get the output of the state. Must flush before getting output.
     fn get_output(&mut self) -> StreamExecutorResult<Datum>;
@@ -77,7 +71,8 @@ impl<S: StateStore> TableState<S> {
             arg_indices: agg_call.args.val_indices().to_vec(),
             inner: match agg_call.kind {
                 AggKind::ApproxCountDistinct => {
-                    Box::new(AppendOnlyStreamingApproxCountDistinct::new())
+                    todo!()
+                    // Box::new(AppendOnlyStreamingApproxCountDistinct::new())
                 }
                 _ => panic!(
                     "Agg kind `{}` is not expected to have table state",
@@ -92,18 +87,9 @@ impl<S: StateStore> TableState<S> {
     }
 
     /// Apply a chunk of data to the state.
-    pub fn apply_chunk(
-        &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
-    ) -> StreamExecutorResult<()> {
-        let data = self
-            .arg_indices
-            .iter()
-            .map(|col_idx| columns[*col_idx])
-            .collect_vec();
-        self.inner.apply_batch(ops, visibility, &data)
+    pub fn apply_chunk(&mut self, chunk: &StreamChunk) -> StreamExecutorResult<()> {
+        let chunk = chunk.clone().reorder_columns(&self.arg_indices);
+        self.inner.apply_batch(&chunk)
     }
 
     /// Flush in-memory state to state table if needed.

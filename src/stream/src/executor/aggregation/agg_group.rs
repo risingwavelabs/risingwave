@@ -16,10 +16,8 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::stream_record::{Record, RecordType};
-use risingwave_common::array::{ArrayRef, Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
@@ -254,21 +252,21 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 
     /// Apply input chunk to all managed agg states.
     /// `visibilities` contains the row visibility of the input chunk for each agg call.
-    pub fn apply_chunk(
+    pub async fn apply_chunk(
         &mut self,
         storages: &mut [AggStateStorage<S>],
-        ops: &[Op],
-        columns: &[ArrayRef],
-        visibilities: Vec<Option<Bitmap>>,
+        chunk: &StreamChunk,
+        visibilities: Vec<Vis>,
     ) -> StreamExecutorResult<()> {
-        let columns = columns.iter().map(|col| col.as_ref()).collect_vec();
-        for ((state, storage), visibility) in self
+        let mut chunk = chunk.clone();
+        for ((state, storage), vis) in self
             .states
             .iter_mut()
             .zip_eq_fast(storages)
             .zip_eq_fast(visibilities)
         {
-            state.apply_chunk(ops, visibility.as_ref(), &columns, storage)?;
+            chunk.set_vis(vis);
+            state.apply_chunk(&chunk, storage).await?;
         }
         Ok(())
     }

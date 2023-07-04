@@ -12,19 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::agg::{build, AggCall, BoxedAggState};
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
 use super::table::TableState;
-use super::value::ValueState;
 use super::GroupKey;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
@@ -48,23 +45,12 @@ pub enum AggStateStorage<S: StateStore> {
     },
 }
 
-/// Verify if the data going through the state is valid by checking if `ops.len() ==
-/// visibility.len() == columns[x].len()`.
-fn verify_chunk(ops: Ops<'_>, visibility: Option<&Bitmap>, columns: &[&ArrayImpl]) -> bool {
-    let mut all_lengths = vec![ops.len()];
-    if let Some(visibility) = visibility {
-        all_lengths.push(visibility.len());
-    }
-    all_lengths.extend(columns.iter().map(|x| x.len()));
-    all_lengths.iter().min() == all_lengths.iter().max()
-}
-
 /// State for single aggregation call. It manages the state cache and interact with the
 /// underlying state store if necessary.
 #[derive(EstimateSize)]
 pub enum AggState<S: StateStore> {
     /// State as single scalar value, e.g. `count`, `sum`, append-only `min`/`max`.
-    Value(ValueState),
+    Value(BoxedAggState),
 
     /// State as a single state table whose schema is deduced by frontend and backend with implicit
     /// consensus, e.g. append-only `single_phase_approx_count_distinct`.
@@ -88,7 +74,11 @@ impl<S: StateStore> AggState<S> {
     ) -> StreamExecutorResult<Self> {
         Ok(match storage {
             AggStateStorage::ResultValue => {
-                Self::Value(ValueState::new(agg_call, prev_output.cloned())?)
+                let mut state = build(agg_call.clone())?;
+                if let Some(prev) = prev_output {
+                    state.set(prev.clone());
+                }
+                Self::Value(state)
             }
             AggStateStorage::Table { table } => {
                 Self::Table(TableState::new(agg_call, table, group_key).await?)
@@ -106,26 +96,24 @@ impl<S: StateStore> AggState<S> {
     }
 
     /// Apply input chunk to the state.
-    pub fn apply_chunk(
+    pub async fn apply_chunk(
         &mut self,
-        ops: Ops<'_>,
-        visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
+        chunk: &StreamChunk,
         storage: &mut AggStateStorage<S>,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(verify_chunk(ops, visibility, columns));
         match self {
             Self::Value(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::ResultValue));
-                state.apply_chunk(ops, visibility, columns)
+                state.update(chunk).await?;
+                Ok(())
             }
             Self::Table(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
-                state.apply_chunk(ops, visibility, columns)
+                state.apply_chunk(chunk)
             }
             Self::MaterializedInput(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::MaterializedInput { .. }));
-                state.apply_chunk(ops, visibility, columns)
+                state.apply_chunk(chunk)
             }
         }
     }
@@ -139,7 +127,7 @@ impl<S: StateStore> AggState<S> {
         match self {
             Self::Value(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::ResultValue));
-                Ok(state.get_output())
+                Ok(state.get())
             }
             Self::Table(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::Table { .. }));

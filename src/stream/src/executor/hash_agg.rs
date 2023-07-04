@@ -334,65 +334,48 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         )
         .await?;
 
-        // Decompose the input chunk.
-        let capacity = chunk.capacity();
-        let (ops, columns, visibility) = chunk.into_inner();
-
         // Calculate the row visibility for every agg call.
         let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
-            let agg_call_filter_res = agg_call_filter_res(
-                &this.actor_ctx,
-                &this.info.identity,
-                agg_call,
-                &columns,
-                visibility.as_ref(),
-                capacity,
-            )
-            .await?;
+            let agg_call_filter_res =
+                agg_call_filter_res(&this.actor_ctx, &this.info.identity, agg_call, &chunk).await?;
             call_visibilities.push(agg_call_filter_res);
         }
 
         // Materialize input chunk if needed.
-        this.storages
+        for (storage, visibility) in this
+            .storages
             .iter_mut()
-            .zip_eq_fast(call_visibilities.iter().map(Option::as_ref))
-            .for_each(|(storage, visibility)| {
-                if let AggStateStorage::MaterializedInput { table, mapping } = storage {
-                    let needed_columns = mapping
-                        .upstream_columns()
-                        .iter()
-                        .map(|col_idx| columns[*col_idx].clone())
-                        .collect();
-                    table.write_chunk(StreamChunk::new(
-                        ops.clone(),
-                        needed_columns,
-                        visibility.cloned(),
-                    ));
-                }
-            });
+            .zip_eq_fast(call_visibilities.iter())
+        {
+            if let AggStateStorage::MaterializedInput { table, mapping } = storage {
+                let mut chunk = chunk.clone().reorder_columns(mapping.upstream_columns());
+                chunk.set_vis(visibility.clone());
+                table.write_chunk(chunk);
+            }
+        }
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, visibility) in group_visibilities {
             let mut agg_group = vars.agg_group_cache.get_mut(&key).unwrap();
             let visibilities = call_visibilities
                 .iter()
-                .map(Option::as_ref)
-                .map(|call_vis| call_vis.map_or_else(|| visibility.clone(), |v| v & &visibility))
-                .map(Some)
+                .map(|call_vis| call_vis & &visibility)
                 .collect();
             let visibilities = vars
                 .distinct_dedup
                 .dedup_chunk(
-                    &ops,
-                    &columns,
+                    chunk.ops(),
+                    chunk.columns(),
                     visibilities,
                     &mut this.distinct_dedup_tables,
                     agg_group.group_key(),
                     this.actor_ctx.clone(),
                 )
                 .await?;
-            agg_group.apply_chunk(&mut this.storages, &ops, &columns, visibilities)?;
+            agg_group
+                .apply_chunk(&mut this.storages, &chunk, visibilities)
+                .await?;
             // Mark the group as changed.
             vars.group_change_set.insert(key);
         }
