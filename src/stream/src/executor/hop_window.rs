@@ -16,8 +16,10 @@ use std::num::NonZeroUsize;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{StreamChunk, Vis};
+use itertools::Itertools;
+use risingwave_common::array::{DataChunk, Op, StreamChunk, Vis};
 use risingwave_common::types::Interval;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
 
@@ -34,6 +36,7 @@ pub struct HopWindowExecutor {
     window_start_exprs: Vec<BoxedExpression>,
     window_end_exprs: Vec<BoxedExpression>,
     pub output_indices: Vec<usize>,
+    chunk_size: usize,
 }
 
 impl HopWindowExecutor {
@@ -48,6 +51,7 @@ impl HopWindowExecutor {
         window_start_exprs: Vec<BoxedExpression>,
         window_end_exprs: Vec<BoxedExpression>,
         output_indices: Vec<usize>,
+        chunk_size: usize,
     ) -> Self {
         HopWindowExecutor {
             ctx,
@@ -59,6 +63,7 @@ impl HopWindowExecutor {
             window_start_exprs,
             window_end_exprs,
             output_indices,
+            chunk_size,
         }
     }
 }
@@ -110,6 +115,8 @@ impl HopWindowExecutor {
             output_indices,
             info,
             time_col_idx,
+
+            chunk_size,
             ..
         } = *self;
         let units = window_size
@@ -133,12 +140,20 @@ impl HopWindowExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
+                    if units == 0 {
+                        continue;
+                    }
+
                     // TODO: compact may be not necessary here.
                     let chunk = chunk.compact();
                     let (data_chunk, ops) = chunk.into_parts();
                     // SAFETY: Already compacted.
                     assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
-                    let _len = data_chunk.cardinality();
+                    let len = data_chunk.cardinality();
+
+                    // Collect each window's data into a chunk.
+                    let mut chunks = Vec::with_capacity(units);
+
                     for i in 0..units {
                         let window_start_col = if output_indices.contains(&window_start_col_index) {
                             Some(
@@ -176,9 +191,45 @@ impl HopWindowExecutor {
                                 }
                             })
                             .collect();
-                        let new_chunk = StreamChunk::new(ops.clone(), new_cols, None);
-                        yield Message::Chunk(new_chunk);
+
+                        chunks.push(DataChunk::new(new_cols, len));
                     }
+
+                    // Reorganize the output rows from the same input row together.
+                    let mut row_iters = chunks.iter().map(|c| c.rows()).collect_vec();
+
+                    let data_types = chunks[0].data_types();
+                    let mut chunk_builder = DataChunkBuilder::new(data_types, chunk_size);
+                    let mut op_builder = Vec::with_capacity(chunk_size);
+
+                    for &op in &ops {
+                        // Since there could be multiple rows for the same input row, we need to
+                        // transform the `U-`/`U+` into `-`/`+` and then duplicate it.
+                        let op = match op {
+                            Op::Insert | Op::UpdateInsert => Op::Insert,
+                            Op::Delete | Op::UpdateDelete => Op::Delete,
+                        };
+                        for row_iter in &mut row_iters {
+                            op_builder.push(op);
+                            if let Some(chunk) =
+                                chunk_builder.append_one_row(row_iter.next().unwrap())
+                            {
+                                let ops = op_builder.drain(..).collect_vec();
+                                let chunk = StreamChunk::from_data_chunk(ops, chunk);
+                                yield Message::Chunk(chunk);
+                            }
+                        }
+                    }
+
+                    if let Some(chunk) = chunk_builder.consume_all() {
+                        let ops = op_builder.drain(..).collect_vec();
+                        let chunk = StreamChunk::from_data_chunk(ops, chunk);
+                        yield Message::Chunk(chunk);
+                    }
+
+                    // All builders should be exhausted.
+                    debug_assert!(op_builder.is_empty());
+                    debug_assert!(row_iters.into_iter().all(|mut it| it.next().is_none()));
                 }
                 Message::Barrier(b) => {
                     yield Message::Barrier(b);
@@ -205,6 +256,9 @@ mod tests {
     use super::super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{ActorContext, Executor, ExecutorInfo, ScalarImpl, StreamChunk};
+
+    const CHUNK_SIZE: usize = 256;
+
     fn create_executor(output_indices: Vec<usize>) -> Box<dyn Executor> {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);
@@ -218,8 +272,8 @@ mod tests {
             + 2 3 ^10:05:00
             - 3 2 ^10:14:00
             + 4 1 ^10:22:00
-            - 5 3 ^10:33:00
-            + 6 2 ^10:42:00
+           U- 5 2 ^10:33:00
+           U+ 6 2 ^10:42:00
             - 7 1 ^10:51:00
             + 8 3 ^11:02:00"
                 .replace('^', "2022-2-2T"),
@@ -253,6 +307,7 @@ mod tests {
             window_start_exprs,
             window_end_exprs,
             output_indices,
+            CHUNK_SIZE,
         )
         .boxed()
     }
@@ -270,29 +325,20 @@ mod tests {
             StreamChunk::from_pretty(
                 &"I I TS        TS        TS
                 + 1 1 ^10:00:00 ^09:45:00 ^10:15:00
-                + 2 3 ^10:05:00 ^09:45:00 ^10:15:00
-                - 3 2 ^10:14:00 ^09:45:00 ^10:15:00
-                + 4 1 ^10:22:00 ^10:00:00 ^10:30:00
-                - 5 3 ^10:33:00 ^10:15:00 ^10:45:00
-                + 6 2 ^10:42:00 ^10:15:00 ^10:45:00
-                - 7 1 ^10:51:00 ^10:30:00 ^11:00:00
-                + 8 3 ^11:02:00 ^10:45:00 ^11:15:00"
-                    .replace('^', "2022-2-2T"),
-            )
-        );
-
-        let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
-                &"I I TS        TS        TS
                 + 1 1 ^10:00:00 ^10:00:00 ^10:30:00
+                + 2 3 ^10:05:00 ^09:45:00 ^10:15:00
                 + 2 3 ^10:05:00 ^10:00:00 ^10:30:00
+                - 3 2 ^10:14:00 ^09:45:00 ^10:15:00
                 - 3 2 ^10:14:00 ^10:00:00 ^10:30:00
+                + 4 1 ^10:22:00 ^10:00:00 ^10:30:00
                 + 4 1 ^10:22:00 ^10:15:00 ^10:45:00
-                - 5 3 ^10:33:00 ^10:30:00 ^11:00:00
+                - 5 2 ^10:33:00 ^10:15:00 ^10:45:00
+                - 5 2 ^10:33:00 ^10:30:00 ^11:00:00
+                + 6 2 ^10:42:00 ^10:15:00 ^10:45:00
                 + 6 2 ^10:42:00 ^10:30:00 ^11:00:00
+                - 7 1 ^10:51:00 ^10:30:00 ^11:00:00
                 - 7 1 ^10:51:00 ^10:45:00 ^11:15:00
+                + 8 3 ^11:02:00 ^10:45:00 ^11:15:00
                 + 8 3 ^11:02:00 ^11:00:00 ^11:30:00"
                     .replace('^', "2022-2-2T"),
             )
@@ -310,31 +356,22 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                &"TS        I I TS       
+                &"TS        I I TS
                 + ^10:15:00 1 1 ^10:00:00
-                + ^10:15:00 3 2 ^10:05:00
-                - ^10:15:00 2 3 ^10:14:00
-                + ^10:30:00 1 4 ^10:22:00
-                - ^10:45:00 3 5 ^10:33:00
-                + ^10:45:00 2 6 ^10:42:00
-                - ^11:00:00 1 7 ^10:51:00
-                + ^11:15:00 3 8 ^11:02:00"
-                    .replace('^', "2022-2-2T"),
-            )
-        );
-
-        let chunk = stream.next().await.unwrap().unwrap().into_chunk().unwrap();
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
-                &"TS        I I TS 
                 + ^10:30:00 1 1 ^10:00:00 
+                + ^10:15:00 3 2 ^10:05:00
                 + ^10:30:00 3 2 ^10:05:00 
+                - ^10:15:00 2 3 ^10:14:00
                 - ^10:30:00 2 3 ^10:14:00 
+                + ^10:30:00 1 4 ^10:22:00
                 + ^10:45:00 1 4 ^10:22:00 
-                - ^11:00:00 3 5 ^10:33:00 
+                - ^10:45:00 2 5 ^10:33:00
+                - ^11:00:00 2 5 ^10:33:00 
+                + ^10:45:00 2 6 ^10:42:00
                 + ^11:00:00 2 6 ^10:42:00 
+                - ^11:00:00 1 7 ^10:51:00
                 - ^11:15:00 1 7 ^10:51:00 
+                + ^11:15:00 3 8 ^11:02:00
                 + ^11:30:00 3 8 ^11:02:00"
                     .replace('^', "2022-2-2T"),
             )
@@ -373,6 +410,7 @@ mod tests {
                 window_start_exprs,
                 window_end_exprs,
                 output_indices,
+                CHUNK_SIZE,
             )
             .boxed(),
         )
