@@ -310,7 +310,7 @@ where
                                             vnode,
                                             &chunk,
                                             &pk_in_output_indices,
-                                            &mut current_pos_map,
+                                            &mut backfill_state,
                                         );
 
                                         let chunk_cardinality = chunk.cardinality() as u64;

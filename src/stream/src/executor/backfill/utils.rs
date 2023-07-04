@@ -60,6 +60,14 @@ impl BackfillState {
         self.inner.get(vnode)
     }
 
+    pub fn update_progress(
+        &mut self,
+        vnode: VirtualNode,
+        progress: BackfillProgressPerVnode,
+    ) -> Option<BackfillProgressPerVnode> {
+        self.inner.insert(vnode, progress)
+    }
+
     fn iter_backfill_progress(
         &self,
     ) -> impl Iterator<Item = (&VirtualNode, &BackfillProgressPerVnode)> {
@@ -318,10 +326,10 @@ pub(crate) fn update_pos_by_vnode(
     vnode: VirtualNode,
     chunk: &StreamChunk,
     pk_in_output_indices: &[usize],
-    current_pos_map: &mut CurrentPosMap,
+    backfill_state: &mut BackfillState,
 ) {
     let new_pos = get_new_pos(chunk, pk_in_output_indices);
-    current_pos_map.insert(vnode, new_pos);
+    backfill_state.update_progress(vnode, BackfillProgressPerVnode::InProgress(new_pos));
 }
 
 /// Get new backfill pos from the chunk. Since chunk should have ordered rows, we can just take the
