@@ -16,11 +16,15 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
+use risingwave_expr::agg::AggKind;
+use risingwave_sqlparser::ast::{
+    BinaryOperator, DataType as AstDataType, Distinct, Expr, Ident, Join, JoinConstraint,
+    JoinOperator, ObjectName, Select, SelectItem, TableFactor, TableWithJoins,
+};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::statement::RewriteExprsRecursive;
@@ -28,11 +32,17 @@ use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
 use crate::catalog::system_catalog::pg_catalog::{
-    PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
+    PG_INDEX_COLUMNS, PG_INDEX_TABLE_NAME, PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
+};
+use crate::catalog::system_catalog::rw_catalog::{
+    RW_TABLE_STATS_COLUMNS, RW_TABLE_STATS_KEY_SIZE_INDEX, RW_TABLE_STATS_TABLE_ID_INDEX,
+    RW_TABLE_STATS_TABLE_NAME, RW_TABLE_STATS_VALUE_SIZE_INDEX,
 };
 use crate::expr::{
-    CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef,
+    AggCall, CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall,
+    InputRef, OrderBy,
 };
+use crate::utils::Condition;
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
@@ -279,9 +289,17 @@ impl Binder {
                         for expr in exprs {
                             let bound = self.bind_expr(expr)?;
                             if let ExprImpl::InputRef(inner) = bound {
-                                except_indices.insert(inner.index);
+                                if !except_indices.insert(inner.index) {
+                                    return Err(ErrorCode::BindError(
+                                        "Duplicate entry in except list".into(),
+                                    )
+                                    .into());
+                                }
                             } else {
-                                unreachable!();
+                                return Err(ErrorCode::BindError(
+                                    "Need column name in except list".into(),
+                                )
+                                .into());
                             }
                         }
                     }
@@ -450,6 +468,174 @@ impl Binder {
             having: None,
             schema,
         })
+    }
+
+    /// This returns the size of all the indexes that are on the specified table.
+    pub fn bind_get_indexes_size_select(&mut self, table: &ExprImpl) -> Result<BoundSelect> {
+        // this function is implemented with the following query:
+        //     SELECT sum(total_key_size + total_value_size)
+        //     FROM rw_catalog.rw_table_stats as stats
+        //     JOIN pg_index on stats.id = pg_index.indexrelid
+        //     WHERE pg_index.indrelid = 'table_name'::regclass
+
+        let indexrelid_col = PG_INDEX_COLUMNS[0].1;
+        let tbl_stats_id_col = RW_TABLE_STATS_COLUMNS[0].1;
+
+        // Filter to only the Indexes on this table
+        let table_id = self.table_id_query(table)?;
+
+        let constraint = JoinConstraint::On(Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new_unchecked(tbl_stats_id_col))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Identifier(Ident::new_unchecked(indexrelid_col))),
+        });
+        let indexes_with_stats = self.bind_table_with_joins(TableWithJoins {
+            relation: TableFactor::Table {
+                name: ObjectName(vec![
+                    RW_CATALOG_SCHEMA_NAME.into(),
+                    RW_TABLE_STATS_TABLE_NAME.into(),
+                ]),
+                alias: None,
+                for_system_time_as_of_proctime: false,
+            },
+            joins: vec![Join {
+                relation: TableFactor::Table {
+                    name: ObjectName(vec![
+                        PG_CATALOG_SCHEMA_NAME.into(),
+                        PG_INDEX_TABLE_NAME.into(),
+                    ]),
+                    alias: None,
+                    for_system_time_as_of_proctime: false,
+                },
+                join_operator: JoinOperator::Inner(constraint),
+            }],
+        })?;
+
+        // Get the size of an index by adding the size of the keys and the size of the values
+        let sum = FunctionCall::new(
+            ExprType::Add,
+            vec![
+                InputRef::new(RW_TABLE_STATS_KEY_SIZE_INDEX, DataType::Int64).into(),
+                InputRef::new(RW_TABLE_STATS_VALUE_SIZE_INDEX, DataType::Int64).into(),
+            ],
+        )?
+        .into();
+
+        // There could be multiple indexes on a table so aggregate the sizes of all indexes
+        let select_items: Vec<ExprImpl> = vec![AggCall::new(
+            AggKind::Sum0,
+            vec![sum],
+            false,
+            OrderBy::any(),
+            Condition::true_cond(),
+            vec![],
+        )?
+        .into()];
+
+        let indrelid_col = PG_INDEX_COLUMNS[1].1;
+        let indrelid_ref = self.bind_column(&[indrelid_col.into()])?;
+        let where_clause: Option<ExprImpl> =
+            Some(FunctionCall::new(ExprType::Equal, vec![indrelid_ref, table_id])?.into());
+
+        // define the output schema
+        let result_schema = Schema {
+            fields: vec![Field::with_name(
+                DataType::Int64,
+                "pg_indexes_size".to_string(),
+            )],
+        };
+
+        Ok(BoundSelect {
+            distinct: BoundDistinct::All,
+            select_items,
+            aliases: vec![None],
+            from: Some(indexes_with_stats),
+            where_clause,
+            group_by: vec![],
+            having: None,
+            schema: result_schema,
+        })
+    }
+
+    pub fn bind_get_table_size_select(
+        &mut self,
+        output_name: &str,
+        table: &ExprImpl,
+    ) -> Result<BoundSelect> {
+        // define the output schema
+        let result_schema = Schema {
+            fields: vec![Field::with_name(DataType::Int64, output_name.to_string())],
+        };
+
+        // Get table stats data
+        let from = Some(self.bind_relation_by_name_inner(
+            Some(RW_CATALOG_SCHEMA_NAME),
+            RW_TABLE_STATS_TABLE_NAME,
+            None,
+            false,
+        )?);
+
+        let table_id = self.table_id_query(table)?;
+
+        // Filter to only the Indexes on this table
+        let where_clause: Option<ExprImpl> = Some(
+            FunctionCall::new(
+                ExprType::Equal,
+                vec![
+                    table_id,
+                    InputRef::new(RW_TABLE_STATS_TABLE_ID_INDEX, DataType::Int32).into(),
+                ],
+            )?
+            .into(),
+        );
+
+        // Add the space used by keys and the space used by values to get the total space used by
+        // the table
+        let key_value_size_sum = FunctionCall::new(
+            ExprType::Add,
+            vec![
+                InputRef::new(RW_TABLE_STATS_KEY_SIZE_INDEX, DataType::Int64).into(),
+                InputRef::new(RW_TABLE_STATS_VALUE_SIZE_INDEX, DataType::Int64).into(),
+            ],
+        )?
+        .into();
+        let select_items = vec![key_value_size_sum];
+
+        Ok(BoundSelect {
+            distinct: BoundDistinct::All,
+            select_items,
+            aliases: vec![None],
+            from,
+            where_clause,
+            group_by: vec![],
+            having: None,
+            schema: result_schema,
+        })
+    }
+
+    /// Given literal varchar this will return the Object ID of the table or index whose
+    /// name matches the varchar.  Given a literal integer, this will return the integer regardless
+    /// of whether an object exists with an Object ID that matches the integer.
+    fn table_id_query(&mut self, table: &ExprImpl) -> Result<ExprImpl> {
+        match table.as_literal() {
+            Some(literal) if literal.return_type().is_int() => Ok(table.clone()),
+            Some(literal) if literal.return_type() == DataType::Varchar => {
+                let table_name = literal
+                    .get_data()
+                    .as_ref()
+                    .expect("ExprImpl value is a Literal but cannot get ref to data")
+                    .as_utf8();
+                self.bind_cast(
+                    Expr::Value(risingwave_sqlparser::ast::Value::SingleQuotedString(
+                        table_name.to_string(),
+                    )),
+                    AstDataType::Regclass,
+                )
+            }
+            _ => Err(RwError::from(ErrorCode::ExprError(
+                "Expected an integer or varchar literal".into(),
+            ))),
+        }
     }
 
     pub fn iter_bound_columns<'a>(

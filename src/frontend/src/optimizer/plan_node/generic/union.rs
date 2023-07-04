@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
@@ -64,16 +62,6 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Union<PlanRef> {
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        self.fmt_fields_with_builder(&mut builder);
-        builder.finish()
-    }
-
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        builder.field("all", &self.all);
-    }
-
     pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
         vec![("all", Pretty::debug(&self.all))]
     }

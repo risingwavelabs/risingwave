@@ -26,6 +26,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
@@ -352,7 +353,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
     /// such, parallel consumers are able to consume the result independently.
-    pub async fn async_execute(self: Arc<Self>, state_tx: Option<StateReporter>) -> Result<()> {
+    pub async fn async_execute(
+        self: Arc<Self>,
+        state_tx: Option<StateReporter>,
+        tracing_context: TracingContext,
+    ) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
             "Prepare executing plan [{:?}]: {}",
@@ -390,13 +395,17 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             let batch_metrics = t_1.context.batch_metrics();
 
             let task = |task_id: TaskId| async move {
+                let span = tracing_context.attach(tracing::info_span!(
+                    "batch_execute",
+                    task_id = task_id.task_id,
+                    stage_id = task_id.stage_id,
+                    query_id = task_id.query_id,
+                ));
+
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
                 t_1.run(exec, sender, state_tx.as_mut())
-                    .instrument(tracing::trace_span!("batch_execute",
-                        task_id = ?task_id.task_id,
-                        stage_id = ?task_id.stage_id,
-                        query_id = ?task_id.query_id))
+                    .instrument(span)
                     .await;
             };
 

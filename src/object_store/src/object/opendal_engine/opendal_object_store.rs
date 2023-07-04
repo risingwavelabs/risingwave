@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::StreamExt;
@@ -72,9 +72,15 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(
-            OpenDalStreamingUploader::new(self.op.clone(), path.to_string()).await?,
-        ))
+        match self.op.info().capability().write_without_content_length {
+            true => Ok(Box::new(
+                OpenDalStreamingUploader::new(self.op.clone(), path.to_string()).await?,
+            )),
+            false => Ok(Box::new(InMemoryMultipartUploader::new(
+                self.op.clone(),
+                path.to_string(),
+            ))),
+        }
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -225,6 +231,39 @@ impl StreamingUploader for OpenDalStreamingUploader {
     }
 }
 
+/// This struct is a workaround due to the current limitation in certain services
+/// where unsized write is not yet supported, and will be removed later.
+pub struct InMemoryMultipartUploader {
+    op: Operator,
+    path: String,
+    buffer: BytesMut,
+}
+impl InMemoryMultipartUploader {
+    pub fn new(op: Operator, path: String) -> Self {
+        Self {
+            op,
+            path,
+            buffer: BytesMut::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl StreamingUploader for InMemoryMultipartUploader {
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        self.buffer.put(data);
+        Ok(())
+    }
+
+    async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
+        self.op.write(&self.path, self.buffer).await?;
+        Ok(())
+    }
+
+    fn get_memory_usage(&self) -> u64 {
+        self.buffer.capacity() as u64
+    }
+}
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;

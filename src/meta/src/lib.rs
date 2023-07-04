@@ -34,6 +34,7 @@
 #![feature(is_sorted)]
 #![feature(string_leak)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(type_name_of_val)]
 
 pub mod backup_restore;
 mod barrier;
@@ -180,6 +181,19 @@ pub struct OverrideConfigOpts {
     #[clap(long, env = "RW_BACKUP_STORAGE_DIRECTORY")]
     #[override_opts(path = system.backup_storage_directory, optional_in_config)]
     backup_storage_directory: Option<String>,
+
+    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
+    pub object_store_streaming_read_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_UPLOAD_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_streaming_upload_timeout_ms)]
+    pub object_store_streaming_upload_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_UPLOAD_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_upload_timeout_ms)]
+    pub object_store_upload_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_READ_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_read_timeout_ms)]
+    pub object_store_read_timeout_ms: Option<u64>,
 }
 
 use std::future::Future;

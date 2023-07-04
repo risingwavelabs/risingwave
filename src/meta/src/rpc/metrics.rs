@@ -129,8 +129,6 @@ pub struct MetaMetrics {
     pub compact_pending_bytes: IntGaugeVec,
     /// Per level compression ratio
     pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
-    /// The number of compactor CPU need to be scale.
-    pub scale_compactor_core_num: IntGauge,
     /// Per level number of running compaction task
     pub level_compact_task_cnt: IntGaugeVec,
     pub time_after_last_observation: AtomicU64,
@@ -419,12 +417,6 @@ impl MetaMetrics {
             registry,
         )
         .unwrap();
-        let scale_compactor_core_num = register_int_gauge_with_registry!(
-            "storage_compactor_suggest_core_count",
-            "num of CPU to be scale to meet compaction need",
-            registry
-        )
-        .unwrap();
 
         let meta_type = register_int_gauge_vec_with_registry!(
             "meta_num",
@@ -597,7 +589,6 @@ impl MetaMetrics {
             meta_type,
             compact_pending_bytes,
             compact_level_compression_ratio,
-            scale_compactor_core_num,
             level_compact_task_cnt,
             object_store_metric,
             source_is_up,
@@ -700,7 +691,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
             meta_metrics.table_info.reset();
             let fragments = fragment_manager.list_table_fragments().await;
             let workers: HashMap<u32, String> = cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None, true)
+                .list_worker_node(WorkerType::ComputeNode, None)
                 .await
                 .into_iter()
                 .map(|worker_node| match worker_node.host {

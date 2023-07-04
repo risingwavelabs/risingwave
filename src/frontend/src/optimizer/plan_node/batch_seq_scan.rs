@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::ops::Bound;
 
 use itertools::Itertools;
@@ -203,38 +202,6 @@ impl Distill for BatchSeqScan {
         }
 
         childless_record("BatchScan", vec)
-    }
-}
-
-impl fmt::Display for BatchSeqScan {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-
-        write!(
-            f,
-            "BatchScan {{ table: {}, columns: [{}]",
-            self.logical.table_name,
-            match verbose {
-                true => self.logical.column_names_with_table_prefix(),
-                false => self.logical.column_names(),
-            }
-            .join(", "),
-        )?;
-
-        if !self.scan_ranges.is_empty() {
-            let range_strs = self.scan_ranges_as_strs(verbose);
-            write!(f, ", scan_ranges: [{}]", range_strs.join(" , "))?;
-        }
-
-        if verbose {
-            let dist = &DistributionDisplay {
-                distribution: self.distribution(),
-                input_schema: &self.base.schema,
-            };
-            write!(f, ", distribution: {}", dist)?;
-        }
-
-        write!(f, " }}")
     }
 }
 

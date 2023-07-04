@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -60,16 +58,6 @@ impl StreamTopN {
     }
 }
 
-impl fmt::Display for StreamTopN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = plan_node_name!("StreamTopN",
-            { "append_only", self.input().append_only() },
-        );
-        self.logical
-            .fmt_with_name_and_force(f, &name, false)
-            .finish()
-    }
-}
 impl Distill for StreamTopN {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let name = plan_node_name!("StreamTopN",

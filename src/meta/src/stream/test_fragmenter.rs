@@ -439,9 +439,11 @@ fn make_cluster_info() -> StreamingClusterInfo {
         },
     ))
     .collect();
+    let unschedulable_parallel_units = Default::default();
     StreamingClusterInfo {
         worker_nodes,
         parallel_units,
+        unschedulable_parallel_units,
     }
 }
 

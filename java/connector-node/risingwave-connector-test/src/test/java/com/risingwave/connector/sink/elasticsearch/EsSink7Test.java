@@ -19,8 +19,8 @@ import static org.junit.Assert.fail;
 
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
-import com.risingwave.connector.EsSink;
-import com.risingwave.connector.EsSinkConfig;
+import com.risingwave.connector.EsSink7;
+import com.risingwave.connector.EsSink7Config;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data;
@@ -39,7 +39,7 @@ import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.junit.Test;
 import org.testcontainers.elasticsearch.ElasticsearchContainer;
 
-public class EsSinkTest {
+public class EsSink7Test {
 
     static TableSchema getTestTableSchema() {
         return new TableSchema(
@@ -50,10 +50,14 @@ public class EsSinkTest {
                 Lists.newArrayList("id", "name"));
     }
 
-    public void testEsSink(ElasticsearchContainer container) throws IOException {
-        EsSink sink =
-                new EsSink(
-                        new EsSinkConfig(container.getHttpHostAddress(), "test", "$"),
+    public void testEsSink(ElasticsearchContainer container, String username, String password)
+            throws IOException {
+        EsSink7 sink =
+                new EsSink7(
+                        new EsSink7Config(container.getHttpHostAddress(), "test")
+                                .withDelimiter("$")
+                                .withUsername(username)
+                                .withPassword(password),
                         getTestTableSchema());
         sink.write(
                 Iterators.forArray(
@@ -61,7 +65,7 @@ public class EsSinkTest {
                         new ArraySinkRow(Op.INSERT, 2, "Bob")));
         sink.sync();
         // container is slow here, but our default flush time is 5s,
-        // so 2s is enough for sync test
+        // so 3s is enough for sync test
         try {
             Thread.sleep(3000);
         } catch (InterruptedException e) {
@@ -95,10 +99,17 @@ public class EsSinkTest {
 
     @Test
     public void testElasticSearch() throws IOException {
-        ElasticsearchContainer container =
+        ElasticsearchContainer containerWithoutAuth =
                 new ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:7.11.0");
-        container.start();
-        testEsSink(container);
-        container.stop();
+        containerWithoutAuth.start();
+        testEsSink(containerWithoutAuth, null, null);
+        containerWithoutAuth.stop();
+
+        ElasticsearchContainer containerWithAuth =
+                new ElasticsearchContainer("docker.elastic.co/elasticsearch/elasticsearch:7.11.0")
+                        .withPassword("test");
+        containerWithAuth.start();
+        testEsSink(containerWithAuth, "elastic", "test");
+        containerWithAuth.stop();
     }
 }

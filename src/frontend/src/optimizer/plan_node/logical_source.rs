@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::{max, min};
-use std::fmt;
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
@@ -231,23 +230,6 @@ impl LogicalSource {
 }
 
 impl_plan_tree_node_for_leaf! {LogicalSource}
-
-impl fmt::Display for LogicalSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: show generated columns
-        if let Some(catalog) = self.source_catalog() {
-            write!(
-                f,
-                "LogicalSource {{ source: {}, columns: [{}], time_range: [{:?}] }}",
-                catalog.name,
-                self.schema().names_str().join(", "),
-                self.core.kafka_timestamp_range,
-            )
-        } else {
-            write!(f, "LogicalSource")
-        }
-    }
-}
 impl Distill for LogicalSource {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = if let Some(catalog) = self.source_catalog() {

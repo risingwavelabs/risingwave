@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::type_name;
 use std::fmt::Write;
 use std::str::FromStr;
 
@@ -80,7 +79,7 @@ where
 {
     elem.trim()
         .parse()
-        .map_err(|_| ExprError::Parse(type_name::<T>().into()))
+        .map_err(|err: <T as FromStr>::Err| ExprError::Parse(err.to_string().into()))
 }
 
 #[function("cast(int16) -> int256")]
@@ -217,6 +216,7 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 #[function("cast(interval) -> varchar")]
 #[function("cast(timestamp) -> varchar")]
 #[function("cast(jsonb) -> varchar")]
+#[function("cast(bytea) -> varchar")]
 #[function("cast(list) -> varchar")]
 pub fn general_to_text(elem: impl ToText, mut writer: &mut dyn Write) -> Result<()> {
     elem.write(&mut writer).unwrap();
