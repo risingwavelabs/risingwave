@@ -37,6 +37,24 @@ use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
 
+pub type CurrentPosMap = HashMap<VirtualNode, OwnedRow>;
+
+pub struct BackfillState {
+    /// Used to track backfill progress.
+    backfill_progress: HashMap<VirtualNode, BackfillProgressPerVnode>,
+
+    /// We need this to process state updates.
+    committed_progress: HashMap<VirtualNode, Option<OwnedRow>>,
+}
+
+/// Used for tracking backfill state per vnode
+#[derive(Eq, PartialEq, Debug)]
+pub enum BackfillProgressPerVnode {
+    NotStarted,
+    InProgress(OwnedRow),
+    Completed,
+}
+
 pub(crate) fn mark_chunk(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
@@ -49,7 +67,8 @@ pub(crate) fn mark_chunk(
 
 /// Mark chunk:
 /// For each row of the chunk, forward it to downstream if its pk <= `current_pos` for the
-/// corresponding vnode, otherwise ignore it. We implement it by changing the visibility bitmap.
+/// corresponding `vnode`, otherwise ignore it.
+/// We implement it by changing the visibility bitmap.
 pub(crate) fn mark_chunk_ref_by_vnode(
     chunk: &StreamChunk,
     current_pos_map: &HashMap<VirtualNode, OwnedRow>,
@@ -127,19 +146,11 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
     }
 }
 
-/// Used for tracking backfill state per vnode
-#[derive(Eq, PartialEq, Debug)]
-pub enum BackfillProgress {
-    NotStarted,
-    InProgress(OwnedRow),
-    Completed,
-}
-
 /// Gets progress per vnode, so we know which to backfill.
 pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
     state_len: usize,
-) -> StreamExecutorResult<Vec<BackfillProgress>> {
+) -> StreamExecutorResult<Vec<BackfillProgressPerVnode>> {
     debug_assert!(!state_table.vnode_bitmap().is_empty());
     let vnodes = state_table.vnodes().iter_vnodes_scalar();
     let mut result = Vec::with_capacity(state_table.vnodes().len());
@@ -154,12 +165,12 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
             Some(row) => {
                 let vnode_is_finished = row.datum_at(backfill_datum_pos).unwrap();
                 if vnode_is_finished.into_bool() {
-                    BackfillProgress::Completed
+                    BackfillProgressPerVnode::Completed
                 } else {
-                    BackfillProgress::InProgress(row)
+                    BackfillProgressPerVnode::InProgress(row)
                 }
             }
-            None => BackfillProgress::NotStarted,
+            None => BackfillProgressPerVnode::NotStarted,
         };
         result.push(backfill_progress);
     }
@@ -307,6 +318,30 @@ pub(crate) async fn iter_chunks<'a, S, E>(
     }
 
     yield None;
+}
+
+/// Schema
+/// | vnode | pk | `backfill_finished` |
+///
+/// `current_pos_map` is the map from vnode to the current backfilled pk position.
+pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
+    epoch: EpochPair,
+    table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
+    is_finished: bool,
+    current_pos_map: &CurrentPosMap,
+    old_state: &mut Option<Vec<Datum>>,
+    current_state: &mut [Datum],
+) -> StreamExecutorResult<()> {
+    if current_pos_map.is_empty() {
+        table.commit_no_data_expected(epoch);
+    }
+    for current_pos in current_pos_map.values() {
+        // state w/o vnodes.
+        build_temporary_state(current_state, is_finished, current_pos);
+        flush_data(table, epoch, old_state, current_state).await?;
+        *old_state = Some(current_state.into());
+    }
+    Ok(())
 }
 
 /// Schema

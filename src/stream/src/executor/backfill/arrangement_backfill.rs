@@ -33,6 +33,7 @@ use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, iter_chunks,
     mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state, update_pos,
+    CurrentPosMap,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -40,8 +41,6 @@ use crate::executor::{
     Message, PkIndices, PkIndicesRef, StreamExecutorError,
 };
 use crate::task::{ActorId, CreateMviewProgress};
-
-type CurrentPosMap = HashMap<VirtualNode, OwnedRow>;
 
 /// Similar to [`BackfillExecutor`].
 /// Main differences:
@@ -165,6 +164,7 @@ where
 
         // Current position of the upstream_table primary key.
         // `None` means it starts from the beginning.
+        // FIXME: Remove it
         let mut current_pos: Option<OwnedRow> = None;
 
         // Use these to persist state.
