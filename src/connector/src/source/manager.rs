@@ -67,7 +67,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             data_type: c.data_type.clone(),
             column_id: c.column_id,
             fields: c.field_descs.clone(),
-            is_row_id: false,
+            is_row_id: c.name.as_str() == "_row_id",
             is_meta,
             is_pk: false,
         }

@@ -64,6 +64,7 @@ use risingwave_pb::meta::serving_service_client::ServingServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{PbReschedule, *};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -75,11 +76,12 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::Endpoint;
 use tonic::{Code, Streaming};
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
+use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
 type ConnectionId = u32;
@@ -581,12 +583,12 @@ impl MetaClient {
 
     pub async fn update_schedulability(
         &self,
-        host: HostAddress,
-        set_is_unschedulable: bool,
+        worker_ids: &[u32],
+        schedulability: Schedulability,
     ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
         let request = UpdateWorkerNodeSchedulabilityRequest {
-            host: Some(host),
-            set_is_unschedulable,
+            worker_ids: worker_ids.to_vec(),
+            schedulability: schedulability.into(),
         };
         let resp = self
             .inner
@@ -983,6 +985,15 @@ impl MetaClient {
             resp.task_assignment,
             resp.task_progress,
         ))
+    }
+
+    pub async fn delete_worker_node(&self, worker: HostAddress) -> Result<()> {
+        let _resp = self
+            .inner
+            .delete_worker_node(DeleteWorkerNodeRequest { host: Some(worker) })
+            .await?;
+
+        Ok(())
     }
 }
 
@@ -1505,13 +1516,16 @@ impl GrpcMetaClient {
     }
 
     async fn connect_to_endpoint(endpoint: Endpoint) -> Result<Channel> {
-        endpoint
+        let channel = endpoint
             .http2_keep_alive_interval(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
             .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await
-            .map_err(RpcError::TransportError)
+            .map_err(RpcError::TransportError)?
+            .tracing_injected();
+
+        Ok(channel)
     }
 
     pub(crate) fn retry_strategy_to_bound(

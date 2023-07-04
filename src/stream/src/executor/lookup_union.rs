@@ -113,7 +113,7 @@ impl LookupUnionExecutor {
                     end = false;
                     match msg {
                         Message::Watermark(_) => {
-                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                         }
 
                         msg @ Message::Chunk(_) => yield msg,

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::hash::Hash;
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
@@ -48,14 +47,6 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Limit<PlanRef> {
     }
 }
 impl<PlanRef> Limit<PlanRef> {
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ limit: {}, offset: {} }}",
-            name, self.limit, self.offset
-        )
-    }
-
     pub fn new(input: PlanRef, limit: u64, offset: u64) -> Self {
         Limit {
             input,

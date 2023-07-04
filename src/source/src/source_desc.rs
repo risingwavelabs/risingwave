@@ -113,6 +113,7 @@ impl SourceDescBuilder {
             PbRowFormatType::UpsertAvro => SourceFormat::UpsertAvro,
             PbRowFormatType::DebeziumMongoJson => SourceFormat::DebeziumMongoJson,
             PbRowFormatType::Csv => SourceFormat::Csv,
+            PbRowFormatType::Bytes => SourceFormat::Bytes,
             _ => unreachable!(),
         };
 

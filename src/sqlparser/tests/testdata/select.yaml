@@ -44,6 +44,14 @@
   error_msg: |-
     sql parser error: Expected SELECT, VALUES, or a subquery in the query body, found: v1 at line:1, column:21
     Near "SELECT v3 EXCEPT ("
+- input: SELECT * EXCEPT (V1, ) FROM foo
+  error_msg: |-
+    sql parser error: Expected an expression:, found: ) at line:1, column:23
+    Near " * EXCEPT (V1, )"
+- input: SELECT * EXCEPT (v1 FROM foo
+  error_msg: |-
+    sql parser error: Expected an expression:, found: * at line:1, column:9
+    Near "SELECT *"
 - input: SELECT * FROM t LIMIT 1 FETCH FIRST ROWS ONLY
   error_msg: 'sql parser error: Cannot specify both LIMIT and FETCH'
 - input: SELECT * FROM t FETCH FIRST ROWS WITH TIES

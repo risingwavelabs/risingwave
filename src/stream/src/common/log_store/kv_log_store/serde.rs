@@ -69,7 +69,7 @@ enum LogStoreRowOp {
 }
 
 #[derive(Clone)]
-pub struct LogStoreRowSerde {
+pub(crate) struct LogStoreRowSerde {
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
 
@@ -96,7 +96,7 @@ pub struct LogStoreRowSerde {
 }
 
 impl LogStoreRowSerde {
-    pub fn new(table_catalog: &Table, vnodes: Option<Arc<Bitmap>>) -> Self {
+    pub(crate) fn new(table_catalog: &Table, vnodes: Option<Arc<Bitmap>>) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()
@@ -155,25 +155,25 @@ impl LogStoreRowSerde {
         }
     }
 
-    pub fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) {
+    pub(crate) fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) {
         self.vnodes = vnodes;
     }
 
-    pub fn vnodes(&self) -> &Bitmap {
+    pub(crate) fn vnodes(&self) -> &Bitmap {
         self.vnodes.as_ref()
     }
 
-    fn encode_epoch(epoch: u64) -> i64 {
+    pub(crate) fn encode_epoch(epoch: u64) -> i64 {
         epoch as i64 ^ (1i64 << 63)
     }
 
-    fn decode_epoch(encoded_epoch: i64) -> u64 {
+    pub(crate) fn decode_epoch(encoded_epoch: i64) -> u64 {
         encoded_epoch as u64 ^ (1u64 << 63)
     }
 }
 
 impl LogStoreRowSerde {
-    pub fn serialize_data_row(
+    pub(crate) fn serialize_data_row(
         &self,
         epoch: u64,
         seq_id: SeqIdType,
@@ -200,7 +200,7 @@ impl LogStoreRowSerde {
         (vnode, key_bytes, value_bytes)
     }
 
-    pub fn serialize_barrier(
+    pub(crate) fn serialize_barrier(
         &self,
         epoch: u64,
         vnode: VirtualNode,
@@ -223,7 +223,7 @@ impl LogStoreRowSerde {
         (key_bytes, value_bytes)
     }
 
-    pub fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> Bytes {
+    pub(crate) fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> Bytes {
         serialize_pk_with_vnode(
             [Some(ScalarImpl::Int64(Self::encode_epoch(epoch)))],
             &self.epoch_serde,
@@ -231,7 +231,7 @@ impl LogStoreRowSerde {
         )
     }
 
-    pub fn serialize_log_store_pk(
+    pub(crate) fn serialize_log_store_pk(
         &self,
         vnode: VirtualNode,
         epoch: u64,
@@ -247,7 +247,7 @@ impl LogStoreRowSerde {
         )
     }
 
-    pub fn serialize_truncation_offset_watermark(
+    pub(crate) fn serialize_truncation_offset_watermark(
         &self,
         vnode: VirtualNode,
         offset: ReaderTruncationOffsetType,
@@ -301,7 +301,7 @@ impl LogStoreRowSerde {
         Ok((epoch, op))
     }
 
-    pub async fn deserialize_stream_chunk(
+    pub(crate) async fn deserialize_stream_chunk(
         &self,
         stream: impl StateStoreReadIterStream,
         start_seq_id: SeqIdType,
@@ -484,8 +484,8 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
     }
 }
 
-pub type LogStoreItemStream<S> = impl Stream<Item = LogStoreResult<(u64, LogStoreReadItem)>>;
-pub fn new_log_store_item_stream<S: StateStoreReadIterStream>(
+pub(crate) type LogStoreItemStream<S> = impl Stream<Item = LogStoreResult<(u64, LogStoreReadItem)>>;
+pub(crate) fn new_log_store_item_stream<S: StateStoreReadIterStream>(
     streams: Vec<S>,
     serde: LogStoreRowSerde,
     chunk_size: usize,
@@ -582,13 +582,10 @@ mod tests {
     use rand::prelude::SliceRandom;
     use rand::thread_rng;
     use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::row::{OwnedRow, Row};
-    use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
-    use risingwave_pb::catalog::PbTable;
     use risingwave_storage::store::StateStoreReadIterStream;
     use risingwave_storage::table::DEFAULT_VNODE;
     use tokio::sync::oneshot;
@@ -597,61 +594,18 @@ mod tests {
     use crate::common::log_store::kv_log_store::serde::{
         new_log_store_item_stream, LogStoreRowOp, LogStoreRowOpStream, LogStoreRowSerde,
     };
+    use crate::common::log_store::kv_log_store::test_utils::{
+        gen_test_data, gen_test_log_store_table, TEST_TABLE_ID,
+    };
     use crate::common::log_store::kv_log_store::SeqIdType;
     use crate::common::log_store::LogStoreReadItem;
-    use crate::common::table::test_utils::gen_prost_table;
 
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     const EPOCH1: u64 = 233;
     const EPOCH2: u64 = EPOCH1 + 1;
 
-    fn gen_test_table() -> PbTable {
-        let column_descs = vec![
-            ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64), // epoch
-            ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32), // Seq id
-            ColumnDesc::unnamed(ColumnId::from(2), DataType::Int16), // op code
-            // Payload
-            ColumnDesc::unnamed(ColumnId::from(3), DataType::Int64), // id
-            ColumnDesc::unnamed(ColumnId::from(2), DataType::Varchar), // name
-        ];
-        let order_types = vec![OrderType::ascending(), OrderType::ascending_nulls_last()];
-        let pk_index = vec![0_usize, 1_usize];
-        let read_prefix_len_hint = 0;
-        gen_prost_table(
-            TEST_TABLE_ID,
-            column_descs,
-            order_types,
-            pk_index,
-            read_prefix_len_hint,
-        )
-    }
-
-    fn gen_test_data(base: i64) -> (Vec<Op>, Vec<OwnedRow>) {
-        let ops = vec![Op::Insert, Op::Delete, Op::UpdateDelete, Op::UpdateInsert];
-        let rows = vec![
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(1 + base)),
-                Some(ScalarImpl::Utf8("name1".to_owned_scalar())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(2 + base)),
-                Some(ScalarImpl::Utf8("name2".to_owned_scalar())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(3 + base)),
-                Some(ScalarImpl::Utf8("name3".to_owned_scalar())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(3 + base)),
-                Some(ScalarImpl::Utf8("name4".to_owned_scalar())),
-            ]),
-        ];
-        (ops, rows)
-    }
-
     #[test]
     fn test_serde() {
-        let table = gen_test_table();
+        let table = gen_test_log_store_table();
 
         let serde = LogStoreRowSerde::new(&table, None);
 
@@ -771,7 +725,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deserialize_stream_chunk() {
-        let table = gen_test_table();
+        let table = gen_test_log_store_table();
         let serde = LogStoreRowSerde::new(&table, None);
 
         let (ops, rows) = gen_test_data(0);
@@ -892,7 +846,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_row_stream_basic() {
-        let table = gen_test_table();
+        let table = gen_test_log_store_table();
 
         let serde = LogStoreRowSerde::new(&table, None);
 
@@ -965,7 +919,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_store_stream_basic() {
-        let table = gen_test_table();
+        let table = gen_test_log_store_table();
 
         let serde = LogStoreRowSerde::new(&table, None);
 
@@ -1066,7 +1020,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_stream() {
-        let table = gen_test_table();
+        let table = gen_test_log_store_table();
 
         let serde = LogStoreRowSerde::new(&table, None);
 

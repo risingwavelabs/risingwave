@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
@@ -26,7 +24,6 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::dml_manager::DmlManagerRef;
 
-use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -105,20 +102,23 @@ impl DeleteExecutor {
             .table_dml_handle(self.table_id, self.table_version_id)?;
         let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
 
-        let mut notifiers = Vec::new();
-
-        notifiers.push(write_handle.begin()?);
+        write_handle.begin()?;
 
         // Transform the data chunk to a stream chunk, then write to the source.
-        let write_txn_data = |chunk: DataChunk| {
+        let write_txn_data = |chunk: DataChunk| async {
             let cap = chunk.capacity();
             let stream_chunk = StreamChunk::from_parts(vec![Op::Delete; cap], chunk);
 
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);
 
-            write_handle.write_chunk(stream_chunk)
+            let cardinality = stream_chunk.cardinality();
+            write_handle.write_chunk(stream_chunk).await?;
+
+            Result::Ok(cardinality)
         };
+
+        let mut rows_deleted = 0;
 
         #[for_await]
         for data_chunk in self.child.execute() {
@@ -127,22 +127,15 @@ impl DeleteExecutor {
                 yield data_chunk.clone();
             }
             for chunk in builder.append_chunk(data_chunk) {
-                notifiers.push(write_txn_data(chunk)?);
+                rows_deleted += write_txn_data(chunk).await?;
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            notifiers.push(write_txn_data(chunk)?);
+            rows_deleted += write_txn_data(chunk).await?;
         }
 
-        notifiers.push(write_handle.end()?);
-
-        // Wait for all chunks to be taken / written.
-        let rows_deleted = try_join_all(notifiers)
-            .await
-            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))?
-            .into_iter()
-            .sum::<usize>();
+        write_handle.end().await?;
 
         // create ret value
         if !self.returning {
@@ -194,7 +187,6 @@ mod tests {
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::util::worker_util::WorkerNodeId;
     use risingwave_source::dml_manager::DmlManager;
 
     use super::*;
@@ -203,7 +195,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_executor() -> Result<()> {
-        let dml_manager = Arc::new(DmlManager::new(WorkerNodeId::default()));
+        let dml_manager = Arc::new(DmlManager::for_test());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();

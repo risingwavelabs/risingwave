@@ -571,6 +571,22 @@ impl Interval {
             usecs: 0,
         }
     }
+
+    // Assuming 1 day = 24 hours, adjust `abs(usecs)` to be less than 24 hours, and has the same
+    // sign with `days`.
+    pub fn justify_hour(self) -> Option<Self> {
+        let whole_day = (self.usecs / USECS_PER_DAY) as i32;
+        let mut usecs = self.usecs % USECS_PER_DAY;
+        let mut days = self.days.checked_add(whole_day)?;
+        if days > 0 && usecs < 0 {
+            usecs += USECS_PER_DAY;
+            days -= 1;
+        } else if days < 0 && usecs > 0 {
+            usecs -= USECS_PER_DAY;
+            days += 1;
+        }
+        Some(Self::from_month_day_usec(self.months, days, usecs))
+    }
 }
 
 /// A separate mod so that `use types::*` or `use interval::*` does not `use IntervalTestExt` by

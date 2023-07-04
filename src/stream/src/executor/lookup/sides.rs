@@ -16,10 +16,11 @@ use std::pin::pin;
 
 use anyhow::Context;
 use either::Either;
-use futures::stream::PollNext;
-use futures::StreamExt;
+use futures::future::select;
+use futures::{future, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -27,7 +28,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{Barrier, Executor, Message, MessageStream};
+use crate::executor::{Barrier, BoxedMessageStream, Executor, Message, MessageStream};
 
 /// Join side of Lookup Executor's stream
 pub(crate) struct StreamJoinSide {
@@ -101,7 +102,7 @@ pub async fn poll_until_barrier(stream: impl MessageStream, expected_barrier: Ba
     for item in stream {
         match item? {
             Message::Watermark(_) => {
-                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
             }
             c @ Message::Chunk(_) => yield c,
             Message::Barrier(b) => {
@@ -116,57 +117,68 @@ pub async fn poll_until_barrier(stream: impl MessageStream, expected_barrier: Ba
     }
 }
 
-fn prefer_right(_: &mut ()) -> PollNext {
-    PollNext::Right
-}
-
 /// A biased barrier aligner which prefers message from the right side. Barrier message will be
 /// available for both left and right side, instead of being combined.
 #[try_stream(ok = BarrierAlignedMessage, error = StreamExecutorError)]
-pub async fn align_barrier(left: impl MessageStream, right: impl MessageStream) {
-    let mut left = pin!(left);
-    let mut right = pin!(right);
-
+pub async fn align_barrier(mut left: BoxedMessageStream, mut right: BoxedMessageStream) {
     enum SideStatus {
         LeftBarrier,
         RightBarrier,
     }
 
     'outer: loop {
-        let mut combined_stream = futures::stream::select_with_strategy(
-            left.by_ref().map(Either::Left),
-            right.by_ref().map(Either::Right),
-            prefer_right,
-        );
-
         let (side_status, side_barrier) = 'inner: loop {
-            match combined_stream.next().await {
-                Some(Either::Left(Ok(c @ Message::Chunk(_)))) => {
-                    yield Either::Left(c);
-                }
-                Some(Either::Left(Ok(Message::Barrier(b)))) => {
-                    yield Either::Left(Message::Barrier(b.clone()));
-                    break 'inner (SideStatus::LeftBarrier, b);
-                }
-                Some(Either::Right(Ok(c @ Message::Chunk(_)))) => {
-                    yield Either::Right(c);
-                }
-                Some(Either::Right(Ok(Message::Barrier(b)))) => {
-                    yield Either::Right(Message::Barrier(b.clone()));
-                    break 'inner (SideStatus::RightBarrier, b);
-                }
-                Some(Either::Right(Ok(Message::Watermark(_)))) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                }
-                Some(Either::Left(Ok(Message::Watermark(_)))) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                }
-                Some(Either::Left(Err(e))) | Some(Either::Right(Err(e))) => return Err(e),
-                None => {
+            // Prefer right
+            let select_result = match select(right.next(), left.next()).await {
+                future::Either::Left(x) => future::Either::Right(x),
+                future::Either::Right(x) => future::Either::Left(x),
+            };
+            match select_result {
+                future::Either::Left((None, _)) => {
+                    // left stream end, passthrough right chunks
+                    while let Some(msg) = right.next().await {
+                        match msg? {
+                            w @ Message::Watermark(_) => yield Either::Left(w),
+                            c @ Message::Chunk(_) => yield Either::Left(c),
+                            Message::Barrier(_) => {
+                                bail!("right barrier received while left stream end");
+                            }
+                        }
+                    }
                     break 'outer;
                 }
+                future::Either::Right((None, _)) => {
+                    // right stream end, passthrough left chunks
+                    while let Some(msg) = left.next().await {
+                        match msg? {
+                            w @ Message::Watermark(_) => yield Either::Right(w),
+                            c @ Message::Chunk(_) => yield Either::Right(c),
+                            Message::Barrier(_) => {
+                                bail!("left barrier received while right stream end");
+                            }
+                        }
+                    }
+                    break 'outer;
+                }
+                future::Either::Left((Some(msg), _)) => match msg? {
+                    w @ Message::Watermark(_) => yield Either::Left(w),
+                    c @ Message::Chunk(_) => yield Either::Left(c),
+                    Message::Barrier(b) => {
+                        yield Either::Left(Message::Barrier(b.clone()));
+                        break 'inner (SideStatus::LeftBarrier, b);
+                    }
+                },
+                future::Either::Right((Some(msg), _)) => match msg? {
+                    w @ Message::Watermark(_) => yield Either::Right(w),
+                    c @ Message::Chunk(_) => yield Either::Right(c),
+                    Message::Barrier(b) => {
+                        yield Either::Right(Message::Barrier(b.clone()));
+                        break 'inner (SideStatus::RightBarrier, b);
+                    }
+                },
             }
         };
+
         match side_status {
             SideStatus::LeftBarrier => {
                 #[for_await]
@@ -238,10 +250,10 @@ pub async fn stream_lookup_arrange_prev_epoch(
                     }
                 }
                 Either::Left(Message::Watermark(_)) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
                 Either::Right(Message::Watermark(_)) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
             }
         }
@@ -253,7 +265,7 @@ pub async fn stream_lookup_arrange_prev_epoch(
                 .context("unexpected close of barrier aligner")??
             {
                 Either::Left(Message::Watermark(_)) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
                 Either::Left(Message::Chunk(msg)) => yield ArrangeMessage::Stream(msg),
                 Either::Left(Message::Barrier(b)) => {
@@ -322,10 +334,10 @@ pub async fn stream_lookup_arrange_this_epoch(
                     break 'inner Status::ArrangeReady;
                 }
                 Either::Left(Message::Watermark(_)) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
                 Either::Right(Message::Watermark(_)) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
             }
         };
@@ -344,10 +356,10 @@ pub async fn stream_lookup_arrange_this_epoch(
                         break;
                     }
                     Either::Left(Message::Watermark(_)) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                     }
                     Either::Right(Message::Watermark(_)) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                     }
                     Either::Right(_) => unreachable!(),
                 }
@@ -376,7 +388,7 @@ pub async fn stream_lookup_arrange_this_epoch(
                         break;
                     }
                     Either::Right(Message::Watermark(_)) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                     }
                 }
             },
@@ -393,5 +405,52 @@ impl<S: StateStore> std::fmt::Debug for ArrangeJoinSide<S> {
             .field("order_rules", &self.order_rules)
             .field("use_current_epoch", &self.use_current_epoch)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::StreamExt;
+    use risingwave_common::array::{StreamChunk, StreamChunkTestExt};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use crate::executor::lookup::sides::stream_lookup_arrange_this_epoch;
+    use crate::executor::test_utils::MockSource;
+    use crate::executor::StreamExecutorResult;
+
+    #[tokio::test]
+    async fn test_stream_lookup_arrange_this_epoch() -> StreamExecutorResult<()> {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I I
+             + 1 1",
+        );
+
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64), // join key
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
+        let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
+
+        let mut stream = stream_lookup_arrange_this_epoch(
+            Box::new(source_l.stop_on_finish(false)),
+            Box::new(source_r.stop_on_finish(false)),
+        )
+        .boxed();
+
+        // Simulate recovery test
+        drop(tx_r);
+
+        tx_l.push_barrier(1, false);
+
+        tx_l.push_chunk(chunk_l1);
+
+        // It should throw an error instead of panic.
+        stream.next().await.unwrap().unwrap_err();
+
+        Ok(())
     }
 }

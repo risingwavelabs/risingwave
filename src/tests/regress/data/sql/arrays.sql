@@ -572,7 +572,7 @@ select array_to_string(array[1,2,3,4,NULL,6], ',', '*');
 select array_to_string(array[1,2,3,4,NULL,6], NULL);
 --@ select array_to_string(array[1,2,3,4,NULL,6], ',', NULL);
 
---@ select array_to_string(string_to_array('1|2|3', '|'), '|');
+select array_to_string(string_to_array('1|2|3', '|'), '|');
 
 select array_length(array[1,2,3], 1);
 select array_length(array[[1,2,3], [4,5,6]], 0);
