@@ -83,9 +83,6 @@ pub mod java_binding;
 #[cfg_attr(madsim, path = "sim/health.rs")]
 pub mod health;
 #[rustfmt::skip]
-#[cfg_attr(madsim, path = "sim/sink_coordination.rs")]
-pub mod sink_coordination;
-#[rustfmt::skip]
 #[path = "connector_service.serde.rs"]
 pub mod connector_service_serde;
 #[rustfmt::skip]
@@ -145,9 +142,6 @@ pub mod backup_service_serde;
 #[rustfmt::skip]
 #[path = "java_binding.serde.rs"]
 pub mod java_binding_serde;
-#[rustfmt::skip]
-#[path = "sink_coordination.serde.rs"]
-pub mod sink_coordination_serde;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct PbFieldNotFound(pub &'static str);

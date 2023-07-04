@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use futures::{Stream, StreamExt};
-use risingwave_pb::sink_coordination::sink_coordination_service_server::SinkCoordinationService;
-use risingwave_pb::sink_coordination::{SinkCoordinatorToWriterMsg, SinkWriterToCoordinatorMsg};
+use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationService;
+use risingwave_pb::connector_service::{SinkCoordinatorToWriterMsg, SinkWriterToCoordinatorMsg};
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::manager::sink_manager::SinkManager;

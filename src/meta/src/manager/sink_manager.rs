@@ -26,9 +26,9 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
-use risingwave_connector::sink::{build_sink, SinkConfig, SinkError, SinkImpl};
+use risingwave_connector::sink::{build_sink, BuildSinkParam, SinkConfig, SinkError, SinkImpl};
 use risingwave_pb::catalog::PbSinkType;
-use risingwave_pb::sink_coordination::{
+use risingwave_pb::connector_service::{
     sink_writer_to_coordinator_msg, PbBuildSinkParam, SinkCoordinatorToWriterMsg,
     SinkWriterToCoordinatorMsg,
 };
@@ -50,35 +50,6 @@ macro_rules! send_with_err_check {
 
 type SinkWriterInputStream = BoxStream<'static, Result<SinkWriterToCoordinatorMsg, Status>>;
 type SinkCoordinatorResponseSender = UnboundedSender<Result<SinkCoordinatorToWriterMsg, Status>>;
-
-#[derive(Eq, PartialEq, Debug)]
-pub(crate) struct BuildSinkParam {
-    sink_id: SinkId,
-    properties: HashMap<String, String>,
-    columns: Vec<ColumnCatalog>,
-    pk_indices: Vec<usize>,
-    sink_type: SinkType,
-}
-
-impl BuildSinkParam {
-    pub(crate) fn from_proto(param: PbBuildSinkParam) -> Self {
-        Self {
-            sink_id: SinkId::from(param.sink_id),
-            properties: param.properties,
-            columns: param
-                .columns
-                .into_iter()
-                .map(ColumnCatalog::from)
-                .collect_vec(),
-            pk_indices: param
-                .pk_indices
-                .into_iter()
-                .map(|i| i as usize)
-                .collect_vec(),
-            sink_type: SinkType::from_proto(PbSinkType::from_i32(param.sink_type).unwrap()),
-        }
-    }
-}
 
 struct NewSinkWriterRequest {
     request_stream: SinkWriterInputStream,

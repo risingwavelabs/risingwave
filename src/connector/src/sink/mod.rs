@@ -28,6 +28,7 @@ use base64::Engine as _;
 use bytes::Bytes;
 use chrono::{Datelike, NaiveDateTime, Timelike};
 use enum_as_inner::EnumAsInner;
+use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
@@ -35,6 +36,8 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_pb::catalog::PbSinkType;
+use risingwave_pb::connector_service::PbBuildSinkParam;
 use risingwave_rpc_client::error::RpcError;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
@@ -269,6 +272,35 @@ impl SinkConfig {
             SinkConfig::Remote(_) => "remote",
             SinkConfig::BlackHole => "blackhole",
             SinkConfig::Kinesis(_) => "kinesis",
+        }
+    }
+}
+
+#[derive(Eq, PartialEq, Debug)]
+pub struct BuildSinkParam {
+    pub sink_id: SinkId,
+    pub properties: HashMap<String, String>,
+    pub columns: Vec<ColumnCatalog>,
+    pub pk_indices: Vec<usize>,
+    pub sink_type: SinkType,
+}
+
+impl BuildSinkParam {
+    pub fn from_proto(param: PbBuildSinkParam) -> Self {
+        Self {
+            sink_id: SinkId::from(param.sink_id),
+            properties: param.properties,
+            columns: param
+                .columns
+                .into_iter()
+                .map(ColumnCatalog::from)
+                .collect_vec(),
+            pk_indices: param
+                .pk_indices
+                .into_iter()
+                .map(|i| i as usize)
+                .collect_vec(),
+            sink_type: SinkType::from_proto(PbSinkType::from_i32(param.sink_type).unwrap()),
         }
     }
 }

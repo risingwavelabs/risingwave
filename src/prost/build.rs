@@ -41,7 +41,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "stream_service",
         "task_service",
         "user",
-        "sink_coordination",
     ];
     let protos: Vec<String> = proto_files
         .iter()

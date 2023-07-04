@@ -2,8 +2,10 @@ syntax = "proto3";
 
 package connector_service;
 
-import "catalog.proto";
 import "data.proto";
+import "common.proto";
+import "plan_common.proto";
+import "catalog.proto";
 
 option java_outer_classname = "ConnectorServiceProto";
 option java_package = "com.risingwave.proto";
@@ -159,4 +161,40 @@ service ConnectorService {
   rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
+}
+
+
+message BuildSinkParam {
+  uint32 sink_id = 1;
+  map<string, string> properties = 2;
+  repeated plan_common.ColumnCatalog columns = 3;
+  repeated uint32 pk_indices = 4;
+  catalog.SinkType sink_type = 5;
+}
+
+message SinkWriterToCoordinatorMsg {
+  message StartCoordinationRequest {
+    common.Buffer vnode_bitmap = 1;
+    BuildSinkParam param = 2;
+    uint64 epoch = 3;
+  }
+
+  oneof msg {
+    StartCoordinationRequest start_request = 1;
+  }
+}
+
+message SinkCoordinatorToWriterMsg {
+  message StartCoordinationResponse {
+    bool is_success = 1;
+    string err_msg = 2;
+  }
+
+  oneof msg {
+    StartCoordinationResponse start_response = 1;
+  }
+}
+
+service SinkCoordinationService {
+  rpc Coordinate(stream SinkWriterToCoordinatorMsg) returns (stream SinkCoordinatorToWriterMsg);
 }

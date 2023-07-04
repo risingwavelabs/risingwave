@@ -44,6 +44,7 @@ use risingwave_pb::catalog::{
     Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
@@ -65,7 +66,6 @@ use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClie
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::*;
-use risingwave_pb::sink_coordination::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;

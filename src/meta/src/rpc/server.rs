@@ -28,6 +28,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
+use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
@@ -41,7 +42,6 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServ
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
 use risingwave_pb::meta::SystemParams;
-use risingwave_pb::sink_coordination::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
