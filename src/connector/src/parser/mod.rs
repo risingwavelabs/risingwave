@@ -37,9 +37,10 @@ pub use self::csv_parser::CsvParserConfig;
 use self::util::get_kafka_topic;
 use crate::aws_auth::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
+use crate::source::kafka::KafkaProperties;
 use crate::source::{
     BoxSourceStream, SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat, SourceMeta,
-    SourceWithStateStream, SplitId, StreamChunkWithState,
+    SourceWithStateStream, SplitId, StreamChunkWithState, ConnectorProperties,
 };
 
 mod avro;
@@ -514,36 +515,50 @@ impl From<&HashMap<String, String>> for ParserClientConfigList {
 }
 
 #[derive(Default)]
-pub struct CsvParserConfigList {
+pub struct AvroProperties {
+    pub use_schema_registry: bool,
+    pub row_schema_location: String,
+    pub upsert_primary_key: String,
+    pub client_config: ParserClientConfigList,
+    pub aws_auth_props: Option<AwsAuthProps>,
+    pub topic: String,
+}
+
+#[derive(Default)]
+pub struct ProtobufProperties {
+    pub message_name: String,
+    pub use_schema_registry: bool,
+    pub row_schema_location: String,
+    pub aws_auth_props: Option<AwsAuthProps>,
+    pub client_config: ParserClientConfigList,
+    pub topic: String,
+}
+
+#[derive(Default)]
+pub struct CsvProperties {
     pub delimiter: u8,
     pub has_header: bool,
 }
 
 #[derive(Default)]
-pub struct AvroParserConfigList {
-    pub use_schema_registry: bool,
-    pub row_schema_location: String,
-    pub aws_auth_props: Option<AwsAuthProps>,
-    pub topic: String,
-    pub client_config: ParserClientConfigList,
-    pub primary_key: String,
+pub enum EncodingProperties {
+    Avro(AvroProperties),
+    Protobuf(ProtobufProperties),
+    Csv(CsvProperties),
+    #[default]
+    None,
 }
 
 #[derive(Default)]
-pub struct ProtoParserConfigList {
-    pub message_name: String,
-    pub use_schema_registry: bool,
-    pub row_schema_location: String,
-    pub aws_auth_props: Option<AwsAuthProps>,
-    pub topic: String,
-    pub client_config: ParserClientConfigList,
+pub enum ProtocolProperties {
+    Debezium,
+    #[default]
+    None
 }
 
-#[derive(Default)]
-pub struct DebeziumAvroParserConfigList {
-    pub row_schema_location: String,
-    pub topic: String,
-    pub client_config: ParserClientConfigList,
+pub struct ParserProperties {
+    pub encoding_config: EncodingProperties,
+    pub protocol_config: ProtocolProperties,
 }
 
 /// Requirements of each parser
@@ -554,42 +569,24 @@ pub struct DebeziumAvroParserConfigList {
 ///    client info, topic, aws config
 /// 4. DEBEZIUM AVRO: row schema location, topic, client info
 /// 5. Other: none
+///
 
-#[derive(Default)]
-pub enum ParserConfigList {
-    Csv(CsvParserConfigList),
-    Avro(AvroParserConfigList),
-    Protobuf(ProtoParserConfigList),
-    DebeziumAvro(DebeziumAvroParserConfigList),
-    #[default]
-    None,
-}
-
-// TODO:
-// 2. aws_auth_props: should check after s3
-// 4. whether to clone
-//
-// Design goal: one iter of props, extract all we want
-// no matter which format we are considering
-//
-// Assumption: missing fields are solved in frontend
-
-impl ParserConfigList {
-    pub fn from(
+impl ParserProperties {
+    pub fn new(
         format: SourceFormat,
         props: &HashMap<String, String>,
         info: &StreamSourceInfo,
     ) -> Result<Self> {
-        match format {
-            SourceFormat::Csv => Ok(ParserConfigList::Csv(CsvParserConfigList {
+        let encoding_config = match format {
+            SourceFormat::Csv => EncodingProperties::Csv(CsvProperties {
                 delimiter: info.csv_delimiter as u8,
                 has_header: info.csv_has_header,
-            })),
+            }),
             SourceFormat::Avro => {
-                let mut config = AvroParserConfigList {
+                let mut config = AvroProperties {
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
-                    primary_key: info.upsert_avro_primary_key.clone(),
+                    upsert_primary_key: info.upsert_avro_primary_key.clone(),
                     ..Default::default()
                 };
                 if info.use_schema_registry {
@@ -600,10 +597,10 @@ impl ParserConfigList {
                         props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
                     ));
                 }
-                Ok(ParserConfigList::Avro(config))
+                EncodingProperties::Avro(config)
             }
             SourceFormat::Protobuf => {
-                let mut config = ProtoParserConfigList {
+                let mut config = ProtobufProperties {
                     message_name: info.proto_message_name.clone(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
@@ -617,17 +614,23 @@ impl ParserConfigList {
                         props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
                     ));
                 }
-                Ok(ParserConfigList::Protobuf(config))
+                EncodingProperties::Protobuf(config)
             }
-            SourceFormat::DebeziumAvro => Ok(ParserConfigList::DebeziumAvro(
-                DebeziumAvroParserConfigList {
+            SourceFormat::DebeziumAvro => EncodingProperties::Avro(
+                AvroProperties {
                     row_schema_location: info.row_schema_location.clone(),
                     topic: get_kafka_topic(props).unwrap().clone(),
                     client_config: ParserClientConfigList::from(props),
+                    ..Default::default()
                 },
-            )),
-            _ => Ok(ParserConfigList::None),
-        }
+            ),
+            _ => EncodingProperties::None,
+        };
+        let protocol_config = ProtobufProperties::None;
+        Ok(ParserProperties {
+            encoding_config,
+            protocol_config,
+        })
     }
 }
 
@@ -664,19 +667,19 @@ impl SpecificParserConfig {
         info: &StreamSourceInfo,
         props: &HashMap<String, String>,
     ) -> Result<Self> {
-        let parser_config_list = ParserConfigList::from(format, props, info)?;
+        let parser_properties = ParserProperties::new(format, props, info)?;
         let conf = match format {
             SourceFormat::Csv => {
-                SpecificParserConfig::Csv(CsvParserConfig::new(&parser_config_list)?)
+                SpecificParserConfig::Csv(CsvParserConfig::new(parser_properties)?)
             }
             SourceFormat::Avro => {
-                SpecificParserConfig::Avro(AvroParserConfig::new(&parser_config_list, false).await?)
+                SpecificParserConfig::Avro(AvroParserConfig::new(parser_properties, false).await?)
             }
             SourceFormat::UpsertAvro => SpecificParserConfig::UpsertAvro(
-                AvroParserConfig::new(&parser_config_list, true).await?,
+                AvroParserConfig::new(parser_properties, true).await?,
             ),
             SourceFormat::Protobuf => SpecificParserConfig::Protobuf(
-                ProtobufParserConfig::new(&parser_config_list).await?,
+                ProtobufParserConfig::new(parser_properties).await?,
             ),
             SourceFormat::Json => SpecificParserConfig::Json,
             SourceFormat::UpsertJson => SpecificParserConfig::UpsertJson,
@@ -687,7 +690,7 @@ impl SpecificParserConfig {
             SourceFormat::Native => SpecificParserConfig::Native,
             SourceFormat::Bytes => SpecificParserConfig::Bytes,
             SourceFormat::DebeziumAvro => SpecificParserConfig::DebeziumAvro(
-                DebeziumAvroParserConfig::new(&parser_config_list).await?,
+                DebeziumAvroParserConfig::new(parser_properties).await?,
             ),
             _ => {
                 return Err(RwError::from(ProtocolError(

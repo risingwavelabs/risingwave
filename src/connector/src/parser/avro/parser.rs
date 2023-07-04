@@ -31,7 +31,7 @@ use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    ByteStreamSourceParser, ParserConfigList, SourceStreamChunkRowWriter, WriteGuard,
+    ByteStreamSourceParser, ParserConfigList, SourceStreamChunkRowWriter, WriteGuard, ParserProperties, EncodingProperties,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -54,26 +54,26 @@ pub struct AvroParserConfig {
 }
 
 impl AvroParserConfig {
-    pub async fn new(parser_config_list: &ParserConfigList, enable_upsert: bool) -> Result<Self> {
-        let parser_config = match parser_config_list {
-            ParserConfigList::Avro(config) => config,
+    pub async fn new(parser_properties: ParserProperties, enable_upsert: bool) -> Result<Self> {
+        let avro_config = match parser_properties.encoding_config {
+            EncodingProperties::Avro(config) => config,
             _ => {
                 return Err(RwError::from(ProtocolError(format!(
                     "wrong parser config list for Avro",
                 ))))
             }
         };
-        let schema_location = &parser_config.row_schema_location;
+        let schema_location = &avro_config.row_schema_location;
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
-        if parser_config.use_schema_registry {
-            let kafka_topic = &parser_config.topic;
-            let client = Client::new(url, &parser_config.client_config)?;
+        if avro_config.use_schema_registry {
+            let kafka_topic = &avro_config.topic;
+            let client = Client::new(url, &avro_config.client_config)?;
             let resolver = ConfluentSchemaResolver::new(client);
             let upsert_primary_key_column_name =
-                if enable_upsert && !parser_config.primary_key.is_empty() {
-                    Some(parser_config.primary_key.clone())
+                if enable_upsert && !avro_config.upsert_primary_key.is_empty() {
+                    Some(avro_config.upsert_primary_key.clone())
                 } else {
                     None
                 };
@@ -103,7 +103,7 @@ impl AvroParserConfig {
             let schema_content = match url.scheme() {
                 "file" => read_schema_from_local(url.path()),
                 "s3" => {
-                    read_schema_from_s3(&url, parser_config.aws_auth_props.as_ref().unwrap()).await
+                    read_schema_from_s3(&url, avro_config.aws_auth_props.as_ref().unwrap()).await
                 }
                 "https" | "http" => read_schema_from_http(&url).await,
                 scheme => Err(RwError::from(ProtocolError(format!(

@@ -31,7 +31,7 @@ use crate::parser::unified::avro::{
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    ByteStreamSourceParser, ParserConfigList, SourceStreamChunkRowWriter, WriteGuard,
+    ByteStreamSourceParser, ParserConfigList, SourceStreamChunkRowWriter, WriteGuard, ParserProperties, EncodingProperties,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -57,18 +57,18 @@ pub struct DebeziumAvroParserConfig {
 }
 
 impl DebeziumAvroParserConfig {
-    pub async fn new(parser_config_list: &ParserConfigList) -> Result<Self> {
-        let parser_config = match parser_config_list {
-            ParserConfigList::DebeziumAvro(config) => config,
+    pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
+        let avro_config = match parser_properties.encoding_config {
+            EncodingProperties::Avro(config) => config,
             _ => {
                 return Err(RwError::from(ProtocolError(format!(
-                    "wrong parser config list for Debezium Avro",
+                    "wrong parser config list for Avro",
                 ))))
             }
         };
-        let schema_location = &parser_config.row_schema_location;
-        let client_config = &parser_config.client_config;
-        let kafka_topic = &parser_config.topic;
+        let schema_location = &avro_config.row_schema_location;
+        let client_config = &avro_config.client_config;
+        let kafka_topic = &avro_config.topic;
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;

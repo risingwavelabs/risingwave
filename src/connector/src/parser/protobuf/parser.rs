@@ -30,7 +30,7 @@ use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::{
-    ByteStreamSourceParser, ParserConfigList, SourceStreamChunkRowWriter, WriteGuard,
+    ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard, ParserProperties, EncodingProperties,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -49,24 +49,24 @@ pub struct ProtobufParserConfig {
 }
 
 impl ProtobufParserConfig {
-    pub async fn new(parser_config_list: &ParserConfigList) -> Result<Self> {
-        let parser_config = match parser_config_list {
-            ParserConfigList::Protobuf(config) => config,
+    pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
+        let protobuf_config = match parser_properties.encoding_config {
+            EncodingProperties::Protobuf(config) => config,
             _ => {
                 return Err(RwError::from(ProtocolError(format!(
-                    "wrong parser config list for protobuf",
+                    "wrong parser config list for Avro",
                 ))))
             }
         };
-        let location = &parser_config.row_schema_location;
-        let message_name = &parser_config.message_name;
+        let location = &protobuf_config.row_schema_location;
+        let message_name = &protobuf_config.message_name;
         let url = Url::parse(location)
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
 
-        let schema_bytes = if parser_config.use_schema_registry {
-            let client = Client::new(url, &parser_config.client_config)?;
+        let schema_bytes = if protobuf_config.use_schema_registry {
+            let client = Client::new(url, &protobuf_config.client_config)?;
             compile_file_descriptor_from_schema_registry(
-                format!("{}-value", &parser_config.topic).as_str(),
+                format!("{}-value", &protobuf_config.topic).as_str(),
                 &client,
             )
             .await?
@@ -88,7 +88,7 @@ impl ProtobufParserConfig {
                 "s3" => {
                     load_file_descriptor_from_s3(
                         &url,
-                        parser_config.aws_auth_props.as_ref().unwrap(),
+                        protobuf_config.aws_auth_props.as_ref().unwrap(),
                     )
                     .await
                 }
@@ -114,7 +114,7 @@ impl ProtobufParserConfig {
         })?;
         Ok(Self {
             message_descriptor,
-            confluent_wire_type: parser_config.use_schema_registry,
+            confluent_wire_type: protobuf_config.use_schema_registry,
         })
     }
 

@@ -20,7 +20,7 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Decimal, ScalarImpl};
 
-use super::{ByteStreamSourceParser, ParserConfigList};
+use super::{ByteStreamSourceParser, ParserProperties, EncodingProperties};
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -37,9 +37,9 @@ pub struct CsvParserConfig {
 }
 
 impl CsvParserConfig {
-    pub fn new(parser_config_list: &ParserConfigList) -> Result<Self> {
-        let parser_config = match parser_config_list {
-            ParserConfigList::Csv(config) => config,
+    pub fn new(parser_properties: ParserProperties) -> Result<Self> {
+        let csv_config = match parser_properties.encoding_config {
+            EncodingProperties::Csv(config) => config,
             _ => {
                 return Err(RwError::from(ProtocolError(format!(
                     "wrong parser config list for Csv",
@@ -47,8 +47,8 @@ impl CsvParserConfig {
             }
         };
         Ok(Self {
-            delimiter: parser_config.delimiter,
-            has_header: parser_config.has_header,
+            delimiter: csv_config.delimiter,
+            has_header: csv_config.has_header,
         })
     }
 }
