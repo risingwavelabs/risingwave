@@ -30,7 +30,12 @@ use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::ReplicatedStateTable;
-use crate::executor::backfill::utils::{check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_progress_per_vnode, iter_chunks, mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState, CurrentPosMap, persist_state_per_vnode};
+use crate::executor::backfill::utils::{
+    check_all_vnode_finished, compute_bounds, construct_initial_finished_state,
+    get_progress_per_vnode, iter_chunks, mapping_chunk, mapping_message, mark_chunk_ref_by_vnode,
+    persist_state, persist_state_per_vnode, update_pos_by_vnode, BackfillProgressPerVnode,
+    BackfillState, CurrentPosMap,
+};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
@@ -133,11 +138,7 @@ where
         }
 
         let mut backfill_state: BackfillState = progress_per_vnode.into();
-
-        // Current position of upstream_table primary key.
-        // Current position is computed **per vnode**.
-        // FIXME: This should be backfill state instead. We need to know which vnode is finished.
-        let mut current_pos_map: CurrentPosMap = HashMap::new();
+        let mut committed_progress = HashMap::new();
 
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
@@ -174,7 +175,7 @@ where
         // They contain the backfill position, and the progress.
         // However, they do not contain the vnode key (index 0).
         // That is filled in when we flush the state table.
-        let mut current_state: Vec<Datum> = vec![None; state_len];
+        let mut temporary_state: Vec<Datum> = vec![None; state_len];
         let mut old_state: Option<Vec<Datum>> = None;
 
         // The first barrier message should be propagated.
@@ -385,15 +386,15 @@ where
                 );
 
                 // Persist state on barrier
-                // FIXME: This should persist state per vnode.
                 persist_state_per_vnode(
                     barrier.epoch,
                     &mut self.state_table,
                     false,
-                    &current_pos,
-                    &mut old_state,
-                    &mut current_state,
-                ).await?;
+                    &mut backfill_state,
+                    &mut committed_progress,
+                    &mut temporary_state,
+                )
+                .await?;
 
                 yield Message::Barrier(barrier);
             }
@@ -426,16 +427,15 @@ where
                     // Or snapshot was empty and we construct a placeholder state.
                     debug_assert_ne!(current_pos, None);
 
-                    // FIXME
-                    persist_state(
+                    persist_state_per_vnode(
                         barrier.epoch,
                         &mut self.state_table,
-                        true,
-                        &current_pos,
-                        &mut old_state,
-                        &mut current_state,
-                    )
-                    .await?;
+                        false,
+                        &mut backfill_state,
+                        &mut committed_progress,
+                        &mut temporary_state,
+                    ).await?;
+
                     self.progress.finish(barrier.epoch.curr);
                     yield msg;
                     break;
