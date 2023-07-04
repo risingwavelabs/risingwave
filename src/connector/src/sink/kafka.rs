@@ -37,7 +37,9 @@ use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
-use crate::sink::{DummySinkCommitCoordinator, Result, SinkWriter, SinkWriterEnv};
+use crate::sink::{
+    DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
+};
 use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
@@ -165,17 +167,19 @@ impl KafkaSink {
 #[async_trait::async_trait]
 impl Sink for KafkaSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = KafkaSinkWriter;
+    type Writer = SinkWriterV1Adapter<KafkaSinkWriter>;
 
-    async fn new_writer(&self, writer_env: SinkWriterEnv) -> Result<Self::Writer> {
-        KafkaSinkWriter::new(
-            self.config.clone(),
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            self.is_append_only,
-            format!("sink-{:?}", writer_env.executor_id),
-        )
-        .await
+    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
+        Ok(SinkWriterV1Adapter::new(
+            KafkaSinkWriter::new(
+                self.config.clone(),
+                self.schema.clone(),
+                self.pk_indices.clone(),
+                self.is_append_only,
+                format!("sink-{:?}", writer_param.executor_id),
+            )
+            .await?,
+        ))
     }
 
     async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {
@@ -354,7 +358,7 @@ impl KafkaSinkWriter {
 }
 
 #[async_trait::async_trait]
-impl SinkWriter for KafkaSinkWriter {
+impl SinkWriterV1 for KafkaSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.is_append_only {
             // Append-only

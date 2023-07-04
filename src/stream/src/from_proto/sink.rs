@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::SinkConfig;
+use risingwave_connector::sink::{SinkConfig, SinkWriterParam};
 use risingwave_pb::stream_plan::SinkNode;
 
 use super::*;
@@ -57,8 +57,11 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 materialize_executor,
                 stream.streaming_metrics.clone(),
                 config,
-                params.executor_id,
-                params.env.connector_params(),
+                SinkWriterParam {
+                    connector_params: params.env.connector_params(),
+                    executor_id: params.executor_id,
+                    vnode_bitmap: params.vnode_bitmap,
+                },
                 columns,
                 pk_indices,
                 sink_type,

@@ -29,6 +29,7 @@ use bytes::Bytes;
 use chrono::{Datelike, NaiveDateTime, Timelike};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::row::Row;
@@ -54,9 +55,10 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
-pub struct SinkWriterEnv {
+pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
+    pub vnode_bitmap: Option<Bitmap>,
 }
 
 #[async_trait]
@@ -65,7 +67,7 @@ pub trait Sink {
     type Coordinator: SinkCommitCoordinator;
 
     async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()>;
-    async fn new_writer(&self, writer_env: SinkWriterEnv) -> Result<Self::Writer>;
+    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
         _connector_rpc_endpoint: Option<String>,
@@ -75,7 +77,27 @@ pub trait Sink {
 }
 
 #[async_trait]
-pub trait SinkWriter {
+pub trait SinkWriter: Send {
+    /// Begin a new epoch
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
+
+    /// Write a stream chunk to sink
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
+
+    /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
+    /// writer should commit the current epoch.
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()>;
+
+    /// Clean up
+    async fn abort(&mut self) -> Result<()>;
+
+    /// Update the vnode bitmap of current sink writer
+    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> Result<()>;
+}
+
+#[async_trait]
+// An old version of SinkWriter for backward compatibility
+pub trait SinkWriterV1: Send {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
@@ -88,6 +110,56 @@ pub trait SinkWriter {
     // aborts the current transaction because some error happens. we should rollback to the last
     // commit point.
     async fn abort(&mut self) -> Result<()>;
+}
+
+pub struct SinkWriterV1Adapter<W: SinkWriterV1> {
+    is_empty: bool,
+    epoch: u64,
+    inner: W,
+}
+
+impl<W: SinkWriterV1> SinkWriterV1Adapter<W> {
+    pub(crate) fn new(inner: W) -> Self {
+        Self {
+            inner,
+            is_empty: true,
+            epoch: u64::MIN,
+        }
+    }
+}
+
+#[async_trait]
+impl<W: SinkWriterV1> SinkWriter for SinkWriterV1Adapter<W> {
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.epoch = epoch;
+        Ok(())
+    }
+
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        if self.is_empty {
+            self.is_empty = false;
+            self.inner.begin_epoch(self.epoch).await?;
+        }
+        self.inner.write_batch(chunk).await
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if is_checkpoint {
+            if !self.is_empty {
+                self.inner.commit().await?
+            }
+            self.is_empty = true;
+        }
+        Ok(())
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        self.inner.abort().await
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -133,7 +205,7 @@ impl Sink for BlackHoleSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = Self;
 
-    async fn new_writer(&self, _writer_env: SinkWriterEnv) -> Result<Self::Writer> {
+    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
         Ok(Self)
     }
 
@@ -152,11 +224,15 @@ impl SinkWriter for BlackHoleSink {
         Ok(())
     }
 
-    async fn commit(&mut self) -> Result<()> {
+    async fn abort(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn abort(&mut self) -> Result<()> {
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
+        Ok(())
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }
