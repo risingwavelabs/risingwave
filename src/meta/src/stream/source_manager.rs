@@ -712,7 +712,7 @@ where
             // kafka
             tokio::time::timeout(DEFAULT_TICK_TIMEOUT, worker.tick())
                 .await
-                .map_err(|e| {
+                .map_err(|_e| {
                     anyhow!(
                         "failed to fetch meta info for source {}, error: timeout {}",
                         source.id,
