@@ -37,7 +37,7 @@ use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
-use crate::sink::{NoSinkCoordinator, Result, SinkWriter};
+use crate::sink::{DummySinkCommitter, Result, SinkWriter};
 use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
@@ -167,7 +167,7 @@ impl KafkaSink {
 
 #[async_trait::async_trait]
 impl Sink for KafkaSink {
-    type Coordinator = NoSinkCoordinator;
+    type Coordinator = DummySinkCommitter;
     type Writer = KafkaSinkWriter;
 
     async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {

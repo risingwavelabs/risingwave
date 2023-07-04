@@ -57,15 +57,15 @@ pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 #[async_trait]
 pub trait Sink {
     type Writer: SinkWriter;
-    type Coordinator: SinkCoordinator;
+    type Coordinator: SinkCommitter;
 
     async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()>;
     async fn new_writer(&self, connector_params: ConnectorParams) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
         _connector_rpc_endpoint: Option<String>,
-    ) -> Result<Option<Self::Coordinator>> {
-        Ok(None)
+    ) -> Result<Self::Coordinator> {
+        Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
 
@@ -85,26 +85,27 @@ pub trait SinkWriter {
     async fn abort(&mut self) -> Result<()>;
 }
 
-pub struct SinkWriterInfo {
-    // TODO: add fields
-}
-
 #[async_trait]
-pub trait SinkCoordinator {
-    async fn init(&mut self, writer_info: Vec<SinkWriterInfo>) -> Result<()>;
+pub trait SinkCommitter {
+    /// Initialize the sink committer
+    async fn init(&mut self) -> Result<()>;
+    /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
+    /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
+    /// to be passed between different gRPC node, so in this general trait, the metadata is
+    /// serialized bytes.
     async fn commit(&mut self, epoch: u64, metadata: Vec<Bytes>) -> Result<()>;
 }
 
-pub struct NoSinkCoordinator;
+pub struct DummySinkCommitter;
 
 #[async_trait]
-impl SinkCoordinator for NoSinkCoordinator {
-    async fn init(&mut self, _writer_info: Vec<SinkWriterInfo>) -> Result<()> {
-        unreachable!("no init call for no sink coordinator")
+impl SinkCommitter for DummySinkCommitter {
+    async fn init(&mut self) -> Result<()> {
+        Ok(())
     }
 
     async fn commit(&mut self, _epoch: u64, _metadata: Vec<Bytes>) -> Result<()> {
-        unreachable!("no commit call for no sink coordinator")
+        Ok(())
     }
 }
 
@@ -124,7 +125,7 @@ pub struct BlackHoleSink;
 
 #[async_trait]
 impl Sink for BlackHoleSink {
-    type Coordinator = NoSinkCoordinator;
+    type Coordinator = DummySinkCommitter;
     type Writer = Self;
 
     async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {
@@ -274,6 +275,8 @@ pub enum SinkError {
     JsonParse(String),
     #[error("config error: {0}")]
     Config(#[from] anyhow::Error),
+    #[error("coordinator error: {0}")]
+    Coordinator(anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {
