@@ -29,6 +29,7 @@ use bytes::Bytes;
 use chrono::{Datelike, NaiveDateTime, Timelike};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::row::Row;
@@ -54,28 +55,49 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
-pub struct SinkWriterEnv {
+pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
+    pub vnode_bitmap: Option<Bitmap>,
 }
 
 #[async_trait]
 pub trait Sink {
     type Writer: SinkWriter;
-    type Coordinator: SinkCoordinator;
+    type Coordinator: SinkCommitCoordinator;
 
     async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()>;
-    async fn new_writer(&self, writer_env: SinkWriterEnv) -> Result<Self::Writer>;
+    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
         _connector_rpc_endpoint: Option<String>,
-    ) -> Result<Option<Self::Coordinator>> {
-        Ok(None)
+    ) -> Result<Self::Coordinator> {
+        Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
 
 #[async_trait]
-pub trait SinkWriter {
+pub trait SinkWriter: Send {
+    /// Begin a new epoch
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
+
+    /// Write a stream chunk to sink
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
+
+    /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
+    /// writer should commit the current epoch.
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()>;
+
+    /// Clean up
+    async fn abort(&mut self) -> Result<()>;
+
+    /// Update the vnode bitmap of current sink writer
+    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> Result<()>;
+}
+
+#[async_trait]
+// An old version of SinkWriter for backward compatibility
+pub trait SinkWriterV1: Send {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
@@ -90,26 +112,77 @@ pub trait SinkWriter {
     async fn abort(&mut self) -> Result<()>;
 }
 
-pub struct SinkWriterInfo {
-    // TODO: add fields
+pub struct SinkWriterV1Adapter<W: SinkWriterV1> {
+    is_empty: bool,
+    epoch: u64,
+    inner: W,
+}
+
+impl<W: SinkWriterV1> SinkWriterV1Adapter<W> {
+    pub(crate) fn new(inner: W) -> Self {
+        Self {
+            inner,
+            is_empty: true,
+            epoch: u64::MIN,
+        }
+    }
 }
 
 #[async_trait]
-pub trait SinkCoordinator {
-    async fn init(&mut self, writer_info: Vec<SinkWriterInfo>) -> Result<()>;
+impl<W: SinkWriterV1> SinkWriter for SinkWriterV1Adapter<W> {
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.epoch = epoch;
+        Ok(())
+    }
+
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        if self.is_empty {
+            self.is_empty = false;
+            self.inner.begin_epoch(self.epoch).await?;
+        }
+        self.inner.write_batch(chunk).await
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if is_checkpoint {
+            if !self.is_empty {
+                self.inner.commit().await?
+            }
+            self.is_empty = true;
+        }
+        Ok(())
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        self.inner.abort().await
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+pub trait SinkCommitCoordinator {
+    /// Initialize the sink committer coordinator
+    async fn init(&mut self) -> Result<()>;
+    /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
+    /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
+    /// to be passed between different gRPC node, so in this general trait, the metadata is
+    /// serialized bytes.
     async fn commit(&mut self, epoch: u64, metadata: Vec<Bytes>) -> Result<()>;
 }
 
-pub struct NoSinkCoordinator;
+pub struct DummySinkCommitCoordinator;
 
 #[async_trait]
-impl SinkCoordinator for NoSinkCoordinator {
-    async fn init(&mut self, _writer_info: Vec<SinkWriterInfo>) -> Result<()> {
-        unreachable!("no init call for no sink coordinator")
+impl SinkCommitCoordinator for DummySinkCommitCoordinator {
+    async fn init(&mut self) -> Result<()> {
+        Ok(())
     }
 
     async fn commit(&mut self, _epoch: u64, _metadata: Vec<Bytes>) -> Result<()> {
-        unreachable!("no commit call for no sink coordinator")
+        Ok(())
     }
 }
 
@@ -129,10 +202,10 @@ pub struct BlackHoleSink;
 
 #[async_trait]
 impl Sink for BlackHoleSink {
-    type Coordinator = NoSinkCoordinator;
+    type Coordinator = DummySinkCommitCoordinator;
     type Writer = Self;
 
-    async fn new_writer(&self, _writer_env: SinkWriterEnv) -> Result<Self::Writer> {
+    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
         Ok(Self)
     }
 
@@ -151,11 +224,15 @@ impl SinkWriter for BlackHoleSink {
         Ok(())
     }
 
-    async fn commit(&mut self) -> Result<()> {
+    async fn abort(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn abort(&mut self) -> Result<()> {
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
+        Ok(())
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }
@@ -279,6 +356,8 @@ pub enum SinkError {
     JsonParse(String),
     #[error("config error: {0}")]
     Config(#[from] anyhow::Error),
+    #[error("coordinator error: {0}")]
+    Coordinator(anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {

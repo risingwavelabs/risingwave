@@ -23,6 +23,7 @@ use risingwave_connector::common::AwsPrivateLinkItem;
 use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
+use risingwave_pb::catalog::connection::Info;
 use risingwave_pb::catalog::{connection, PbConnection};
 
 use crate::catalog::{ConnectionId, OwnedByUserCatalog};
@@ -33,7 +34,21 @@ pub struct ConnectionCatalog {
     pub id: ConnectionId,
     pub name: String,
     pub info: connection::Info,
-    owner: UserId,
+    pub owner: UserId,
+}
+
+impl ConnectionCatalog {
+    pub fn connection_type(&self) -> &str {
+        match &self.info {
+            Info::PrivateLinkService(srv) => srv.get_provider().unwrap().as_str_name(),
+        }
+    }
+
+    pub fn provider(&self) -> &str {
+        match &self.info {
+            Info::PrivateLinkService(_) => "PRIVATELINK",
+        }
+    }
 }
 
 impl From<&PbConnection> for ConnectionCatalog {

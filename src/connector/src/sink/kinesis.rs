@@ -22,6 +22,7 @@ use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::for_await;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
@@ -34,8 +35,8 @@ use crate::sink::utils::{
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
 use crate::sink::{
-    NoSinkCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterEnv, SINK_TYPE_APPEND_ONLY,
-    SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 
 pub const KINESIS_SINK: &str = "kinesis";
@@ -66,7 +67,7 @@ impl KinesisSink {
 
 #[async_trait::async_trait]
 impl Sink for KinesisSink {
-    type Coordinator = NoSinkCoordinator;
+    type Coordinator = DummySinkCommitCoordinator;
     type Writer = KinesisSinkWriter;
 
     async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {
@@ -92,7 +93,7 @@ impl Sink for KinesisSink {
         Ok(())
     }
 
-    async fn new_writer(&self, _writer_env: SinkWriterEnv) -> Result<Self::Writer> {
+    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
         KinesisSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
@@ -257,11 +258,15 @@ impl SinkWriter for KinesisSinkWriter {
         Ok(())
     }
 
-    async fn commit(&mut self) -> Result<()> {
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
         Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }

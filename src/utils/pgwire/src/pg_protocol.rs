@@ -377,14 +377,21 @@ where
             }
             let mut res = res.map_err(|err| PsqlError::QueryError(err))?;
 
-            for notice in res.get_notices() {
+            for notice in res.notices() {
                 self.stream
                     .write_no_flush(&BeMessage::NoticeResponse(notice))?;
             }
 
+            let status = res.status();
+            if let Some(ref application_name) = status.application_name {
+                self.stream.write_no_flush(&BeMessage::ParameterStatus(
+                    BeParameterStatusMessage::ApplicationName(application_name),
+                ))?;
+            }
+
             if res.is_query() {
                 self.stream
-                    .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
+                    .write_no_flush(&BeMessage::RowDescription(&res.row_desc()))?;
 
                 let mut rows_cnt = 0;
 
@@ -401,7 +408,7 @@ where
 
                 self.stream.write_no_flush(&BeMessage::CommandComplete(
                     BeCommandCompleteMessage {
-                        stmt_type: res.get_stmt_type(),
+                        stmt_type: res.stmt_type(),
                         rows_cnt,
                     },
                 ))?;
@@ -411,10 +418,8 @@ where
 
                 self.stream.write_no_flush(&BeMessage::CommandComplete(
                     BeCommandCompleteMessage {
-                        stmt_type: res.get_stmt_type(),
-                        rows_cnt: res
-                            .get_effected_rows_cnt()
-                            .expect("row count should be set"),
+                        stmt_type: res.stmt_type(),
+                        rows_cnt: res.affected_rows_cnt().expect("row count should be set"),
                     },
                 ))?;
             }
@@ -593,10 +598,7 @@ where
                 sql = %truncated_sql,
             );
 
-            let pg_response = match result {
-                Ok(pg_response) => pg_response,
-                Err(err) => return Err(PsqlError::ExecuteError(err)),
-            };
+            let pg_response = result.map_err(PsqlError::ExecuteError)?;
             let mut result_cache = ResultCache::new(pg_response);
             let is_consume_completed = result_cache.consume::<S>(row_max, &mut self.stream).await?;
             if !is_consume_completed {
@@ -779,7 +781,7 @@ where
             BeParameterStatusMessage::StandardConformingString("on"),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ServerVersion("9.0.0"),
+            BeParameterStatusMessage::ServerVersion("8.3.0"),
         ))?;
         if let Some(application_name) = &status.application_name {
             self.write_no_flush(&BeMessage::ParameterStatus(

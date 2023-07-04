@@ -339,6 +339,14 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
     }
 }
 
+impl From<PrefetchOptions> for TracedPrefetchOptions {
+    fn from(value: PrefetchOptions) -> Self {
+        Self {
+            exhaust_iter: value.exhaust_iter,
+        }
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.
@@ -358,6 +366,20 @@ pub struct ReadOptions {
 
 impl From<TracedReadOptions> for ReadOptions {
     fn from(value: TracedReadOptions) -> Self {
+        Self {
+            prefix_hint: value.prefix_hint.map(|b| b.into()),
+            ignore_range_tombstone: value.ignore_range_tombstone,
+            prefetch_options: value.prefetch_options.into(),
+            cache_policy: value.cache_policy.into(),
+            retention_seconds: value.retention_seconds,
+            table_id: value.table_id.into(),
+            read_version_from_backup: value.read_version_from_backup,
+        }
+    }
+}
+
+impl From<ReadOptions> for TracedReadOptions {
+    fn from(value: ReadOptions) -> Self {
         Self {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
             ignore_range_tombstone: value.ignore_range_tombstone,
@@ -417,6 +439,17 @@ pub struct NewLocalOptions {
 
 impl From<TracedNewLocalOptions> for NewLocalOptions {
     fn from(value: TracedNewLocalOptions) -> Self {
+        Self {
+            table_id: value.table_id.into(),
+            is_consistent_op: value.is_consistent_op,
+            table_option: value.table_option.into(),
+            is_replicated: value.is_replicated,
+        }
+    }
+}
+
+impl From<NewLocalOptions> for TracedNewLocalOptions {
+    fn from(value: NewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
             is_consistent_op: value.is_consistent_op,

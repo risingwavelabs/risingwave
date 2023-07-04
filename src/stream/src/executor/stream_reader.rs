@@ -182,7 +182,10 @@ mod tests {
         // Write a chunk, and we should receive it.
 
         write_handle1.begin().unwrap();
-        write_handle1.write_chunk(StreamChunk::default()).unwrap();
+        write_handle1
+            .write_chunk(StreamChunk::default())
+            .await
+            .unwrap();
         write_handle1.end().unwrap();
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
@@ -196,7 +199,10 @@ mod tests {
         barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
         // Then write a chunk.
         write_handle2.begin().unwrap();
-        write_handle2.write_chunk(StreamChunk::default()).unwrap();
+        write_handle2
+            .write_chunk(StreamChunk::default())
+            .await
+            .unwrap();
         write_handle2.end().unwrap();
 
         // We should receive the barrier.

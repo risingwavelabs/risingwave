@@ -117,7 +117,7 @@ pub type ElectionClientRef = Arc<dyn ElectionClient>;
 pub async fn rpc_serve(
     address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
@@ -159,7 +159,7 @@ pub async fn rpc_serve(
                 meta_store,
                 Some(election_client),
                 address_info,
-                max_heartbeat_interval,
+                max_cluster_heartbeat_interval,
                 lease_interval_secs,
                 opts,
                 init_system_params,
@@ -172,7 +172,7 @@ pub async fn rpc_serve(
                 meta_store,
                 None,
                 address_info,
-                max_heartbeat_interval,
+                max_cluster_heartbeat_interval,
                 lease_interval_secs,
                 opts,
                 init_system_params,
@@ -186,7 +186,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
     election_client: Option<ElectionClientRef>,
     address_info: AddressInfo,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
@@ -268,7 +268,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         start_service_as_election_leader(
             meta_store,
             address_info,
-            max_heartbeat_interval,
+            max_cluster_heartbeat_interval,
             opts,
             init_system_params,
             election_client,
@@ -329,7 +329,7 @@ pub async fn start_service_as_election_follower(
 pub async fn start_service_as_election_leader<S: MetaStore>(
     meta_store: Arc<S>,
     address_info: AddressInfo,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
     init_system_params: SystemParams,
     election_client: Option<ElectionClientRef>,
@@ -358,7 +358,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     }
 
     let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), max_heartbeat_interval)
+        ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
             .await
             .unwrap(),
     );
@@ -373,7 +373,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
 
     let compactor_manager = Arc::new(
-        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
+        hummock::CompactorManager::with_meta(env.clone())
             .await
             .unwrap(),
     );
