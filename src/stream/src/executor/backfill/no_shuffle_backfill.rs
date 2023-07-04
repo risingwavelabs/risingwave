@@ -387,7 +387,7 @@ where
                     // (there's no epoch before the first epoch).
                     if is_snapshot_empty {
                         current_pos =
-                            construct_initial_finished_state(pk_in_output_indices.len())
+                            Some(construct_initial_finished_state(pk_in_output_indices.len()))
                     }
 
                     // We will update current_pos at least once,

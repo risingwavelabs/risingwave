@@ -24,17 +24,15 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::{
-    check_all_vnode_finished, compute_bounds, construct_initial_finished_state,
-    get_progress_per_vnode, iter_chunks, mapping_chunk, mapping_message, mark_chunk_ref_by_vnode,
-    persist_state, persist_state_per_vnode, update_pos_by_vnode, BackfillProgressPerVnode,
-    BackfillState, CurrentPosMap,
+    compute_bounds, construct_initial_finished_state, get_progress_per_vnode, iter_chunks,
+    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state_per_vnode,
+    update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -166,17 +164,11 @@ where
         // | f                    | f              | -> | t                |
         let to_backfill = !is_completely_finished && !is_snapshot_empty;
 
-        // Current position of the upstream_table primary key.
-        // `None` means it starts from the beginning.
-        // FIXME: Remove it
-        let mut current_pos: Option<OwnedRow> = None;
-
         // Use these to persist state.
         // They contain the backfill position, and the progress.
         // However, they do not contain the vnode key (index 0).
         // That is filled in when we flush the state table.
         let mut temporary_state: Vec<Datum> = vec![None; state_len];
-        let mut old_state: Option<Vec<Datum>> = None;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
@@ -302,7 +294,6 @@ where
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
-                                        // current_pos = up(&chunk, &pk_in_output_indices);
                                         update_pos_by_vnode(
                                             vnode,
                                             &chunk,
@@ -339,7 +330,7 @@ where
                     // Flush downstream.
                     // If no current_pos, means no snapshot processed yet.
                     // Also means we don't need propagate any updates <= current_pos.
-                    if let Some(_current_pos) = &current_pos {
+                    if backfill_state.has_progress() {
                         yield Message::Chunk(mapping_chunk(
                             mark_chunk_ref_by_vnode(
                                 &chunk,
@@ -418,14 +409,11 @@ where
                     // since it expects to have been initialized in previous epoch
                     // (there's no epoch before the first epoch).
                     if is_snapshot_empty {
-                        current_pos =
-                            construct_initial_finished_state(pk_in_output_indices.len())
+                        let finished_state = construct_initial_finished_state(pk_in_output_indices.len());
+                        for vnode in upstream_table.vnodes().iter_vnodes() {
+                            backfill_state.update_progress(vnode, BackfillProgressPerVnode::InProgress(finished_state.clone()));
+                        }
                     }
-
-                    // We will update current_pos at least once,
-                    // since snapshot read has to be non-empty,
-                    // Or snapshot was empty and we construct a placeholder state.
-                    debug_assert_ne!(current_pos, None);
 
                     persist_state_per_vnode(
                         barrier.epoch,
@@ -481,14 +469,14 @@ where
     ///
     /// For now we only support the case where all iterators are complete.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
-    async fn snapshot_read_per_vnode<'a>(
+    async fn snapshot_read_per_vnode(
         schema: Arc<Schema>,
-        upstream_table: &'a ReplicatedStateTable<S>,
+        upstream_table: &ReplicatedStateTable<S>,
         backfill_state: BackfillState,
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
         for vnode in upstream_table.vnodes().iter_vnodes() {
-            let backfill_progress = backfill_state.get_progress_infallible(&vnode)?;
+            let backfill_progress = backfill_state.get_progress(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::Completed => {
                     continue;

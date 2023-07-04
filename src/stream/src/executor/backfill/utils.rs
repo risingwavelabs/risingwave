@@ -38,8 +38,6 @@ use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
 
-pub type CurrentPosMap = HashMap<VirtualNode, OwnedRow>;
-
 #[derive(Clone, Debug)]
 pub struct BackfillState {
     /// Used to track backfill progress.
@@ -47,18 +45,18 @@ pub struct BackfillState {
 }
 
 impl BackfillState {
-    fn new() -> Self {
-        Self {
-            inner: HashMap::new(),
-        }
+    fn has_no_progress(&self) -> bool {
+        self.inner
+            .values()
+            .all(|p| !matches!(p, BackfillProgressPerVnode::InProgress(_)))
     }
 
-    fn has_no_progress(&self) -> bool {
-        self.inner.is_empty()
+    pub(crate) fn has_progress(&self) -> bool {
+        !self.has_no_progress()
     }
 
     // Expects the vnode to always have progress, otherwise it will return an error.
-    pub fn get_progress_infallible(
+    pub(crate) fn get_progress(
         &self,
         vnode: &VirtualNode,
     ) -> StreamExecutorResult<&BackfillProgressPerVnode> {
@@ -71,7 +69,7 @@ impl BackfillState {
         }
     }
 
-    pub fn update_progress(
+    pub(crate) fn update_progress(
         &mut self,
         vnode: VirtualNode,
         progress: BackfillProgressPerVnode,
@@ -132,7 +130,7 @@ pub(crate) fn mark_chunk_ref_by_vnode(
         // TODO(kwannoel): Is this logic correct for computing vnode?
         // I will revisit it again when arrangement_backfill is implemented e2e.
         let vnode = VirtualNode::compute_row(row, pk_in_output_indices);
-        let v = match backfill_state.get_progress_infallible(&vnode)? {
+        let v = match backfill_state.get_progress(&vnode)? {
             BackfillProgressPerVnode::Completed => true,
             BackfillProgressPerVnode::NotStarted => false,
             BackfillProgressPerVnode::InProgress(current_pos) => {
@@ -325,21 +323,6 @@ pub(crate) fn build_temporary_state(
     row_state[current_pos.len() + 1] = Some(is_finished.into());
 }
 
-pub(crate) fn update_pos_per_vnode(
-    chunk: &StreamChunk,
-    pk_in_output_indices: &[usize],
-) -> Option<OwnedRow> {
-    Some(
-        chunk
-            .rows()
-            .last()
-            .unwrap()
-            .1
-            .project(pk_in_output_indices)
-            .into_owned_row(),
-    )
-}
-
 /// Update backfill pos by vnode.
 pub(crate) fn update_pos_by_vnode(
     vnode: VirtualNode,
@@ -368,8 +351,8 @@ pub(crate) fn get_new_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -
 // This is so we can persist backfill state as "finished".
 // It won't be confused with another case where pk position comprised of nulls,
 // because they both record that backfill is finished.
-pub(crate) fn construct_initial_finished_state(pos_len: usize) -> Option<OwnedRow> {
-    Some(OwnedRow::new(vec![None; pos_len]))
+pub(crate) fn construct_initial_finished_state(pos_len: usize) -> OwnedRow {
+    OwnedRow::new(vec![None; pos_len])
 }
 
 pub(crate) fn compute_bounds(
@@ -419,9 +402,9 @@ pub(crate) async fn iter_chunks<'a, S, E>(
 /// Schema
 /// | vnode | pk | `backfill_finished` |
 /// Persists the state per vnode.
-/// 1. For each (vnode, current_pos),
-///    either insert OR update the state,
-///    depending if there was an old state.
+/// 1. For each (`vnode`, `current_pos`),
+///    Either insert if no old state,
+///    Or update the state if have old state.
 pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
@@ -444,7 +427,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         };
         build_temporary_state_with_vnode(temporary_state, *vnode, is_finished, current_pos);
 
-        let old_state = committed_progress.get(&vnode);
+        let old_state = committed_progress.get(vnode);
 
         if let Some(old_state) = old_state {
             // No progress for vnode, means no data
