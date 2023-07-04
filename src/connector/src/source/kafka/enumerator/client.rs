@@ -110,10 +110,14 @@ impl SplitEnumerator for KafkaSplitEnumerator {
                 self.broker_address, e
             ))
         })?;
+        let watermarks = self.get_watermarks(topic_partitions.as_ref()).await?;
+        let mut start_offsets = self
+            .fetch_start_offset(topic_partitions.as_ref(), &watermarks)
+            .await?;
 
-        let mut start_offsets = self.fetch_start_offset(topic_partitions.as_ref()).await?;
-
-        let mut stop_offsets = self.fetch_stop_offset(topic_partitions.as_ref()).await?;
+        let mut stop_offsets = self
+            .fetch_stop_offset(topic_partitions.as_ref(), &watermarks)
+            .await?;
 
         let ret = topic_partitions
             .into_iter()
@@ -130,6 +134,19 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
+    async fn get_watermarks(&self, partitions: &[i32]) -> KafkaResult<HashMap<i32, (i64, i64)>> {
+        let mut map = HashMap::new();
+        for partition in partitions {
+            let (low, high) = self
+                .client
+                .fetch_watermarks(self.topic.as_str(), *partition, self.sync_call_timeout)
+                .await?;
+            self.report_high_watermark(*partition, high as u64);
+            map.insert(*partition, (low, high));
+        }
+        Ok(map)
+    }
+
     pub async fn list_splits_batch(
         &mut self,
         expect_start_timestamp_millis: Option<i64>,
@@ -155,7 +172,6 @@ impl KafkaSplitEnumerator {
             None
         };
 
-        // println!("Start offset: {:?}", expect_start_offset);
         let mut expect_stop_offset = if let Some(ts) = expect_stop_timestamp_millis {
             Some(
                 self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
@@ -164,7 +180,6 @@ impl KafkaSplitEnumerator {
         } else {
             None
         };
-        // println!("Stop offset: {:?}", expect_stop_offset);
 
         // Watermark here has nothing to do with watermark in streaming processing. Watermark
         // here means smallest/largest offset available for reading.
@@ -222,17 +237,15 @@ impl KafkaSplitEnumerator {
     async fn fetch_stop_offset(
         &self,
         partitions: &[i32],
+        watermarks: &HashMap<i32, (i64, i64)>,
     ) -> KafkaResult<HashMap<i32, Option<i64>>> {
         match self.stop_offset {
             KafkaEnumeratorOffset::Earliest => unreachable!(),
             KafkaEnumeratorOffset::Latest => {
                 let mut map = HashMap::new();
                 for partition in partitions {
-                    let (_, high_watermark) = self
-                        .client
-                        .fetch_watermarks(self.topic.as_str(), *partition, self.sync_call_timeout)
-                        .await?;
-                    map.insert(*partition, Some(high_watermark));
+                    let (_, high_watermark) = watermarks.get(partition).unwrap();
+                    map.insert(*partition, Some(*high_watermark));
                 }
                 Ok(map)
             }
@@ -249,15 +262,13 @@ impl KafkaSplitEnumerator {
     async fn fetch_start_offset(
         &self,
         partitions: &[i32],
+        watermarks: &HashMap<i32, (i64, i64)>,
     ) -> KafkaResult<HashMap<i32, Option<i64>>> {
         match self.start_offset {
             KafkaEnumeratorOffset::Earliest | KafkaEnumeratorOffset::Latest => {
                 let mut map = HashMap::new();
                 for partition in partitions {
-                    let (low_watermark, high_watermark) = self
-                        .client
-                        .fetch_watermarks(self.topic.as_str(), *partition, self.sync_call_timeout)
-                        .await?;
+                    let (low_watermark, high_watermark) = watermarks.get(partition).unwrap();
                     let offset = match self.start_offset {
                         KafkaEnumeratorOffset::Earliest => low_watermark - 1,
                         KafkaEnumeratorOffset::Latest => high_watermark - 1,
@@ -315,6 +326,15 @@ impl KafkaSplitEnumerator {
         }
 
         Ok(result)
+    }
+
+    #[inline]
+    fn report_high_watermark(&self, partition: i32, offset: u64) {
+        self.context
+            .metrics
+            .high_watermark
+            .with_label_values(&[&self.topic, &partition.to_string()])
+            .inc_by(offset);
     }
 
     async fn fetch_topic_partition(&self) -> anyhow::Result<Vec<i32>> {
