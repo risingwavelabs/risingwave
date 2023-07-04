@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::type_name;
 use std::fmt::Write;
 use std::str::FromStr;
 
@@ -80,7 +79,7 @@ where
 {
     elem.trim()
         .parse()
-        .map_err(|_| ExprError::Parse(type_name::<T>().into()))
+        .map_err(|err: <T as FromStr>::Err| ExprError::Parse(err.to_string().into()))
 }
 
 #[function("cast(int16) -> int256")]
