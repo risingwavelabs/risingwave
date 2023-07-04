@@ -32,7 +32,7 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state, update_pos,
+    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state, update_pos_by_vnode,
     CurrentPosMap,
 };
 use crate::executor::monitor::StreamingMetrics;
@@ -134,7 +134,7 @@ where
 
         // Current position of upstream_table primary key.
         // Current position is computed **per vnode**.
-        let current_pos_map: CurrentPosMap = HashMap::new();
+        let mut current_pos_map: CurrentPosMap = HashMap::new();
 
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
@@ -148,7 +148,7 @@ where
                 let snapshot = Self::snapshot_read_per_vnode(
                     schema.clone(),
                     &upstream_table,
-                    &current_pos_map,
+                    current_pos_map.clone(), // FIXME: temporary workaround... How to avoid it?
                 );
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
@@ -235,7 +235,7 @@ where
                     let right_snapshot = pin!(Self::snapshot_read_per_vnode(
                         schema.clone(),
                         &upstream_table,
-                        &current_pos_map
+                        current_pos_map.clone(), // FIXME: temporary workaround, how to avoid it?
                     )
                     .map(Either::Right),);
 
@@ -294,11 +294,17 @@ where
 
                                         break 'backfill_loop;
                                     }
-                                    Some((_, chunk)) => {
+                                    Some((vnode, chunk)) => {
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
-                                        current_pos = update_pos(&chunk, &pk_in_output_indices);
+                                        // current_pos = up(&chunk, &pk_in_output_indices);
+                                        update_pos_by_vnode(
+                                            vnode,
+                                            &chunk,
+                                            &pk_in_output_indices,
+                                            &mut current_pos_map,
+                                        );
 
                                         let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -325,6 +331,7 @@ where
                 let upstream_chunk_buffer_is_empty = upstream_chunk_buffer.is_empty();
                 for chunk in upstream_chunk_buffer.drain(..) {
                     cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
+                    // FIXME: Replace with `snapshot_is_processed`
                     // Flush downstream.
                     // If no current_pos, means no snapshot processed yet.
                     // Also means we don't need propagate any updates <= current_pos.
@@ -342,6 +349,7 @@ where
                     // Replicate
                     upstream_table.write_chunk(chunk);
                 }
+
                 if upstream_chunk_buffer_is_empty {
                     upstream_table.commit_no_data_expected(barrier.epoch)
                 } else {
@@ -460,7 +468,7 @@ where
     async fn snapshot_read_per_vnode<'a>(
         schema: Arc<Schema>,
         upstream_table: &'a ReplicatedStateTable<S>,
-        current_pos_map: &'a CurrentPosMap,
+        current_pos_map: CurrentPosMap,
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
         for vnode in upstream_table.vnodes().iter_vnodes() {

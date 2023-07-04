@@ -34,8 +34,8 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    check_all_vnode_finished, compute_bounds, construct_initial_finished_state, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk, update_pos,
+    check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_new_pos,
+    iter_chunks, mapping_chunk, mapping_message, mark_chunk,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -349,7 +349,7 @@ where
                                     // Raise the current position.
                                     // As snapshot read streams are ordered by pk, so we can
                                     // just use the last row to update `current_pos`.
-                                    current_pos = update_pos(&chunk, &pk_in_output_indices);
+                                    current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
 
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;

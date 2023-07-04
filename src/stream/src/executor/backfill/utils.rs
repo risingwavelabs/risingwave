@@ -270,16 +270,27 @@ pub(crate) fn update_pos_per_vnode(
     )
 }
 
-pub(crate) fn update_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -> Option<OwnedRow> {
-    Some(
-        chunk
-            .rows()
-            .last()
-            .unwrap()
-            .1
-            .project(pk_in_output_indices)
-            .into_owned_row(),
-    )
+/// Update backfill pos by vnode.
+pub(crate) fn update_pos_by_vnode(
+    vnode: VirtualNode,
+    chunk: &StreamChunk,
+    pk_in_output_indices: &[usize],
+    current_pos_map: &mut CurrentPosMap,
+) {
+    let new_pos = get_new_pos(chunk, pk_in_output_indices);
+    current_pos_map.insert(vnode, new_pos);
+}
+
+/// Get new backfill pos from the chunk. Since chunk should have ordered rows, we can just take the
+/// last row.
+pub(crate) fn get_new_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -> OwnedRow {
+    chunk
+        .rows()
+        .last()
+        .unwrap()
+        .1
+        .project(pk_in_output_indices)
+        .into_owned_row()
 }
 
 // NOTE(kwannoel): ["None" ..] encoding should be appropriate to mark
