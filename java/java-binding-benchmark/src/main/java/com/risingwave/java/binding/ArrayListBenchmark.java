@@ -2,7 +2,6 @@ package com.risingwave.java.binding;
 
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
-
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -13,14 +12,14 @@ import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 
-@Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.MILLISECONDS)
-@Measurement(iterations = 10, time = 1, timeUnit = TimeUnit.MILLISECONDS)
+@Warmup(iterations = 10, time = 1, timeUnit = TimeUnit.MILLISECONDS)
+@Measurement(iterations = 20, time = 1, timeUnit = TimeUnit.MILLISECONDS)
 @Fork(value = 1)
 @BenchmarkMode(org.openjdk.jmh.annotations.Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(org.openjdk.jmh.annotations.Scope.Benchmark)
 public class ArrayListBenchmark {
-    @Param({ "1000", "10000", "100000" })
+    @Param({"1000", "10000", "100000"})
     static int loopTime;
 
     ArrayList<ArrayList<Object>> data = new ArrayList<>();
@@ -32,10 +31,11 @@ public class ArrayListBenchmark {
         float v4 = (float) index;
         double v5 = (double) index;
         boolean v6 = index % 3 == 0;
-        String v7 = "'"
-                + new String(new char[(index % 10) + 1])
-                        .replace("\0", String.valueOf(index))
-                + "'";
+        String v7 =
+                "'"
+                        + new String(new char[(index % 10) + 1])
+                                .replace("\0", String.valueOf(index))
+                        + "'";
         String v8 = "to_timestamp(" + index + ")";
         int v9 = index;
         Integer mayNull = null;
@@ -80,6 +80,5 @@ public class ArrayListBenchmark {
         for (int i = 0; i < loopTime; i++) {
             processRowData(data.get(i));
         }
-
     }
 }

@@ -23,16 +23,6 @@
 
     <dependencies>
         <dependency>
-			<groupId>org.openjdk.jmh</groupId>
-			<artifactId>jmh-core</artifactId>
-			<version>1.33</version>
-		</dependency>
-		<dependency>
-			<groupId>org.openjdk.jmh</groupId>
-			<artifactId>jmh-generator-annprocess</artifactId>
-			<version>1.33</version>
-		</dependency>
-        <dependency>
             <groupId>org.questdb</groupId>
             <artifactId>jar-jni</artifactId>
             <version>${jni.loader.version}</version>
