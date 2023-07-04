@@ -503,8 +503,14 @@ impl LogicalOptimizer {
         // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
         plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
+        let force_split_distinct_agg = ctx.session_ctx().config().get_force_split_distinct_agg();
+        // TODO: better naming of the OptimizationStage
         // Convert distinct aggregates.
-        plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM);
+        plan = if force_split_distinct_agg {
+            plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH)
+        } else {
+            plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM)
+        };
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
 
