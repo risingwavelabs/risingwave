@@ -473,7 +473,7 @@ where
             }
             let range_bounds = range_bounds.unwrap();
             let vnode_iter = upstream_table
-                .iter_all_with_pk_range(&range_bounds, Default::default())
+                .iter_with_pk_range(&range_bounds, vnode, Default::default())
                 .await?;
             streams.push(Box::pin(vnode_iter));
         }

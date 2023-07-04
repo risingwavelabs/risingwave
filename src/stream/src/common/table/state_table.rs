@@ -45,7 +45,6 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
-use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, get_second, Distribution};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
@@ -932,36 +931,6 @@ where
     ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
         Ok(self
             .iter_key_and_val_with_pk_range(pk_range, vnode, prefetch_options)
-            .await?
-            .map(get_second))
-    }
-
-    // FIXME: Remove this.
-    async fn iter_all_pk_and_val_with_pk_range(
-        &self,
-        pk_range: &(Bound<impl Row>, Bound<impl Row>),
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
-        let mut vec = Vec::with_capacity(self.vnodes.count_ones());
-        for vnode in self.vnodes.iter_vnodes() {
-            vec.push(
-                self.iter_key_and_val_with_pk_range(pk_range, vnode, prefetch_options)
-                    .await?,
-            )
-        }
-        let pinned_iter: Vec<_> = vec.into_iter().map(Box::pin).collect_vec();
-        let iter = merge_sort(pinned_iter);
-        Ok(iter)
-    }
-
-    // FIXME: Remove this.
-    pub async fn iter_all_with_pk_range(
-        &self,
-        pk_range: &(Bound<impl Row>, Bound<impl Row>),
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
-        Ok(self
-            .iter_all_pk_and_val_with_pk_range(pk_range, prefetch_options)
             .await?
             .map(get_second))
     }
