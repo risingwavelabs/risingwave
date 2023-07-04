@@ -572,8 +572,6 @@ impl Binder {
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),
                 ("cbrt", raw_call(ExprType::Cbrt)),
-                ("left", raw_call(ExprType::Left)),
-                ("right", raw_call(ExprType::Right)),
 
                 (
                     "to_timestamp",
@@ -629,6 +627,8 @@ impl Binder {
                 ("sha256", raw_call(ExprType::Sha256)),
                 ("sha384", raw_call(ExprType::Sha384)),
                 ("sha512", raw_call(ExprType::Sha512)),
+                ("left", raw_call(ExprType::Left)),
+                ("right", raw_call(ExprType::Right)),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),

@@ -383,7 +383,7 @@ pub fn quote_ident(s: &str, writer: &mut dyn Write) {
 }
 
 /// Returns the first n characters in the string.
-/// If n is a negative value, the function will return an empty string.
+/// If n is a negative value, the function will return all but last |n| characters.
 ///
 /// # Example
 ///
@@ -403,17 +403,24 @@ pub fn quote_ident(s: &str, writer: &mut dyn Write) {
 /// ----
 ///
 /// query T
-/// select left('RisingWave', -1)
+/// select left('RisingWave', -4)
 /// ----
+/// Rising
 #[function("left(varchar, int32) -> varchar")]
 pub fn left(s: &str, n: i32, writer: &mut dyn Write) {
+    let n = if n >= 0 {
+        n as usize
+    } else {
+        s.chars().count().saturating_sub(-n as usize)
+    };
+
     s.chars()
-        .take(n.max(0) as usize)
+        .take(n)
         .for_each(|c| writer.write_char(c).unwrap());
 }
 
 /// Returns the last n characters in the string.
-/// If n is a negative value, the function will return an empty string.
+/// If n is a negative value, the function will return all but first |n| characters.
 ///
 /// # Example
 ///
@@ -433,12 +440,16 @@ pub fn left(s: &str, n: i32, writer: &mut dyn Write) {
 /// ----
 ///
 /// query T
-/// select right('RisingWave', -1)
+/// select right('RisingWave', -6)
 /// ----
+/// Wave
 #[function("right(varchar, int32) -> varchar")]
 pub fn right(s: &str, n: i32, writer: &mut dyn Write) {
-    let take = n.max(0) as usize;
-    let skip = s.chars().count().saturating_sub(take);
+    let skip = if n >= 0 {
+        s.chars().count().saturating_sub(n as usize)
+    } else {
+        -n as usize
+    };
 
     s.chars()
         .skip(skip)
@@ -456,11 +467,12 @@ mod tests {
 
         let cases = [
             (s, 3, "cxs", "cdd"),
-            (s, -3, "", ""),
+            (s, -3, "cxscgc", "cgccdd"),
             (s, 0, "", ""),
             (s, 15, "cxscgccdd", "cxscgccdd"),
             // Unicode test
             (us, 5, "上海自来水", "水来自海上"),
+            (us, -6, "上海自", "自海上"),
         ];
 
         for (s, n, left_expected, right_expected) in cases {
