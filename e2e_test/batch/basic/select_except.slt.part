@@ -67,7 +67,7 @@ select * except (a.v3) from (select * except (v2) from t1) as a;
 1
 
 statement error Ambiguous column name: a
-select * except (v) from t1 t(a,a,a);
+select * except (a) from t1 t(a,a,a);
 
 statement error Ambiguous column name: v1
 select * except (v1) from t1 a, t1 b;
