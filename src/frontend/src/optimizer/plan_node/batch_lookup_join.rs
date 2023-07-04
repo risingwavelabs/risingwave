@@ -182,18 +182,15 @@ impl ToDistributedBatch for BatchLookupJoin {
             exchange_dist_keys.push(left_eq_indexes[dist_in_eq_indexes]);
         }
 
-        let input = if exchange_dist_keys.is_empty() {
-            self.input()
-                .to_distributed_with_required(&Order::any(), &RequiredDist::single())?
-        } else {
-            self.input().to_distributed_with_required(
-                &Order::any(),
-                &RequiredDist::PhysicalDist(Distribution::UpstreamHashShard(
-                    exchange_dist_keys,
-                    self.right_table_desc.table_id,
-                )),
-            )?
-        };
+        assert!(!exchange_dist_keys.is_empty());
+
+        let input = self.input().to_distributed_with_required(
+            &Order::any(),
+            &RequiredDist::PhysicalDist(Distribution::UpstreamHashShard(
+                exchange_dist_keys,
+                self.right_table_desc.table_id,
+            )),
+        )?;
 
         Ok(self.clone_with_distributed_lookup(input, true).into())
     }
