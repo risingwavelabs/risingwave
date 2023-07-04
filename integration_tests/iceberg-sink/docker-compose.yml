@@ -1,14 +1,50 @@
 ---
 version: "3"
+x-airflow-common:
+    &airflow-common
+    image: apache/airflow:2.6.2-python3.10
+    build: 
+      context: .
+      target: airflow
+    environment:
+      &airflow-common-env
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    volumes:
+      - ./airflow_dags:/opt/airflow/dags
+      - ./iceberg-compaction-sql:/opt/airflow/iceberg-compaction-sql
+    depends_on:
+      &airflow-common-depends-on
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    
+
 services:
   spark:
-    image: apache/spark:3.3.1
-    command: tail -f /dev/null
-    depends_on:
-      - minio-0
+    image: bitnami/spark:3.3
+    build: 
+      context: .
+      target: spark
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - '7077:7077'
     volumes:
-      - "./spark-script:/spark-script"
-    container_name: spark
+      - './spark-script:/spark-script'
+  spark-worker:
+    image: spark-air:latest
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark:7077
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_WORKER_CORES=1
   presto:
     build: ./presto-with-iceberg
     container_name: presto
@@ -84,6 +120,59 @@ services:
       - /datagen --mode clickstream --qps 1 mysql --user mysqluser --password mysqlpw --host mysql --port 3306 --db mydb
     container_name: datagen
     restart: on-failure
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - ./db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+  redis:
+    image: 'redis:latest'
+    expose:
+      - 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 50
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - 8080:8080
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+          condition: service_completed_successfully
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+          condition: service_completed_successfully
+  airflow-worker:
+    <<: *airflow-common
+    command: celery worker
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+          condition: service_completed_successfully
+  airflow-init:
+    <<: *airflow-common
+    command: version
+    environment:
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_NAME: 'airflow'
+      _AIRFLOW_WWW_USER_PASSWORD: 'airflow'
+
 volumes:
   compute-node-0:
     external: false

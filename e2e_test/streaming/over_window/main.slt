@@ -1,9 +1,5 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-# FIXME(rc): This is to avoid a bug in DistributedLookupJoin used by `cross_check.slt.part`. See #10721.
-statement ok
-set RW_BATCH_ENABLE_LOOKUP_JOIN to false;
-
 include ./special_cases/mod.slt.part
 include ./over_window/mod.slt.part

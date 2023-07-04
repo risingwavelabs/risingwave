@@ -473,6 +473,15 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_preload_wait_time_mill")]
     pub max_preload_wait_time_mill: u64,
 
+    #[serde(default = "default::storage::object_store_streaming_read_timeout_ms")]
+    pub object_store_streaming_read_timeout_ms: u64,
+    #[serde(default = "default::storage::object_store_streaming_upload_timeout_ms")]
+    pub object_store_streaming_upload_timeout_ms: u64,
+    #[serde(default = "default::storage::object_store_upload_timeout_ms")]
+    pub object_store_upload_timeout_ms: u64,
+    #[serde(default = "default::storage::object_store_read_timeout_ms")]
+    pub object_store_read_timeout_ms: u64,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -824,6 +833,22 @@ mod default {
 
         pub fn max_preload_wait_time_mill() -> u64 {
             10
+        }
+
+        pub fn object_store_streaming_read_timeout_ms() -> u64 {
+            10 * 60 * 1000
+        }
+
+        pub fn object_store_streaming_upload_timeout_ms() -> u64 {
+            10 * 60 * 1000
+        }
+
+        pub fn object_store_upload_timeout_ms() -> u64 {
+            60 * 60 * 1000
+        }
+
+        pub fn object_store_read_timeout_ms() -> u64 {
+            60 * 60 * 1000
         }
     }
 
