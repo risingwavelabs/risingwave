@@ -39,7 +39,8 @@ pub struct CsvParserConfig {
 
 impl CsvParserConfig {
     pub fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let csv_config = try_match_expand!(parser_properties.encoding_config, EncodingProperties::Csv)?;
+        let csv_config =
+            try_match_expand!(parser_properties.encoding_config, EncodingProperties::Csv)?;
         Ok(Self {
             delimiter: csv_config.delimiter,
             has_header: csv_config.has_header,

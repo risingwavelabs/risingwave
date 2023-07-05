@@ -52,7 +52,10 @@ pub struct ProtobufParserConfig {
 
 impl ProtobufParserConfig {
     pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let protobuf_config = try_match_expand!(parser_properties.encoding_config, EncodingProperties::Protobuf)?;
+        let protobuf_config = try_match_expand!(
+            parser_properties.encoding_config,
+            EncodingProperties::Protobuf
+        )?;
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;
         let url = Url::parse(location)

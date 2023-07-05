@@ -60,7 +60,8 @@ pub struct DebeziumAvroParserConfig {
 
 impl DebeziumAvroParserConfig {
     pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let avro_config = try_match_expand!(parser_properties.encoding_config, EncodingProperties::Avro)?;
+        let avro_config =
+            try_match_expand!(parser_properties.encoding_config, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let client_config = &avro_config.client_config;
         let kafka_topic = &avro_config.topic;
