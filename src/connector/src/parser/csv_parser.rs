@@ -18,9 +18,10 @@ use anyhow::anyhow;
 use risingwave_common::cast::{str_to_date, str_to_timestamp};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::try_match_expand;
 use risingwave_common::types::{Datum, Decimal, ScalarImpl, Timestamptz};
 
-use super::ByteStreamSourceParser;
+use super::{ByteStreamSourceParser, EncodingProperties, ParserProperties};
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -34,6 +35,17 @@ macro_rules! to_rust_type {
 pub struct CsvParserConfig {
     pub delimiter: u8,
     pub has_header: bool,
+}
+
+impl CsvParserConfig {
+    pub fn new(parser_properties: ParserProperties) -> Result<Self> {
+        let csv_config =
+            try_match_expand!(parser_properties.encoding_config, EncodingProperties::Csv)?;
+        Ok(Self {
+            delimiter: csv_config.delimiter,
+            has_header: csv_config.has_header,
+        })
+    }
 }
 
 /// Parser for CSV format

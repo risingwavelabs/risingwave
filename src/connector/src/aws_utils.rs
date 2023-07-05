@@ -115,7 +115,7 @@ pub fn s3_client(
 /// properties require keys: refer to [`AWS_DEFAULT_CONFIG`]
 pub async fn load_file_descriptor_from_s3(
     location: &Url,
-    properties: &HashMap<String, String>,
+    config: &AwsAuthProps,
 ) -> Result<Vec<u8>> {
     let bucket = location.domain().ok_or_else(|| {
         RwError::from(InternalError(format!(
@@ -124,7 +124,6 @@ pub async fn load_file_descriptor_from_s3(
         )))
     })?;
     let key = location.path().replace('/', "");
-    let config = AwsAuthProps::from_pairs(properties.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     let sdk_config = config.build_config().await?;
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
     let response = s3_client
