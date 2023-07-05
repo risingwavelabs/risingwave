@@ -32,6 +32,7 @@ use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
@@ -107,6 +108,7 @@ pub async fn compute_node_serve(
             worker_node_parallelism: opts.parallelism as u64,
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
+            is_unschedulable: false,
         },
         &config.meta,
     )
@@ -224,6 +226,7 @@ pub async fn compute_node_serve(
                 output_memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
+                await_tree_reg: None,
             });
 
             let (handle, shutdown_sender) =
@@ -294,7 +297,10 @@ pub async fn compute_node_serve(
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
-    let dml_mgr = Arc::new(DmlManager::default());
+    let dml_mgr = Arc::new(DmlManager::new(
+        worker_id,
+        config.streaming.developer.dml_channel_initial_permits,
+    ));
 
     // Initialize batch environment.
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
@@ -383,6 +389,7 @@ pub async fn compute_node_serve(
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
             .layer(AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg))
+            .layer(TracingExtractLayer::new())
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))

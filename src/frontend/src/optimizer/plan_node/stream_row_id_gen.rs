@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Distribution;
@@ -55,13 +55,10 @@ impl StreamRowIdGen {
     }
 }
 
-impl fmt::Display for StreamRowIdGen {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamRowIdGen {{ row_id_index: {} }}",
-            self.row_id_index
-        )
+impl Distill for StreamRowIdGen {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let fields = vec![("row_id_index", Pretty::debug(&self.row_id_index))];
+        childless_record("StreamRowIdGen", fields)
     }
 }
 

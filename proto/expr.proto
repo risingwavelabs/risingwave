@@ -61,6 +61,8 @@ message ExprNode {
     TO_TIMESTAMP1 = 107;
     // Performs a cast with additional timezone information.
     CAST_WITH_TIME_ZONE = 108;
+    ADD_WITH_TIME_ZONE = 109;
+    SUBTRACT_WITH_TIME_ZONE = 110;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -157,6 +159,8 @@ message ExprNode {
     SHA256 = 314;
     SHA384 = 315;
     SHA512 = 316;
+    LEFT = 317;
+    RIGHT = 318;
 
     // Unary operators
     NEG = 401;

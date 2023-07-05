@@ -27,6 +27,7 @@ use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -36,6 +37,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
+use risingwave_pb::meta::serving_service_server::ServingServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
@@ -51,10 +53,10 @@ use super::intercept::MetricsMiddlewareLayer;
 use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
+use super::service::serving_service::ServingServiceImpl;
 use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
-use crate::batch::ServingVnodeMapping;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
@@ -72,10 +74,11 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
 use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
+use crate::serving::ServingVnodeMapping;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
-use crate::{batch, hummock, MetaError, MetaResult};
+use crate::{hummock, serving, MetaError, MetaResult};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -112,7 +115,7 @@ pub type ElectionClientRef = Arc<dyn ElectionClient>;
 pub async fn rpc_serve(
     address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
@@ -154,7 +157,7 @@ pub async fn rpc_serve(
                 meta_store,
                 Some(election_client),
                 address_info,
-                max_heartbeat_interval,
+                max_cluster_heartbeat_interval,
                 lease_interval_secs,
                 opts,
                 init_system_params,
@@ -167,7 +170,7 @@ pub async fn rpc_serve(
                 meta_store,
                 None,
                 address_info,
-                max_heartbeat_interval,
+                max_cluster_heartbeat_interval,
                 lease_interval_secs,
                 opts,
                 init_system_params,
@@ -181,7 +184,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
     election_client: Option<ElectionClientRef>,
     address_info: AddressInfo,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
@@ -263,7 +266,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         start_service_as_election_leader(
             meta_store,
             address_info,
-            max_heartbeat_interval,
+            max_cluster_heartbeat_interval,
             opts,
             init_system_params,
             election_client,
@@ -291,6 +294,7 @@ pub async fn start_service_as_election_follower(
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
+        .layer(TracingExtractLayer::new())
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(HealthServer::new(health_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
@@ -324,7 +328,7 @@ pub async fn start_service_as_election_follower(
 pub async fn start_service_as_election_leader<S: MetaStore>(
     meta_store: Arc<S>,
     address_info: AddressInfo,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
     init_system_params: SystemParams,
     election_client: Option<ElectionClientRef>,
@@ -353,12 +357,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     }
 
     let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), max_heartbeat_interval)
+        ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
             .await
             .unwrap(),
     );
     let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
-    batch::on_meta_start(
+    serving::on_meta_start(
         env.notification_manager_ref(),
         cluster_manager.clone(),
         fragment_manager.clone(),
@@ -368,7 +372,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
 
     let compactor_manager = Arc::new(
-        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
+        hummock::CompactorManager::with_meta(env.clone())
             .await
             .unwrap(),
     );
@@ -538,6 +542,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let backup_srv = BackupServiceImpl::new(backup_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone());
     let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
+    let serving_srv =
+        ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -579,7 +585,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
     sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager).await);
     sub_tasks.push(
-        batch::start_serving_vnode_mapping_worker(
+        serving::start_serving_vnode_mapping_worker(
             env.notification_manager_ref(),
             cluster_manager.clone(),
             fragment_manager.clone(),
@@ -673,6 +679,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
+        .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))
@@ -686,6 +693,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(BackupServiceServer::new(backup_srv))
         .add_service(SystemParamsServiceServer::new(system_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
+        .add_service(ServingServiceServer::new(serving_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 res = svc_shutdown_rx.changed() => {

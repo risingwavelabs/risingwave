@@ -39,7 +39,6 @@ members = [
   "src/tests/simulation",
   "src/tests/sqlsmith",
   "src/tests/state_cleaning_test",
-  "src/tracing",
   "src/udf",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
@@ -65,6 +64,7 @@ aws-sdk-kinesis = { version = "0.28", default-features = false, features = ["rt-
 aws-sdk-s3 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
 aws-sdk-ec2 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
 aws-sdk-sqs = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-client = { version = "0.55", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-smithy-http = "0.55"
 aws-smithy-types = "0.55"
 aws-endpoint = "0.55"
@@ -73,6 +73,7 @@ futures-async-stream = "0.2"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
 hashbrown = { version = "0.13.2", features = ["ahash", "inline-more", "nightly"] }
+criterion = "0.5"
 
 [profile.dev]
 lto = 'off'
@@ -105,8 +106,6 @@ opt-level = 3
 [profile.ci-dev.package."await-tree"]
 opt-level = 3
 [profile.ci-dev.package."indextree"]
-opt-level = 3
-[profile.ci-dev.package."task_stats_alloc"]
 opt-level = 3
 
 # The profile used for deterministic simulation tests in CI.

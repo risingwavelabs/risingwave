@@ -12,21 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum};
-use risingwave_common::util::iter_util::ZipEqFast;
-use simd_json::{BorrowedValue, StaticNode, ValueAccess};
+use simd_json::{BorrowedValue, Mutable, ValueAccess};
 
 use crate::parser::canal::operators::*;
-use crate::parser::common::{do_parse_simd_json_value, json_object_smart_get_value};
-use crate::parser::util::at_least_one_ok;
+use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
+use crate::parser::unified::ChangeEventOperation;
 use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
-const AFTER: &str = "data";
-const BEFORE: &str = "old";
+const DATA: &str = "data";
 const OP: &str = "type";
 const IS_DDL: &str = "isDdl";
 
@@ -50,7 +47,7 @@ impl CanalJsonParser {
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
+        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         let is_ddl = event.get(IS_DDL).and_then(|v| v.as_bool()).ok_or_else(|| {
@@ -65,132 +62,45 @@ impl CanalJsonParser {
             )));
         }
 
-        let op = event.get(OP).and_then(|v| v.as_str()).ok_or_else(|| {
-            RwError::from(ProtocolError("op field not found in canal json".to_owned()))
-        })?;
+        let op = match event.get(OP).and_then(|v| v.as_str()) {
+            Some(CANAL_INSERT_EVENT | CANAL_UPDATE_EVENT) => ChangeEventOperation::Upsert,
+            Some(CANAL_DELETE_EVENT) => ChangeEventOperation::Delete,
+            _ => Err(RwError::from(ProtocolError(
+                "op field not found in canal json".to_owned(),
+            )))?,
+        };
 
-        match op {
-            CANAL_INSERT_EVENT => {
-                let inserted = event
-                    .get(AFTER)
-                    .and_then(|v| match v {
-                        BorrowedValue::Array(array) => Some(array.iter()),
-                        _ => None,
-                    })
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "data is missing for creating event".to_string(),
-                        ))
-                    })?;
-                let results = inserted
-                    .into_iter()
-                    .map(|v| {
-                        writer.insert(|column| {
-                            cannal_simd_json_parse_value(
-                                &column.data_type,
-                                crate::parser::common::json_object_smart_get_value(
-                                    v,
-                                    (&column.name).into(),
-                                ),
-                            )
-                        })
-                    })
-                    .collect::<Vec<Result<_>>>();
-                at_least_one_ok(results)
+        let events = event
+            .get_mut(DATA)
+            .and_then(|v| match v {
+                BorrowedValue::Array(array) => Some(array),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                RwError::from(ProtocolError(
+                    "'data' is missing for creating event".to_string(),
+                ))
+            })?;
+        let mut errors = Vec::new();
+        let mut guard = None;
+        for event in events.drain(..) {
+            let accessor = JsonAccess::new_with_options(event, &JsonParseOptions::CANAL);
+            match apply_row_operation_on_stream_chunk_writer((op, accessor), &mut writer) {
+                Ok(this_guard) => guard = Some(this_guard),
+                Err(err) => errors.push(err),
             }
-            CANAL_UPDATE_EVENT => {
-                let after = event
-                    .get(AFTER)
-                    .and_then(|v| match v {
-                        BorrowedValue::Array(array) => Some(array.iter()),
-                        _ => None,
-                    })
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "data is missing for updating event".to_string(),
-                        ))
-                    })?;
-                let before = event
-                    .get(BEFORE)
-                    .and_then(|v| match v {
-                        BorrowedValue::Array(array) => Some(array.iter()),
-                        _ => None,
-                    })
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "old is missing for updating event".to_string(),
-                        ))
-                    })?;
-
-                let results = before
-                    .zip_eq_fast(after)
-                    .map(|(before, after)| {
-                        writer.update(|column| {
-                            // in origin canal, old only contains the changed columns but data
-                            // contains all columns.
-                            // in ticdc, old contains all fields
-                            let before_value =
-                                json_object_smart_get_value(before, (&column.name).into()).or_else(
-                                    || json_object_smart_get_value(after, (&column.name).into()),
-                                );
-                            let before =
-                                cannal_simd_json_parse_value(&column.data_type, before_value)?;
-                            let after = cannal_simd_json_parse_value(
-                                &column.data_type,
-                                json_object_smart_get_value(after, (&column.name).into()),
-                            )?;
-                            Ok((before, after))
-                        })
-                    })
-                    .collect::<Vec<Result<_>>>();
-                at_least_one_ok(results)
-            }
-            CANAL_DELETE_EVENT => {
-                let deleted = event
-                    .get(AFTER)
-                    .and_then(|v| match v {
-                        BorrowedValue::Array(array) => Some(array.iter()),
-                        _ => None,
-                    })
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError("old is missing for delete event".to_string()))
-                    })?;
-
-                let results = deleted
-                    .into_iter()
-                    .map(|v| {
-                        writer.delete(|column| {
-                            cannal_simd_json_parse_value(
-                                &column.data_type,
-                                json_object_smart_get_value(v, (&column.name).into()),
-                            )
-                        })
-                    })
-                    .collect::<Vec<Result<_>>>();
-
-                at_least_one_ok(results)
-            }
-            other => Err(RwError::from(ProtocolError(format!(
-                "unknown canal json op: {}",
-                other
-            )))),
         }
-    }
-}
-
-#[inline]
-fn cannal_simd_json_parse_value(
-    dtype: &DataType,
-    value: Option<&BorrowedValue<'_>>,
-) -> Result<Datum> {
-    match value {
-        None | Some(BorrowedValue::Static(StaticNode::Null)) => Ok(None),
-        Some(v) => Ok(Some(
-            do_parse_simd_json_value(&SourceFormat::CanalJson, dtype, v).map_err(|e| {
-                tracing::warn!("failed to parse type '{}' from json: {}", dtype, e);
-                anyhow!("failed to parse type '{}' from json: {}", dtype, e)
-            })?,
-        )),
+        if let Some(guard) = guard {
+            if !errors.is_empty() {
+                tracing::error!(?errors, "failed to parse some columns");
+            }
+            Ok(guard)
+        } else {
+            Err(RwError::from(ErrorCode::InternalError(format!(
+                "failed to parse all columns: {:?}",
+                errors
+            ))))
+        }
     }
 }
 
@@ -318,35 +228,7 @@ mod tests {
 
         {
             let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::UpdateDelete);
-            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int64(1)));
-            assert_eq!(
-                row.datum_at(1).to_owned_datum(),
-                (Some(ScalarImpl::Utf8("mike".into())))
-            );
-            assert_eq!(
-                row.datum_at(2).to_owned_datum(),
-                (Some(ScalarImpl::Bool(false)))
-            );
-            assert_eq!(
-                row.datum_at(3).to_owned_datum(),
-                (Some(Decimal::from_str("1000.62").unwrap().into()))
-            );
-            assert_eq!(
-                row.datum_at(4).to_owned_datum(),
-                (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2018-01-01 00:00:01").unwrap()
-                )))
-            );
-            assert_eq!(
-                row.datum_at(5).to_owned_datum(),
-                (Some(ScalarImpl::Float64(0.65.into())))
-            );
-        }
-
-        {
-            let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::UpdateInsert);
+            assert_eq!(op, Op::Insert);
             assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int64(1)));
             assert_eq!(
                 row.datum_at(1).to_owned_datum(),

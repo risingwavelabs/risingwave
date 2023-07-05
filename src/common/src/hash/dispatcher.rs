@@ -95,7 +95,7 @@ pub trait HashKeyDispatcher: Sized {
 fn hash_key_size(data_type: &DataType) -> HashKeySize {
     use std::mem::size_of;
 
-    use crate::types::{Date, Decimal, Interval, Time, Timestamp, F32, F64};
+    use crate::types::{Date, Decimal, Interval, Time, Timestamp, Timestamptz, F32, F64};
 
     match data_type {
         // for `Boolean` in `HashKey` use 1 FixedBytes , but in `Array` use 1 FixedBits
@@ -110,7 +110,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Date => HashKeySize::Fixed(size_of::<Date>()),
         DataType::Time => HashKeySize::Fixed(size_of::<Time>()),
         DataType::Timestamp => HashKeySize::Fixed(size_of::<Timestamp>()),
-        DataType::Timestamptz => HashKeySize::Fixed(size_of::<i64>()),
+        DataType::Timestamptz => HashKeySize::Fixed(size_of::<Timestamptz>()),
         DataType::Interval => HashKeySize::Fixed(size_of::<Interval>()),
         DataType::Int256 => HashKeySize::Variable,
         DataType::Varchar => HashKeySize::Variable,

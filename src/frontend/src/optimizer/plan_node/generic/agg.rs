@@ -592,19 +592,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         (self.agg_calls, self.group_key, self.input)
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        self.fmt_fields_with_builder(&mut builder);
-        builder.finish()
-    }
-
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        if self.group_key.count_ones(..) != 0 {
-            builder.field("group_key", &self.group_key_display());
-        }
-        builder.field("aggs", &self.agg_calls_display());
-    }
-
     pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
         let last = ("aggs", self.agg_calls_pretty());
         if self.group_key.count_ones(..) != 0 {
@@ -615,14 +602,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         }
     }
 
-    fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        let f = |plan_agg_call| PlanAggCallDisplay {
-            plan_agg_call,
-            input_schema: self.input.schema(),
-        };
-        self.agg_calls.iter().map(f).collect()
-    }
-
     fn agg_calls_pretty<'a>(&self) -> Pretty<'a> {
         let f = |plan_agg_call| {
             Pretty::debug(&PlanAggCallDisplay {
@@ -631,11 +610,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             })
         };
         Pretty::Array(self.agg_calls.iter().map(f).collect())
-    }
-
-    fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
-        let f = |i| FieldDisplay(self.input.schema().fields.get(i).unwrap());
-        self.group_key.ones().map(f).collect()
     }
 
     fn group_key_pretty<'a>(&self) -> Pretty<'a> {

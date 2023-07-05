@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::rc::Rc;
+
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
@@ -19,8 +21,8 @@ use risingwave_common::error::Result;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    CreateSink, CreateSinkStatement, ObjectName, Query, Select, SelectItem, SetExpr, TableFactor,
-    TableWithJoins,
+    CreateSink, CreateSinkStatement, EmitMode, ObjectName, Query, Select, SelectItem, SetExpr,
+    TableFactor, TableWithJoins,
 };
 
 use super::create_mv::get_column_names;
@@ -48,7 +50,7 @@ pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     }];
     let select = Select {
         from,
-        projection: vec![SelectItem::Wildcard],
+        projection: vec![SelectItem::WildcardOrWithExcept(None)],
         ..Default::default()
     };
     let body = SetExpr::Select(Box::new(select));
@@ -66,7 +68,7 @@ pub fn gen_sink_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: CreateSinkStatement,
-) -> Result<(PlanRef, SinkCatalog)> {
+) -> Result<(Box<Query>, PlanRef, SinkCatalog)> {
     let db_name = session.database();
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
@@ -83,7 +85,7 @@ pub fn gen_sink_plan(
 
     let (dependent_relations, bound) = {
         let mut binder = Binder::new_for_stream(session);
-        let bound = binder.bind_query(*query)?;
+        let bound = binder.bind_query(*query.clone())?;
         (binder.included_relations(), bound)
     };
 
@@ -100,12 +102,22 @@ pub fn gen_sink_plan(
         conn_id.map(ConnectionId)
     };
 
+    let emit_on_window_close = stmt.emit_mode == Some(EmitMode::OnWindowClose);
+    if emit_on_window_close {
+        context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
+    }
+
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
         plan_root.set_out_names(col_names)?;
     };
 
-    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, with_options)?;
+    let sink_plan = plan_root.gen_sink_plan(
+        sink_table_name,
+        definition,
+        with_options,
+        emit_on_window_close,
+    )?;
     let sink_desc = sink_plan.sink_desc().clone();
     let sink_plan: PlanRef = sink_plan.into();
 
@@ -113,7 +125,7 @@ pub fn gen_sink_plan(
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Sink:");
-        ctx.trace(sink_plan.explain_to_string().unwrap());
+        ctx.trace(sink_plan.explain_to_string());
     }
 
     let dependent_relations =
@@ -127,7 +139,7 @@ pub fn gen_sink_plan(
         dependent_relations.into_iter().collect_vec(),
     );
 
-    Ok((sink_plan, sink_catalog))
+    Ok((query, sink_plan, sink_catalog))
 }
 
 pub async fn handle_create_sink(
@@ -139,8 +151,15 @@ pub async fn handle_create_sink(
     session.check_relation_name_duplicated(stmt.sink_name.clone())?;
 
     let (sink, graph) = {
-        let context = OptimizerContext::from_handler_args(handle_args);
-        let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
+        let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
+        let (query, plan, sink) = gen_sink_plan(&session, context.clone(), stmt)?;
+        let has_order_by = !query.order_by.is_empty();
+        if has_order_by {
+            context.warn_to_user(
+                r#"The ORDER BY clause in the CREATE SINK statement has no effect at all."#
+                    .to_string(),
+            );
+        }
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()
@@ -179,7 +198,7 @@ pub mod tests {
         let sql = format!(
             r#"CREATE SOURCE t1
     WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}';"#,
+    ROW FORMAT PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;

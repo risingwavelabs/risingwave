@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 25] = [
+const CONFIG_KEYS: [&str; 26] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -60,6 +60,7 @@ const CONFIG_KEYS: [&str; 25] = [
     "RW_ENABLE_JOIN_ORDERING",
     "SERVER_VERSION",
     "SERVER_VERSION_NUM",
+    "RW_FORCE_SPLIT_DISTINCT_AGG",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -89,6 +90,7 @@ const STREAMING_ENABLE_BUSHY_JOIN: usize = 21;
 const RW_ENABLE_JOIN_ORDERING: usize = 22;
 const SERVER_VERSION: usize = 23;
 const SERVER_VERSION_NUM: usize = 24;
+const FORCE_SPLIT_DISTINCT_AGG: usize = 25;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -143,7 +145,7 @@ impl<const NAME: usize, const DEFAULT: bool> Deref for ConfigBool<NAME, DEFAULT>
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, PartialEq, Eq)]
 struct ConfigString<const NAME: usize>(String);
 
 impl<const NAME: usize> Deref for ConfigString<NAME> {
@@ -294,6 +296,12 @@ type BatchParallelism = ConfigU64<BATCH_PARALLELISM, 0>;
 type EnableJoinOrdering = ConfigBool<RW_ENABLE_JOIN_ORDERING, true>;
 type ServerVersion = ConfigString<SERVER_VERSION>;
 type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 80_300>;
+type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
+
+/// Report status or notice to caller.
+pub trait ConfigReporter {
+    fn report_status(&mut self, key: &str, new_val: String);
+}
 
 #[derive(Educe)]
 #[educe(Default)]
@@ -374,6 +382,9 @@ pub struct ConfigMap {
     /// rather than only tree structured query plans.
     enable_share_plan: EnableSharePlan,
 
+    /// Enable split distinct agg
+    force_split_distinct_agg: ForceSplitDistinctAgg,
+
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
     interval_style: IntervalStyle,
 
@@ -386,7 +397,12 @@ pub struct ConfigMap {
 }
 
 impl ConfigMap {
-    pub fn set(&mut self, key: &str, val: Vec<String>) -> Result<(), RwError> {
+    pub fn set(
+        &mut self,
+        key: &str,
+        val: Vec<String>,
+        mut reporter: impl ConfigReporter,
+    ) -> Result<(), RwError> {
         info!(%key, ?val, "set config");
         let val = val.iter().map(AsRef::as_ref).collect_vec();
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
@@ -398,7 +414,11 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
             self.extra_float_digit = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
-            self.application_name = val.as_slice().try_into()?;
+            let new_application_name = val.as_slice().try_into()?;
+            if self.application_name != new_application_name {
+                self.application_name = new_application_name.clone();
+                reporter.report_status(ApplicationName::entry_name(), new_application_name.0);
+            }
         } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
             self.date_style = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
@@ -439,6 +459,8 @@ impl ConfigMap {
             if *self.force_two_phase_agg {
                 self.enable_two_phase_agg = ConfigBool(true);
             }
+        } else if key.eq_ignore_ascii_case(ForceSplitDistinctAgg::entry_name()) {
+            self.force_split_distinct_agg = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableSharePlan::entry_name()) {
             self.enable_share_plan = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(IntervalStyle::entry_name()) {
@@ -480,7 +502,7 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
             Ok(self.query_epoch.to_string())
         } else if key.eq_ignore_ascii_case(Timezone::entry_name()) {
-            Ok(self.timezone.clone())
+            Ok(self.timezone.to_string())
         } else if key.eq_ignore_ascii_case(StreamingParallelism::entry_name()) {
             Ok(self.streaming_parallelism.to_string())
         } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
@@ -500,9 +522,13 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
             Ok(self.batch_parallelism.to_string())
         } else if key.eq_ignore_ascii_case(ServerVersion::entry_name()) {
-            Ok(self.server_version.clone())
+            Ok(self.server_version.to_string())
         } else if key.eq_ignore_ascii_case(ServerVersionNum::entry_name()) {
             Ok(self.server_version_num.to_string())
+        } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
+            Ok(self.application_name.to_string())
+        } else if key.eq_ignore_ascii_case(ForceSplitDistinctAgg::entry_name()) {
+            Ok(self.force_split_distinct_agg.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -630,6 +656,11 @@ impl ConfigMap {
                 setting : self.server_version_num.to_string(),
                 description : String::from("The version number of the server.")
             },
+            VariableInfo{
+                name : ForceSplitDistinctAgg::entry_name().to_lowercase(),
+                setting : self.force_split_distinct_agg.to_string(),
+                description : String::from("Enable split the distinct aggregation.")
+            },
         ]
     }
 
@@ -713,6 +744,10 @@ impl ConfigMap {
 
     pub fn get_enable_two_phase_agg(&self) -> bool {
         *self.enable_two_phase_agg
+    }
+
+    pub fn get_force_split_distinct_agg(&self) -> bool {
+        *self.force_split_distinct_agg
     }
 
     pub fn get_force_two_phase_agg(&self) -> bool {

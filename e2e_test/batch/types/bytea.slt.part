@@ -87,3 +87,33 @@ query T
 SELECT 'De\\678dBeEf'::bytea;
 ----
 \x44655c3637386442654566
+
+query T
+select 'a'::bytea = '\x61';
+----
+t
+
+query T
+select '\x31'::bytea > '1'::bytea;
+----
+f
+
+query TI
+select 'a'::varchar::bytea, octet_length('a'::varchar::bytea);
+----
+\x61 1
+
+query TI
+select 'a'::bytea::varchar, octet_length('a'::bytea::varchar);
+----
+\x61 4
+
+query II
+select bit_length('😇'), bit_length('😇'::bytea);
+----
+32 32
+
+query II
+select length('😇'), length('😇'::bytea);
+----
+1 4

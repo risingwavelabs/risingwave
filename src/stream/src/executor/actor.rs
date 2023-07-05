@@ -162,14 +162,20 @@ where
     async fn run_consumer(self) -> StreamResult<()> {
         let id = self.actor_context.id;
 
-        let span_name = format!("actor_poll_{:03}", id);
-        let mut span = tracing::trace_span!(
-            "actor_poll",
-            otel.name = span_name.as_str(),
-            next = id,
-            next = "Outbound",
-            epoch = -1
-        );
+        let span_name = format!("Actor {id}");
+
+        let new_span = |epoch: Option<EpochPair>| {
+            tracing::info_span!(
+                parent: None,
+                "actor",
+                "otel.name" = span_name,
+                actor_id = id,
+                prev_epoch = epoch.map(|e| e.prev),
+                curr_epoch = epoch.map(|e| e.curr),
+            )
+        };
+        let mut span = new_span(None);
+
         let mut last_epoch: Option<EpochPair> = None;
         let mut stream = Box::pin(Box::new(self.consumer).execute());
 
@@ -177,7 +183,7 @@ where
         let result = loop {
             let barrier = match stream
                 .try_next()
-                .instrument(span)
+                .instrument(span.clone())
                 .instrument_await(
                     last_epoch.map_or("Epoch <initial>".into(), |e| format!("Epoch {}", e.curr)),
                 )
@@ -198,14 +204,7 @@ where
 
             // Tracing related work
             last_epoch = Some(barrier.epoch);
-
-            span = tracing::trace_span!(
-                "actor_poll",
-                otel.name = span_name.as_str(),
-                next = id,
-                next = "Outbound",
-                epoch = barrier.epoch.curr
-            );
+            span = barrier.tracing_context().attach(new_span(last_epoch));
         };
 
         spawn_blocking_drop_stream(stream).await;

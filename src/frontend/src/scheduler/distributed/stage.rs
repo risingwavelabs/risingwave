@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::mem;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
@@ -46,7 +47,7 @@ use tokio::spawn;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tonic::Streaming;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, warn, Instrument};
 use StageEvent::Failed;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -175,6 +176,7 @@ impl StageExecution {
         let tasks = (0..stage.parallelism.unwrap())
             .map(|task_id| (task_id, TaskStatusHolder::new(task_id)))
             .collect();
+
         Self {
             epoch,
             stage,
@@ -217,7 +219,14 @@ impl StageExecution {
                 // Change state before spawn runner.
                 *s = StageState::Started;
 
-                spawn(async move { runner.run(receiver).await });
+                let span = tracing::info_span!(
+                    "stage",
+                    "otel.name" = format!("Stage {}-{}", self.stage.query_id.id, self.stage.id),
+                    query_id = self.stage.query_id.id,
+                    stage_id = self.stage.id,
+                );
+                spawn(async move { runner.run(receiver).instrument(span).await });
+
                 tracing::trace!(
                     "Stage {:?}-{:?} started.",
                     self.stage.query_id.id,
@@ -638,19 +647,25 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_streaming_vnode_mapping(
+    fn get_table_dml_vnode_mapping(
         &self,
         table_id: &TableId,
     ) -> SchedulerResult<ParallelUnitMapping> {
-        let fragment_id = self
-            .catalog_reader
-            .read_guard()
+        let guard = self.catalog_reader.read_guard();
+
+        let table = guard
             .get_table_by_id(table_id)
-            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?
-            .fragment_id;
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
+
+        let fragment_id = match table.dml_fragment_id.as_ref() {
+            Some(dml_fragment_id) => dml_fragment_id,
+            // Backward compatibility for those table without `dml_fragment_id`.
+            None => &table.fragment_id,
+        };
+
         self.worker_node_manager
             .manager
-            .get_streaming_fragment_mapping(&fragment_id)
+            .get_streaming_fragment_mapping(fragment_id)
     }
 
     fn choose_worker(
@@ -661,7 +676,7 @@ impl StageRunner {
     ) -> SchedulerResult<Option<WorkerNode>> {
         let plan_node = plan_fragment.root.as_ref().expect("fail to get plan node");
         let vnode_mapping = match dml_table_id {
-            Some(table_id) => Some(self.get_streaming_vnode_mapping(&table_id)?),
+            Some(table_id) => Some(self.get_table_dml_vnode_mapping(&table_id)?),
             None => {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)
@@ -816,21 +831,20 @@ impl StageRunner {
         plan_fragment: PlanFragment,
         worker: Option<WorkerNode>,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
-        let worker_node_addr = worker
-            .unwrap_or(self.worker_node_manager.next_random_worker()?)
-            .host
-            .unwrap();
-
+        let mut worker = worker.unwrap_or(self.worker_node_manager.next_random_worker()?);
+        let worker_node_addr = worker.host.take().unwrap();
         let compute_client = self
             .compute_client_pool
             .get_by_addr((&worker_node_addr).into())
             .await
+            .inspect_err(|_| self.mask_failed_serving_worker(&worker))
             .map_err(|e| anyhow!(e))?;
 
         let t_id = task_id.task_id;
         let stream_status = compute_client
             .create_task(task_id, plan_fragment, self.epoch.clone())
             .await
+            .inspect_err(|_| self.mask_failed_serving_worker(&worker))
             .map_err(|e| anyhow!(e))?
             .fuse();
 
@@ -963,5 +977,24 @@ impl StageRunner {
 
     fn is_root_stage(&self) -> bool {
         self.stage.id == 0
+    }
+
+    fn mask_failed_serving_worker(&self, worker: &WorkerNode) {
+        if !worker.property.as_ref().map_or(false, |p| p.is_serving) {
+            return;
+        }
+        let duration = std::cmp::max(
+            Duration::from_secs(
+                self.ctx
+                    .session
+                    .env()
+                    .meta_config()
+                    .max_heartbeat_interval_secs as _,
+            ) / 10,
+            Duration::from_secs(1),
+        );
+        self.worker_node_manager
+            .manager
+            .mask_worker_node(worker.id, duration);
     }
 }

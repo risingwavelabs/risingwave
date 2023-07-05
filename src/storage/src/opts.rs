@@ -73,6 +73,14 @@ pub struct StorageOpts {
     pub backup_storage_directory: String,
     /// max time which wait for preload. 0 represent do not do any preload.
     pub max_preload_wait_time_mill: u64,
+    /// object store streaming read timeout.
+    pub object_store_streaming_read_timeout_ms: u64,
+    /// object store streaming upload timeout.
+    pub object_store_streaming_upload_timeout_ms: u64,
+    /// object store upload timeout.
+    pub object_store_upload_timeout_ms: u64,
+    /// object store read timeout.
+    pub object_store_read_timeout_ms: u64,
 }
 
 impl Default for StorageOpts {
@@ -116,6 +124,14 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             file_cache_meta_fallocate_unit_mb: c.storage.file_cache.cache_meta_fallocate_unit_mb,
             file_cache_file_max_write_size_mb: c.storage.file_cache.cache_file_max_write_size_mb,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
+            object_store_streaming_read_timeout_ms: c
+                .storage
+                .object_store_streaming_read_timeout_ms,
+            object_store_streaming_upload_timeout_ms: c
+                .storage
+                .object_store_streaming_upload_timeout_ms,
+            object_store_read_timeout_ms: c.storage.object_store_read_timeout_ms,
+            object_store_upload_timeout_ms: c.storage.object_store_upload_timeout_ms,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),
         }

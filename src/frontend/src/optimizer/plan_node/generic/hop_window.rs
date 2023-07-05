@@ -349,8 +349,8 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
                 input_schema: self.input.schema(),
             }),
         ));
-        out.push(("slide", Pretty::debug(&self.window_slide)));
-        out.push(("size", Pretty::debug(&self.window_size)));
+        out.push(("slide", Pretty::display(&self.window_slide)));
+        out.push(("size", Pretty::display(&self.window_size)));
         if self
             .output_indices
             .iter()
@@ -380,12 +380,6 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
             ));
         }
         out
-    }
-
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        self.fmt_fields_with_builder(&mut builder);
-        builder.finish()
     }
 }
 

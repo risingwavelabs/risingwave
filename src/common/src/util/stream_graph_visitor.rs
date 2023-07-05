@@ -179,6 +179,10 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "EowcOverWindow");
             }
 
+            NodeBody::OverWindow(node) => {
+                always!(node.state_table, "OverWindow");
+            }
+
             // Sort
             NodeBody::Sort(node) => {
                 always!(node.state_table, "Sort");
@@ -186,7 +190,7 @@ fn visit_stream_node_tables_inner<F>(
 
             // Chain
             NodeBody::Chain(node) => {
-                always!(node.state_table, "Chain")
+                optional!(node.state_table, "Chain")
             }
 
             // Note: add internal tables for new nodes here.

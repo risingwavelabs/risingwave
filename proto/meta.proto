@@ -165,10 +165,48 @@ message ListTableFragmentsResponse {
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
 
+message ListTableFragmentStatesRequest {}
+
+message ListTableFragmentStatesResponse {
+  message TableFragmentState {
+    uint32 table_id = 1;
+    TableFragments.State state = 2;
+  }
+  repeated TableFragmentState states = 1;
+}
+
+message ListFragmentDistributionRequest {}
+
+message ListFragmentDistributionResponse {
+  message FragmentDistribution {
+    uint32 fragment_id = 1;
+    uint32 table_id = 2;
+    TableFragments.Fragment.FragmentDistributionType distribution_type = 3;
+    repeated uint32 state_table_ids = 4;
+    repeated uint32 upstream_fragment_ids = 5;
+  }
+  repeated FragmentDistribution distributions = 1;
+}
+
+message ListActorStatesRequest {}
+
+message ListActorStatesResponse {
+  message ActorState {
+    uint32 actor_id = 1;
+    uint32 fragment_id = 2;
+    uint32 parallel_unit_id = 3;
+    TableFragments.ActorStatus.ActorState state = 4;
+  }
+  repeated ActorState states = 1;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
+  rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
+  rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
+  rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
 }
 
 // Below for cluster service.
@@ -178,6 +216,7 @@ message AddWorkerNodeRequest {
     uint64 worker_node_parallelism = 1;
     bool is_streaming = 2;
     bool is_serving = 3;
+    bool is_unschedulable = 4;
   }
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
@@ -208,6 +247,22 @@ message DeleteWorkerNodeResponse {
   common.Status status = 1;
 }
 
+// Mark CN as schedulable or as unschedulable
+message UpdateWorkerNodeSchedulabilityRequest {
+  enum Schedulability {
+    UNSPECIFIED = 0;
+    SCHEDULABLE = 1;
+    UNSCHEDULABLE = 2;
+  }
+
+  repeated uint32 worker_ids = 1;
+  Schedulability schedulability = 2;
+}
+
+message UpdateWorkerNodeSchedulabilityResponse {
+  common.Status status = 1;
+}
+
 message ListAllNodesRequest {
   common.WorkerType worker_type = 1;
   // Whether to include nodes still starting
@@ -223,6 +278,7 @@ service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
+  rpc UpdateWorkerNodeSchedulability(UpdateWorkerNodeSchedulabilityRequest) returns (UpdateWorkerNodeSchedulabilityResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 
@@ -312,6 +368,7 @@ message SubscribeResponse {
     RelationGroup relation_group = 21;
     catalog.Connection connection = 22;
     FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
+    hummock.HummockVersionStats hummock_stats = 24;
   }
 }
 
@@ -337,11 +394,12 @@ message GetClusterInfoResponse {
   uint64 revision = 5;
 }
 
+message Reschedule {
+  repeated uint32 added_parallel_units = 1;
+  repeated uint32 removed_parallel_units = 2;
+}
+
 message RescheduleRequest {
-  message Reschedule {
-    repeated uint32 added_parallel_units = 1;
-    repeated uint32 removed_parallel_units = 2;
-  }
   // reschedule plan for each fragment
   map<uint32, Reschedule> reschedules = 1;
   uint64 revision = 2;
@@ -352,12 +410,41 @@ message RescheduleResponse {
   uint64 revision = 2;
 }
 
+message GetReschedulePlanRequest {
+  uint64 revision = 1;
+
+  message WorkerChanges {
+    repeated uint32 include_worker_ids = 1;
+    repeated uint32 exclude_worker_ids = 2;
+  }
+
+  message StableResizePolicy {
+    map<uint32, WorkerChanges> fragment_worker_changes = 1;
+  }
+
+  oneof policy {
+    // The StableResizePolicy will generate a stable ReschedulePlan, without altering the distribution on WorkerId that's not involved.
+    // Note that this "Stable" doesn't refer to the "determinacy" of the algorithm.
+    // Multiple repeated calls may yield different ReschedulePlan results.
+    StableResizePolicy stable_resize_policy = 2;
+  }
+}
+
+message GetReschedulePlanResponse {
+  uint64 revision = 1;
+  // reschedule plan for each fragment
+  map<uint32, Reschedule> reschedules = 2;
+  // todo, refactor needed
+  bool success = 3;
+}
+
 service ScaleService {
   // TODO(Kexiang): delete them when config change interface is finished
   rpc Pause(PauseRequest) returns (PauseResponse);
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
+  rpc GetReschedulePlan(GetReschedulePlanRequest) returns (GetReschedulePlanResponse);
 }
 
 message MembersRequest {}
@@ -410,4 +497,15 @@ message SetSystemParamResponse {}
 service SystemParamsService {
   rpc GetSystemParams(GetSystemParamsRequest) returns (GetSystemParamsResponse);
   rpc SetSystemParam(SetSystemParamRequest) returns (SetSystemParamResponse);
+}
+
+message GetServingVnodeMappingsRequest {}
+
+message GetServingVnodeMappingsResponse {
+  repeated FragmentParallelUnitMapping mappings = 1;
+  map<uint32, uint32> fragment_to_table = 2;
+}
+
+service ServingService {
+  rpc GetServingVnodeMappings(GetServingVnodeMappingsRequest) returns (GetServingVnodeMappingsResponse);
 }

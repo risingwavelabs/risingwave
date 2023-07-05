@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::StackTraceResponse;
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_rpc_client::{CompactorClient, ComputeClientPool};
 
 use crate::CtlContext;
 
@@ -41,6 +41,7 @@ pub async fn trace(context: &CtlContext) -> anyhow::Result<()> {
         let StackTraceResponse {
             actor_traces,
             rpc_traces,
+            ..
         } = client.stack_trace().await?;
 
         all_actor_traces.extend(actor_traces);
@@ -62,6 +63,24 @@ pub async fn trace(context: &CtlContext) -> anyhow::Result<()> {
         println!("--- RPC Traces ---");
         for (key, trace) in all_rpc_traces {
             println!(">> RPC {key}\n{trace}");
+        }
+    }
+
+    let compactor_nodes = meta_client.list_worker_nodes(WorkerType::Compactor).await?;
+    let mut all_compaction_task_traces = BTreeMap::new();
+    for compactor in compactor_nodes {
+        let addr: HostAddr = compactor.get_host().unwrap().into();
+        let client = CompactorClient::new(addr).await?;
+        let StackTraceResponse {
+            compaction_task_traces,
+            ..
+        } = client.stack_trace().await?;
+        all_compaction_task_traces.extend(compaction_task_traces);
+    }
+    if !all_compaction_task_traces.is_empty() {
+        println!("--- Compactor Traces ---");
+        for (key, trace) in all_compaction_task_traces {
+            println!(">> Compaction Task {key}\n{trace}");
         }
     }
 

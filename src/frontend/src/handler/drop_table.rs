@@ -42,10 +42,9 @@ pub async fn handle_drop_table(
             Ok((t, s)) => (t, s),
             Err(e) => {
                 return if if_exists {
-                    Ok(RwPgResponse::empty_result_with_notice(
-                        StatementType::DROP_TABLE,
-                        format!("table \"{}\" does not exist, skipping", table_name),
-                    ))
+                    Ok(RwPgResponse::builder(StatementType::DROP_TABLE)
+                        .notice(format!("table \"{}\" does not exist, skipping", table_name))
+                        .into())
                 } else {
                     Err(e.into())
                 }

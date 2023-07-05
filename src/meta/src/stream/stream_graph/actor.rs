@@ -606,7 +606,7 @@ impl ActorGraphBuilder {
     pub fn new(
         fragment_graph: CompleteStreamFragmentGraph,
         cluster_info: StreamingClusterInfo,
-        default_parallelism: Option<NonZeroUsize>,
+        default_parallelism: NonZeroUsize,
     ) -> MetaResult<Self> {
         let existing_distributions = fragment_graph.existing_distribution();
 
@@ -614,7 +614,7 @@ impl ActorGraphBuilder {
         let distributions = schedule::Scheduler::new(
             cluster_info.parallel_units.values().cloned(),
             default_parallelism,
-        )?
+        )
         .schedule(&fragment_graph)?;
 
         Ok(Self {
@@ -679,6 +679,19 @@ impl ActorGraphBuilder {
             external_changes,
             external_locations,
         } = self.build_actor_graph(id_gen)?;
+
+        for parallel_unit_id in external_locations.values() {
+            if let Some(parallel_unit) = self
+                .cluster_info
+                .unschedulable_parallel_units
+                .get(parallel_unit_id)
+            {
+                bail!(
+                    "The worker {} where the associated upstream is located is unscheduable",
+                    parallel_unit.worker_node_id
+                );
+            }
+        }
 
         // Serialize the graph into a map of sealed fragments.
         let graph = {

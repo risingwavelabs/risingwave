@@ -29,7 +29,7 @@ use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Instrument};
 
 use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
@@ -154,10 +154,16 @@ impl QueryExecution {
                     query_metrics,
                 };
 
+                let span = tracing::info_span!(
+                    "distributed_execute",
+                    query_id = self.query.query_id.id,
+                    epoch = ?pinned_snapshot.get_batch_query_epoch(),
+                );
+
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run(pinned_snapshot).await });
+                tokio::spawn(async move { runner.run(pinned_snapshot).instrument(span).await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -599,8 +605,9 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(0, 0),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
         };
         let worker2 = WorkerNode {
@@ -613,8 +620,9 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(8, 1),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
         };
         let worker3 = WorkerNode {
@@ -627,8 +635,9 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(16, 2),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
         };
         let workers = vec![worker1, worker2, worker3];

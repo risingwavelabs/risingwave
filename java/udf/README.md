@@ -163,10 +163,10 @@ _JAVA_OPTIONS="--add-opens=java.base/java.nio=ALL-UNNAMED" mvn exec:java -Dexec.
 
 ```sql
 create function gcd(int, int) returns int
-language java as gcd using link 'http://localhost:8815';
+as gcd using link 'http://localhost:8815';
 
 create function series(int) returns table (x int)
-language java as series using link 'http://localhost:8815';
+as series using link 'http://localhost:8815';
 ```
 
 For more detailed information and examples, please refer to the official RisingWave [documentation](https://www.risingwave.dev/docs/current/user-defined-functions/#4-declare-your-functions-in-risingwave).
@@ -185,20 +185,25 @@ select * from series(10);
 
 The RisingWave Java UDF SDK supports the following data types:
 
-| SQL Type  | Java Type          | Notes              |
-| --------- | ------------------ | ------------------ |
-| SMALLINT  | short, Short       |                    |
-| INT       | int, Integer       |                    |
-| BIGINT    | long, Long         |                    |
-| FLOAT     | float, Float       |                    |
-| DOUBLE    | double, Double     |                    |
-| DECIMAL   | BigDecimal         |                    |
-| VARCHAR   | String             |                    |
-| BYTEA     | byte[]             |                    |
-| JSONB     | String             | Use `@DataTypeHint("JSONB") String` as the type. See [example](#jsonb). |
-| JSONB[]   | String[]           | Use `@DataTypeHint("JSONB[]") String[]` as the type. |
-| STRUCT<>  | user-defined class | Define a data class as the type. See [example](#struct-type). |
-| ...others |                    | Not supported yet. |
+| SQL Type         | Java Type                               | Notes              |
+| ---------------- | --------------------------------------- | ------------------ |
+| BOOLEAN          | boolean, Boolean                        |                    |
+| SMALLINT         | short, Short                            |                    |
+| INT              | int, Integer                            |                    |
+| BIGINT           | long, Long                              |                    |
+| REAL             | float, Float                            |                    |
+| DOUBLE PRECISION | double, Double                          |                    |
+| DECIMAL          | BigDecimal                              |                    |
+| DATE             | java.time.LocalDate                     |                    |
+| TIME             | java.time.LocalTime                     |                    |
+| TIMESTAMP        | java.time.LocalDateTime                 |                    |
+| INTERVAL         | com.risingwave.functions.PeriodDuration |                    |
+| VARCHAR          | String                                  |                    |
+| BYTEA            | byte[]                                  |                    |
+| JSONB            | String                                  | Use `@DataTypeHint("JSONB") String` as the type. See [example](#jsonb). |
+| JSONB[]          | String[]                                | Use `@DataTypeHint("JSONB[]") String[]` as the type.                    |
+| STRUCT<>         | user-defined class                      | Define a data class as the type. See [example](#struct-type).           |
+| ...others        |                                         | Not supported yet. |
 
 ### JSONB
 
@@ -223,7 +228,7 @@ public class JsonbAccess implements ScalarFunction {
 
 ```sql
 create function jsonb_access(jsonb, int) returns jsonb
-language java as jsonb_access using link 'http://localhost:8815';
+as jsonb_access using link 'http://localhost:8815';
 ```
 
 ### Struct Type
@@ -248,7 +253,7 @@ public static class IpPort implements ScalarFunction {
 
 ```sql
 create function ip_port(varchar) returns struct<host varchar, port smallint>
-language java as ip_port using link 'http://localhost:8815';
+as ip_port using link 'http://localhost:8815';
 ```
 
 ## Full Example

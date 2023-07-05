@@ -134,7 +134,7 @@ Use the `./risedev configure` command to start the interactive configuration mod
 - Prometheus and Grafana: Enable this component to view RisingWave metrics. You can view the metrics through a built-in Grafana dashboard.
 - Etcd: Enable this component if you want to persist metadata node data.
 - Kafka: Enable this component if you want to create a streaming source from a Kafka topic.
-- Jaeger: Use this component for tracing.
+- Grafana Tempo: Use this component for tracing.
 
 To manually add those components into the cluster, you will need to configure RiseDev to download them first. For example,
 
@@ -248,13 +248,15 @@ for more information.
 
 ### Monitoring
 
-Uncomment `grafana` and `prometheus` lines in `risedev.yml` to enable Grafana and Prometheus services. 
+Uncomment `grafana` and `prometheus` lines in `risedev.yml` to enable Grafana and Prometheus services.
 
 ### Tracing
 
 Compute nodes support streaming tracing. Tracing is not enabled by default. You need to
-use `./risedev configure` to download the tracing components first. After that, you will need to uncomment `jaeger`
+use `./risedev configure` to download the tracing components first. After that, you will need to uncomment `tempo`
 service in `risedev.yml` and start a new dev cluster to allow the components to work.
+
+Traces are visualized in Grafana. You may also want to uncomment `grafana` service in `risedev.yml` to enable it.
 
 ### Dashboard
 

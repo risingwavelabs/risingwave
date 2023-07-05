@@ -184,6 +184,11 @@ impl DataChunk {
         &self.columns
     }
 
+    /// Returns the data types of all columns.
+    pub fn data_types(&self) -> Vec<DataType> {
+        self.columns.iter().map(|col| col.data_type()).collect()
+    }
+
     /// Divides one chunk into two at an column index.
     ///
     /// # Panics
@@ -748,6 +753,7 @@ impl DataChunkTestExt for DataChunk {
                 "F" => DataType::Float64,
                 "f" => DataType::Float32,
                 "TS" => DataType::Timestamp,
+                "TZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
                 "SRL" => DataType::Serial,
                 array if array.starts_with('{') && array.ends_with('}') => {

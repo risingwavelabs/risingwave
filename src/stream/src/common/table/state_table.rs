@@ -31,7 +31,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
+use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
@@ -42,12 +42,13 @@ use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use risingwave_storage::StateStore;
-use tracing::trace;
+use tracing::{trace, Instrument};
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
@@ -217,16 +218,6 @@ where
             .map(|val| *val as usize)
             .collect_vec();
 
-        let data_types = input_value_indices
-            .iter()
-            .map(|idx| table_columns[*idx].data_type.clone())
-            .collect_vec();
-
-        let column_ids = input_value_indices
-            .iter()
-            .map(|idx| table_columns[*idx].column_id)
-            .collect_vec();
-
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
 
         // if value_indices is the no shuffle full columns.
@@ -238,7 +229,10 @@ where
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
 
-        let row_serde = SD::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let row_serde = SD::new(
+            Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
+            Arc::from(table_columns.into_boxed_slice()),
+        );
         assert_eq!(
             row_serde.kind().is_column_aware(),
             table_catalog.version.is_some()
@@ -397,29 +391,19 @@ where
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
-        let data_types = match &value_indices {
-            Some(value_indices) => value_indices
-                .iter()
-                .map(|idx| table_columns[*idx].data_type.clone())
-                .collect_vec(),
-            None => table_columns
-                .iter()
-                .map(|c| c.data_type.clone())
-                .collect_vec(),
-        };
-
-        let column_ids = match &value_indices {
-            Some(value_indices) => value_indices
-                .iter()
-                .map(|idx| table_columns[*idx].column_id)
-                .collect_vec(),
-            None => table_columns.iter().map(|c| c.column_id).collect_vec(),
-        };
         Self {
             table_id,
             local_store: local_state_store,
             pk_serde,
-            row_serde: SD::new(&column_ids, Arc::from(data_types.into_boxed_slice())),
+            row_serde: SD::new(
+                Arc::from(
+                    value_indices
+                        .clone()
+                        .unwrap_or_else(|| (0..table_columns.len()).collect_vec())
+                        .into_boxed_slice(),
+                ),
+                Arc::from(table_columns.into_boxed_slice()),
+            ),
             pk_indices,
             dist_key_in_pk_indices,
             prefix_hint_len: 0,
@@ -790,7 +774,9 @@ where
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
-        self.seal_current_epoch(new_epoch.curr).await
+        self.seal_current_epoch(new_epoch.curr)
+            .instrument(tracing::info_span!("state_table_commit"))
+            .await
     }
 
     // TODO(st1page): maybe we should extract a pub struct to do it

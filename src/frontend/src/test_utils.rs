@@ -24,7 +24,7 @@ use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
+    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -36,6 +36,9 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
 use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -47,14 +50,13 @@ use tempfile::{Builder, NamedTempFile};
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId};
-use crate::handler::extended_handle::{Portal, PrepareStatement};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserId;
-use crate::{FrontendOpts, PgResponseStream};
+use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
@@ -62,7 +64,7 @@ pub struct LocalFrontend {
     env: FrontendEnv,
 }
 
-impl SessionManager<PgResponseStream, PrepareStatement, Portal> for LocalFrontend {
+impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
     fn connect(
@@ -128,7 +130,7 @@ impl LocalFrontend {
 
     pub async fn get_explain_output(&self, sql: impl Into<String>) -> String {
         let mut rsp = self.run_sql(sql).await.unwrap();
-        assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
+        assert_eq!(rsp.stmt_type(), StatementType::EXPLAIN);
         let mut res = String::new();
         #[for_await]
         for row_set in rsp.values_stream() {
@@ -167,7 +169,7 @@ impl LocalFrontend {
 }
 
 pub async fn get_explain_output(mut rsp: RwPgResponse) -> String {
-    if rsp.get_stmt_type() != StatementType::EXPLAIN {
+    if rsp.stmt_type() != StatementType::EXPLAIN {
         panic!("RESPONSE INVALID: {rsp:?}");
     }
     let mut res = String::new();
@@ -202,6 +204,8 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner)
             .await?;
         self.create_schema(database_id, PG_CATALOG_SCHEMA_NAME, owner)
+            .await?;
+        self.create_schema(database_id, RW_CATALOG_SCHEMA_NAME, owner)
             .await?;
         Ok(())
     }
@@ -456,12 +460,19 @@ impl MockCatalogWriter {
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
         });
+        catalog.write().create_schema(&PbSchema {
+            id: 3,
+            name: RW_CATALOG_SCHEMA_NAME.to_string(),
+            database_id: 0,
+            owner: DEFAULT_SUPER_USER_ID,
+        });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(1_u32, 0_u32);
         map.insert(2_u32, 0_u32);
+        map.insert(3_u32, 0_u32);
         Self {
             catalog,
-            id: AtomicU32::new(2),
+            id: AtomicU32::new(3),
             table_id_to_schema_id: Default::default(),
             schema_id_to_database_id: RwLock::new(map),
         }
@@ -721,6 +732,18 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _table_ids: &[u32],
     ) -> RpcResult<HashMap<u32, TableFragmentInfo>> {
         Ok(HashMap::default())
+    }
+
+    async fn list_table_fragment_states(&self) -> RpcResult<Vec<TableFragmentState>> {
+        Ok(vec![])
+    }
+
+    async fn list_fragment_distribution(&self) -> RpcResult<Vec<FragmentDistribution>> {
+        Ok(vec![])
+    }
+
+    async fn list_actor_states(&self) -> RpcResult<Vec<ActorState>> {
+        Ok(vec![])
     }
 
     async fn unpin_snapshot(&self) -> RpcResult<()> {

@@ -22,7 +22,7 @@ mod hop_window;
 mod insert;
 mod join;
 mod limit;
-mod manager;
+mod managed;
 mod merge_sort_exchange;
 mod order_by;
 mod project;
@@ -51,7 +51,7 @@ pub use hop_window::*;
 pub use insert::*;
 pub use join::*;
 pub use limit::*;
-pub use manager::*;
+pub use managed::*;
 pub use merge_sort_exchange::*;
 pub use order_by::*;
 pub use project::*;
@@ -229,10 +229,9 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,
         }
         .await?;
-        let input_desc = real_executor.identity().to_string();
+
         Ok(Box::new(ManagedExecutor::new(
             real_executor,
-            input_desc,
             self.shutdown_rx.clone(),
         )) as BoxedExecutor)
     }

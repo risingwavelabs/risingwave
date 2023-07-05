@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, INITIAL_TABLE_VERSION_ID};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -58,24 +56,15 @@ impl StreamDml {
     }
 }
 
-impl fmt::Display for StreamDml {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamDml {{ columns: {} }}",
-            format_args!("[{}]", &self.column_names().join(", "))
-        )
-    }
-}
 impl Distill for StreamDml {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let col = self
             .column_names()
             .iter()
             .map(|n| Pretty::from(n.to_string()))
             .collect();
         let col = Pretty::Array(col);
-        Pretty::childless_record("StreamDml", vec![("columns", col)])
+        childless_record("StreamDml", vec![("columns", col)])
     }
 }
 
