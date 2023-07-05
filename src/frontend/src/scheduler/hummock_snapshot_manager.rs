@@ -184,9 +184,9 @@ impl HummockSnapshotManager {
                 let need_unpin = last_unpin_time.elapsed().as_secs() >= UNPIN_INTERVAL_SECS;
                 if !pin_batches.is_empty() || need_unpin {
                     // Note: If we want stronger consistency, we should use
-                    // `get_epoch_for_query_from_rpc`.
+                    // `get_epoch_for_txn_from_rpc`.
                     let epoch = manager
-                        .get_epoch_for_query_from_push(&mut pin_batches)
+                        .get_epoch_for_txn_from_push(&mut pin_batches)
                         .committed_epoch;
                     if need_unpin && epoch > 0 {
                         manager.unpin_snapshot_before(epoch);
@@ -205,11 +205,11 @@ impl HummockSnapshotManager {
         let (sender, rc) = once_channel();
         let msg = EpochOperation::RequestEpoch { txn_id, sender };
         self.sender.send(msg).map_err(|_| {
-            SchedulerError::Internal(anyhow!("Failed to get epoch for query: {:?}", txn_id,))
+            SchedulerError::Internal(anyhow!("Failed to get epoch for transaction: {:?}", txn_id))
         })?;
         let snapshot = rc.await.unwrap_or_else(|e| {
             Err(SchedulerError::Internal(anyhow!(
-                "Failed to get epoch for query: {:?}, the rpc thread may panic: {:?}",
+                "Failed to get epoch for transaction: {:?}, the rpc thread may panic: {:?}",
                 txn_id,
                 e
             )))
@@ -236,7 +236,7 @@ impl HummockSnapshotManager {
 }
 
 struct HummockSnapshotManagerCore {
-    /// Record the query ids that pin each snapshot.
+    /// Record the transaction ids that pin each snapshot.
     /// Send an `unpin_snapshot` RPC when a snapshot is not pinned any more.
     epoch_to_txn_ids: BTreeMap<u64, HashSet<TxnId>>,
     meta_client: Arc<dyn FrontendMetaClient>,
@@ -257,18 +257,18 @@ impl HummockSnapshotManagerCore {
 
     /// Retrieve max committed epoch and max current epoch from locally cached value, which is
     /// maintained by meta's notification service.
-    fn get_epoch_for_query_from_push(
+    fn get_epoch_for_txn_from_push(
         &mut self,
         batches: &mut Vec<(TxnId, Callback<SchedulerResult<HummockSnapshot>>)>,
     ) -> HummockSnapshot {
         let snapshot = HummockSnapshot::clone(&self.latest_snapshot.load());
-        self.notify_epoch_assigned_for_queries(&snapshot, batches);
+        self.notify_epoch_assigned_for_txns(&snapshot, batches);
         snapshot
     }
 
-    /// Add committed epoch in `epoch_to_txn_ids`, notify queries with committed epoch and current
-    /// epoch
-    fn notify_epoch_assigned_for_queries(
+    /// Add committed epoch in `epoch_to_txn_ids`, notify transactions with committed epoch and
+    /// current epoch.
+    fn notify_epoch_assigned_for_txns(
         &mut self,
         snapshot: &HummockSnapshot,
         batches: &mut Vec<(TxnId, Callback<SchedulerResult<HummockSnapshot>>)>,
@@ -277,22 +277,22 @@ impl HummockSnapshotManagerCore {
             return;
         }
         let committed_epoch = snapshot.committed_epoch;
-        let queries = match self.epoch_to_txn_ids.get_mut(&committed_epoch) {
+        let txns = match self.epoch_to_txn_ids.get_mut(&committed_epoch) {
             None => {
                 self.epoch_to_txn_ids
                     .insert(committed_epoch, HashSet::default());
                 self.epoch_to_txn_ids.get_mut(&committed_epoch).unwrap()
             }
-            Some(queries) => queries,
+            Some(txns) => txns,
         };
         for (id, cb) in batches.drain(..) {
-            queries.insert(id);
+            txns.insert(id);
             let _ = cb.send(Ok(snapshot.clone()));
         }
     }
 
-    pub fn release_epoch(&mut self, queries: &mut Vec<(TxnId, u64)>) {
-        for (txn_id, epoch) in queries.drain(..) {
+    pub fn release_epoch(&mut self, txns: &mut Vec<(TxnId, u64)>) {
+        for (txn_id, epoch) in txns.drain(..) {
             let txn_ids = self.epoch_to_txn_ids.get_mut(&epoch);
             if let Some(txn_ids) = txn_ids {
                 txn_ids.remove(&txn_id);
@@ -304,13 +304,13 @@ impl HummockSnapshotManagerCore {
     }
 
     pub fn unpin_snapshot_before(&mut self, last_committed_epoch: u64) {
-        // Check the min epoch which still exists running query. If there is no running query,
-        // we shall unpin snapshot with the last committed epoch.
+        // Check the min epoch which still exists running transaction. If there is no running
+        // transaction, we shall unpin snapshot with the last committed epoch.
         let min_epoch = match self.epoch_to_txn_ids.first_key_value() {
             Some((epoch, txn_ids)) => {
                 assert!(
                     !txn_ids.is_empty(),
-                    "No query is associated with epoch {}",
+                    "No transaction is associated with epoch {}",
                     epoch
                 );
                 *epoch
