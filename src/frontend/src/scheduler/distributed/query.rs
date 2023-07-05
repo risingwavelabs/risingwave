@@ -463,7 +463,7 @@ pub(crate) mod tests {
         DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot,
         QueryExecutionInfo,
     };
-    use crate::session::SessionImpl;
+    use crate::session::{transaction, SessionImpl};
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
 
@@ -479,7 +479,8 @@ pub(crate) mod tests {
             CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
         let query = create_query().await;
         let query_id = query.query_id().clone();
-        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        let txn_id = transaction::Id::new();
+        let pinned_snapshot = hummock_snapshot_manager.acquire(txn_id).await.unwrap();
         let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),

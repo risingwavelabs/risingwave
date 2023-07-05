@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
@@ -20,9 +21,21 @@ use tokio::sync::OnceCell;
 
 use super::SessionImpl;
 use crate::catalog::catalog_service::CatalogWriter;
-use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::{PinnedHummockSnapshot, PinnedHummockSnapshotRef, SchedulerResult};
 use crate::user::user_service::UserInfoWriter;
+
+/// Globally unique transaction id in this frontend instance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Id(u64);
+
+impl Id {
+    /// Creates a new transaction id.
+    #[expect(clippy::new_without_default)]
+    pub fn new() -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        Self(NEXT_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
 
 /// Transaction access mode.
 // TODO: WriteOnly, DdlOnly
@@ -42,6 +55,9 @@ pub enum AccessMode {
 
 /// Transaction context.
 pub struct Context {
+    /// The transaction id.
+    id: Id,
+
     /// The access mode of the transaction, defined by the `START TRANSACTION` and the `SET
     /// TRANSACTION` statements
     access_mode: AccessMode,
@@ -99,6 +115,7 @@ impl SessionImpl {
         match &mut *txn {
             State::Initial => {
                 *txn = State::Implicit(Context {
+                    id: Id::new(),
                     access_mode: AccessMode::ReadWrite,
                     snapshot: Default::default(),
                 })
@@ -121,6 +138,7 @@ impl SessionImpl {
             State::Initial => unreachable!(),
             State::Implicit(ctx) => {
                 *txn = State::Explicit(Context {
+                    id: ctx.id,
                     access_mode,
                     snapshot: ctx.snapshot.clone(),
                 })
@@ -159,11 +177,11 @@ impl SessionImpl {
     /// Acquires and pins a snapshot for the current transaction.
     ///
     /// If a snapshot is already acquired, returns it directly.
-    pub async fn pinned_snapshot(
-        &self,
-        query_id: &QueryId, // TODO: use transaction id
-    ) -> SchedulerResult<PinnedHummockSnapshotRef> {
-        let snapshot = self.txn_ctx().snapshot.clone();
+    pub async fn pinned_snapshot(&self) -> SchedulerResult<PinnedHummockSnapshotRef> {
+        let (id, snapshot) = {
+            let ctx = self.txn_ctx();
+            (ctx.id, ctx.snapshot.clone())
+        };
 
         snapshot
             .get_or_try_init(|| async move {
@@ -175,7 +193,7 @@ impl SessionImpl {
                     // Acquire hummock snapshot for execution.
                     let is_barrier_read = self.is_barrier_read();
                     let hummock_snapshot_manager = self.env().hummock_snapshot_manager();
-                    let pinned_snapshot = hummock_snapshot_manager.acquire(query_id).await?;
+                    let pinned_snapshot = hummock_snapshot_manager.acquire(id).await?;
                     PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, is_barrier_read)
                 };
 
