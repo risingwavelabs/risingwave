@@ -90,6 +90,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     )))
                 }
             }
+            kind @ (A::FirstValue | A::LastValue) => {
+                if order_by.is_empty() {
+                    // `first/last_value` only works when ORDER BY is provided
+                    None
+                } else {
+                    Some(Expr::Function(make_agg_func(
+                        &kind.to_string(),
+                        exprs,
+                        distinct,
+                        filter,
+                        order_by,
+                    )))
+                }
+            }
             A::ApproxCountDistinct => {
                 if self.is_distinct_allowed {
                     None
