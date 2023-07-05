@@ -54,7 +54,7 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
-use tokio::runtime::{Builder, Runtime};
+use tokio::runtime::Builder;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -168,7 +168,7 @@ impl FrontendEnv {
             meta_config: MetaConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
-            compute_runtime: Arc::new(Runtime::new().unwrap().into()),
+            compute_runtime: Self::create_compute_runtime(),
         }
     }
 
@@ -320,15 +320,6 @@ impl FrontendEnv {
         let creating_streaming_job_tracker =
             Arc::new(StreamingJobTracker::new(frontend_meta_client.clone()));
 
-        // TODO: Make this configurable.
-        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
-            Builder::new_multi_thread()
-                .worker_threads(4)
-                .thread_name("frontend-compute-threads")
-                .build()
-                .unwrap(),
-        ));
-
         Ok((
             Self {
                 catalog_reader,
@@ -347,7 +338,7 @@ impl FrontendEnv {
                 meta_config,
                 source_metrics,
                 creating_streaming_job_tracker,
-                compute_runtime,
+                compute_runtime: Self::create_compute_runtime(),
             },
             join_handles,
             shutdown_senders,
@@ -424,6 +415,17 @@ impl FrontendEnv {
 
     pub fn compute_runtime(&self) -> Arc<BackgroundShutdownRuntime> {
         self.compute_runtime.clone()
+    }
+
+    fn create_compute_runtime() -> Arc<BackgroundShutdownRuntime> {
+        Arc::new(BackgroundShutdownRuntime::from(
+            Builder::new_multi_thread()
+                .worker_threads(4)
+                .thread_name("frontend-compute-threads")
+                .enable_all()
+                .build()
+                .unwrap(),
+        ))
     }
 }
 
