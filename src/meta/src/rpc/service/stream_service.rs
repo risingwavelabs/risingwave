@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -23,8 +24,9 @@ use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierScheduler;
-use crate::manager::{FragmentManagerRef, MetaSrvEnv};
+use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv};
 use crate::storage::MetaStore;
+use crate::stream::GlobalStreamManagerRef;
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
@@ -35,6 +37,8 @@ where
 {
     env: MetaSrvEnv<S>,
     barrier_scheduler: BarrierScheduler<S>,
+    stream_manager: GlobalStreamManagerRef<S>,
+    catalog_manager: CatalogManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
 
@@ -45,11 +49,15 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         barrier_scheduler: BarrierScheduler<S>,
+        stream_manager: GlobalStreamManagerRef<S>,
+        catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         StreamServiceImpl {
             env,
             barrier_scheduler,
+            stream_manager,
+            catalog_manager,
             fragment_manager,
         }
     }
@@ -72,6 +80,23 @@ where
         }))
     }
 
+    async fn cancel_creating_jobs(
+        &self,
+        request: Request<CancelCreatingJobsRequest>,
+    ) -> TonicResponse<CancelCreatingJobsResponse> {
+        let req = request.into_inner();
+        let table_ids = self
+            .catalog_manager
+            .find_creating_streaming_job_ids(req.infos)
+            .await;
+        if !table_ids.is_empty() {
+            self.stream_manager
+                .cancel_streaming_jobs(table_ids.into_iter().map(TableId::from).collect_vec())
+                .await;
+        }
+        Ok(Response::new(CancelCreatingJobsResponse { status: None }))
+    }
+
     #[cfg_attr(coverage, no_coverage)]
     async fn list_table_fragments(
         &self,
@@ -79,7 +104,7 @@ where
     ) -> Result<Response<ListTableFragmentsResponse>, Status> {
         let req = request.into_inner();
         let table_ids = HashSet::<u32>::from_iter(req.table_ids);
-        let table_fragments = self.fragment_manager.list_table_fragments().await?;
+        let table_fragments = self.fragment_manager.list_table_fragments().await;
         let info = table_fragments
             .into_iter()
             .filter(|tf| table_ids.contains(&tf.table_id().table_id))
@@ -111,6 +136,79 @@ where
 
         Ok(Response::new(ListTableFragmentsResponse {
             table_fragments: info,
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn list_table_fragment_states(
+        &self,
+        _request: Request<ListTableFragmentStatesRequest>,
+    ) -> Result<Response<ListTableFragmentStatesResponse>, Status> {
+        let table_fragments = self.fragment_manager.list_table_fragments().await;
+
+        Ok(Response::new(ListTableFragmentStatesResponse {
+            states: table_fragments
+                .into_iter()
+                .map(
+                    |tf| list_table_fragment_states_response::TableFragmentState {
+                        table_id: tf.table_id().table_id,
+                        state: tf.state() as i32,
+                    },
+                )
+                .collect_vec(),
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn list_fragment_distribution(
+        &self,
+        _request: Request<ListFragmentDistributionRequest>,
+    ) -> Result<Response<ListFragmentDistributionResponse>, Status> {
+        let table_fragments = self.fragment_manager.list_table_fragments().await;
+
+        Ok(Response::new(ListFragmentDistributionResponse {
+            distributions: table_fragments
+                .into_iter()
+                .flat_map(|tf| {
+                    let table_id = tf.table_id().table_id;
+                    tf.fragments
+                        .into_iter()
+                        .map(move |(fragment_id, fragment)| {
+                            list_fragment_distribution_response::FragmentDistribution {
+                                fragment_id,
+                                table_id,
+                                distribution_type: fragment.distribution_type,
+                                state_table_ids: fragment.state_table_ids,
+                                upstream_fragment_ids: fragment.upstream_fragment_ids,
+                            }
+                        })
+                })
+                .collect_vec(),
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn list_actor_states(
+        &self,
+        _request: Request<ListActorStatesRequest>,
+    ) -> Result<Response<ListActorStatesResponse>, Status> {
+        let table_fragments = self.fragment_manager.list_table_fragments().await;
+
+        Ok(Response::new(ListActorStatesResponse {
+            states: table_fragments
+                .into_iter()
+                .flat_map(|tf| {
+                    let actor_to_fragment = tf.actor_fragment_mapping();
+                    tf.actor_status.into_iter().map(move |(actor_id, status)| {
+                        list_actor_states_response::ActorState {
+                            actor_id,
+                            fragment_id: actor_to_fragment[&actor_id],
+                            state: status.state,
+                            parallel_unit_id: status.parallel_unit.unwrap().id,
+                        }
+                    })
+                })
+                .collect_vec(),
         }))
     }
 }

@@ -16,11 +16,12 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, SYSTEM_SCHEMAS};
+use risingwave_common::catalog::{is_system_schema, Field};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
+use risingwave_sqlparser::tokenizer::{Token, Tokenizer};
 
 use super::BoundShare;
 use crate::binder::relation::BoundSubquery;
@@ -37,6 +38,7 @@ pub struct BoundBaseTable {
     pub table_id: TableId,
     pub table_catalog: TableCatalog,
     pub table_indexes: Vec<Arc<IndexCatalog>>,
+    pub for_system_time_as_of_proctime: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -63,11 +65,8 @@ impl Binder {
         schema_name: Option<&str>,
         table_name: &str,
         alias: Option<TableAlias>,
+        for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
-        fn is_system_schema(schema_name: &str) -> bool {
-            SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
-        }
-
         // define some helper functions converting catalog to bound relation
         let resolve_sys_table_relation = |sys_table_catalog: &SystemCatalog| {
             let table = BoundSystemTable {
@@ -77,17 +76,6 @@ impl Binder {
             (
                 Relation::SystemTable(Box::new(table)),
                 sys_table_catalog
-                    .columns
-                    .iter()
-                    .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
-                    .collect_vec(),
-            )
-        };
-
-        let resolve_source_relation = |source_catalog: &SourceCatalog| {
-            (
-                Relation::Source(Box::new(source_catalog.into())),
-                source_catalog
                     .columns
                     .iter()
                     .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
@@ -126,12 +114,16 @@ impl Binder {
                         self.catalog
                             .get_table_by_name(&self.db_name, schema_path, table_name)
                     {
-                        self.resolve_table_relation(table_catalog, schema_name)?
+                        self.resolve_table_relation(
+                            &table_catalog.clone(),
+                            schema_name,
+                            for_system_time_as_of_proctime,
+                        )?
                     } else if let Ok((source_catalog, _)) =
                         self.catalog
                             .get_source_by_name(&self.db_name, schema_path, table_name)
                     {
-                        resolve_source_relation(source_catalog)
+                        self.resolve_source_relation(&source_catalog.clone())
                     } else if let Ok((view_catalog, _)) =
                         self.catalog
                             .get_view_by_name(&self.db_name, schema_path, table_name)
@@ -167,11 +159,17 @@ impl Binder {
                                 self.catalog.get_schema_by_name(&self.db_name, schema_name)
                             {
                                 if let Some(table_catalog) = schema.get_table_by_name(table_name) {
-                                    return self.resolve_table_relation(table_catalog, schema_name);
+                                    return self.resolve_table_relation(
+                                        &table_catalog.clone(),
+                                        &schema_name.clone(),
+                                        for_system_time_as_of_proctime,
+                                    );
                                 } else if let Some(source_catalog) =
                                     schema.get_source_by_name(table_name)
                                 {
-                                    return Ok(resolve_source_relation(source_catalog));
+                                    return Ok(
+                                        self.resolve_source_relation(&source_catalog.clone())
+                                    );
                                 } else if let Some(view_catalog) =
                                     schema.get_view_by_name(table_name)
                                 {
@@ -191,9 +189,10 @@ impl Binder {
     }
 
     fn resolve_table_relation(
-        &self,
+        &mut self,
         table_catalog: &TableCatalog,
         schema_name: &str,
+        for_system_time_as_of_proctime: bool,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let table_id = table_catalog.id();
         let table_catalog = table_catalog.clone();
@@ -202,15 +201,32 @@ impl Binder {
             .iter()
             .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
             .collect_vec();
+        self.included_relations.insert(table_id);
         let table_indexes = self.resolve_table_indexes(schema_name, table_id)?;
 
         let table = BoundBaseTable {
             table_id,
             table_catalog,
             table_indexes,
+            for_system_time_as_of_proctime,
         };
 
         Ok::<_, RwError>((Relation::BaseTable(Box::new(table)), columns))
+    }
+
+    fn resolve_source_relation(
+        &mut self,
+        source_catalog: &SourceCatalog,
+    ) -> (Relation, Vec<(bool, Field)>) {
+        self.included_relations.insert(source_catalog.id.into());
+        (
+            Relation::Source(Box::new(source_catalog.into())),
+            source_catalog
+                .columns
+                .iter()
+                .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
+                .collect_vec(),
+        )
     }
 
     fn resolve_view_relation(
@@ -222,7 +238,8 @@ impl Binder {
         let Statement::Query(query) = ast
             .into_iter()
             .exactly_one()
-            .expect("a view should contain only one statement") else {
+            .expect("a view should contain only one statement")
+        else {
             unreachable!("a view should contain a query statement");
         };
         let query = self.bind_query(*query).map_err(|e| {
@@ -237,6 +254,7 @@ impl Binder {
             None => {
                 let share_id = self.next_share_id();
                 self.shared_views.insert(view_catalog.id, share_id);
+                self.included_relations.insert(view_catalog.id.into());
                 share_id
             }
         };
@@ -291,6 +309,7 @@ impl Binder {
             table_id,
             table_catalog,
             table_indexes,
+            for_system_time_as_of_proctime: false,
         })
     }
 
@@ -343,9 +362,42 @@ impl Binder {
     }
 
     pub(crate) fn resolve_regclass(&self, class_name: &str) -> Result<u32> {
-        let schema_path = SchemaPath::Path(&self.search_path, &self.auth_context.user_name);
-        Ok(self
-            .catalog
-            .get_id_by_class_name(&self.db_name, schema_path, class_name)?)
+        let obj = Self::parse_object_name(class_name)?;
+
+        if obj.0.len() == 1 {
+            let class_name = obj.0[0].real_value();
+            let schema_path = SchemaPath::Path(&self.search_path, &self.auth_context.user_name);
+            Ok(self
+                .catalog
+                .get_id_by_class_name(&self.db_name, schema_path, &class_name)?)
+        } else {
+            let schema = obj.0[0].real_value();
+            let class_name = obj.0[1].real_value();
+            let schema_path = SchemaPath::Name(&schema);
+            Ok(self
+                .catalog
+                .get_id_by_class_name(&self.db_name, schema_path, &class_name)?)
+        }
+    }
+
+    /// Attempt to parse the value of a varchar Literal into an
+    /// [`ObjectName`](risingwave_sqlparser::ast::ObjectName).
+    fn parse_object_name(name: &str) -> Result<risingwave_sqlparser::ast::ObjectName> {
+        // We use the full parser here because this function needs to accept every legal way
+        // of identifying an object in PG SQL as a valid value for the varchar
+        // literal.  For example: 'foo', 'public.foo', '"my table"', and
+        // '"my schema".foo' must all work as values passed pg_table_size.
+        let mut tokenizer = Tokenizer::new(name);
+        let tokens = tokenizer
+            .tokenize_with_location()
+            .map_err(|e| ErrorCode::BindError(e.to_string()))?;
+        let mut parser = Parser::new(tokens);
+        let object = parser
+            .parse_object_name()
+            .map_err(|e| ErrorCode::BindError(e.to_string()))?;
+        if parser.next_token().token != Token::EOF {
+            Err(ErrorCode::BindError("Invalid name syntax".to_string()))?
+        }
+        Ok(object)
     }
 }

@@ -19,6 +19,7 @@ use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use thiserror::Error;
 
 use crate::hummock::HummockError;
+use crate::mem_table::MemTableError;
 
 #[derive(Error)]
 pub enum StorageError {
@@ -40,6 +41,13 @@ pub enum StorageError {
         #[backtrace]
         #[from]
         sled::Error,
+    ),
+
+    #[error("MemTable error: {0}")]
+    MemTable(
+        #[backtrace]
+        #[from]
+        Box<MemTableError>,
     ),
 }
 

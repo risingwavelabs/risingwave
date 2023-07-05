@@ -13,33 +13,34 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+#[cfg(enable_task_local_alloc)]
 use std::future::Future;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
+#[cfg(enable_task_local_alloc)]
 use std::time::Duration;
 
 use futures::StreamExt;
-use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::batch_plan::{
-    PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
-};
+use risingwave_common::util::panic::FutureCatchUnwindExt;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::tracing::TracingContext;
+use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::task_service::task_info::TaskStatus;
-use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
-use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
-use tokio::runtime::Runtime;
-use tokio::sync::oneshot::{Receiver, Sender};
+use risingwave_pb::task_service::task_info_response::TaskStatus;
+use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
+use tokio::select;
+use tokio::task::JoinHandle;
 use tokio_metrics::TaskMonitor;
-use tonic::Status;
+use tracing::Instrument;
 
 use crate::error::BatchError::SenderError;
-use crate::error::{BatchError, Result as BatchResult};
+use crate::error::{to_rw_error, BatchError, Result as BatchResult};
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
-use crate::rpc::service::task_service::{GetDataResponseResult, TaskInfoResponseResult};
+use crate::rpc::service::task_service::TaskInfoResponseResult;
 use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
 use crate::task::BatchTaskContext;
 
@@ -48,6 +49,7 @@ pub const TASK_STATUS_BUFFER_SIZE: usize = 2;
 
 /// A special version for batch allocation stat, passed in another task `context` C to report task
 /// mem usage 0 bytes at the end.
+#[cfg(enable_task_local_alloc)]
 pub async fn allocation_stat_for_batch<Fut, T, F, C>(
     future: Fut,
     interval: Duration,
@@ -59,6 +61,8 @@ where
     F: FnMut(usize),
     C: BatchTaskContext,
 {
+    use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
+
     BYTES_ALLOCATED
         .scope(TaskLocalBytesAllocated::new(), async move {
             // The guard has the same lifetime as the counter so that the counter will keep positive
@@ -76,8 +80,11 @@ where
                 biased;
                 _ = monitor => unreachable!(),
                 output = future => {
-                    // Report bytes allocated when actor ends. Note we should not report 0, cuz actor may allocate memory in block cache and may not be dealloc.
-                    BYTES_ALLOCATED.with(|bytes| context.store_mem_usage(bytes.val()));
+                    // NOTE: Report bytes allocated when the actor ends. We simply report 0 here,
+                    // assuming that all memory allocated by this batch task will be freed at some
+                    // time. Maybe we should introduce a better monitoring strategy for batch memory
+                    // usage.
+                    BYTES_ALLOCATED.with(|_| context.store_mem_usage(0));
                     output
                 },
             };
@@ -93,30 +100,18 @@ where
 /// status (Failed/Finished) update. `StateReporter::Mock` is only used in test and do not takes any
 /// effect. Local sender only report Failed update, Distributed sender will also report
 /// Finished/Pending/Starting/Aborted etc.
+#[derive(Clone)]
 pub enum StateReporter {
-    Local(tokio::sync::mpsc::Sender<GetDataResponseResult>),
     Distributed(tokio::sync::mpsc::Sender<TaskInfoResponseResult>),
     Mock(),
 }
 
 impl StateReporter {
-    pub async fn send(&mut self, val: TaskInfoResponseResult) -> BatchResult<()> {
+    pub async fn send(&mut self, val: TaskInfoResponse) -> BatchResult<()> {
         match self {
-            Self::Local(s) => {
-                if let Err(e) = val {
-                    s.send(Err(e)).await.map_err(|_| SenderError)
-                } else {
-                    // do nothing and just return.
-                    Ok(())
-                }
-            }
-            Self::Distributed(s) => s.send(val).await.map_err(|_| SenderError),
+            Self::Distributed(s) => s.send(Ok(val)).await.map_err(|_| SenderError),
             Self::Mock() => Ok(()),
         }
-    }
-
-    pub fn new_with_local_sender(s: tokio::sync::mpsc::Sender<GetDataResponseResult>) -> Self {
-        Self::Local(s)
     }
 
     pub fn new_with_dist_sender(s: tokio::sync::mpsc::Sender<TaskInfoResponseResult>) -> Self {
@@ -151,8 +146,8 @@ impl Debug for TaskOutputId {
     }
 }
 
-impl From<&ProstTaskId> for TaskId {
-    fn from(prost: &ProstTaskId) -> Self {
+impl From<&PbTaskId> for TaskId {
+    fn from(prost: &PbTaskId) -> Self {
         TaskId {
             task_id: prost.task_id,
             stage_id: prost.stage_id,
@@ -162,8 +157,8 @@ impl From<&ProstTaskId> for TaskId {
 }
 
 impl TaskId {
-    pub fn to_prost(&self) -> ProstTaskId {
-        ProstTaskId {
+    pub fn to_prost(&self) -> PbTaskId {
+        PbTaskId {
             task_id: self.task_id,
             stage_id: self.stage_id,
             query_id: self.query_id.clone(),
@@ -171,10 +166,10 @@ impl TaskId {
     }
 }
 
-impl TryFrom<&ProstOutputId> for TaskOutputId {
+impl TryFrom<&PbTaskOutputId> for TaskOutputId {
     type Error = RwError;
 
-    fn try_from(prost: &ProstOutputId) -> Result<Self> {
+    fn try_from(prost: &PbTaskOutputId) -> Result<Self> {
         Ok(TaskOutputId {
             task_id: TaskId::from(prost.get_task_id()?),
             output_id: prost.get_output_id(),
@@ -183,8 +178,8 @@ impl TryFrom<&ProstOutputId> for TaskOutputId {
 }
 
 impl TaskOutputId {
-    pub fn to_prost(&self) -> ProstOutputId {
-        ProstOutputId {
+    pub fn to_prost(&self) -> PbTaskOutputId {
+        PbTaskOutputId {
             task_id: Some(self.task_id.to_prost()),
             output_id: self.output_id,
         }
@@ -202,7 +197,7 @@ impl TaskOutput {
     /// Return whether the data stream is finished.
     async fn take_data_inner(
         &mut self,
-        writer: &mut dyn ExchangeWriter,
+        writer: &mut impl ExchangeWriter,
         at_most_num: Option<usize>,
     ) -> Result<bool> {
         let mut cnt: usize = 0;
@@ -222,10 +217,9 @@ impl TaskOutput {
                     );
                     let pb = chunk.to_protobuf().await;
                     let resp = GetDataResponse {
-                        status: Default::default(),
                         record_batch: Some(pb),
                     };
-                    writer.write(resp).await?;
+                    writer.write(Ok(resp)).await?;
                 }
                 // Reached EOF
                 Ok(None) => {
@@ -233,14 +227,8 @@ impl TaskOutput {
                 }
                 // Error happened
                 Err(e) => {
-                    let possible_err = self.failure.lock().take();
-                    return if let Some(err) = possible_err {
-                        // Task error
-                        Err(err)
-                    } else {
-                        // Channel error
-                        Err(e)
-                    };
+                    writer.write(Err(tonic::Status::from(&*e))).await?;
+                    break;
                 }
             }
             cnt += 1;
@@ -252,14 +240,14 @@ impl TaskOutput {
     /// Return whether the data stream is finished.
     pub async fn take_data_with_num(
         &mut self,
-        writer: &mut dyn ExchangeWriter,
+        writer: &mut impl ExchangeWriter,
         num: usize,
     ) -> Result<bool> {
         self.take_data_inner(writer, Some(num)).await
     }
 
     /// Take all data and write the data in serialized format to `ExchangeWriter`.
-    pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
+    pub async fn take_data(&mut self, writer: &mut impl ExchangeWriter) -> Result<()> {
         let finish = self.take_data_inner(writer, None).await?;
         assert!(finish);
         Ok(())
@@ -267,7 +255,12 @@ impl TaskOutput {
 
     /// Directly takes data without serialization.
     pub async fn direct_take_data(&mut self) -> Result<Option<DataChunk>> {
-        Ok(self.receiver.recv().await?.map(|c| c.into_data_chunk()))
+        Ok(self
+            .receiver
+            .recv()
+            .await
+            .map_err(to_rw_error)?
+            .map(|c| c.into_data_chunk()))
     }
 
     pub fn id(&self) -> &TaskOutputId {
@@ -275,6 +268,13 @@ impl TaskOutput {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum ShutdownMsg {
+    /// Used in init, it never occur in receiver later.
+    Init,
+    Abort(String),
+    Cancel,
+}
 /// `BatchTaskExecution` represents a single task execution.
 pub struct BatchTaskExecution<C> {
     /// Task id.
@@ -298,37 +298,35 @@ pub struct BatchTaskExecution<C> {
     /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
 
-    /// Shutdown signal sender.
-    shutdown_tx: Mutex<Option<Sender<u64>>>,
-
-    /// State receivers. Will be moved out by `.state_receivers()`. Returned back to client.
-    /// This is a hack, cuz there is no easy way to get out the receiver.
-    state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponseResult>>>,
-
     epoch: BatchQueryEpoch,
 
     /// Runtime for the batch tasks.
-    runtime: &'static Runtime,
+    runtime: Arc<BackgroundShutdownRuntime>,
+
+    shutdown_tx: tokio::sync::watch::Sender<ShutdownMsg>,
+    shutdown_rx: tokio::sync::watch::Receiver<ShutdownMsg>,
+    heartbeat_join_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn new(
-        prost_tid: &ProstTaskId,
+        prost_tid: &PbTaskId,
         plan: PlanFragment,
         context: C,
         epoch: BatchQueryEpoch,
-        runtime: &'static Runtime,
+        runtime: Arc<BackgroundShutdownRuntime>,
     ) -> Result<Self> {
         let task_id = TaskId::from(prost_tid);
 
         let (sender, receivers) = create_output_channel(
             plan.get_exchange_info()?,
-            context.get_config().developer.batch_output_channel_size,
+            context.get_config().developer.output_channel_size,
         )?;
 
         let mut rts = Vec::new();
         rts.extend(receivers.into_iter().map(Some));
 
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
         Ok(Self {
             task_id,
             plan,
@@ -336,11 +334,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             receivers: Mutex::new(rts),
             failure: Arc::new(Mutex::new(None)),
             epoch,
-            shutdown_tx: Mutex::new(None),
-            state_rx: Mutex::new(None),
             context,
             runtime,
             sender,
+            shutdown_tx,
+            shutdown_rx,
+            heartbeat_join_handle: Mutex::new(None),
         })
     }
 
@@ -354,7 +353,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
     /// such, parallel consumers are able to consume the result independently.
-    pub async fn async_execute(self: Arc<Self>, state_tx: StateReporter) -> Result<()> {
+    pub async fn async_execute(
+        self: Arc<Self>,
+        state_tx: Option<StateReporter>,
+        tracing_context: TracingContext,
+    ) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
             "Prepare executing plan [{:?}]: {}",
@@ -367,74 +370,55 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             &self.task_id,
             self.context.clone(),
             self.epoch.clone(),
+            self.shutdown_rx.clone(),
         )
         .build()
         .await?;
 
-        // Init shutdown channel and data receivers.
         let sender = self.sender.clone();
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
-        *self.shutdown_tx.lock() = Some(shutdown_tx);
-        let failure = self.failure.clone();
+        let _failure = self.failure.clone();
         let task_id = self.task_id.clone();
 
         // After we init the output receivers, it's must safe to schedule next stage -- able to send
         // TaskStatus::Running here.
         // Init the state receivers. Swap out later.
-        self.change_state_notify(TaskStatus::Running, &mut state_tx, None)
+        self.change_state_notify(TaskStatus::Running, state_tx.as_mut(), None)
             .await?;
 
         // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
-        let t_2 = self.clone();
         // Spawn task for real execution.
         let fut = async move {
             trace!("Executing plan [{:?}]", task_id);
-            let mut sender = sender;
+            let sender = sender;
             let mut state_tx = state_tx;
-            let task_metrics = t_1.context.task_metrics();
+            let batch_metrics = t_1.context.batch_metrics();
 
             let task = |task_id: TaskId| async move {
+                let span = tracing_context.attach(tracing::info_span!(
+                    "batch_execute",
+                    task_id = task_id.task_id,
+                    stage_id = task_id.stage_id,
+                    query_id = task_id.query_id,
+                ));
+
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                if let Err(e) = t_1
-                    .try_execute(exec, &mut sender, shutdown_rx, &mut state_tx)
-                    .in_span({
-                        let mut span = Span::enter_with_local_parent("batch_execute");
-                        span.add_property(|| ("task_id", task_id.task_id.to_string()));
-                        span.add_property(|| ("stage_id", task_id.stage_id.to_string()));
-                        span.add_property(|| ("query_id", task_id.query_id.to_string()));
-                        span
-                    })
-                    .await
-                {
-                    error!("Execution failed [{:?}]: {}", &task_id, e);
-                    let err_str = e.to_string();
-                    *failure.lock() = Some(e);
-                    if let Err(_e) = t_1
-                        .change_state_notify(TaskStatus::Failed, &mut state_tx, Some(err_str))
-                        .await
-                    {
-                        // It's possible to send fail. Same reason in `.try_execute`.
-                        warn!("send task execution error message fail!");
-                    }
-
-                    // There will be no more chunks, so send None.
-                    if let Err(_e) = sender.send(None).await {
-                        warn!("failed to send None to annotate end");
-                    }
-                }
+                t_1.run(exec, sender, state_tx.as_mut())
+                    .instrument(span)
+                    .await;
             };
 
-            if let Some(task_metrics) = task_metrics {
+            if let Some(batch_metrics) = batch_metrics {
                 let monitor = TaskMonitor::new();
-                let join_handle = t_2.runtime.spawn(monitor.instrument(task(task_id.clone())));
-                if let Err(join_error) = join_handle.await && join_error.is_panic() {
-                    error!("Batch task {:?} panic!", task_id);
+                let instrumented_task =
+                    AssertUnwindSafe(TaskMonitor::instrument(&monitor, task(task_id.clone())));
+                if let Err(error) = instrumented_task.rw_catch_unwind().await {
+                    error!("Batch task {:?} panic: {:?}", task_id, error);
                 }
                 let cumulative = monitor.cumulative();
-                let labels = &task_metrics.task_labels();
-                let task_metrics = &task_metrics.metrics;
+                let labels = &batch_metrics.task_labels();
+                let task_metrics = batch_metrics.get_task_metrics();
                 task_metrics
                     .task_first_poll_delay
                     .with_label_values(labels)
@@ -459,27 +443,36 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .task_slow_poll_duration
                     .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
-            } else {
-                let join_handle = t_2.runtime.spawn(task(task_id.clone()));
-                if let Err(join_error) = join_handle.await && join_error.is_panic() {
-                    error!("Batch task {:?} panic!", task_id);
-                }
+            } else if let Err(error) = AssertUnwindSafe(task(task_id.clone()))
+                .rw_catch_unwind()
+                .await
+            {
+                error!("Batch task {:?} panic: {:?}", task_id, error);
             }
         };
 
-        // For every fired Batch Task, we will wrap it with allocation stats to report memory
-        // estimation per task to `BatchManager`.
-        let ctx1 = self.context.clone();
-        let ctx2 = self.context.clone();
-        let alloc_stat_wrap_fut = allocation_stat_for_batch(
-            fut,
-            Duration::from_millis(1000),
-            move |bytes| {
-                ctx1.store_mem_usage(bytes);
-            },
-            ctx2,
-        );
-        self.runtime.spawn(alloc_stat_wrap_fut);
+        #[cfg(enable_task_local_alloc)]
+        {
+            // For every fired Batch Task, we will wrap it with allocation stats to report memory
+            // estimation per task to `BatchManager`.
+            let ctx1 = self.context.clone();
+            let ctx2 = self.context.clone();
+            let alloc_stat_wrap_fut = allocation_stat_for_batch(
+                fut,
+                Duration::from_millis(1000),
+                move |bytes| {
+                    ctx1.store_mem_usage(bytes);
+                },
+                ctx2,
+            );
+            self.runtime.spawn(alloc_stat_wrap_fut);
+        }
+
+        #[cfg(not(enable_task_local_alloc))]
+        {
+            self.runtime.spawn(fut);
+        }
+
         Ok(())
     }
 
@@ -487,110 +480,158 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub async fn change_state_notify(
         &self,
         task_status: TaskStatus,
-        state_tx: &mut StateReporter,
+        state_tx: Option<&mut StateReporter>,
         err_str: Option<String>,
     ) -> BatchResult<()> {
         self.change_state(task_status);
-        if let Some(err_str) = err_str {
-            state_tx.send(Err(Status::internal(err_str))).await
-        } else {
-            // Notify frontend the task status.
-            state_tx
-                .send(Ok(TaskInfoResponse {
-                    task_info: Some(TaskInfo {
-                        task_id: Some(TaskId::default().to_prost()),
-                        task_status: task_status.into(),
-                    }),
-                    // TODO: Fill the real status.
-                    ..Default::default()
-                }))
+        // Notify frontend the task status.
+        if let Some(reporter) = state_tx {
+            reporter
+                .send(TaskInfoResponse {
+                    task_id: Some(self.task_id.to_prost()),
+                    task_status: task_status.into(),
+                    error_message: err_str.unwrap_or("".to_string()),
+                })
                 .await
+        } else {
+            Ok(())
         }
     }
 
     pub fn change_state(&self, task_status: TaskStatus) {
         *self.state.lock() = task_status;
+        tracing::debug!(
+            "Task {:?} state changed to {:?}",
+            &self.task_id,
+            task_status
+        );
     }
 
-    pub async fn try_execute(
+    async fn run(
         &self,
         root: BoxedExecutor,
-        sender: &mut ChanSenderImpl,
-        mut shutdown_rx: Receiver<u64>,
-        state_tx: &mut StateReporter,
-    ) -> Result<()> {
+        mut sender: ChanSenderImpl,
+        state_tx: Option<&mut StateReporter>,
+    ) {
         let mut data_chunk_stream = root.execute();
-        let mut state = TaskStatus::Unspecified;
+        let mut state;
+        let mut error = None;
+
+        let mut shutdown_rx = self.shutdown_rx.clone();
         loop {
-            tokio::select! {
-            // We prioritize abort signal over normal data chunks.
-            biased;
-            _ = &mut shutdown_rx => {
-                state = TaskStatus::Aborted;
-                break;
-            }
-            res = data_chunk_stream.next() => {
-                if let Some(data_chunk) = res {
-                if let Err(e) = sender.send(Some(data_chunk?)).await {
-                        match e {
-                            BatchError::SenderError => {
-                                // This is possible since when we have limit executor in parent
-                                // stage, it may early stop receiving data from downstream, which
-                                // leads to close of channel.
-                                warn!("Task receiver closed!");
-                                break;
-                            },
-                            x => {
-                                return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
-                            }
+            select! {
+                biased;
+                // `shutdown_rx` can't be removed here to avoid `sender.send(data_chunk)` blocked whole execution.
+                _ = shutdown_rx.changed() => {
+                    match self.shutdown_rx.borrow().clone() {
+                        ShutdownMsg::Abort(e) => {
+                            error = Some(BatchError::Aborted(e));
+                            state = TaskStatus::Aborted;
+                            break;
+                        }
+                        ShutdownMsg::Cancel => {
+                            state = TaskStatus::Cancelled;
+                            break;
+                        }
+                        ShutdownMsg::Init => {
+                            unreachable!("Init message should not be received here!")
                         }
                     }
-                } else {
-                    state = TaskStatus::Finished;
-                    break;
                 }
-            }
+                date_chunk = data_chunk_stream.next()=> {
+                    match date_chunk {
+                        Some(Ok(data_chunk)) => {
+                            if let Err(e) = sender.send(data_chunk).await {
+                                match e {
+                                    BatchError::SenderError => {
+                                        // This is possible since when we have limit executor in parent
+                                        // stage, it may early stop receiving data from downstream, which
+                                        // leads to close of channel.
+                                        warn!("Task receiver closed!");
+                                        state = TaskStatus::Finished;
+                                        break;
+                                    }
+                                    x => {
+                                        error!("Failed to send data!");
+                                        error = Some(x);
+                                        state = TaskStatus::Failed;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        Some(Err(e)) => match self.shutdown_rx.borrow().clone() {
+                            ShutdownMsg::Init => {
+                                // There is no message received from shutdown channel, which means it caused
+                                // task failed.
+                                error!("Batch task failed: {:?}", e);
+                                error = Some(BatchError::from(e));
+                                state = TaskStatus::Failed;
+                                break;
+                            }
+                            ShutdownMsg::Abort(_) => {
+                                error = Some(BatchError::from(e));
+                                state = TaskStatus::Aborted;
+                                break;
+                            }
+                            ShutdownMsg::Cancel => {
+                                state = TaskStatus::Cancelled;
+                                break;
+                            }
+                        },
+                        None => {
+                            debug!("Batch task {:?} finished successfully.", self.task_id);
+                            state = TaskStatus::Finished;
+                            break;
+                        }
+                    }
+                }
             }
         }
 
-        *self.state.lock() = state;
-        if let Err(e) = sender.send(None).await {
+        let error = error.map(Arc::new);
+        *self.failure.lock() = error.clone().map(to_rw_error);
+        let err_str = error.as_ref().map(|e| format!("{:?}", e));
+        if let Err(e) = sender.close(error).await {
             match e {
-                BatchError::SenderError => {
+                SenderError => {
                     // This is possible since when we have limit executor in parent
                     // stage, it may early stop receiving data from downstream, which
                     // leads to close of channel.
                     warn!("Task receiver closed when sending None!");
                 }
-                x => {
-                    return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
+                _x => {
+                    error!("Failed to close task output channel: {:?}", self.task_id);
+                    state = TaskStatus::Failed;
                 }
             }
         }
 
-        if let Err(e) = self.change_state_notify(state, state_tx, None).await {
+        if let Err(e) = self.change_state_notify(state, state_tx, err_str).await {
             warn!(
                 "The status receiver in FE has closed so the status push is failed {:}",
                 e
             );
         }
-
-        Ok(())
     }
 
-    pub fn abort_task(&self) {
-        if let Some(sender) = self.shutdown_tx.lock().take() {
-            // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
-            // Stop task execution.
-            if sender.send(0).is_err() {
-                warn!("The task has already died before this request, so the abort did no-op")
-            } else {
-                info!("Abort task {:?} done", self.task_id);
-            }
-        };
+    pub fn abort(&self, err_msg: String) {
+        // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
+        // Stop task execution.
+        if self.shutdown_tx.send(ShutdownMsg::Abort(err_msg)).is_err() {
+            debug!("The task has already died before this request.")
+        } else {
+            info!("Abort task {:?} done", self.task_id);
+        }
     }
 
-    pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
+    pub fn cancel(&self) {
+        if self.shutdown_tx.send(ShutdownMsg::Cancel).is_err() {
+            debug!("The task has already died before this request.");
+        }
+    }
+
+    pub fn get_task_output(&self, output_id: &PbTaskOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         let receiver = self.receivers.lock()[output_id.get_output_id() as usize]
             .take()
@@ -632,13 +673,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
     }
 
-    pub fn state_receiver(&self) -> tokio::sync::mpsc::Receiver<TaskInfoResponseResult> {
-        self.state_rx
-            .lock()
-            .take()
-            .expect("The state receivers must have been inited!")
-    }
-
     pub fn mem_usage(&self) -> usize {
         self.context.mem_usage()
     }
@@ -647,6 +681,16 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn is_end(&self) -> bool {
         let guard = self.state.lock();
         !(*guard == TaskStatus::Running || *guard == TaskStatus::Pending)
+    }
+}
+
+impl<C> BatchTaskExecution<C> {
+    pub(crate) fn set_heartbeat_join_handle(&self, join_handle: JoinHandle<()>) {
+        *self.heartbeat_join_handle.lock() = Some(join_handle);
+    }
+
+    pub(crate) fn heartbeat_join_handle(&self) -> Option<JoinHandle<()>> {
+        self.heartbeat_join_handle.lock().take()
     }
 }
 

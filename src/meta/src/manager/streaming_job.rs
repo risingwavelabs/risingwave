@@ -14,14 +14,14 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::TableVersionId;
 use risingwave_pb::catalog::{Index, Sink, Source, Table};
 
 use crate::model::FragmentId;
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink),
@@ -53,12 +53,31 @@ impl StreamingJob {
         }
     }
 
+    /// Set the fragment id where the table dml is received.
+    pub fn set_dml_fragment_id(&mut self, id: Option<FragmentId>) {
+        match self {
+            Self::Table(_, table) => {
+                table.dml_fragment_id = id;
+            }
+            Self::MaterializedView(_) | Self::Index(_, _) | Self::Sink(_) => {}
+        }
+    }
+
     pub fn id(&self) -> u32 {
         match self {
             Self::MaterializedView(table) => table.id,
             Self::Sink(sink) => sink.id,
             Self::Table(_, table) => table.id,
             Self::Index(index, _) => index.id,
+        }
+    }
+
+    pub fn mv_table(&self) -> Option<u32> {
+        match self {
+            Self::MaterializedView(table) => Some(table.id),
+            Self::Sink(_sink) => None,
+            Self::Table(_, table) => Some(table.id),
+            Self::Index(_, table) => Some(table.id),
         }
     }
 
@@ -69,27 +88,6 @@ impl StreamingJob {
                 Some(table)
             }
             Self::Sink(_) => None,
-        }
-    }
-
-    /// Set the dependent relations of the job, not including the associated source being created.
-    pub fn set_dependent_relations(
-        &mut self,
-        dependent_relations: impl IntoIterator<Item = TableId>,
-    ) {
-        let dependent_relations = dependent_relations
-            .into_iter()
-            .map(|t| t.table_id())
-            .collect();
-
-        match self {
-            Self::MaterializedView(table) => table.dependent_relations = dependent_relations,
-            Self::Sink(sink) => sink.dependent_relations = dependent_relations,
-            Self::Index(_, index_table) => index_table.dependent_relations = dependent_relations,
-
-            // Note: For creating tables with connectors, the associated source (connector) itself
-            // should not be in this list, as it's also in the creating procedure.
-            Self::Table(_, _) => assert!(dependent_relations.is_empty()),
         }
     }
 
@@ -120,11 +118,21 @@ impl StreamingJob {
         }
     }
 
-    pub fn mview_definition(&self) -> String {
+    pub fn owner(&self) -> u32 {
+        match self {
+            StreamingJob::MaterializedView(mv) => mv.owner,
+            StreamingJob::Sink(sink) => sink.owner,
+            StreamingJob::Table(_, table) => table.owner,
+            StreamingJob::Index(index, _) => index.owner,
+        }
+    }
+
+    pub fn definition(&self) -> String {
         match self {
             Self::MaterializedView(table) => table.definition.clone(),
             Self::Table(_, table) => table.definition.clone(),
-            _ => "".to_owned(),
+            Self::Index(_, table) => table.definition.clone(),
+            Self::Sink(sink) => sink.definition.clone(),
         }
     }
 
@@ -137,15 +145,17 @@ impl StreamingJob {
         }
     }
 
-    /// Returns the optional [`Source`] if this is a `Table` streaming job.
-    ///
-    /// Only used for registering sources for creating tables with connectors.
-    pub fn source(&self) -> Option<&Source> {
-        match self {
-            Self::MaterializedView(_) => None,
-            Self::Sink(_) => None,
-            Self::Table(source, _) => source.as_ref(),
-            Self::Index(_, _) => None,
+    /// Returns the [`TableVersionId`] if this job is `Table`.
+    pub fn table_version_id(&self) -> Option<TableVersionId> {
+        if let Self::Table(_, table) = self {
+            Some(
+                table
+                    .get_version()
+                    .expect("table must be versioned")
+                    .version,
+            )
+        } else {
+            None
         }
     }
 }

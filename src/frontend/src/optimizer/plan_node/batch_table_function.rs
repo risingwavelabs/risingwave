@@ -12,21 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TableFunctionNode;
 
-use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
-};
+use super::utils::{childless_record, Distill};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb, ToDistributedBatch};
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::logical_table_function::LogicalTableFunction;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchTableFunction {
     pub base: PlanBase,
     logical: LogicalTableFunction,
@@ -52,13 +50,10 @@ impl BatchTableFunction {
     }
 }
 
-impl fmt::Display for BatchTableFunction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchTableFunction {{ {:?} }}",
-            self.logical.table_function
-        )
+impl Distill for BatchTableFunction {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = Pretty::debug(&self.logical.table_function);
+        childless_record("BatchTableFunction", vec![("table_function", data)])
     }
 }
 
@@ -68,7 +63,7 @@ impl ToDistributedBatch for BatchTableFunction {
     }
 }
 
-impl ToBatchProst for BatchTableFunction {
+impl ToBatchPb for BatchTableFunction {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::TableFunction(TableFunctionNode {
             table_function: Some(self.logical.table_function.to_protobuf()),

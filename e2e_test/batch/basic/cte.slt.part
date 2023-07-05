@@ -53,6 +53,13 @@ with c as (values(1)) select * from (with c as (values(2)) select * from c) foo 
 1
 2
 
+query I rowsort
+with table1 as ( select 1 as n), table2 as ( select 2 as n), table3 as ( select 3 as n) select * from table1 union select * from table2 union select * from table3;
+----
+1
+2
+3
+
 statement ok
 drop table t1;
 

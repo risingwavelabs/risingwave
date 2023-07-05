@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, DatabaseId, SchemaId, TableId, UserId};
-use risingwave_common::util::sort_util::OrderPair;
-use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
-use risingwave_pb::stream_plan::SinkDesc as ProstSinkDesc;
+use risingwave_common::catalog::{
+    ColumnCatalog, ConnectionId, DatabaseId, SchemaId, TableId, UserId,
+};
+use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::stream_plan::PbSinkDesc;
 
 use super::{SinkCatalog, SinkId, SinkType};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SinkDesc {
     /// Id of the sink. For debug now.
     pub id: SinkId,
@@ -36,19 +37,18 @@ pub struct SinkDesc {
     /// All columns of the sink. Note that this is NOT sorted by columnId in the vector.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Primiary keys of the sink (connector). Now the sink does not care about a field's
-    /// order (ASC/DESC).
-    pub pk: Vec<OrderPair>,
+    /// Primiary keys of the sink. Derived by the frontend.
+    pub plan_pk: Vec<ColumnOrder>,
 
-    /// Primary key indices of the corresponding sink operator's output.
-    pub stream_key: Vec<usize>,
+    /// User-defined primary key indices for upsert sink.
+    pub downstream_pk: Vec<usize>,
 
     /// Distribution key indices of the sink. For example, if `distribution_key = [1, 2]`, then the
     /// distribution keys will be `columns[1]` and `columns[2]`.
     pub distribution_key: Vec<usize>,
 
     /// The properties of the sink.
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
 
     // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
     // based on both its own derivation on the append-only attribute and other user-specified
@@ -62,6 +62,7 @@ impl SinkDesc {
         schema_id: SchemaId,
         database_id: DatabaseId,
         owner: UserId,
+        connection_id: Option<ConnectionId>,
         dependent_relations: Vec<TableId>,
     ) -> SinkCatalog {
         SinkCatalog {
@@ -71,30 +72,31 @@ impl SinkDesc {
             name: self.name,
             definition: self.definition,
             columns: self.columns,
-            pk: self.pk,
-            stream_key: self.stream_key,
+            plan_pk: self.plan_pk,
+            downstream_pk: self.downstream_pk,
             distribution_key: self.distribution_key,
             owner,
             dependent_relations,
-            properties: self.properties,
+            properties: self.properties.into_iter().collect(),
             sink_type: self.sink_type,
+            connection_id,
         }
     }
 
-    pub fn to_proto(&self) -> ProstSinkDesc {
-        ProstSinkDesc {
+    pub fn to_proto(&self) -> PbSinkDesc {
+        PbSinkDesc {
             id: self.id.sink_id,
             name: self.name.clone(),
             definition: self.definition.clone(),
-            columns: self
+            column_catalogs: self
                 .columns
                 .iter()
-                .map(|column| Into::<ProstColumnDesc>::into(&column.column_desc))
+                .map(|column| column.to_protobuf())
                 .collect_vec(),
-            pk: self.pk.iter().map(|k| k.to_protobuf()).collect_vec(),
-            stream_key: self.stream_key.iter().map(|idx| *idx as _).collect_vec(),
+            plan_pk: self.plan_pk.iter().map(|k| k.to_protobuf()).collect_vec(),
+            downstream_pk: self.downstream_pk.iter().map(|idx| *idx as _).collect_vec(),
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
-            properties: self.properties.clone(),
+            properties: self.properties.clone().into_iter().collect(),
             sink_type: self.sink_type.to_proto() as i32,
         }
     }

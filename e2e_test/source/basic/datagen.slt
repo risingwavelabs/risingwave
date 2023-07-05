@@ -7,7 +7,7 @@ create table s1 (v1 int, v2 float) with (
     fields.v2.kind = 'sequence',
     fields.v2.start = '11',
     fields.v2.end = '20',
-    datagen.rows.per.second='15',
+    datagen.rows.per.second = '15',
     datagen.split.num = '1'
 );
 

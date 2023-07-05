@@ -16,9 +16,6 @@ create materialized view mv2 as select * from t1 order by v1 limit 3;
 statement ok
 create materialized view mv3 as select * from t1 order by v1 limit 3 offset 1;
 
-statement ok
-flush;
-
 query III rowsort
 select v1, v2, v3 from mv1;
 ----
@@ -43,13 +40,60 @@ select v1, v2, v3 from mv3;
 5 1 4
 
 statement ok
-drop materialized view mv1
+insert into t1 values (NULL,0,0);
 
 statement ok
-drop materialized view mv2
+create materialized view mv4 as select * from t1 order by v1 desc limit 1;
 
 statement ok
-drop materialized view mv3
+create materialized view mv5 as select * from t1 order by v1 nulls first limit 1;
 
 statement ok
-drop table t1
+create materialized view mv6 as select * from t1 order by v1 nulls last limit 1;
+
+statement ok
+create materialized view mv7 as select * from t1 order by v1 desc nulls last limit 1;
+
+query III
+select v1, v2, v3 from mv4;
+----
+NULL 0 0
+
+query III
+select v1, v2, v3 from mv5;
+----
+NULL 0 0
+
+query III
+select v1, v2, v3 from mv6;
+----
+0 2 3
+
+query III
+select v1, v2, v3 from mv7;
+----
+9 8 1
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv3;
+
+statement ok
+drop materialized view mv4;
+
+statement ok
+drop materialized view mv5;
+
+statement ok
+drop materialized view mv6;
+
+statement ok
+drop materialized view mv7;
+
+statement ok
+drop table t1;

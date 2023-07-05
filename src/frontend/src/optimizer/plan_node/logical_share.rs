@@ -13,20 +13,20 @@
 // limitations under the License.
 
 use std::cell::RefCell;
-use std::fmt;
 
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::ErrorCode::NotImplemented;
 use risingwave_common::error::Result;
 
-use super::generic::{self, GenericPlanNode};
+use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
-    ToStream,
+    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
+    ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
-    StreamShare, ToStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamShare,
+    ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -47,7 +47,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///        |
 ///   LogicalSource
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalShare {
     pub base: PlanBase,
     core: generic::Share<PlanRef>,
@@ -55,19 +55,12 @@ pub struct LogicalShare {
 
 impl LogicalShare {
     pub fn new(input: PlanRef) -> Self {
-        let ctx = input.ctx();
-        let functional_dependency = input.functional_dependency().clone();
+        let _ctx = input.ctx();
+        let _functional_dependency = input.functional_dependency().clone();
         let core = generic::Share {
             input: RefCell::new(input),
         };
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalShare { base, core }
     }
 
@@ -75,8 +68,8 @@ impl LogicalShare {
         LogicalShare::new(input).into()
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(f, "{} {{ id = {} }}", name, &self.id().0)
+    pub(super) fn pretty_fields<'a>(base: &PlanBase, name: &'a str) -> XmlNode<'a> {
+        childless_record(name, vec![("id", Pretty::debug(&base.id.0))])
     }
 }
 
@@ -107,9 +100,9 @@ impl LogicalShare {
     }
 }
 
-impl fmt::Display for LogicalShare {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalShare")
+impl Distill for LogicalShare {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        Self::pretty_fields(&self.base, "LogicalShare")
     }
 }
 
@@ -148,7 +141,8 @@ impl ToStream for LogicalShare {
         match ctx.get_to_stream_result(self.id()) {
             None => {
                 let new_input = self.input().to_stream(ctx)?;
-                let new_logical = self.clone_with_input(new_input);
+                let new_logical = self.core.clone();
+                new_logical.replace_input(new_input);
                 let stream_share_ref: PlanRef = StreamShare::new(new_logical).into();
                 ctx.add_to_stream_result(self.id(), stream_share_ref.clone());
                 Ok(stream_share_ref)
@@ -165,14 +159,8 @@ impl ToStream for LogicalShare {
             None => {
                 let (new_input, col_change) = self.input().logical_rewrite_for_stream(ctx)?;
                 let new_share: PlanRef = self.clone_with_input(new_input).into();
-
-                // FIXME: Add an identity project here to avoid parent exchange connecting directly
-                // to the share operator.
-                let identity = ColIndexMapping::identity(new_share.schema().len());
-                let project: PlanRef = LogicalProject::with_mapping(new_share, identity).into();
-
-                ctx.add_rewrite_result(self.id(), project.clone(), col_change.clone());
-                Ok((project, col_change))
+                ctx.add_rewrite_result(self.id(), new_share.clone(), col_change.clone());
+                Ok((new_share, col_change))
             }
             Some(cache) => Ok(cache.clone()),
         }

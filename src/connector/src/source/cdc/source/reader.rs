@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::str::FromStr;
-use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -27,9 +26,9 @@ use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::CdcProperties;
-use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReaderV2,
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
+    SplitReader,
 };
 
 impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
@@ -37,16 +36,19 @@ impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
 pub struct CdcSplitReader {
     source_id: u64,
     start_offset: Option<String>,
+    // host address of worker node for a Citus cluster
+    server_addr: Option<String>,
     conn_props: CdcProperties,
 
     split_id: SplitId,
+    // whether the full snapshot phase is done
+    snapshot_done: bool,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
-impl SplitReaderV2 for CdcSplitReader {
+impl SplitReader for CdcSplitReader {
     type Properties = CdcProperties;
 
     #[allow(clippy::unused_async)]
@@ -54,23 +56,34 @@ impl SplitReaderV2 for CdcSplitReader {
         conn_props: CdcProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        assert!(splits.len() == 1);
+        assert_eq!(splits.len(), 1);
         let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
         match split {
             SplitImpl::MySqlCdc(split) | SplitImpl::PostgresCdc(split) => Ok(Self {
-                source_id: split.source_id as u64,
-                start_offset: split.start_offset,
+                source_id: split.split_id() as u64,
+                start_offset: split.start_offset().clone(),
+                server_addr: None,
                 conn_props,
                 split_id,
+                snapshot_done: split.snapshot_done(),
                 parser_config,
-                metrics,
-                source_info,
+                source_ctx,
             }),
+            SplitImpl::CitusCdc(split) => Ok(Self {
+                source_id: split.split_id() as u64,
+                start_offset: split.start_offset().clone(),
+                server_addr: split.server_addr().clone(),
+                conn_props,
+                split_id,
+                snapshot_done: split.snapshot_done(),
+                parser_config,
+                source_ctx,
+            }),
+
             _ => Err(anyhow!(
                 "failed to create cdc split reader: invalid splis info"
             )),
@@ -89,12 +102,31 @@ impl CdcSplitReader {
         let cdc_client =
             ConnectorClient::new(HostAddr::from_str(&self.conn_props.connector_node_addr)?).await?;
 
+        // rewrite the hostname and port for the split
+        let mut properties = self.conn_props.props.clone();
+
+        // For citus, we need to rewrite the table.name to capture sharding tables
+        if self.server_addr.is_some() {
+            let addr = self.server_addr.unwrap();
+            let host_addr = HostAddr::from_str(&addr)
+                .map_err(|err| anyhow!("invalid server address for cdc split. {}", err))?;
+            properties.insert("hostname".to_string(), host_addr.host);
+            properties.insert("port".to_string(), host_addr.port.to_string());
+            // rewrite table name with suffix to capture all shards in the split
+            let mut table_name = properties
+                .remove("table.name")
+                .ok_or_else(|| anyhow!("missing field 'table.name'".to_string()))?;
+            table_name.push_str("_[0-9]+");
+            properties.insert("table.name".into(), table_name);
+        }
+
         let cdc_stream = cdc_client
             .start_source_stream(
                 self.source_id,
-                self.conn_props.source_type_enum()?,
+                self.conn_props.get_source_type_pb()?,
                 self.start_offset,
-                self.conn_props.props,
+                properties,
+                self.snapshot_done,
             )
             .await
             .inspect_err(|err| tracing::error!("connector node start stream error: {}", err))?;

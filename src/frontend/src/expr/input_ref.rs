@@ -17,13 +17,13 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::agg_call::Arg as ProstAggCallArg;
-use risingwave_pb::expr::InputRefExpr;
+use risingwave_pb::expr::PbInputRef;
 
 use super::Expr;
 use crate::expr::ExprType;
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct InputRef {
+    // TODO(rc): remove `pub`, use `new()`, `index()` and `data_type()` instead
     pub index: usize,
     pub data_type: DataType,
 }
@@ -107,27 +107,27 @@ impl InputRef {
         self.index = (self.index as isize + offset) as usize;
     }
 
-    /// Convert to [`InputRefExpr`].
-    pub fn to_proto(&self) -> InputRefExpr {
-        InputRefExpr {
-            column_idx: self.index as i32,
+    pub fn clone_with_offset(&self, offset: isize) -> Self {
+        Self {
+            index: (self.index as isize + offset) as usize,
+            data_type: self.data_type.clone(),
         }
     }
 
-    /// Convert [`InputRef`] to an arg of agg call.
-    pub fn to_agg_arg_proto(&self) -> ProstAggCallArg {
-        ProstAggCallArg {
-            input: Some(self.to_proto()),
+    /// Convert to protobuf.
+    pub fn to_proto(&self) -> PbInputRef {
+        PbInputRef {
+            index: self.index as _,
             r#type: Some(self.data_type.to_protobuf()),
         }
     }
 
     pub(super) fn from_expr_proto(
-        input_ref: &risingwave_pb::expr::InputRefExpr,
+        column_index: usize,
         ret_type: DataType,
     ) -> risingwave_common::error::Result<Self> {
         Ok(Self {
-            index: input_ref.get_column_idx() as usize,
+            index: column_index,
             data_type: ret_type,
         })
     }
@@ -142,9 +142,9 @@ impl Expr for InputRef {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
         ExprNode {
-            expr_type: ExprType::InputRef.into(),
+            function_type: ExprType::Unspecified.into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::InputRef(self.to_proto())),
+            rex_node: Some(RexNode::InputRef(self.index() as _)),
         }
     }
 }

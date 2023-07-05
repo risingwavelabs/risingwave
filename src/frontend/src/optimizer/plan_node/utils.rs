@@ -17,25 +17,28 @@ use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema};
-use risingwave_common::util::sort_util::OrderType;
+use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
+use risingwave_common::catalog::{
+    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema,
+};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{FragmentId, TableCatalog, TableId};
-use crate::optimizer::property::{Direction, FieldOrder};
 use crate::utils::WithOptions;
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
     /// All columns in this table
     columns: Vec<ColumnCatalog>,
-    pk: Vec<FieldOrder>,
+    pk: Vec<ColumnOrder>,
     properties: WithOptions,
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
     column_names: HashMap<String, i32>,
     read_prefix_len_hint: usize,
     watermark_columns: Option<FixedBitSet>,
+    dist_key_in_pk: Option<Vec<usize>>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -71,18 +74,13 @@ impl TableCatalogBuilder {
 
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
     /// semantics and they are encoded as storage key.
-    pub fn add_order_column(&mut self, index: usize, order_type: OrderType) {
-        self.pk.push(FieldOrder {
-            index,
-            direct: match order_type {
-                OrderType::Ascending => Direction::Asc,
-                OrderType::Descending => Direction::Desc,
-            },
-        });
+    pub fn add_order_column(&mut self, column_index: usize, order_type: OrderType) {
+        self.pk.push(ColumnOrder::new(column_index, order_type));
     }
 
-    pub fn set_read_prefix_len_hint(&mut self, read_prefix_len_hint: usize) {
-        self.read_prefix_len_hint = read_prefix_len_hint;
+    /// get the current exist field number of the primary key.
+    pub fn get_current_pk_len(&self) -> usize {
+        self.pk.len()
     }
 
     pub fn set_vnode_col_idx(&mut self, vnode_col_idx: usize) {
@@ -96,6 +94,10 @@ impl TableCatalogBuilder {
     #[allow(dead_code)]
     pub fn set_watermark_columns(&mut self, watermark_columns: FixedBitSet) {
         self.watermark_columns = Some(watermark_columns);
+    }
+
+    pub fn set_dist_key_in_pk(&mut self, dist_key_in_pk: Vec<usize>) {
+        self.dist_key_in_pk = Some(dist_key_in_pk);
     }
 
     /// Check the column name whether exist before. if true, record occurrence and change the name
@@ -116,8 +118,10 @@ impl TableCatalogBuilder {
         self.column_names.insert(column_desc.name.clone(), 0);
     }
 
-    /// Consume builder and create `TableCatalog` (for proto).
-    pub fn build(self, distribution_key: Vec<usize>) -> TableCatalog {
+    /// Consume builder and create `TableCatalog` (for proto). The `read_prefix_len_hint` is the
+    /// anticipated read prefix pattern (number of fields) for the table, which can be utilized for
+    /// implementing the table's bloom filter or other storage optimization techniques.
+    pub fn build(self, distribution_key: Vec<usize>, read_prefix_len_hint: usize) -> TableCatalog {
         assert!(self.read_prefix_len_hint <= self.pk.len());
         let watermark_columns = match self.watermark_columns {
             Some(w) => w,
@@ -139,16 +143,18 @@ impl TableCatalogBuilder {
             properties: self.properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
+            dml_fragment_id: None,
             vnode_col_index: self.vnode_col_idx,
             row_id_index: None,
             value_indices: self
                 .value_indices
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
-            handle_pk_conflict: false,
-            read_prefix_len_hint: self.read_prefix_len_hint,
+            conflict_behavior: ConflictBehavior::NoCheck,
+            read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
+            dist_key_in_pk: self.dist_key_in_pk.unwrap_or(vec![]),
         }
     }
 
@@ -157,10 +163,102 @@ impl TableCatalogBuilder {
     }
 }
 
+/// See also [`super::generic::DistillUnit`].
+pub trait Distill {
+    fn distill<'a>(&self) -> XmlNode<'a>;
+
+    fn distill_to_string(&self) -> String {
+        let mut config = pretty_config();
+        let mut output = String::with_capacity(2048);
+        config.unicode(&mut output, &Pretty::Record(self.distill()));
+        output
+    }
+}
+
+pub(super) fn childless_record<'a>(
+    name: impl Into<Str<'a>>,
+    fields: StrAssocArr<'a>,
+) -> XmlNode<'a> {
+    XmlNode::simple_record(name, fields, Default::default())
+}
+
+macro_rules! impl_distill_by_unit {
+    ($ty:ty, $core:ident, $name:expr) => {
+        use pretty_xmlish::XmlNode;
+        use $crate::optimizer::plan_node::generic::DistillUnit;
+        use $crate::optimizer::plan_node::utils::Distill;
+        impl Distill for $ty {
+            fn distill<'a>(&self) -> XmlNode<'a> {
+                self.$core.distill_with_name($name)
+            }
+        }
+    };
+}
+pub(crate) use impl_distill_by_unit;
+
+pub(crate) fn column_names_pretty<'a>(schema: &Schema) -> Pretty<'a> {
+    let columns = (schema.fields.iter())
+        .map(|f| f.name.clone())
+        .map(Pretty::from)
+        .collect();
+    Pretty::Array(columns)
+}
+
+pub(crate) fn watermark_pretty<'a>(
+    watermark_columns: &FixedBitSet,
+    schema: &Schema,
+) -> Option<Pretty<'a>> {
+    if watermark_columns.count_ones(..) > 0 {
+        Some(watermark_fields_pretty(watermark_columns.ones(), schema))
+    } else {
+        None
+    }
+}
+pub(crate) fn watermark_fields_pretty<'a>(
+    watermark_columns: impl Iterator<Item = usize>,
+    schema: &Schema,
+) -> Pretty<'a> {
+    let arr = watermark_columns
+        .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+        .map(|d| Pretty::display(&d))
+        .collect();
+    Pretty::Array(arr)
+}
+
 #[derive(Clone, Copy)]
 pub struct IndicesDisplay<'a> {
     pub indices: &'a [usize],
     pub input_schema: &'a Schema,
+}
+
+impl<'a> IndicesDisplay<'a> {
+    /// Returns `None` means all
+    pub fn from_join<PlanRef: GenericPlanRef>(
+        join: &'a generic::Join<PlanRef>,
+        input_schema: &'a Schema,
+    ) -> Option<Self> {
+        Self::from(
+            &join.output_indices,
+            join.internal_column_num(),
+            input_schema,
+        )
+    }
+
+    /// Returns `None` means all
+    pub fn from(
+        indices: &'a [usize],
+        internal_column_num: usize,
+        input_schema: &'a Schema,
+    ) -> Option<Self> {
+        if indices.iter().copied().eq(0..internal_column_num) {
+            None
+        } else {
+            Some(Self {
+                indices,
+                input_schema,
+            })
+        }
+    }
 }
 
 impl fmt::Display for IndicesDisplay<'_> {
@@ -179,3 +277,27 @@ impl fmt::Debug for IndicesDisplay<'_> {
         f.finish()
     }
 }
+
+/// Call `debug_struct` on the given formatter to create a debug struct builder.
+/// If a property list is provided, properties in it will be added to the struct name according to
+/// the condition of that property.
+macro_rules! plan_node_name {
+    ($name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
+        {
+            #[allow(unused_mut)]
+            let mut properties: Vec<&str> = vec![];
+            $( if $cond { properties.push($prop); } )*
+            let mut name = $name.to_string();
+            if !properties.is_empty() {
+                name += " [";
+                name += &properties.join(", ");
+                name += "]";
+            }
+            name
+        }
+    };
+}
+pub(crate) use plan_node_name;
+
+use super::generic::{self, GenericPlanRef};
+use super::pretty_config;

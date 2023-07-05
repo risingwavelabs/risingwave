@@ -25,6 +25,34 @@ use crate::sql_gen::expr::typed_null;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
+    /// Generates integer scalar expression.
+    /// Bound: [start, end).
+    /// Type: `DataType`.
+    pub(super) fn gen_range_scalar(
+        &mut self,
+        typ: &DataType,
+        start: isize,
+        end: isize,
+    ) -> Option<Expr> {
+        use DataType as T;
+        let value = self.rng.gen_range(start..end).to_string();
+        match *typ {
+            T::Int64 => Some(Expr::TypedString {
+                data_type: AstDataType::BigInt,
+                value,
+            }),
+            T::Int32 => Some(Expr::TypedString {
+                data_type: AstDataType::Int,
+                value,
+            }),
+            T::Int16 => Some(Expr::TypedString {
+                data_type: AstDataType::SmallInt,
+                value,
+            }),
+            _ => None,
+        }
+    }
+
     pub(super) fn gen_simple_scalar(&mut self, typ: &DataType) -> Expr {
         use DataType as T;
         // NOTE(kwannoel): Since this generates many invalid queries,
@@ -41,9 +69,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // e.g. -1 becomes -(1).
         // See: https://github.com/risingwavelabs/risingwave/issues/4344
         match *typ {
-            T::Int64 => Expr::Nested(Box::new(Expr::Value(Value::Number(
-                self.gen_int(i64::MIN as isize, i64::MAX as isize),
-            )))),
+            T::Int64 => Expr::Nested(Box::new(Expr::TypedString {
+                data_type: AstDataType::BigInt,
+                value: self.gen_int(i64::MIN as isize, i64::MAX as isize),
+            })),
             T::Int32 => Expr::Nested(Box::new(Expr::TypedString {
                 data_type: AstDataType::Int,
                 value: self.gen_int(i32::MIN as isize, i32::MAX as isize),
@@ -87,8 +116,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 data_type: AstDataType::Interval,
                 value: self.gen_temporal_scalar(typ),
             })),
-            T::List { datatype: ref ty } => {
-                let n = self.rng.gen_range(1..=4); // Avoid ambiguous type
+            T::List(ref ty) => {
+                let n = self.rng.gen_range(1..=4);
                 Expr::Array(Array {
                     elem: self.gen_simple_scalar_list(ty, n),
                     named: true,
@@ -146,15 +175,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_temporal_scalar(&mut self, typ: &DataType) -> String {
         use DataType as T;
 
-        let rand_secs = self.rng.gen_range(2..1000000) as u64;
         let minute = 60;
         let hour = 60 * minute;
         let day = 24 * hour;
         let week = 7 * day;
-        let choices = [0, 1, minute, hour, day, week, rand_secs];
-        let secs = choices.choose(&mut self.rng).unwrap();
+        let choices = [0, 1, minute, hour, day, week];
 
-        let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(*secs));
+        let secs = match self.rng.gen_range(1..=100) {
+            1..=30 => *choices.choose(&mut self.rng).unwrap(),
+            31..=100 => self.rng.gen_range(2..100) as u64,
+            _ => unreachable!(),
+        };
+
+        let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(secs));
         match typ {
             T::Date => tm.format("%F").to_string(),
             T::Timestamp | T::Timestamptz => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
@@ -167,7 +200,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             T::Time => tm.format("%T").to_string(),
             T::Interval => {
                 if self.rng.gen_bool(0.5) {
-                    (-(*secs as i64)).to_string()
+                    (-(secs as i64)).to_string()
                 } else {
                     secs.to_string()
                 }

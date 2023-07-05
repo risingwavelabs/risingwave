@@ -14,14 +14,13 @@
 
 use std::fmt::Write;
 
-use crate::Result;
+use risingwave_expr_macro::function;
 
-#[inline(always)]
-pub fn repeat(s: &str, count: i32, writer: &mut dyn Write) -> Result<()> {
+#[function("repeat(varchar, int32) -> varchar")]
+pub fn repeat(s: &str, count: i32, writer: &mut dyn Write) {
     for _ in 0..count {
         writer.write_str(s).unwrap();
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -29,7 +28,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_repeat() -> Result<()> {
+    fn test_repeat() {
         let cases = vec![
             ("hello, world", 1, "hello, world"),
             ("114514", 3, "114514114514114514"),
@@ -39,9 +38,8 @@ mod tests {
 
         for (s, count, expected) in cases {
             let mut writer = String::new();
-            repeat(s, count, &mut writer)?;
+            repeat(s, count, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
     }
 }

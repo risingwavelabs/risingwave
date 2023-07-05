@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::mem::swap;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
@@ -21,53 +20,54 @@ use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
-use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
+use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
-use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
-use crate::source::kafka::KafkaProperties;
-use crate::source::monitor::SourceMetrics;
+use crate::source::base::SourceMessage;
+use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReaderV2,
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
+    SplitReader,
 };
 
 impl_common_split_reader_logic!(KafkaSplitReader, KafkaProperties);
 
 pub struct KafkaSplitReader {
-    consumer: StreamConsumer<DefaultConsumerContext>,
+    consumer: StreamConsumer<PrivateLinkConsumerContext>,
     start_offset: Option<i64>,
     stop_offset: Option<i64>,
     bytes_per_second: usize,
     max_num_messages: usize,
+    enable_upsert: bool,
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
-impl SplitReaderV2 for KafkaSplitReader {
+impl SplitReader for KafkaSplitReader {
     type Properties = KafkaProperties;
 
     async fn new(
         properties: KafkaProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let mut config = ClientConfig::new();
 
         let bootstrap_servers = &properties.common.brokers;
+        let broker_rewrite_map = properties.common.broker_rewrite_map.clone();
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
         config.set("enable.auto.commit", "false");
         config.set("auto.offset.reset", "smallest");
+        config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
 
         properties.common.set_security_properties(&mut config);
@@ -85,9 +85,10 @@ impl SplitReaderV2 for KafkaSplitReader {
             );
         }
 
-        let consumer: StreamConsumer = config
+        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map)?;
+        let consumer: StreamConsumer<PrivateLinkConsumerContext> = config
             .set_log_level(RDKafkaLogLevel::Info)
-            .create_with_context(DefaultConsumerContext)
+            .create_with_context(client_ctx)
             .await
             .map_err(|e| anyhow!("failed to create kafka consumer: {}", e))?;
 
@@ -136,9 +137,9 @@ impl SplitReaderV2 for KafkaSplitReader {
             bytes_per_second,
             max_num_messages,
             split_id,
+            enable_upsert: parser_config.specific.is_upsert(),
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
         })
     }
 
@@ -151,7 +152,7 @@ impl KafkaSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_data_stream(self) {
         if let Some(stop_offset) = self.stop_offset {
-            if let Some(start_offset) = self.start_offset && (start_offset+1) >= stop_offset {
+            if let Some(start_offset) = self.start_offset && (start_offset + 1) >= stop_offset {
                 yield Vec::new();
                 return Ok(());
             } else if stop_offset == 0 {
@@ -163,9 +164,10 @@ impl KafkaSplitReader {
         interval.tick().await;
         let mut bytes_current_second = 0;
         let mut num_messages = 0;
-        let mut res = Vec::with_capacity(MAX_CHUNK_SIZE);
+        let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
+        let mut res = Vec::with_capacity(max_chunk_size);
         #[for_await]
-        'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(MAX_CHUNK_SIZE) {
+        'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
             for msg in msgs {
                 let msg = msg?;
                 let cur_offset = msg.offset();
@@ -174,7 +176,12 @@ impl KafkaSplitReader {
                     Some(payload) => payload.len(),
                 };
                 num_messages += 1;
-                res.push(SourceMessage::from(msg));
+                if self.enable_upsert {
+                    res.push(SourceMessage::from_kafka_message_upsert(msg));
+                } else {
+                    res.push(SourceMessage::from(msg));
+                }
+
                 if let Some(stop_offset) = self.stop_offset {
                     if cur_offset == stop_offset - 1 {
                         tracing::debug!(

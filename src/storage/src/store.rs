@@ -19,12 +19,16 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
+use risingwave_hummock_trace::{
+    TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions, TracedWriteOptions,
+};
 
 use crate::error::{StorageError, StorageResult};
+use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
@@ -76,6 +80,8 @@ pub trait StateStoreIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreIter
 pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
 pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
 
+pub type IterKeyRange = (Bound<KeyPayloadType>, Bound<KeyPayloadType>);
+
 pub trait IterFutureTrait<'a, I: StateStoreReadIterStream> =
     Future<Output = StorageResult<I>> + Send + 'a;
 pub trait StateStoreRead: StaticSendSync {
@@ -86,12 +92,7 @@ pub trait StateStoreRead: StaticSendSync {
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_>;
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_>;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
@@ -100,7 +101,7 @@ pub trait StateStoreRead: StaticSendSync {
     /// corresponding to the given `epoch`.
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_>;
@@ -120,7 +121,7 @@ pub trait StateStoreReadExt: StaticSendSync {
     /// By default, this simply calls `StateStore::iter` to fetch elements.
     fn scan(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -132,11 +133,14 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
 
     fn scan(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         limit: Option<usize>,
-        read_options: ReadOptions,
+        mut read_options: ReadOptions,
     ) -> Self::ScanFuture<'_> {
+        if limit.is_some() {
+            read_options.prefetch_options.exhaust_iter = false;
+        }
         let limit = limit.unwrap_or(usize::MAX);
         async move {
             self.iter(key_range, epoch, read_options)
@@ -176,7 +180,7 @@ pub trait StateStoreWrite: StaticSendSync {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_>;
 
@@ -239,7 +243,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
         todo!()
     }
 
-    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_>;
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_>;
 
     /// Validates whether store can serve `epoch` at the moment.
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
@@ -257,31 +261,44 @@ macro_rules! define_local_state_store_associated_type {
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
-pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
+pub trait LocalStateStore: StaticSendSync {
+    type IterStream<'a>: StateStoreIterItemStream + 'a;
+
     type MayExistFuture<'a>: MayExistTrait<'a>;
+    type GetFuture<'a>: GetFutureTrait<'a>;
+    type IterFuture<'a>: Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+    type FlushFuture<'a>: Future<Output = StorageResult<usize>> + Send + 'a;
+
+    /// Point gets a value from the state store.
+    /// The result is based on the latest written snapshot.
+    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_>;
+
+    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
+    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
+    /// in `key_range`) The returned iterator will iterate data based on the latest written
+    /// snapshot.
+    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_>;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
-    fn insert(&self, _key: Bytes, _val: Bytes) -> StorageResult<()> {
-        unimplemented!()
-    }
+    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()>;
 
     /// Deletes a key-value entry from the state store. Only the key-value entry with epoch smaller
     /// than the given `epoch` will be deleted.
-    fn delete(&self, _key: Bytes) -> StorageResult<()> {
-        unimplemented!()
-    }
+    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
 
-    /// Triggers a flush to persistent storage for the in-memory states.
-    fn flush(&self) -> StorageResult<usize> {
-        unimplemented!()
-    }
+    fn flush(&mut self, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) -> Self::FlushFuture<'_>;
+
+    fn epoch(&self) -> u64;
+
+    fn is_dirty(&self) -> bool;
+
+    fn init(&mut self, epoch: u64);
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
-    fn advance_write_epoch(&mut self, _new_epoch: u64) -> StorageResult<()> {
-        unimplemented!()
-    }
+    fn seal_current_epoch(&mut self, next_epoch: u64);
 
     /// Check existence of a given `key_range`.
     /// It is better to provide `prefix_hint` in `read_options`, which will be used
@@ -294,9 +311,40 @@ pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
     /// - true: `key_range` may or may not exist in storage.
     fn may_exist(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> Self::MayExistFuture<'_>;
+}
+
+/// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
+/// footprint of the CN process because the prefetched blocks cannot be evicted.
+#[derive(Default, Clone, Copy)]
+pub struct PrefetchOptions {
+    /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
+    /// exhausted, i.e., will iterate until end.
+    pub exhaust_iter: bool,
+}
+
+impl PrefetchOptions {
+    pub fn new_for_exhaust_iter() -> Self {
+        Self { exhaust_iter: true }
+    }
+}
+
+impl From<TracedPrefetchOptions> for PrefetchOptions {
+    fn from(value: TracedPrefetchOptions) -> Self {
+        Self {
+            exhaust_iter: value.exhaust_iter,
+        }
+    }
+}
+
+impl From<PrefetchOptions> for TracedPrefetchOptions {
+    fn from(value: PrefetchOptions) -> Self {
+        Self {
+            exhaust_iter: value.exhaust_iter,
+        }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -306,6 +354,8 @@ pub struct ReadOptions {
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Bytes>,
     pub ignore_range_tombstone: bool,
+    pub prefetch_options: PrefetchOptions,
+    pub cache_policy: CachePolicy,
 
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,
@@ -314,12 +364,40 @@ pub struct ReadOptions {
     pub read_version_from_backup: bool,
 }
 
+impl From<TracedReadOptions> for ReadOptions {
+    fn from(value: TracedReadOptions) -> Self {
+        Self {
+            prefix_hint: value.prefix_hint.map(|b| b.into()),
+            ignore_range_tombstone: value.ignore_range_tombstone,
+            prefetch_options: value.prefetch_options.into(),
+            cache_policy: value.cache_policy.into(),
+            retention_seconds: value.retention_seconds,
+            table_id: value.table_id.into(),
+            read_version_from_backup: value.read_version_from_backup,
+        }
+    }
+}
+
+impl From<ReadOptions> for TracedReadOptions {
+    fn from(value: ReadOptions) -> Self {
+        Self {
+            prefix_hint: value.prefix_hint.map(|b| b.into()),
+            ignore_range_tombstone: value.ignore_range_tombstone,
+            prefetch_options: value.prefetch_options.into(),
+            cache_policy: value.cache_policy.into(),
+            retention_seconds: value.retention_seconds,
+            table_id: value.table_id.into(),
+            read_version_from_backup: value.read_version_from_backup,
+        }
+    }
+}
+
 pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
     let base_epoch = Epoch(base_epoch);
     match retention_seconds {
         Some(retention_seconds_u32) => {
             base_epoch
-                .subtract_ms((retention_seconds_u32 * 1000) as u64)
+                .subtract_ms(*retention_seconds_u32 as u64 * 1000)
                 .0
         }
         None => 0,
@@ -330,4 +408,88 @@ pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
 pub struct WriteOptions {
     pub epoch: u64,
     pub table_id: TableId,
+}
+
+impl From<TracedWriteOptions> for WriteOptions {
+    fn from(value: TracedWriteOptions) -> Self {
+        Self {
+            epoch: value.epoch,
+            table_id: value.table_id.into(),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct NewLocalOptions {
+    pub table_id: TableId,
+    /// Whether the operation is consistent. The term `consistent` requires the following:
+    ///
+    /// 1. A key cannot be inserted or deleted for more than once, i.e. inserting to an existing
+    /// key or deleting an non-existing key is not allowed.
+    ///
+    /// 2. The old value passed from
+    /// `update` and `delete` should match the original stored value.
+    pub is_consistent_op: bool,
+    pub table_option: TableOption,
+
+    /// Indicate if this is replicated. If it is, we should not
+    /// upload its ReadVersions.
+    pub is_replicated: bool,
+}
+
+impl From<TracedNewLocalOptions> for NewLocalOptions {
+    fn from(value: TracedNewLocalOptions) -> Self {
+        Self {
+            table_id: value.table_id.into(),
+            is_consistent_op: value.is_consistent_op,
+            table_option: value.table_option.into(),
+            is_replicated: value.is_replicated,
+        }
+    }
+}
+
+impl From<NewLocalOptions> for TracedNewLocalOptions {
+    fn from(value: NewLocalOptions) -> Self {
+        Self {
+            table_id: value.table_id.into(),
+            is_consistent_op: value.is_consistent_op,
+            table_option: value.table_option.into(),
+            is_replicated: value.is_replicated,
+        }
+    }
+}
+
+impl NewLocalOptions {
+    pub fn new(table_id: TableId, is_consistent_op: bool, table_option: TableOption) -> Self {
+        NewLocalOptions {
+            table_id,
+            is_consistent_op,
+            table_option,
+            is_replicated: false,
+        }
+    }
+
+    pub fn new_replicated(
+        table_id: TableId,
+        is_consistent_op: bool,
+        table_option: TableOption,
+    ) -> Self {
+        NewLocalOptions {
+            table_id,
+            is_consistent_op,
+            table_option,
+            is_replicated: true,
+        }
+    }
+
+    pub fn for_test(table_id: TableId) -> Self {
+        Self {
+            table_id,
+            is_consistent_op: false,
+            table_option: TableOption {
+                retention_seconds: None,
+            },
+            is_replicated: false,
+        }
+    }
 }

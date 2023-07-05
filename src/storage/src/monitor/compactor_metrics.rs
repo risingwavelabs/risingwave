@@ -42,6 +42,9 @@ pub struct CompactorMetrics {
     pub sstable_avg_value_size: Histogram,
     pub iter_scan_key_counts: GenericCounterVec<AtomicU64>,
     pub write_build_l0_bytes: GenericCounter<AtomicU64>,
+    pub sstable_distinct_epoch_count: Histogram,
+    pub preload_io_count: GenericCounter<AtomicU64>,
+    pub refill_cache_duration: Histogram,
 }
 
 impl CompactorMetrics {
@@ -64,28 +67,34 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_compact_sst_duration",
             "Total time of compact_key_range that have been issued to state store",
-            exponential_buckets(0.001, 1.6, 28).unwrap() // max 520s
+            exponential_buckets(0.001, 1.6, 28).unwrap() // max 320
         );
         let compact_sst_duration = register_histogram_with_registry!(opts, registry).unwrap();
         let opts = histogram_opts!(
             "compactor_compact_task_duration",
             "Total time of compact that have been issued to state store",
-            exponential_buckets(0.1, 1.6, 28).unwrap() // max 52000s
+            exponential_buckets(0.1, 1.6, 28).unwrap() // max 9h
         );
         let compact_task_duration =
-            register_histogram_vec_with_registry!(opts, &["level"], registry).unwrap();
+            register_histogram_vec_with_registry!(opts, &["group", "level"], registry).unwrap();
+
         let opts = histogram_opts!(
             "compactor_get_table_id_total_time_duration",
             "Total time of compact that have been issued to state store",
-            exponential_buckets(0.1, 1.6, 28).unwrap() // max 52000s
+            exponential_buckets(0.1, 1.6, 28).unwrap() // max 9h
         );
         let get_table_id_total_time_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
-
+        let opts = histogram_opts!(
+            "compute_refill_cache_duration",
+            "Total time of compact that have been issued to state store",
+            exponential_buckets(0.001, 1.6, 20).unwrap()
+        );
+        let refill_cache_duration = register_histogram_with_registry!(opts, registry).unwrap();
         let opts = histogram_opts!(
             "compactor_remote_read_time",
             "Total time of operations which read from remote storage when enable prefetch",
-            exponential_buckets(0.001, 1.6, 28).unwrap() // max 520s
+            exponential_buckets(0.001, 1.6, 28).unwrap() // max 320
         );
         let remote_read_time = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -171,7 +180,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_sstable_avg_value_size",
             "Total bytes gotten from sstable_avg_value_size, for observing sstable_avg_value_size",
-            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+            exponential_buckets(1.0, 2.0, 26).unwrap() // max 32MB
         );
 
         let sstable_avg_value_size = register_histogram_with_registry!(opts, registry).unwrap();
@@ -198,6 +207,21 @@ impl CompactorMetrics {
             registry
         ).unwrap();
 
+        let opts = histogram_opts!(
+            "compactor_sstable_distinct_epoch_count",
+            "Total number gotten from sstable_distinct_epoch_count, for observing sstable_distinct_epoch_count",
+            exponential_buckets(1.0, 2.0, 17).unwrap()
+        );
+
+        let sstable_distinct_epoch_count =
+            register_histogram_with_registry!(opts, registry).unwrap();
+        let preload_io_count = register_int_counter_with_registry!(
+            "sstable_preload_io_count",
+            "Total number of preload io count",
+            registry
+        )
+        .unwrap();
+
         Self {
             compaction_upload_sst_counts,
             compact_write_bytes,
@@ -219,6 +243,9 @@ impl CompactorMetrics {
             sstable_avg_value_size,
             iter_scan_key_counts,
             write_build_l0_bytes,
+            sstable_distinct_epoch_count,
+            preload_io_count,
+            refill_cache_duration,
         }
     }
 

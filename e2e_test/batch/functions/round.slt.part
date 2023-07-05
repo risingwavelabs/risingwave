@@ -14,7 +14,7 @@ SELECT ceil(4.7)
 5
 
 query I
-SELECT floor(4.7::double)
+SELECT floor(4.7::double precision)
 ----
 4
 
@@ -26,9 +26,60 @@ SELECT round(4)
 query I
 SELECT round(4.5::float)
 ----
-5
+4
 
 query R
 SELECT round('4.5')
 ----
-5
+4
+
+query RIIRRRRRRRR
+with t(v) as (
+	select v / 4.0 from generate_series(-6, 6, 1) as t(v)
+) select
+	v::real,
+	v::decimal::int AS ties_away,
+	v::float8::int AS ties_even,
+	round(v::decimal),
+	round(v::float8),
+	floor(v::decimal),
+	floor(v::float8),
+	ceil(v::decimal),
+	ceil(v::float8),
+	trunc(v::decimal),
+	trunc(v::float8)
+from t;
+----
+ -1.5 -2 -2 -2 -2 -2 -2 -1 -1 -1 -1
+-1.25 -1 -1 -1 -1 -2 -2 -1 -1 -1 -1
+   -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+-0.75 -1 -1 -1 -1 -1 -1  0 -0  0 -0
+ -0.5 -1  0 -1 -0 -1 -1  0 -0  0 -0
+-0.25  0  0  0 -0 -1 -1  0 -0  0 -0
+    0  0  0  0  0  0  0  0  0  0  0
+ 0.25  0  0  0  0  0  0  1  1  0  0
+  0.5  1  0  1  0  0  0  1  1  0  0
+ 0.75  1  1  1  1  0  0  1  1  0  0
+    1  1  1  1  1  1  1  1  1  1  1
+ 1.25  1  1  1  1  1  1  2  2  1  1
+  1.5  2  2  2  2  1  1  2  2  1  1
+
+query TRRRRRRRR
+with t(v) as (
+	values ('nan'), ('inf'), ('-inf'), ('-0')
+) select
+	v,
+	round(v::decimal),
+	round(v::float8),
+	floor(v::decimal),
+	floor(v::float8),
+	ceil(v::decimal),
+	ceil(v::float8),
+	trunc(v::decimal),
+	trunc(v::float8)
+from t;
+----
+nan        NaN       NaN       NaN       NaN       NaN       NaN       NaN       NaN
+inf   Infinity  Infinity  Infinity  Infinity  Infinity  Infinity  Infinity  Infinity
+-inf -Infinity -Infinity -Infinity -Infinity -Infinity -Infinity -Infinity -Infinity
+-0           0        -0         0        -0         0        -0         0        -0

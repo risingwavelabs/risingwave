@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use risingwave_pb::ProstFieldNotFound;
+use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 
 use crate::storage::MetaStoreError;
@@ -25,15 +25,15 @@ pub enum MetadataModelError {
     #[error("Meta store error: {0}")]
     MetaStoreError(#[from] MetaStoreError),
 
-    #[error("Prost decode error: {0}")]
-    ProstDecode(#[from] prost::DecodeError),
+    #[error("Pb decode error: {0}")]
+    PbDecode(#[from] prost::DecodeError),
 
     #[error(transparent)]
     InternalError(anyhow::Error),
 }
 
-impl From<ProstFieldNotFound> for MetadataModelError {
-    fn from(p: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for MetadataModelError {
+    fn from(p: PbFieldNotFound) -> Self {
         MetadataModelError::InternalError(anyhow::anyhow!(
             "Failed to decode prost: field not found `{}`",
             p.0

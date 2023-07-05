@@ -33,22 +33,23 @@ pub struct FieldExpression {
     index: usize,
 }
 
+#[async_trait::async_trait]
 impl Expression for FieldExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let array = self.input.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let array = self.input.eval_checked(input).await?;
         if let ArrayImpl::Struct(struct_array) = array.as_ref() {
-            Ok(struct_array.field_at(self.index))
+            Ok(struct_array.field_at(self.index).clone())
         } else {
             Err(anyhow!("expects a struct array ref").into())
         }
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let struct_datum = self.input.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let struct_datum = self.input.eval_row(input).await?;
         struct_datum
             .map(|s| match s {
                 ScalarImpl::Struct(v) => Ok(v.fields()[self.index].clone()),
@@ -73,7 +74,7 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::Field);
+        ensure!(prost.get_function_type().unwrap() == Type::Field);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
@@ -101,17 +102,16 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::array;
-    use risingwave_common::array::{DataChunk, F32Array, I32Array, StructArray};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::array::{Array, DataChunk, F32Array, I32Array, StructArray};
+    use risingwave_common::types::{DataType, ScalarImpl, StructType};
     use risingwave_pb::data::data_type::TypeName;
 
     use crate::expr::expr_field::FieldExpression;
     use crate::expr::test_utils::{make_field_function, make_i32_literal, make_input_ref};
     use crate::expr::Expression;
 
-    #[test]
-    fn test_field_expr() {
+    #[tokio::test]
+    async fn test_field_expr() {
         let input_node = make_input_ref(0, TypeName::Struct);
         let literal_node = make_i32_literal(0);
         let field_expr = FieldExpression::try_from(&make_field_function(
@@ -119,17 +119,17 @@ mod tests {
             TypeName::Int32,
         ))
         .unwrap();
-        let array = StructArray::from_slices(
-            &[true],
+        let array = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
             vec![
-                array! { I32Array, [Some(1),Some(2),Some(3),Some(4),Some(5)] }.into(),
-                array! { F32Array, [Some(2.0)] }.into(),
+                I32Array::from_iter([1, 2, 3, 4, 5]).into_ref(),
+                F32Array::from_iter([2.0, 2.0, 2.0, 2.0, 2.0]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Float32],
+            [true].into_iter().collect(),
         );
 
-        let data_chunk = DataChunk::new(vec![array.into()], 1);
-        let res = field_expr.eval(&data_chunk).unwrap();
+        let data_chunk = DataChunk::new(vec![array.into_ref()], 1);
+        let res = field_expr.eval(&data_chunk).await.unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(1)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
         assert_eq!(res.datum_at(2), Some(ScalarImpl::Int32(3)));
@@ -137,8 +137,8 @@ mod tests {
         assert_eq!(res.datum_at(4), Some(ScalarImpl::Int32(5)));
     }
 
-    #[test]
-    fn test_nested_field_expr() {
+    #[tokio::test]
+    async fn test_nested_field_expr() {
         let field_node = make_field_function(
             vec![make_input_ref(0, TypeName::Struct), make_i32_literal(0)],
             TypeName::Int32,
@@ -149,25 +149,25 @@ mod tests {
         ))
         .unwrap();
 
-        let struct_array = StructArray::from_slices(
-            &[true],
+        let struct_array = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
             vec![
-                array! { I32Array, [Some(1),Some(2),Some(3),Some(4),Some(5)] }.into(),
-                array! { F32Array, [Some(1.0),Some(2.0),Some(3.0),Some(4.0),Some(5.0)] }.into(),
+                I32Array::from_iter([1, 2, 3, 4, 5]).into_ref(),
+                F32Array::from_iter([1.0, 2.0, 3.0, 4.0, 5.0]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Float32],
+            [true].into_iter().collect(),
         );
-        let array = StructArray::from_slices(
-            &[true],
+        let array = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
             vec![
-                struct_array.into(),
-                array! { F32Array, [Some(2.0),Some(2.0),Some(2.0),Some(2.0),Some(2.0)] }.into(),
+                struct_array.into_ref(),
+                F32Array::from_iter([2.0, 2.0, 2.0, 2.0, 2.0]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Float32],
+            [true].into_iter().collect(),
         );
 
-        let data_chunk = DataChunk::new(vec![array.into()], 1);
-        let res = field_expr.eval(&data_chunk).unwrap();
+        let data_chunk = DataChunk::new(vec![array.into_ref()], 1);
+        let res = field_expr.eval(&data_chunk).await.unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Float32(1.0.into())));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Float32(2.0.into())));
         assert_eq!(res.datum_at(2), Some(ScalarImpl::Float32(3.0.into())));

@@ -66,3 +66,6 @@ drop materialized view nexmark_q104;
 
 statement ok
 drop materialized view nexmark_q105;
+
+statement ok
+drop materialized view nexmark_q106;

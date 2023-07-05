@@ -22,11 +22,13 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 use risingwave_stream::common::table::state_table::StateTable;
 
+use crate::common::HummockServiceOpts;
 use crate::CtlContext;
 
 pub async fn get_table_catalog(meta: MetaClient, mv_name: String) -> Result<TableCatalog> {
@@ -62,8 +64,8 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
             .iter()
             .map(|x| x.column_desc.clone())
             .collect(),
-        table.pk().iter().map(|x| x.direct.to_order()).collect(),
-        table.pk().iter().map(|x| x.index).collect(),
+        table.pk().iter().map(|x| x.order_type).collect(),
+        table.pk().iter().map(|x| x.column_index).collect(),
         Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
         Some(table.value_indices.clone()),
     )
@@ -84,25 +86,30 @@ pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> St
             .iter()
             .map(|x| x.column_desc.column_id)
             .collect(),
-        table.pk().iter().map(|x| x.direct.to_order()).collect(),
-        table.pk().iter().map(|x| x.index).collect(),
+        table.pk().iter().map(|x| x.order_type).collect(),
+        table.pk().iter().map(|x| x.column_index).collect(),
         Distribution::all_vnodes(table.distribution_key().to_vec()),
         TableOption::build_table_option(&HashMap::new()),
         table.value_indices.clone(),
         table.read_prefix_len_hint,
+        table.version.is_some(),
     )
 }
 
-pub async fn scan(context: &CtlContext, mv_name: String) -> Result<()> {
+pub async fn scan(context: &CtlContext, mv_name: String, data_dir: Option<String>) -> Result<()> {
     let meta_client = context.meta_client().await?;
-    let hummock = context.hummock_store().await?;
+    let hummock = context
+        .hummock_store(HummockServiceOpts::from_env(data_dir)?)
+        .await?;
     let table = get_table_catalog(meta_client, mv_name).await?;
     do_scan(table, hummock).await
 }
 
-pub async fn scan_id(context: &CtlContext, table_id: u32) -> Result<()> {
+pub async fn scan_id(context: &CtlContext, table_id: u32, data_dir: Option<String>) -> Result<()> {
     let meta_client = context.meta_client().await?;
-    let hummock = context.hummock_store().await?;
+    let hummock = context
+        .hummock_store(HummockServiceOpts::from_env(data_dir)?)
+        .await?;
     let table = get_table_catalog_by_id(meta_client, table_id).await?;
     do_scan(table, hummock).await
 }
@@ -114,7 +121,11 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
     let storage_table = make_storage_table(hummock, &table);
     let stream = storage_table
-        .batch_iter(HummockReadEpoch::Committed(read_epoch), true)
+        .batch_iter(
+            HummockReadEpoch::Committed(read_epoch),
+            true,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await?;
     pin_mut!(stream);
     while let Some(item) = stream.next().await {

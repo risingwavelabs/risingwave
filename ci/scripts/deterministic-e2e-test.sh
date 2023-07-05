@@ -3,17 +3,27 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
+source ci/scripts/pr.env.sh
 
 echo "--- Download artifacts"
-buildkite-agent artifact download risingwave_simulation .
+download-and-decompress-artifact risingwave_simulation .
 chmod +x ./risingwave_simulation
 
 echo "--- Extract data for Kafka"
-cd ./scripts/source/
+pushd ./scripts/source/
 mkdir -p ./test_data
 unzip -o test_data.zip -d .
-cd ../../
+popd
+
+echo "--- Extract data for SqlSmith"
+pushd ./src/tests/sqlsmith/tests
+git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/sqlsmith-query-snapshots.git
+# FIXME(kwannoel): Uncomment this to stage changes. Should have a better approach.
+# pushd sqlsmith-query-snapshots
+# git checkout stage
+# popd
+popd
 
 export RUST_LOG=info
 export LOGDIR=.risingwave/log
@@ -38,5 +48,8 @@ seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, batch"
 seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-batch-{}.log && rm $LOGDIR/parallel-batch-{}.log'
 
-echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
+echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queries)"
+timeout 7m seq 64 | parallel MADSIM_TEST_SEED={} './risingwave_simulation  --run-sqlsmith-queries ./src/tests/sqlsmith/tests/sqlsmith-query-snapshots/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
+
+echo "--- deterministic simulation e2e, ci-3cn-2fe, e2e extended mode test"
+seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation -e 2> $LOGDIR/extended-{}.log && rm $LOGDIR/extended-{}.log'

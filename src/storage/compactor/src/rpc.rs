@@ -12,47 +12,65 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::error::RwError;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
+use parking_lot::RwLock;
 use risingwave_pb::compactor::compactor_service_server::CompactorService;
-use risingwave_pb::compactor::{SetRuntimeConfigRequest, SetRuntimeConfigResponse};
-use risingwave_rpc_client::MetaClient;
-use risingwave_storage::hummock::compactor::CompactorContext;
+use risingwave_pb::compactor::{EchoRequest, EchoResponse};
+use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
+use risingwave_pb::monitor_service::{
+    ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse,
+};
 use tonic::{Request, Response, Status};
 
-pub struct CompactorServiceImpl {
-    context: Arc<CompactorContext>,
-    meta_client: MetaClient,
+#[derive(Default)]
+pub struct CompactorServiceImpl {}
+
+#[async_trait::async_trait]
+impl CompactorService for CompactorServiceImpl {
+    async fn echo(&self, _request: Request<EchoRequest>) -> Result<Response<EchoResponse>, Status> {
+        Ok(Response::new(EchoResponse {}))
+    }
 }
 
-impl CompactorServiceImpl {
-    pub fn new(context: Arc<CompactorContext>, meta_client: MetaClient) -> Self {
-        Self {
-            context,
-            meta_client,
-        }
+pub struct MonitorServiceImpl {
+    await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
+}
+
+impl MonitorServiceImpl {
+    pub fn new(await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>) -> Self {
+        Self { await_tree_reg }
     }
 }
 
 #[async_trait::async_trait]
-impl CompactorService for CompactorServiceImpl {
-    async fn set_runtime_config(
+impl MonitorService for MonitorServiceImpl {
+    async fn stack_trace(
         &self,
-        request: Request<SetRuntimeConfigRequest>,
-    ) -> Result<Response<SetRuntimeConfigResponse>, Status> {
-        // The lock ensures config is synchronized in compactor and meta. Otherwise this may happen:
-        // 1. set_compactor_runtime_config succeeds with new config.
-        // 2. subscribe_compact_tasks succeeds with old config.
-        // 3. Local config is set with new config. But the one in meta is stale.
-        let mut local_config = self.context.lock_config().await;
-        let new_config = CompactorRuntimeConfig::from(request.into_inner().config.unwrap());
-        self.meta_client
-            .set_compactor_runtime_config(new_config.clone())
-            .await
-            .map_err(RwError::from)?;
-        *local_config = new_config;
-        Ok(Response::new(SetRuntimeConfigResponse {}))
+        _request: Request<StackTraceRequest>,
+    ) -> Result<Response<StackTraceResponse>, Status> {
+        let compaction_task_traces = match &self.await_tree_reg {
+            None => HashMap::default(),
+            Some(await_tree_reg) => await_tree_reg
+                .read()
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        };
+        Ok(Response::new(StackTraceResponse {
+            actor_traces: Default::default(),
+            rpc_traces: Default::default(),
+            compaction_task_traces,
+        }))
+    }
+
+    async fn profiling(
+        &self,
+        _request: Request<ProfilingRequest>,
+    ) -> Result<Response<ProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "profiling unimplemented in compactor",
+        ))
     }
 }

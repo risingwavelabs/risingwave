@@ -1,7 +1,7 @@
 version: v1
 breaking:
   use:
-    - WIRE_JSON # https://docs.buf.build/breaking/rules
+    - WIRE # https://docs.buf.build/breaking/rules
 lint:
   use:
     - DEFAULT

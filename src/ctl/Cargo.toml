@@ -17,12 +17,14 @@ normal = ["workspace-hack"]
 anyhow = "1"
 bytes = "1"
 chrono = "0.4"
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 comfy-table = "6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+inquire = "0.6.2"
 itertools = "0.10"
 regex = "1.6.0"
 risingwave_common = { path = "../common" }
+risingwave_connector = { path = "../connector" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
@@ -30,8 +32,9 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
 risingwave_stream = { path = "../stream" }
-risingwave_tracing = { path = "../tracing" }
+serde = "1"
 serde_json = "1"
+serde_yaml = "0.9.21"
 size = "0.4"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

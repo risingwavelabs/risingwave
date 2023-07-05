@@ -14,15 +14,75 @@
 
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::{ExprError, Result};
 
-#[inline(always)]
+/// Replaces a substring of the given string with a new substring.
+///
+/// ```slt
+/// query T
+/// select overlay('αβγδεζ' placing '💯' from 3);
+/// ----
+/// αβ💯δεζ
+/// ```
+#[function("overlay(varchar, varchar, int32) -> varchar")]
 pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
-    // If count is omitted, it defaults to the length of new_sub_str.
-    overlay_for(s, new_sub_str, start, new_sub_str.len() as i32, writer)
+    let sub_len = new_sub_str
+        .chars()
+        .count()
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)?;
+    overlay_for(s, new_sub_str, start, sub_len, writer)
 }
 
-#[inline(always)]
+/// Replaces a substring of the given string with a new substring.
+///
+/// ```slt
+/// statement error not positive
+/// select overlay('αβγδεζ' placing '①②③' from 0);
+///
+/// query T
+/// select overlay('αβγδεζ' placing '①②③' from 10);
+/// ----
+/// αβγδεζ①②③
+///
+/// query T
+/// select overlay('αβγδεζ' placing '①②③' from 4 for 2);
+/// ----
+/// αβγ①②③ζ
+///
+/// query T
+/// select overlay('αβγδεζ' placing '①②③' from 4);
+/// ----
+/// αβγ①②③
+///
+/// query T
+/// select overlay('αβγδεζ' placing '①②③' from 2 for 4);
+/// ----
+/// α①②③ζ
+///
+/// query T
+/// select overlay('αβγδεζ' placing '①②③' from 2 for 7);
+/// ----
+/// α①②③
+///
+/// query T
+/// select overlay('αβγδεζ' placing '①②③' from 4 for 0);
+/// ----
+/// αβγ①②③δεζ
+///
+/// query T
+/// select overlay('αβγδεζ' placing '①②③' from 4 for -2);
+/// ----
+/// αβγ①②③βγδεζ
+///
+/// query T
+/// select overlay('αβγδεζ' placing '①②③' from 4 for -1000);
+/// ----
+/// αβγ①②③αβγδεζ
+/// ```
+#[function("overlay(varchar, varchar, int32, int32) -> varchar")]
 pub fn overlay_for(
     s: &str,
     new_sub_str: &str,
@@ -30,23 +90,32 @@ pub fn overlay_for(
     count: i32,
     writer: &mut dyn Write,
 ) -> Result<()> {
-    let count = count.max(0) as usize;
+    if start <= 0 {
+        return Err(ExprError::InvalidParam {
+            name: "start",
+            reason: format!("{start} is not positive"),
+        });
+    }
 
-    // If start is out of range, attach it to the end.
-    // Note that indices are 1-based.
-    let start = (start
-        .checked_sub(1)
-        .ok_or(ExprError::NumericOutOfRange)?
-        .max(0) as usize)
-        .min(s.len());
+    let mut chars = s.chars();
+    for _ in 1..start {
+        if let Some(c) = chars.next() {
+            writer.write_char(c).unwrap();
+        }
+    }
 
-    let remaining = start + count;
-
-    writer.write_str(&s[..start]).unwrap();
     writer.write_str(new_sub_str).unwrap();
 
-    if remaining < s.len() {
-        writer.write_str(&s[remaining..]).unwrap();
+    let Ok(count) = count.try_into() else {
+        // For negative `count`, which is rare in practice, we hand over to `substr`
+        let start_right = start
+            .checked_add(count)
+            .ok_or(ExprError::NumericOutOfRange)?;
+        return super::substr::substr_start(s, start_right, writer);
+    };
+
+    for c in chars.skip(count) {
+        writer.write_char(c).unwrap();
     }
 
     Ok(())
@@ -69,11 +138,10 @@ mod tests {
             ("aaaaaa", "XYZ", 4, Some(0), "aaaXYZaaa"),
             // Replace longer string.
             ("aaa___aaa", "X", 4, Some(3), "aaaXaaa"),
-            // start too small or large.
-            ("aaa", "XY", -123, None, "XYa"),
+            // start too large.
             ("aaa", "XY", 123, None, "aaaXY"),
             // count too small or large.
-            ("aaa", "X", 4, Some(-123), "aaaX"),
+            ("aaa", "X", 4, Some(-123), "aaaXaaa"),
             ("aaa_", "X", 4, Some(123), "aaaX"),
         ];
 

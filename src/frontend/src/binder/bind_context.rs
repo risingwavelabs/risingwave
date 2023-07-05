@@ -50,8 +50,11 @@ pub enum Clause {
     Where,
     Values,
     GroupBy,
+    JoinOn,
     Having,
     Filter,
+    From,
+    GeneratedColumn,
 }
 
 /// A `BindContext` that is only visible if the `LATERAL` keyword

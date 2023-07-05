@@ -24,7 +24,7 @@ INSERT INTO INT2_TBL(f1) VALUES ('32767');
 statement ok
 INSERT INTO INT2_TBL(f1) VALUES ('-32767');
 
-statement error
+statement error Numeric out of range
 SELECT i.f1, i.f1 * smallint '2' AS x FROM INT2_TBL i;
 
 statement ok

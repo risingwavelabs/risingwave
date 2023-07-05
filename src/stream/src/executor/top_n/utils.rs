@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -25,14 +24,14 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::row_serde::OrderedRowSerde;
+use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::top_n_cache::CacheKey;
+use super::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef,
+    ExecutorInfo, Message, PkIndicesRef, Watermark,
 };
 
 #[async_trait]
@@ -67,7 +66,12 @@ pub trait TopNExecutorBase: Send + 'static {
     }
 
     fn evict(&mut self) {}
+    fn update_epoch(&mut self, _epoch: u64) {}
+
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
+
+    /// Handle incoming watermarks
+    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark>;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]
@@ -120,10 +124,13 @@ where
 
         #[for_await]
         for msg in input {
+            self.inner.evict();
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                Message::Watermark(watermark) => {
+                    if let Some(output_watermark) = self.inner.handle_watermark(watermark).await {
+                        yield Message::Watermark(output_watermark);
+                    }
                 }
                 Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
                 Message::Barrier(barrier) => {
@@ -133,7 +140,8 @@ where
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
-                    self.inner.evict();
+
+                    self.inner.update_epoch(barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
             };
@@ -186,35 +194,25 @@ pub fn serialize_pk_to_cache_key(pk: impl Row, cache_key_serde: &CacheKeySerde) 
 pub type CacheKeySerde = (OrderedRowSerde, OrderedRowSerde, usize);
 
 pub fn create_cache_key_serde(
-    storage_key: &[OrderPair],
-    pk_indices: PkIndicesRef<'_>,
+    storage_key: &[ColumnOrder],
     schema: &Schema,
-    order_by: &[OrderPair],
+    order_by: &[ColumnOrder],
     group_by: &[usize],
 ) -> CacheKeySerde {
     {
         // validate storage_key = group_by + order_by + additional_pk
         for i in 0..group_by.len() {
-            assert_eq!(storage_key[i].column_idx, group_by[i]);
+            assert_eq!(storage_key[i].column_index, group_by[i]);
         }
         for i in group_by.len()..(group_by.len() + order_by.len()) {
             assert_eq!(storage_key[i], order_by[i - group_by.len()]);
-        }
-        let pk_indices = pk_indices.iter().copied().collect::<HashSet<_>>();
-        for i in (group_by.len() + order_by.len())..storage_key.len() {
-            assert!(
-                pk_indices.contains(&storage_key[i].column_idx),
-                "storage_key = {:?}, pk_indices = {:?}",
-                storage_key,
-                pk_indices
-            );
         }
     }
 
     let (cache_key_data_types, cache_key_order_types): (Vec<_>, Vec<_>) = storage_key
         [group_by.len()..]
         .iter()
-        .map(|o| (schema[o.column_idx].data_type(), o.order_type))
+        .map(|o| (schema[o.column_index].data_type(), o.order_type))
         .unzip();
 
     let order_by_len = order_by.len();
@@ -231,3 +229,7 @@ pub fn create_cache_key_serde(
     );
     (first_key_serde, second_key_serde, order_by_len)
 }
+
+use risingwave_common::row;
+pub trait GroupKey = row::Row + Send + Sync;
+pub const NO_GROUP_KEY: Option<row::Empty> = None;

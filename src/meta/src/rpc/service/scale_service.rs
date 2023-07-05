@@ -14,10 +14,10 @@
 
 use itertools::Itertools;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::meta::reschedule_request::Reschedule;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, PauseRequest, PauseResponse, RescheduleRequest,
+    GetClusterInfoRequest, GetClusterInfoResponse, GetReschedulePlanRequest,
+    GetReschedulePlanResponse, PauseRequest, PauseResponse, Reschedule, RescheduleRequest,
     RescheduleResponse, ResumeRequest, ResumeResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -85,10 +85,12 @@ where
         &self,
         _: Request<GetClusterInfoRequest>,
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+
         let table_fragments = self
             .fragment_manager
             .list_table_fragments()
-            .await?
+            .await
             .iter()
             .map(|tf| tf.to_protobuf())
             .collect();
@@ -117,11 +119,14 @@ where
 
         let source_infos = sources.into_iter().map(|s| (s.id, s)).collect();
 
+        let revision = self.fragment_manager.get_revision().await.inner();
+
         Ok(Response::new(GetClusterInfoResponse {
             worker_nodes,
             table_fragments,
             actor_splits,
             source_infos,
+            revision,
         }))
     }
 
@@ -131,6 +136,17 @@ where
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
         let req = request.into_inner();
+
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.write().await;
+
+        let current_revision = self.fragment_manager.get_revision().await;
+
+        if req.revision != current_revision.inner() {
+            return Ok(Response::new(RescheduleResponse {
+                success: false,
+                revision: current_revision.inner(),
+            }));
+        }
 
         self.stream_manager
             .reschedule_actors(
@@ -162,6 +178,65 @@ where
             )
             .await?;
 
-        Ok(Response::new(RescheduleResponse { success: true }))
+        let next_revision = self.fragment_manager.get_revision().await;
+
+        Ok(Response::new(RescheduleResponse {
+            success: true,
+            revision: next_revision.into(),
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn get_reschedule_plan(
+        &self,
+        request: Request<GetReschedulePlanRequest>,
+    ) -> Result<Response<GetReschedulePlanResponse>, Status> {
+        let req = request.into_inner();
+
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+
+        let current_revision = self.fragment_manager.get_revision().await;
+
+        if req.revision != current_revision.inner() {
+            return Ok(Response::new(GetReschedulePlanResponse {
+                success: false,
+                revision: current_revision.inner(),
+                reschedules: Default::default(),
+            }));
+        }
+
+        let policy = req
+            .policy
+            .ok_or_else(|| Status::invalid_argument("policy is required"))?;
+
+        let plan = self.stream_manager.get_reschedule_plan(policy).await?;
+
+        let next_revision = self.fragment_manager.get_revision().await;
+
+        // generate reschedule plan will not change the revision
+        assert_eq!(current_revision, next_revision);
+
+        Ok(Response::new(GetReschedulePlanResponse {
+            success: true,
+            revision: next_revision.into(),
+            reschedules: plan
+                .into_iter()
+                .map(|(fragment_id, reschedule)| {
+                    (
+                        fragment_id,
+                        Reschedule {
+                            added_parallel_units: reschedule
+                                .added_parallel_units
+                                .into_iter()
+                                .collect(),
+                            removed_parallel_units: reschedule
+                                .removed_parallel_units
+                                .into_iter()
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+        }))
     }
 }

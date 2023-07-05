@@ -12,31 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
+use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{
-    CreateSinkStatement, CreateSourceStatement, SqlOption, Statement, Value,
+    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, SqlOption, Statement,
+    Value,
 };
+
+use crate::catalog::connection_catalog::resolve_private_link_connection;
+use crate::catalog::ConnectionId;
+use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
+use crate::handler::util::get_connection_name;
+use crate::session::SessionImpl;
 
 mod options {
     use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 
-    pub const APPEND_ONLY: &str = "appendonly";
     pub const RETENTION_SECONDS: &str = PROPERTIES_RETENTION_SECOND_KEY;
 }
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
-    inner: HashMap<String, String>,
+    inner: BTreeMap<String, String>,
 }
 
 impl std::ops::Deref for WithOptions {
-    type Target = HashMap<String, String>;
+    type Target = BTreeMap<String, String>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -46,17 +53,23 @@ impl std::ops::Deref for WithOptions {
 impl WithOptions {
     /// Create a new [`WithOptions`] from a [`HashMap`].
     pub fn new(inner: HashMap<String, String>) -> Self {
-        Self { inner }
+        Self {
+            inner: inner.into_iter().collect(),
+        }
     }
 
     /// Get the reference of the inner map.
-    pub fn inner(&self) -> &HashMap<String, String> {
+    pub fn inner(&self) -> &BTreeMap<String, String> {
         &self.inner
     }
 
+    pub fn inner_mut(&mut self) -> &mut BTreeMap<String, String> {
+        &mut self.inner
+    }
+
     /// Take the value of the inner map.
-    pub fn into_inner(self) -> HashMap<String, String> {
-        self.inner
+    pub fn into_inner(self) -> BTreeMap<String, String> {
+        self.inner.into_iter().collect()
     }
 
     /// Parse the retention seconds from the options.
@@ -64,16 +77,6 @@ impl WithOptions {
         self.inner
             .get(options::RETENTION_SECONDS)
             .and_then(|s| s.parse().ok())
-    }
-
-    /// Parse the append only property from the options.
-    pub fn append_only(&self) -> bool {
-        if let Some(val) = self.inner.get(options::APPEND_ONLY) {
-            if val.eq_ignore_ascii_case("true") {
-                return true;
-            }
-        }
-        false
     }
 
     /// Get a subset of the options from the given keys.
@@ -96,6 +99,48 @@ impl WithOptions {
     pub fn internal_table_subset(&self) -> Self {
         self.subset([options::RETENTION_SECONDS])
     }
+
+    pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
+        if let Some(inner_val) = self.inner.get(key) {
+            if inner_val.eq_ignore_ascii_case(val) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+#[inline(always)]
+fn is_kafka_connector(with_options: &WithOptions) -> bool {
+    let Some(connector) = with_options.inner().get(UPSTREAM_SOURCE_KEY).map(|s| s.to_lowercase()) else {
+        return false;
+    };
+    connector == KAFKA_CONNECTOR
+}
+
+pub(crate) fn resolve_connection_in_with_option(
+    with_options: &mut WithOptions,
+    schema_name: &Option<String>,
+    session: &SessionImpl,
+) -> RwResult<Option<ConnectionId>> {
+    let connection_name = get_connection_name(with_options);
+    let is_kafka = is_kafka_connector(with_options);
+    let connection_id = match connection_name {
+        Some(connection_name) => {
+            let connection = session
+                .get_connection_by_name(schema_name.clone(), &connection_name)
+                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
+            if !is_kafka {
+                return Err(RwError::from(ErrorCode::ProtocolError(
+                    "Connection is only supported in kafka connector".to_string(),
+                )));
+            }
+            resolve_private_link_connection(&connection, with_options.inner_mut())?;
+            Some(connection.id)
+        }
+        None => None,
+    };
+    Ok(connection_id)
 }
 
 impl TryFrom<&[SqlOption]> for WithOptions {
@@ -144,6 +189,12 @@ impl TryFrom<&Statement> for WithOptions {
             | Statement::CreateSink {
                 stmt:
                     CreateSinkStatement {
+                        with_properties, ..
+                    },
+            }
+            | Statement::CreateConnection {
+                stmt:
+                    CreateConnectionStatement {
                         with_properties, ..
                     },
             } => Self::try_from(with_properties.0.as_slice()),

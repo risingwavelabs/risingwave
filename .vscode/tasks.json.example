@@ -1,0 +1,15 @@
+// Copy this file to .vscode/tasks.json and edit it to your needs
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build rw bin",
+            "type": "shell",
+            "command": "/bin/bash",
+            "args": [
+                "-c",
+                "risedev k ; cargo build --bin risingwave"
+            ]
+        }
+    ]
+}

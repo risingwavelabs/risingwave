@@ -12,59 +12,55 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExpandNode;
 
-use super::ExprRewritable;
+use super::utils::impl_distill_by_unit;
+use super::{generic, ExprRewritable};
 use crate::optimizer::plan_node::{
-    LogicalExpand, PlanBase, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ToLocalBatch,
+    PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRef;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExpand {
     pub base: PlanBase,
-    logical: LogicalExpand,
+    logical: generic::Expand<PlanRef>,
 }
 
 impl BatchExpand {
-    pub fn new(logical: LogicalExpand) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let dist = match logical.input().distribution() {
+    pub fn new(logical: generic::Expand<PlanRef>) -> Self {
+        let dist = match logical.input.distribution() {
             Distribution::Single => Distribution::Single,
             Distribution::SomeShard
             | Distribution::HashShard(_)
             | Distribution::UpstreamHashShard(_, _) => Distribution::SomeShard,
             Distribution::Broadcast => unreachable!(),
         };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
+        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
         BatchExpand { base, logical }
     }
 
-    pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
-        self.logical.column_subsets()
+    pub fn column_subsets(&self) -> &[Vec<usize>] {
+        &self.logical.column_subsets
     }
 }
 
-impl fmt::Display for BatchExpand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchExpand")
-    }
-}
+impl_distill_by_unit!(BatchExpand, logical, "BatchExpand");
 
 impl PlanTreeNodeUnary for BatchExpand {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
@@ -77,7 +73,7 @@ impl ToDistributedBatch for BatchExpand {
     }
 }
 
-impl ToBatchProst for BatchExpand {
+impl ToBatchPb for BatchExpand {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Expand(ExpandNode {
             column_subsets: self

@@ -24,7 +24,15 @@ platforms = [
 # exact-versions = true
 
 [traversal-excludes]
-workspace-members = ["workspace-config", "risingwave_object_store"]
+workspace-members = [
+    "workspace-config",
+    "risingwave_object_store",
+    "risingwave_bench",
+]
 third-party = [
     { name = "opendal" },
+    # These are solely dev-dependencies. Unifying them may slow down build.
+    { name = "criterion" },
+    { name = "console" },
+    { name = "similar" },
 ]

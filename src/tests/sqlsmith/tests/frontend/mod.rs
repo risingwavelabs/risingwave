@@ -15,7 +15,6 @@
 use std::env;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use libtest_mimic::{Arguments, Failed, Trial};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -27,7 +26,7 @@ use risingwave_frontend::{
 };
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
-    create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
+    is_permissible_error, mview_sql_gen, parse_create_table_statements, parse_sql, sql_gen, Table,
 };
 use tokio::runtime::Runtime;
 
@@ -95,11 +94,7 @@ async fn create_tables(
     let sql = get_seed_table_sql();
     setup_sql.push_str(&sql);
 
-    let statements = parse_sql(&sql);
-    let mut tables = statements
-        .iter()
-        .map(create_table_statement_to_table)
-        .collect_vec();
+    let (mut tables, statements) = parse_create_table_statements(sql);
 
     for s in statements {
         let create_sql = s.to_string();
@@ -107,7 +102,7 @@ async fn create_tables(
     }
 
     // Generate some mviews
-    for i in 0..10 {
+    for i in 0..20 {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         reproduce_failing_queries(&setup_sql, &sql);
         setup_sql.push_str(&format!("{};", &sql));
@@ -187,9 +182,17 @@ fn run_batch_query(
     let mut logical_plan = planner
         .plan(bound)
         .map_err(|e| Failed::from(format!("Failed to generate logical plan:\nReason:\n{}", e)))?;
-    logical_plan
-        .gen_batch_distributed_plan()
+    let batch_plan = logical_plan
+        .gen_batch_plan()
         .map_err(|e| Failed::from(format!("Failed to generate batch plan:\nReason:\n{}", e)))?;
+    logical_plan
+        .gen_batch_distributed_plan(batch_plan)
+        .map_err(|e| {
+            Failed::from(format!(
+                "Failed to generate batch distributed plan:\nReason:\n{}",
+                e
+            ))
+        })?;
     Ok(())
 }
 

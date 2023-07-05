@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::once;
+
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
+use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::types::{DataType, Datum, Scalar};
-use risingwave_expr::expr::{build_from_prost, AggKind};
+use risingwave_expr::agg::AggKind;
+use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 
@@ -27,6 +31,9 @@ mod correlated_input_ref;
 mod function_call;
 mod input_ref;
 mod literal;
+mod now;
+mod parameter;
+mod pure;
 mod subquery;
 mod table_function;
 mod user_defined_function;
@@ -50,6 +57,9 @@ pub use expr_visitor::ExprVisitor;
 pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
+pub use now::{InlineNowProcTime, Now};
+pub use parameter::Parameter;
+pub use pure::*;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 pub use session_timezone::SessionTimezone;
 pub use subquery::{Subquery, SubqueryKind};
@@ -60,7 +70,7 @@ pub use type_inference::{
 };
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
-pub use window_function::{WindowFunction, WindowFunctionType};
+pub use window_function::WindowFunction;
 
 /// the trait of bound expressions
 pub trait Expr: Into<ExprImpl> {
@@ -72,17 +82,32 @@ pub trait Expr: Into<ExprImpl> {
 }
 
 macro_rules! impl_expr_impl {
-    ($($t:ident),*) => {
+    ($($t:ident,)*) => {
         #[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
         pub enum ExprImpl {
             $($t(Box<$t>),)*
         }
+
         $(
         impl From<$t> for ExprImpl {
             fn from(o: $t) -> ExprImpl {
                 ExprImpl::$t(Box::new(o))
             }
         })*
+
+        impl Expr for ExprImpl {
+            fn return_type(&self) -> DataType {
+                match self {
+                    $(ExprImpl::$t(expr) => expr.return_type(),)*
+                }
+            }
+
+            fn to_expr_proto(&self) -> ExprNode {
+                match self {
+                    $(ExprImpl::$t(expr) => expr.to_expr_proto(),)*
+                }
+            }
+        }
     };
 }
 
@@ -96,7 +121,9 @@ impl_expr_impl!(
     Subquery,
     TableFunction,
     WindowFunction,
-    UserDefinedFunction
+    UserDefinedFunction,
+    Parameter,
+    Now,
 );
 
 impl ExprImpl {
@@ -104,6 +131,12 @@ impl ExprImpl {
     #[inline(always)]
     pub fn literal_int(v: i32) -> Self {
         Literal::new(Some(v.to_scalar_value()), DataType::Int32).into()
+    }
+
+    /// A literal float64 value.
+    #[inline(always)]
+    pub fn literal_f64(v: f64) -> Self {
+        Literal::new(Some(v.into()), DataType::Float64).into()
     }
 
     /// A literal boolean value.
@@ -129,11 +162,14 @@ impl ExprImpl {
     pub fn literal_list(v: ListValue, element_type: DataType) -> Self {
         Literal::new(
             Some(v.to_scalar_value()),
-            DataType::List {
-                datatype: Box::new(element_type),
-            },
+            DataType::List(Box::new(element_type)),
         )
         .into()
+    }
+
+    /// Takes the expression, leaving a literal null of the same type in its place.
+    pub fn take(&mut self) -> Self {
+        std::mem::replace(self, Self::literal_null(self.return_type()))
     }
 
     /// A `count(*)` aggregate function.
@@ -145,6 +181,7 @@ impl ExprImpl {
             false,
             OrderBy::any(),
             Condition::true_cond(),
+            vec![],
         )
         .unwrap()
         .into()
@@ -155,9 +192,16 @@ impl ExprImpl {
     /// # Panics
     /// Panics if `input_ref >= input_col_num`.
     pub fn collect_input_refs(&self, input_col_num: usize) -> FixedBitSet {
-        let mut visitor = CollectInputRef::with_capacity(input_col_num);
-        visitor.visit_expr(self);
-        visitor.into()
+        collect_input_refs(input_col_num, once(self))
+    }
+
+    /// Check if the expression has no side effects and output is deterministic
+    pub fn is_pure(&self) -> bool {
+        is_pure(self)
+    }
+
+    pub fn is_impure(&self) -> bool {
+        is_impure(self)
     }
 
     /// Count `Now`s in the expression.
@@ -172,28 +216,50 @@ impl ExprImpl {
     }
 
     /// Check whether self is a literal NULL or literal string.
-    pub fn is_unknown(&self) -> bool {
-        matches!(self, ExprImpl::Literal(literal) if literal.return_type() == DataType::Varchar)
+    pub fn is_untyped(&self) -> bool {
+        matches!(self, ExprImpl::Literal(literal) if literal.is_untyped())
+            || matches!(self, ExprImpl::Parameter(parameter) if !parameter.has_infer())
     }
 
     /// Shorthand to create cast expr to `target` type in implicit context.
-    pub fn cast_implicit(self, target: DataType) -> Result<ExprImpl> {
-        FunctionCall::new_cast(self, target, CastContext::Implicit)
+    pub fn cast_implicit(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+        FunctionCall::cast_mut(&mut self, target, CastContext::Implicit)?;
+        Ok(self)
     }
 
     /// Shorthand to create cast expr to `target` type in assign context.
-    pub fn cast_assign(self, target: DataType) -> Result<ExprImpl> {
-        FunctionCall::new_cast(self, target, CastContext::Assign)
+    pub fn cast_assign(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+        FunctionCall::cast_mut(&mut self, target, CastContext::Assign)?;
+        Ok(self)
     }
 
     /// Shorthand to create cast expr to `target` type in explicit context.
-    pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl> {
-        FunctionCall::new_cast(self, target, CastContext::Explicit)
+    pub fn cast_explicit(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+        FunctionCall::cast_mut(&mut self, target, CastContext::Explicit)?;
+        Ok(self)
+    }
+
+    /// Shorthand to inplace cast expr to `target` type in implicit context.
+    pub fn cast_implicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
+        FunctionCall::cast_mut(self, target, CastContext::Implicit)
+    }
+
+    /// Ensure the return type of this expression is an array of some type.
+    pub fn ensure_array_type(&self) -> Result<(), ErrorCode> {
+        if self.is_untyped() {
+            return Err(ErrorCode::BindError(
+                "could not determine polymorphic type because input has type unknown".into(),
+            ));
+        }
+        match self.return_type() {
+            DataType::List(_) => Ok(()),
+            t => Err(ErrorCode::BindError(format!("expects array but got {t}"))),
+        }
     }
 
     /// Shorthand to enforce implicit cast to boolean
-    pub fn enforce_bool_clause(self, clause: &str) -> Result<ExprImpl> {
-        if self.is_unknown() {
+    pub fn enforce_bool_clause(self, clause: &str) -> RwResult<ExprImpl> {
+        if self.is_untyped() {
             let inner = self.cast_implicit(DataType::Boolean)?;
             return Ok(inner);
         }
@@ -218,28 +284,45 @@ impl ExprImpl {
     /// References in `PostgreSQL`:
     /// * [cast](https://github.com/postgres/postgres/blob/a3ff08e0b08dbfeb777ccfa8f13ebaa95d064c04/src/include/catalog/pg_cast.dat#L437-L444)
     /// * [impl](https://github.com/postgres/postgres/blob/27b77ecf9f4d5be211900eda54d8155ada50d696/src/backend/utils/adt/bool.c#L204-L209)
-    pub fn cast_output(self) -> Result<ExprImpl> {
+    pub fn cast_output(self) -> RwResult<ExprImpl> {
         if self.return_type() == DataType::Boolean {
             return Ok(FunctionCall::new(ExprType::BoolOut, vec![self])?.into());
         }
         // Use normal cast for other types. Both `assign` and `explicit` can pass the castability
         // check and there is no difference.
         self.cast_assign(DataType::Varchar)
+            .map_err(|err| err.into())
     }
 
     /// Evaluate the expression on the given input.
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
     /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+    async fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
-        backend_expr.eval_row(input).map_err(Into::into)
+        Ok(backend_expr.eval_row(input).await?)
     }
 
-    /// Evaluate a constant expression.
-    pub fn eval_row_const(&self) -> Result<Datum> {
-        assert!(self.is_const());
-        self.eval_row(&OwnedRow::empty())
+    /// Try to evaluate an expression if it's a constant expression by `ExprImpl::is_const`.
+    ///
+    /// Returns...
+    /// - `None` if it's not a constant expression,
+    /// - `Some(Ok(_))` if constant evaluation succeeds,
+    /// - `Some(Err(_))` if there's an error while evaluating a constant expression.
+    pub fn try_fold_const(&self) -> Option<RwResult<Datum>> {
+        if self.is_const() {
+            self.eval_row(&OwnedRow::empty())
+                .now_or_never()
+                .expect("constant expression should not be async")
+                .into()
+        } else {
+            None
+        }
+    }
+
+    /// Similar to `ExprImpl::try_fold_const`, but panics if the expression is not constant.
+    pub fn fold_const(&self) -> RwResult<Datum> {
+        self.try_fold_const().expect("expression is not constant")
     }
 }
 
@@ -276,6 +359,30 @@ macro_rules! impl_has_variant {
 }
 
 impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction, WindowFunction}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InequalityInputPair {
+    /// Input index of greater side of inequality.
+    pub(crate) key_required_larger: usize,
+    /// Input index of less side of inequality.
+    pub(crate) key_required_smaller: usize,
+    /// greater >= less + delta_expression
+    pub(crate) delta_expression: Option<(ExprType, ExprImpl)>,
+}
+
+impl InequalityInputPair {
+    fn new(
+        key_required_larger: usize,
+        key_required_smaller: usize,
+        delta_expression: Option<(ExprType, ExprImpl)>,
+    ) -> Self {
+        Self {
+            key_required_larger,
+            key_required_smaller,
+            delta_expression,
+        }
+    }
+}
 
 impl ExprImpl {
     /// This function is not meant to be called. In most cases you would want
@@ -473,34 +580,50 @@ impl ExprImpl {
     }
 
     /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.
-    /// Equivalent to `!has_input_ref && !has_agg_call && !has_subquery &&
-    /// !has_correlated_input_ref` but checks them in one pass.
+    ///
+    /// The expression tree should only consist of literals and **pure** function calls.
     pub fn is_const(&self) -> bool {
-        struct Has {
-            has: bool,
-        }
-        impl ExprVisitor<()> for Has {
-            fn merge(_: (), _: ()) {}
+        let only_literal_and_func = {
+            struct HasOthers {
+                has_others: bool,
+            }
+            impl ExprVisitor<()> for HasOthers {
+                fn merge(_: (), _: ()) {}
 
-            fn visit_expr(&mut self, expr: &ExprImpl) {
-                match expr {
-                    ExprImpl::Literal(_inner) => {}
-                    ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
-                    _ => self.has = true,
+                fn visit_expr(&mut self, expr: &ExprImpl) {
+                    match expr {
+                        ExprImpl::Literal(_inner) => {}
+                        ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+                        ExprImpl::CorrelatedInputRef(_)
+                        | ExprImpl::InputRef(_)
+                        | ExprImpl::AggCall(_)
+                        | ExprImpl::Subquery(_)
+                        | ExprImpl::TableFunction(_)
+                        | ExprImpl::WindowFunction(_)
+                        | ExprImpl::UserDefinedFunction(_)
+                        | ExprImpl::Parameter(_)
+                        | ExprImpl::Now(_) => self.has_others = true,
+                    }
                 }
             }
-        }
-        let mut visitor = Has { has: false };
-        visitor.visit_expr(self);
-        !visitor.has
+
+            let mut visitor = HasOthers { has_others: false };
+            visitor.visit_expr(self);
+            !visitor.has_others
+        };
+
+        let is_pure = self.is_pure();
+
+        only_literal_and_func && is_pure
     }
 
     /// Returns the `InputRefs` of an Equality predicate if it matches
     /// ordered by the canonical ordering (lower, higher), else returns None
     pub fn as_eq_cond(&self) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self
-            && function_call.get_expr_type() == ExprType::Equal
-            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
+            && function_call.func_type() == ExprType::Equal
+            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) =
+                function_call.clone().decompose_as_binary()
         {
             if x.index() < y.index() {
                 Some((*x, *y))
@@ -514,8 +637,9 @@ impl ExprImpl {
 
     pub fn as_is_not_distinct_from_cond(&self) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self
-            && function_call.get_expr_type() == ExprType::IsNotDistinctFrom
-            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
+            && function_call.func_type() == ExprType::IsNotDistinctFrom
+            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) =
+                function_call.clone().decompose_as_binary()
         {
             if x.index() < y.index() {
                 Some((*x, *y))
@@ -527,19 +651,20 @@ impl ExprImpl {
         }
     }
 
-    fn reverse_comparison(comparison: ExprType) -> ExprType {
+    pub fn reverse_comparison(comparison: ExprType) -> ExprType {
         match comparison {
             ExprType::LessThan => ExprType::GreaterThan,
             ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
             ExprType::GreaterThan => ExprType::LessThan,
             ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
+            ExprType::Equal | ExprType::IsNotDistinctFrom => comparison,
             _ => unreachable!(),
         }
     }
 
     pub fn as_comparison_cond(&self) -> Option<(InputRef, ExprType, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self {
-            match function_call.get_expr_type() {
+            match function_call.func_type() {
                 ty @ (ExprType::LessThan
                 | ExprType::LessThanOrEqual
                 | ExprType::GreaterThan
@@ -562,14 +687,14 @@ impl ExprImpl {
         }
     }
 
-    // Accepts expressions of the form `input_expr cmp now() [+- const_expr]` or
-    // `now() [+- const_expr] cmp input_expr`, where `input_expr` contains an
-    // `InputRef` and contains no `now()`.
-    //
-    // Canonicalizes to the first ordering and returns (input_expr, cmp, now_expr)
+    /// Accepts expressions of the form `input_expr cmp now() [+- const_expr]` or
+    /// `now() [+- const_expr] cmp input_expr`, where `input_expr` contains an
+    /// `InputRef` and contains no `now()`.
+    ///
+    /// Canonicalizes to the first ordering and returns `(input_expr, cmp, now_expr)`
     pub fn as_now_comparison_cond(&self) -> Option<(ExprImpl, ExprType, ExprImpl)> {
         if let ExprImpl::FunctionCall(function_call) = self {
-            match function_call.get_expr_type() {
+            match function_call.func_type() {
                 ty @ (ExprType::LessThan
                 | ExprType::LessThanOrEqual
                 | ExprType::GreaterThan
@@ -598,17 +723,63 @@ impl ExprImpl {
         }
     }
 
-    // Checks if expr is of the form `now() [+- const_expr]`
+    /// Accepts expressions of the form `InputRef cmp InputRef [+- const_expr]` or
+    /// `InputRef [+- const_expr] cmp InputRef`.
+    pub(crate) fn as_input_comparison_cond(&self) -> Option<InequalityInputPair> {
+        if let ExprImpl::FunctionCall(function_call) = self {
+            match function_call.func_type() {
+                ty @ (ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual) => {
+                    let (_, mut op1, mut op2) = function_call.clone().decompose_as_binary();
+                    if matches!(ty, ExprType::LessThan | ExprType::LessThanOrEqual) {
+                        std::mem::swap(&mut op1, &mut op2);
+                    }
+                    if let (Some((lft_input, lft_offset)), Some((rht_input, rht_offset))) =
+                        (op1.as_input_offset(), op2.as_input_offset())
+                    {
+                        match (lft_offset, rht_offset) {
+                            (Some(_), Some(_)) => None,
+                            (None, rht_offset @ Some(_)) => {
+                                Some(InequalityInputPair::new(lft_input, rht_input, rht_offset))
+                            }
+                            (Some((operator, operand)), None) => Some(InequalityInputPair::new(
+                                lft_input,
+                                rht_input,
+                                Some((
+                                    if operator == ExprType::Add {
+                                        ExprType::Subtract
+                                    } else {
+                                        ExprType::Add
+                                    },
+                                    operand,
+                                )),
+                            )),
+                            (None, None) => {
+                                Some(InequalityInputPair::new(lft_input, rht_input, None))
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Checks if expr is of the form `now() [+- const_expr]`
     fn is_now_offset(&self) -> bool {
-        if let ExprImpl::FunctionCall(f) = self {
-            match f.get_expr_type() {
-                ExprType::Now => true,
+        if let ExprImpl::Now(_) = self {
+            true
+        } else if let ExprImpl::FunctionCall(f) = self {
+            match f.func_type() {
                 ExprType::Add | ExprType::Subtract => {
                     let (_, lhs, rhs) = f.clone().decompose_as_binary();
-                    lhs.as_function_call()
-                        .map(|f| f.get_expr_type() == ExprType::Now)
-                        .unwrap_or(false)
-                        && rhs.is_const()
+                    lhs.is_now_offset() && rhs.is_const()
                 }
                 _ => false,
             }
@@ -617,9 +788,42 @@ impl ExprImpl {
         }
     }
 
+    /// Returns the `InputRef` and offset of a predicate if it matches
+    /// the form `InputRef [+- const_expr]`, else returns None.
+    fn as_input_offset(&self) -> Option<(usize, Option<(ExprType, ExprImpl)>)> {
+        match self {
+            ExprImpl::InputRef(input_ref) => Some((input_ref.index(), None)),
+            ExprImpl::FunctionCall(function_call) => {
+                let expr_type = function_call.func_type();
+                match expr_type {
+                    ExprType::Add | ExprType::Subtract => {
+                        let (_, lhs, rhs) = function_call.clone().decompose_as_binary();
+                        if let ExprImpl::InputRef(input_ref) = &lhs && rhs.is_const() {
+                            // Currently we will return `None` for non-literal because the result of the expression might be '1 day'. However, there will definitely exist false positives such as '1 second + 1 second'.
+                            // We will treat the expression as an input offset when rhs is `null`.
+                            if rhs.return_type() == DataType::Interval && rhs.as_literal().map_or(true, |literal| literal.get_data().as_ref().map_or(false, |scalar| {
+                                let interval = scalar.as_interval();
+                                interval.months() != 0 || interval.days() != 0
+                            })) {
+                                None
+                            } else {
+                                Some((input_ref.index(), Some((expr_type, rhs))))
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     pub fn as_eq_const(&self) -> Option<(InputRef, ExprImpl)> {
-        if let ExprImpl::FunctionCall(function_call) = self &&
-        function_call.get_expr_type() == ExprType::Equal{
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.func_type() == ExprType::Equal
+        {
             match function_call.clone().decompose_as_binary() {
                 (_, ExprImpl::InputRef(x), y) if y.is_const() => Some((*x, y)),
                 (_, x, ExprImpl::InputRef(y)) if x.is_const() => Some((*y, x)),
@@ -631,8 +835,9 @@ impl ExprImpl {
     }
 
     pub fn as_eq_correlated_input_ref(&self) -> Option<(InputRef, CorrelatedInputRef)> {
-        if let ExprImpl::FunctionCall(function_call) = self &&
-            function_call.get_expr_type() == ExprType::Equal{
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.func_type() == ExprType::Equal
+        {
             match function_call.clone().decompose_as_binary() {
                 (_, ExprImpl::InputRef(x), ExprImpl::CorrelatedInputRef(y)) => Some((*x, *y)),
                 (_, ExprImpl::CorrelatedInputRef(x), ExprImpl::InputRef(y)) => Some((*y, *x)),
@@ -644,8 +849,9 @@ impl ExprImpl {
     }
 
     pub fn as_is_null(&self) -> Option<InputRef> {
-        if let ExprImpl::FunctionCall(function_call) = self &&
-            function_call.get_expr_type() == ExprType::IsNull{
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.func_type() == ExprType::IsNull
+        {
             match function_call.clone().decompose_as_unary() {
                 (_, ExprImpl::InputRef(x)) => Some(*x),
                 _ => None,
@@ -667,7 +873,7 @@ impl ExprImpl {
         }
 
         if let ExprImpl::FunctionCall(function_call) = self {
-            match function_call.get_expr_type() {
+            match function_call.func_type() {
                 ty @ (ExprType::LessThan
                 | ExprType::LessThanOrEqual
                 | ExprType::GreaterThan
@@ -689,28 +895,32 @@ impl ExprImpl {
     }
 
     pub fn as_in_const_list(&self) -> Option<(InputRef, Vec<ExprImpl>)> {
-        if let ExprImpl::FunctionCall(function_call) = self &&
-        function_call.get_expr_type() == ExprType::In {
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.func_type() == ExprType::In
+        {
             let mut inputs = function_call.inputs().iter().cloned();
-            let input_ref= match inputs.next().unwrap() {
+            let input_ref = match inputs.next().unwrap() {
                 ExprImpl::InputRef(i) => *i,
-                _ => { return None }
+                _ => return None,
             };
-            let list: Vec<_> = inputs.map(|expr|{
-                // Non constant IN will be bound to OR
-                assert!(expr.is_const());
-                expr
-            }).collect();
+            let list: Vec<_> = inputs
+                .map(|expr| {
+                    // Non constant IN will be bound to OR
+                    assert!(expr.is_const());
+                    expr
+                })
+                .collect();
 
-           Some((input_ref, list))
+            Some((input_ref, list))
         } else {
             None
         }
     }
 
     pub fn as_or_disjunctions(&self) -> Option<Vec<ExprImpl>> {
-        if let ExprImpl::FunctionCall(function_call) = self &&
-            function_call.get_expr_type() == ExprType::Or {
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.func_type() == ExprType::Or
+        {
             Some(to_disjunctions(self.clone()))
         } else {
             None
@@ -728,56 +938,28 @@ impl ExprImpl {
         }
     }
 
-    pub fn from_expr_proto(proto: &ExprNode) -> Result<Self> {
+    pub fn from_expr_proto(proto: &ExprNode) -> RwResult<Self> {
         let rex_node = proto.get_rex_node()?;
         let ret_type = proto.get_return_type()?.into();
-        let expr_type = proto.get_expr_type()?;
+
         Ok(match rex_node {
-            RexNode::InputRef(input_ref) => {
-                Self::InputRef(Box::new(InputRef::from_expr_proto(input_ref, ret_type)?))
-            }
+            RexNode::InputRef(column_index) => Self::InputRef(Box::new(InputRef::from_expr_proto(
+                *column_index as _,
+                ret_type,
+            )?)),
             RexNode::Constant(_) => Self::Literal(Box::new(Literal::from_expr_proto(proto)?)),
             RexNode::Udf(udf) => Self::UserDefinedFunction(Box::new(
                 UserDefinedFunction::from_expr_proto(udf, ret_type)?,
             )),
-            RexNode::FuncCall(function_call) => Self::FunctionCall(Box::new(
-                FunctionCall::from_expr_proto(function_call, expr_type, ret_type)?,
-            )),
+            RexNode::FuncCall(function_call) => {
+                Self::FunctionCall(Box::new(FunctionCall::from_expr_proto(
+                    function_call,
+                    proto.get_function_type()?, // only interpret if it's a function call
+                    ret_type,
+                )?))
+            }
+            RexNode::Now(_) => Self::Now(Box::new(Now {})),
         })
-    }
-}
-
-impl Expr for ExprImpl {
-    fn return_type(&self) -> DataType {
-        match self {
-            ExprImpl::InputRef(expr) => expr.return_type(),
-            ExprImpl::Literal(expr) => expr.return_type(),
-            ExprImpl::FunctionCall(expr) => expr.return_type(),
-            ExprImpl::AggCall(expr) => expr.return_type(),
-            ExprImpl::Subquery(expr) => expr.return_type(),
-            ExprImpl::CorrelatedInputRef(expr) => expr.return_type(),
-            ExprImpl::TableFunction(expr) => expr.return_type(),
-            ExprImpl::WindowFunction(expr) => expr.return_type(),
-            ExprImpl::UserDefinedFunction(expr) => expr.return_type(),
-        }
-    }
-
-    fn to_expr_proto(&self) -> ExprNode {
-        match self {
-            ExprImpl::InputRef(e) => e.to_expr_proto(),
-            ExprImpl::Literal(e) => e.to_expr_proto(),
-            ExprImpl::FunctionCall(e) => e.to_expr_proto(),
-            ExprImpl::AggCall(e) => e.to_expr_proto(),
-            ExprImpl::Subquery(e) => e.to_expr_proto(),
-            ExprImpl::CorrelatedInputRef(e) => e.to_expr_proto(),
-            ExprImpl::TableFunction(_e) => {
-                unreachable!("Table function should not be converted to ExprNode")
-            }
-            ExprImpl::WindowFunction(_e) => {
-                unreachable!("Window function should not be converted to ExprNode")
-            }
-            ExprImpl::UserDefinedFunction(e) => e.to_expr_proto(),
-        }
     }
 }
 
@@ -811,6 +993,8 @@ impl std::fmt::Debug for ExprImpl {
                 Self::UserDefinedFunction(arg0) => {
                     f.debug_tuple("UserDefinedFunction").field(arg0).finish()
                 }
+                Self::Parameter(arg0) => f.debug_tuple("Parameter").field(arg0).finish(),
+                Self::Now(_) => f.debug_tuple("Now").finish(),
             };
         }
         match self {
@@ -823,6 +1007,8 @@ impl std::fmt::Debug for ExprImpl {
             Self::TableFunction(x) => write!(f, "{:?}", x),
             Self::WindowFunction(x) => write!(f, "{:?}", x),
             Self::UserDefinedFunction(x) => write!(f, "{:?}", x),
+            Self::Parameter(x) => write!(f, "{:?}", x),
+            Self::Now(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -865,6 +1051,8 @@ impl std::fmt::Debug for ExprDisplay<'_> {
                 write!(f, "{:?}", x)
             }
             ExprImpl::UserDefinedFunction(x) => write!(f, "{:?}", x),
+            ExprImpl::Parameter(x) => write!(f, "{:?}", x),
+            ExprImpl::Now(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -892,6 +1080,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
 
+use self::function_call::CastError;
 use crate::binder::BoundSetExpr;
 use crate::utils::Condition;
 

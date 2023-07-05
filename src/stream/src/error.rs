@@ -16,7 +16,7 @@ use std::backtrace::Backtrace;
 
 use risingwave_common::array::ArrayError;
 use risingwave_expr::ExprError;
-use risingwave_pb::ProstFieldNotFound;
+use risingwave_pb::PbFieldNotFound;
 use risingwave_storage::error::StorageError;
 
 use crate::executor::StreamExecutorError;
@@ -36,7 +36,7 @@ enum Inner {
     #[error("Array/Chunk error: {0}")]
     Array(ArrayError),
 
-    #[error("Executor error: {0}")]
+    #[error("Executor error: {0:?}")]
     Executor(Box<StreamExecutorError>),
 
     #[error(transparent)]
@@ -95,8 +95,8 @@ impl From<StreamExecutorError> for StreamError {
     }
 }
 
-impl From<ProstFieldNotFound> for StreamError {
-    fn from(err: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for StreamError {
+    fn from(err: PbFieldNotFound) -> Self {
         Self::from(anyhow::anyhow!(
             "Failed to decode prost: field not found `{}`",
             err.0

@@ -17,6 +17,8 @@
 #![expect(clippy::doc_markdown)]
 #![feature(lint_reasons)]
 
+use std::str::FromStr;
+
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
 pub mod catalog;
@@ -142,11 +144,19 @@ pub mod backup_service_serde;
 pub mod java_binding_serde;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct ProstFieldNotFound(pub &'static str);
+pub struct PbFieldNotFound(pub &'static str);
 
-impl From<ProstFieldNotFound> for tonic::Status {
-    fn from(e: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for tonic::Status {
+    fn from(e: PbFieldNotFound) -> Self {
         tonic::Status::new(tonic::Code::Internal, e.0)
+    }
+}
+
+impl FromStr for crate::expr::table_function::PbType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_str_name(&s.to_uppercase()).ok_or(())
     }
 }
 

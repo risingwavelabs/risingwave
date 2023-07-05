@@ -5,13 +5,6 @@ statement ok
 create table t (v1 int, v2 numeric, v3 double, v4 interval);
 
 statement ok
-insert into t values
-(null, 2, 3, interval '1' second),
-(4, null, 6, interval '1' minute),
-(7, 8, null, interval '1' hour),
-(10, 11, 12, null);
-
-statement ok
 create materialized view mv_sum as
 select
     count(*) as count_all,
@@ -35,6 +28,20 @@ from t;
 
 statement ok
 flush;
+
+# For basic/simple agg, there should be the trivial agg values
+# even without any input rows.
+query I
+select * from mv_sum;
+----
+0 0 0 0 0 NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL
+
+statement ok
+insert into t values
+(null, 2, 3, interval '1' second),
+(4, null, 6, interval '1' minute),
+(7, 8, null, interval '1' hour),
+(10, 11, 12, null);
 
 query I
 select * from mv_sum;

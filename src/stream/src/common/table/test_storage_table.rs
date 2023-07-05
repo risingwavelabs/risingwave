@@ -50,7 +50,7 @@ async fn test_storage_table_value_indices() {
         ColumnDesc::unnamed(column_ids[4], DataType::Varchar),
     ];
     let pk_indices = vec![0_usize, 2_usize];
-    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let value_indices = vec![1, 3, 4];
     let read_prefix_len_hint = 2;
     let table = gen_prost_table_with_value_indices(
@@ -179,7 +179,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
 
-    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let pk_indices = vec![0_usize, 1_usize];
     let read_prefix_len_hint = 2;
     let table = gen_prost_table(
@@ -281,7 +281,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
     let pk_indices = vec![0_usize, 1_usize];
-    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let value_indices: Vec<usize> = vec![0, 1, 2];
     let read_prefix_len_hint = 0;
     let table = gen_prost_table_with_value_indices(
@@ -310,6 +310,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         TableOption::default(),
         value_indices,
         0,
+        false,
     );
     let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
@@ -375,7 +376,7 @@ async fn test_batch_scan_with_value_indices() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     let test_env = prepare_hummock_test_env().await;
 
-    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let column_ids = vec![
         ColumnId::from(0),
         ColumnId::from(1),
@@ -418,6 +419,7 @@ async fn test_batch_scan_with_value_indices() {
         TableOption::default(),
         value_indices,
         0,
+        false,
     );
     let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
@@ -446,7 +448,11 @@ async fn test_batch_scan_with_value_indices() {
     test_env.commit_epoch(epoch.prev).await;
 
     let iter = table
-        .batch_iter(HummockReadEpoch::Committed(epoch.prev), false)
+        .batch_iter(
+            HummockReadEpoch::Committed(epoch.prev),
+            false,
+            Default::default(),
+        )
         .await
         .unwrap();
     pin_mut!(iter);

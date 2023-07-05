@@ -54,7 +54,7 @@ pub fn wait(
 
         if detect_failure && p.exists() {
             let mut buf = String::new();
-            std::fs::File::open(p)?.read_to_string(&mut buf)?;
+            fs_err::File::open(p)?.read_to_string(&mut buf)?;
 
             return Err(anyhow!(
                 "{} exited while waiting for connection: {}",

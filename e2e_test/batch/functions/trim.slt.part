@@ -14,6 +14,51 @@ select trim(trailing 'cba' from 'abcxyzabc');
 abcxyz
 
 query T
+select trim('cba' from 'abcxyzabc');
+----
+xyz
+
+query T
+select trim(both from '   xyz   ');
+----
+xyz
+
+query T
+select trim(from '   xyz   ');
+----
+xyz
+
+query T
+select trim(both from 'abcxyzabc', 'cba');
+----
+xyz
+
+query T
+select trim(both 'abcxyzabc', 'cba');
+----
+xyz
+
+query T
+select trim(from 'abcxyzabc', 'cba');
+----
+xyz
+
+query T
+select trim('abcxyzabc', 'cba');
+----
+xyz
+
+query T
+select trim(both '   xyz   ');
+----
+xyz
+
+query T
+select trim('   xyz   ');
+----
+xyz
+
+query T
 select ltrim('abcxyzabc', 'bca');
 ----
 xyzabc
@@ -22,3 +67,8 @@ query T
 select rtrim('abcxyzabc', 'bca');
 ----
 abcxyz
+
+query T
+select btrim('abcxyzabc', 'bca');
+----
+xyz

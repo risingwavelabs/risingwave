@@ -18,12 +18,13 @@
 //! structs. It is accessed via [`catalog_service::CatalogReader`] and
 //! [`catalog_service::CatalogWriter`], which is held by [`crate::session::FrontendEnv`].
 
-use risingwave_common::catalog::{is_row_id_column_name, PG_CATALOG_SCHEMA_NAME, ROWID_PREFIX};
+use risingwave_common::catalog::{is_row_id_column_name, is_system_schema, ROWID_PREFIX};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;
 pub(crate) mod catalog_service;
 
+pub(crate) mod connection_catalog;
 pub(crate) mod database_catalog;
 pub(crate) mod function_catalog;
 pub(crate) mod index_catalog;
@@ -39,6 +40,7 @@ pub use table_catalog::TableCatalog;
 
 use crate::user::UserId;
 
+pub(crate) type ConnectionId = u32;
 pub(crate) type SourceId = u32;
 pub(crate) type SinkId = u32;
 pub(crate) type ViewId = u32;
@@ -63,7 +65,7 @@ pub fn check_valid_column_name(column_name: &str) -> Result<()> {
 
 /// Check if modifications happen to system catalog.
 pub fn check_schema_writable(schema: &str) -> Result<()> {
-    if schema == PG_CATALOG_SCHEMA_NAME {
+    if is_system_schema(schema) {
         Err(ErrorCode::ProtocolError(format!(
             "permission denied to write on \"{}\", System catalog modifications are currently disallowed.",
             schema
@@ -91,15 +93,16 @@ impl From<CatalogError> for RwError {
     }
 }
 
-/// A trait for the catalog of relations (table, index, sink, etc.).
+/// A trait for the catalog with owners, including relations (table, index, sink, etc.) and
+/// function, connection.
 ///
 /// This trait can be used to reduce code duplication and can be extended if needed in the future.
-pub trait RelationCatalog {
-    /// Returns the owner of the relation.
+pub trait OwnedByUserCatalog {
+    /// Returns the owner of the catalog.
     fn owner(&self) -> UserId;
 }
 
-impl RelationCatalog for SinkCatalog {
+impl OwnedByUserCatalog for SinkCatalog {
     fn owner(&self) -> UserId {
         self.owner.user_id
     }

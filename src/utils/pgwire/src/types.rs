@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::TrustedLen;
 use std::ops::Index;
 use std::slice::Iter;
 
-use anyhow::anyhow;
 use bytes::Bytes;
 
 use crate::error::{PsqlError, PsqlResult};
@@ -66,10 +66,9 @@ impl Format {
         match format_code {
             0 => Ok(Format::Text),
             1 => Ok(Format::Binary),
-            _ => Err(PsqlError::Internal(anyhow!(
-                "Unknown format code: {}",
-                format_code
-            ))),
+            _ => Err(PsqlError::Internal(
+                format!("Unknown format code: {}", format_code).into(),
+            )),
         }
     }
 }
@@ -131,10 +130,11 @@ impl Iterator for FormatIterator<'_, '_> {
                 .unwrap_or(self.default_format),
         )
     }
-}
 
-impl ExactSizeIterator for FormatIterator<'_, '_> {
-    fn len(&self) -> usize {
-        self.actual_len
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.actual_len, Some(self.actual_len))
     }
 }
+
+impl ExactSizeIterator for FormatIterator<'_, '_> {}
+unsafe impl TrustedLen for FormatIterator<'_, '_> {}

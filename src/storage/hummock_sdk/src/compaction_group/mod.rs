@@ -22,7 +22,7 @@ pub type StateTableId = u32;
 
 /// A compaction task's `StaticCompactionGroupId` indicates the compaction group that all its input
 /// SSTs belong to.
-#[derive(FromPrimitive, Display)]
+#[derive(Display)]
 pub enum StaticCompactionGroupId {
     /// Create a new compaction group.
     NewCompactionGroup = 0,

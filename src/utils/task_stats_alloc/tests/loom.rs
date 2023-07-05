@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(loom)]
+#![cfg(all(loom, enable_task_local_alloc))]
 
 /// Note this test is not running in CI, due to the re-compile time cost. Add it when it is
 /// necessary. Run `RUSTFLAGS="--cfg loom" cargo test --test loom` to test.

@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use anyhow::{anyhow, Result};
-use kafka::client::KafkaClient;
+use rdkafka::config::FromClientConfig;
+use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::ClientConfig;
 
 use crate::{ExecuteContext, KafkaConfig, Task};
 
@@ -31,14 +35,30 @@ impl Task for KafkaReadyCheckTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         ctx.pb.set_message("waiting for online...");
 
-        let mut client = KafkaClient::new(vec![format!(
-            "{}:{}",
-            self.config.address, self.config.port
-        )]);
+        let mut config = ClientConfig::new();
+        config.set(
+            "bootstrap.servers",
+            &format!("{}:{}", self.config.address, self.config.port),
+        );
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .enable_io()
+            .build()?;
+        let consumer = rt.block_on(async {
+            BaseConsumer::from_config(&config)
+                .await
+                .map_err(|e| anyhow!("{}", e))
+        })?;
 
         ctx.wait(|| {
-            client.load_metadata_all().map_err(|e| anyhow!("{}", e))?;
-            Ok(())
+            rt.block_on(async {
+                let _metadata = consumer
+                    .fetch_metadata(None, Duration::from_secs(1))
+                    .await
+                    .map_err(|e| anyhow!("{}", e))?;
+                Ok(())
+            })
         })?;
 
         ctx.complete_spin();

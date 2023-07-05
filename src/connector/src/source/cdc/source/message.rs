@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Bytes;
 use risingwave_pb::connector_service::CdcMessage;
 
 use crate::source::base::SourceMessage;
@@ -21,7 +20,7 @@ use crate::source::SourceMeta;
 impl From<CdcMessage> for SourceMessage {
     fn from(message: CdcMessage) -> Self {
         SourceMessage {
-            payload: Some(Bytes::from(message.payload)),
+            payload: Some(message.payload.as_bytes().to_vec()),
             offset: message.offset,
             split_id: message.partition.into(),
             meta: SourceMeta::Empty,

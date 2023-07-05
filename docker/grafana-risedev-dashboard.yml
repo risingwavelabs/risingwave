@@ -11,6 +11,6 @@ providers:
     updateIntervalSeconds: 1
     allowUiUpdates: true
     options:
-      path: /risingwave-dashboard.json
+      path: /dashboards
       foldersFromFilesStructure: false
     

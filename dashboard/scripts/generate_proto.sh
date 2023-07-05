@@ -8,10 +8,12 @@ cp -a ../proto/*.proto tmp_gen
 
 # Array in proto will conflict with JavaScript's Array, so we replace it with RwArray.
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i "" -e "s/Array/RwArray/" "tmp_gen/data.proto" 
+    sed -i "" -e "s/Array/RwArray/" "tmp_gen/data.proto"
 else
-    sed -i -e "s/Array/RwArray/" "tmp_gen/data.proto" 
+    sed -i -e "s/Array/RwArray/" "tmp_gen/data.proto"
 fi
+
+mkdir -p proto/gen
 
 protoc --plugin=./node_modules/.bin/protoc-gen-ts_proto \
     --experimental_allow_proto3_optional \

@@ -21,11 +21,10 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
-use risingwave_pb::meta::TableFragments as ProstTableFragments;
+use risingwave_pb::meta::PbTableFragments;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, SourceNode, StreamActor, StreamEnvironment as ProstStreamEnvironment,
-    StreamNode,
+    FragmentTypeFlag, PbStreamEnvironment, StreamActor, StreamNode, StreamSource,
 };
 
 use super::{ActorId, FragmentId};
@@ -68,13 +67,13 @@ pub struct StreamEnvironment {
 }
 
 impl StreamEnvironment {
-    pub fn to_protobuf(&self) -> ProstStreamEnvironment {
-        ProstStreamEnvironment {
+    pub fn to_protobuf(&self) -> PbStreamEnvironment {
+        PbStreamEnvironment {
             timezone: self.timezone.clone().unwrap_or("".into()),
         }
     }
 
-    pub fn from_protobuf(prost: &ProstStreamEnvironment) -> Self {
+    pub fn from_protobuf(prost: &PbStreamEnvironment) -> Self {
         Self {
             timezone: if prost.get_timezone().is_empty() {
                 None
@@ -87,14 +86,14 @@ impl StreamEnvironment {
 
 impl MetadataModel for TableFragments {
     type KeyType = u32;
-    type ProstType = ProstTableFragments;
+    type PbType = PbTableFragments;
 
     fn cf_name() -> String {
         TABLE_FRAGMENTS_CF_NAME.to_string()
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
-        Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
+        Self::PbType {
             table_id: self.table_id.table_id(),
             state: self.state as _,
             fragments: self.fragments.clone().into_iter().collect(),
@@ -104,7 +103,7 @@ impl MetadataModel for TableFragments {
         }
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         let env = StreamEnvironment::from_protobuf(prost.get_env().unwrap());
         Self {
             table_id: TableId::new(prost.table_id),
@@ -191,6 +190,12 @@ impl TableFragments {
         self.state == State::Created
     }
 
+    /// Set the table ID.
+    // TODO: remove this workaround for replacing table.
+    pub fn set_table_id(&mut self, table_id: TableId) {
+        self.table_id = table_id;
+    }
+
     /// Set the state of the table fragments.
     pub fn set_state(&mut self, state: State) {
         self.state = state;
@@ -233,6 +238,18 @@ impl TableFragments {
             .collect()
     }
 
+    pub fn actor_fragment_mapping(&self) -> HashMap<ActorId, FragmentId> {
+        self.fragments
+            .values()
+            .flat_map(|fragment| {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|actor| (actor.actor_id, fragment.fragment_id))
+            })
+            .collect()
+    }
+
     /// Returns actors associated with this table.
     pub fn actors(&self) -> Vec<StreamActor> {
         self.fragments
@@ -253,7 +270,11 @@ impl TableFragments {
     /// Returns barrier inject actor ids.
     pub fn barrier_inject_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
-            (fragment_type_mask & (FragmentTypeFlag::Source as u32 | FragmentTypeFlag::Now as u32))
+            (fragment_type_mask
+                & (FragmentTypeFlag::Source as u32
+                    | FragmentTypeFlag::Now as u32
+                    | FragmentTypeFlag::Values as u32
+                    | FragmentTypeFlag::BarrierRecv as u32))
                 != 0
         })
     }
@@ -262,6 +283,13 @@ impl TableFragments {
     pub fn mview_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
             (fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0
+        })
+    }
+
+    /// Returns values actor ids.
+    pub fn values_actor_ids(&self) -> Vec<ActorId> {
+        Self::filter_actor_ids(self, |fragment_type_mask| {
+            (fragment_type_mask & FragmentTypeFlag::Values as u32) != 0
         })
     }
 
@@ -284,16 +312,16 @@ impl TableFragments {
         .collect()
     }
 
-    /// Find the source node that contains an external stream source inside the stream node, if any.
-    pub fn find_source_node_with_stream_source(stream_node: &StreamNode) -> Option<&SourceNode> {
+    /// Find the external stream source info inside the stream node, if any.
+    pub fn find_stream_source(stream_node: &StreamNode) -> Option<&StreamSource> {
         if let Some(NodeBody::Source(source)) = stream_node.node_body.as_ref() {
-            if source.source_inner.is_some() {
-                return Some(source);
+            if let Some(inner) = &source.source_inner {
+                return Some(inner);
             }
         }
 
         for child in &stream_node.input {
-            if let Some(source) = Self::find_source_node_with_stream_source(child) {
+            if let Some(source) = Self::find_stream_source(child) {
                 return Some(source);
             }
         }
@@ -308,10 +336,9 @@ impl TableFragments {
 
         for fragment in self.fragments() {
             for actor in &fragment.actors {
-                if let Some(source_id) = TableFragments::find_source_node_with_stream_source(
-                    actor.nodes.as_ref().unwrap(),
-                )
-                .map(|s| s.source_inner.as_ref().unwrap().source_id)
+                if let Some(source_id) =
+                    TableFragments::find_stream_source(actor.nodes.as_ref().unwrap())
+                        .map(|s| s.source_id)
                 {
                     source_fragments
                         .entry(source_id)
@@ -369,16 +396,24 @@ impl TableFragments {
         map
     }
 
+    pub fn worker_parallel_units(&self) -> HashMap<WorkerId, HashSet<ParallelUnitId>> {
+        let mut map = HashMap::new();
+        for actor_status in self.actor_status.values() {
+            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id)
+                .or_insert_with(HashSet::new)
+                .insert(actor_status.get_parallel_unit().unwrap().id);
+        }
+        map
+    }
+
     pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
         for fragment in self.fragments.values_mut() {
-            if fragment.vnode_mapping.is_some() {
-                if let Some(ref mut mapping) = fragment.vnode_mapping {
-                    mapping.data.iter_mut().for_each(|id| {
-                        if migrate_map.contains_key(id) {
-                            *id = migrate_map.get(id).unwrap().id;
-                        }
-                    });
-                }
+            if let Some(mapping) = &mut fragment.vnode_mapping {
+                mapping.data.iter_mut().for_each(|id| {
+                    if migrate_map.contains_key(id) {
+                        *id = migrate_map.get(id).unwrap().id;
+                    }
+                });
             }
         }
     }

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
+
 use bytes::{Buf, BufMut, Bytes};
 
 use super::{HummockError, HummockResult};
@@ -24,10 +26,21 @@ pub const VALUE_PUT: u8 = 0;
 ///
 /// Its encoding is a 1-byte flag + storage value. For `Put`, storage value contains both value meta
 /// and user value. For `Delete`, storage value contains only value meta.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum HummockValue<T> {
     Put(T),
     Delete,
+}
+
+impl<T: AsRef<[u8]>> Debug for HummockValue<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            HummockValue::Put(v) => {
+                write!(f, "HummockValue {{ PUT, {} }}", hex::encode(v.as_ref()))
+            }
+            HummockValue::Delete => write!(f, "HummockValue {{ DELETE }}"),
+        }
+    }
 }
 
 impl<T> Copy for HummockValue<T> where T: Copy {}

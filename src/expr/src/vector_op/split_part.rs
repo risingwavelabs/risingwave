@@ -14,9 +14,11 @@
 
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::{ExprError, Result};
 
-#[inline(always)]
+#[function("split_part(varchar, varchar, int32) -> varchar")]
 pub fn split_part(
     string_expr: &str,
     delimiter_expr: &str,

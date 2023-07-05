@@ -63,7 +63,7 @@ impl Task for PrometheusService {
         let prefix_config = env::var("PREFIX_CONFIG")?;
         let prefix_data = env::var("PREFIX_DATA")?;
 
-        std::fs::write(
+        fs_err::write(
             Path::new(&prefix_config).join("prometheus.yml"),
             PrometheusGen.gen_prometheus_yml(&self.config),
         )?;

@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::estimate_size::collections::MemMonitoredHeap;
+use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::types::ToOwnedDatum;
-use risingwave_common::util::sort_util::{HeapElem, OrderPair};
+use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
+use risingwave_pb::batch_plan::PbExchangeSource;
 
 use crate::exchange_source::ExchangeSourceImpl;
 use crate::executor::{
@@ -38,10 +40,10 @@ pub type MergeSortExchangeExecutor<C> = MergeSortExchangeExecutorImpl<DefaultCre
 pub struct MergeSortExchangeExecutorImpl<CS, C> {
     context: C,
     /// keeps one data chunk of each source if any
-    source_inputs: Vec<Option<DataChunk>>,
-    order_pairs: Arc<Vec<OrderPair>>,
-    min_heap: BinaryHeap<HeapElem>,
-    proto_sources: Vec<ProstExchangeSource>,
+    source_inputs: Vec<Option<DataChunk>, MonitoredGlobalAlloc>,
+    column_orders: Arc<Vec<ColumnOrder>>,
+    min_heap: MemMonitoredHeap<HeapElem>,
+    proto_sources: Vec<PbExchangeSource>,
     sources: Vec<ExchangeSourceImpl>, // impl
     /// Mock-able CreateSource.
     source_creators: Vec<CS>,
@@ -50,23 +52,71 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     identity: String,
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
+    mem_ctx: MemoryContext,
+    alloc: MonitoredGlobalAlloc,
 }
 
 impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        context: C,
+        column_orders: Arc<Vec<ColumnOrder>>,
+        proto_sources: Vec<PbExchangeSource>,
+        source_creators: Vec<CS>,
+        schema: Schema,
+        task_id: TaskId,
+        identity: String,
+        chunk_size: usize,
+    ) -> Self {
+        let mem_ctx = context.create_executor_mem_context(&identity);
+        let alloc = MonitoredGlobalAlloc::with_memory_context(mem_ctx.clone());
+
+        let source_inputs = {
+            let mut v = Vec::with_capacity_in(proto_sources.len(), alloc.clone());
+            (0..proto_sources.len()).for_each(|_| v.push(None));
+            v
+        };
+
+        let num_sources = proto_sources.len();
+
+        Self {
+            context,
+            source_inputs,
+            column_orders,
+            min_heap: MemMonitoredHeap::with_capacity(num_sources, mem_ctx.clone()),
+            proto_sources,
+            sources: Vec::with_capacity(num_sources),
+            source_creators,
+            schema,
+            task_id,
+            identity,
+            chunk_size,
+            mem_ctx,
+            alloc,
+        }
+    }
+
     /// We assume that the source would always send `Some(chunk)` with cardinality > 0
     /// or `None`, but never `Some(chunk)` with cardinality == 0.
     async fn get_source_chunk(&mut self, source_idx: usize) -> Result<()> {
         assert!(source_idx < self.source_inputs.len());
         let res = self.sources[source_idx].take_data().await?;
-        match res {
+        let old = match res {
             Some(chunk) => {
                 assert_ne!(chunk.cardinality(), 0);
-                let _ = std::mem::replace(&mut self.source_inputs[source_idx], Some(chunk));
+                let new_chunk_size = chunk.estimated_heap_size() as i64;
+                let old = std::mem::replace(&mut self.source_inputs[source_idx], Some(chunk));
+                self.mem_ctx.add(new_chunk_size);
+                old
             }
-            None => {
-                let _ = std::mem::replace(&mut self.source_inputs[source_idx], None);
-            }
+            None => std::mem::take(&mut self.source_inputs[source_idx]),
+        };
+
+        if let Some(chunk) = old {
+            // Reduce the heap size of retired chunk
+            self.mem_ctx.add(-(chunk.estimated_heap_size() as i64));
         }
+
         Ok(())
     }
 
@@ -75,13 +125,13 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
     fn push_row_into_heap(&mut self, source_idx: usize, row_idx: usize) {
         assert!(source_idx < self.source_inputs.len());
         let chunk_ref = self.source_inputs[source_idx].as_ref().unwrap();
-        self.min_heap.push(HeapElem {
-            order_pairs: self.order_pairs.clone(),
-            chunk: chunk_ref.clone(),
-            chunk_idx: source_idx,
-            elem_idx: row_idx,
-            encoded_chunk: None,
-        });
+        self.min_heap.push(HeapElem::new(
+            self.column_orders.clone(),
+            chunk_ref.clone(),
+            source_idx,
+            row_idx,
+            None,
+        ));
     }
 }
 
@@ -137,14 +187,14 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
             let mut array_len = 0;
             while want_to_produce > 0 && !self.min_heap.is_empty() {
                 let top_elem = self.min_heap.pop().unwrap();
-                let child_idx = top_elem.chunk_idx;
-                let cur_chunk = top_elem.chunk;
-                let row_idx = top_elem.elem_idx;
+                let child_idx = top_elem.chunk_idx();
+                let cur_chunk = top_elem.chunk();
+                let row_idx = top_elem.elem_idx();
                 for (idx, builder) in builders.iter_mut().enumerate() {
-                    let chunk_arr = cur_chunk.column_at(idx).array();
+                    let chunk_arr = cur_chunk.column_at(idx);
                     let chunk_arr = chunk_arr.as_ref();
                     let datum = chunk_arr.value_at(row_idx).to_owned_datum();
-                    builder.append_datum(&datum);
+                    builder.append(&datum);
                 }
                 want_to_produce -= 1;
                 array_len += 1;
@@ -191,15 +241,15 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
             NodeBody::MergeSortExchange
         )?;
 
-        let order_pairs = sort_merge_node
+        let column_orders = sort_merge_node
             .column_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(ColumnOrder::from_protobuf)
             .collect();
-        let order_pairs = Arc::new(order_pairs);
+        let column_orders = Arc::new(column_orders);
 
         let exchange_node = sort_merge_node.get_exchange()?;
-        let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
+        let proto_sources: Vec<PbExchangeSource> = exchange_node.get_sources().to_vec();
         let source_creators =
             vec![DefaultCreateSource::new(source.context().client_pool()); proto_sources.len()];
         ensure!(!exchange_node.get_sources().is_empty());
@@ -209,20 +259,16 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
             .map(Field::from)
             .collect::<Vec<Field>>();
 
-        let num_sources = proto_sources.len();
-        Ok(Box::new(MergeSortExchangeExecutor::<C> {
-            context: source.context().clone(),
-            source_inputs: vec![None; num_sources],
-            order_pairs,
-            min_heap: BinaryHeap::new(),
+        Ok(Box::new(MergeSortExchangeExecutor::<C>::new(
+            source.context().clone(),
+            column_orders,
             proto_sources,
-            sources: vec![],
             source_creators,
-            schema: Schema { fields },
-            task_id: source.task_id.clone(),
-            identity: source.plan_node().get_identity().clone(),
-            chunk_size: source.context.get_config().developer.batch_chunk_size,
-        }))
+            Schema { fields },
+            source.task_id.clone(),
+            source.plan_node().get_identity().clone(),
+            source.context.get_config().developer.chunk_size,
+        )))
     }
 }
 
@@ -253,36 +299,33 @@ mod tests {
         let fake_exchange_source = FakeExchangeSource::new(vec![Some(chunk)]);
         let fake_create_source = FakeCreateSource::new(fake_exchange_source);
 
-        let mut proto_sources: Vec<ProstExchangeSource> = vec![];
+        let mut proto_sources: Vec<PbExchangeSource> = vec![];
         let mut source_creators = vec![];
         let num_sources = 2;
         for _ in 0..num_sources {
-            proto_sources.push(ProstExchangeSource::default());
+            proto_sources.push(PbExchangeSource::default());
             source_creators.push(fake_create_source.clone());
         }
-        let order_pairs = Arc::new(vec![OrderPair {
-            column_idx: 0,
-            order_type: OrderType::Ascending,
+        let column_orders = Arc::new(vec![ColumnOrder {
+            column_index: 0,
+            order_type: OrderType::ascending(),
         }]);
 
         let executor = Box::new(MergeSortExchangeExecutorImpl::<
             FakeCreateSource,
             ComputeNodeContext,
-        > {
-            context: ComputeNodeContext::for_test(),
-            source_inputs: vec![None; proto_sources.len()],
-            order_pairs,
-            min_heap: BinaryHeap::new(),
+        >::new(
+            ComputeNodeContext::for_test(),
+            column_orders,
             proto_sources,
-            sources: vec![],
             source_creators,
-            schema: Schema {
+            Schema {
                 fields: vec![Field::unnamed(DataType::Int32)],
             },
-            task_id: TaskId::default(),
-            identity: "MergeSortExchangeExecutor2".to_string(),
-            chunk_size: CHUNK_SIZE,
-        });
+            TaskId::default(),
+            "MergeSortExchangeExecutor2".to_string(),
+            CHUNK_SIZE,
+        ));
 
         let mut stream = executor.execute();
         let res = stream.next().await;
@@ -291,12 +334,12 @@ mod tests {
             let res = res.unwrap();
             assert_eq!(res.capacity(), 3 * num_sources);
             let col0 = res.column_at(0);
-            assert_eq!(col0.array().as_int32().value_at(0), Some(1));
-            assert_eq!(col0.array().as_int32().value_at(1), Some(1));
-            assert_eq!(col0.array().as_int32().value_at(2), Some(2));
-            assert_eq!(col0.array().as_int32().value_at(3), Some(2));
-            assert_eq!(col0.array().as_int32().value_at(4), Some(3));
-            assert_eq!(col0.array().as_int32().value_at(5), Some(3));
+            assert_eq!(col0.as_int32().value_at(0), Some(1));
+            assert_eq!(col0.as_int32().value_at(1), Some(1));
+            assert_eq!(col0.as_int32().value_at(2), Some(2));
+            assert_eq!(col0.as_int32().value_at(3), Some(2));
+            assert_eq!(col0.as_int32().value_at(4), Some(3));
+            assert_eq!(col0.as_int32().value_at(5), Some(3));
         }
         let res = stream.next().await;
         assert!(res.is_none());

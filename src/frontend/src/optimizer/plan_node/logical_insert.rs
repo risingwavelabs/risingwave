@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use risingwave_common::catalog::{Field, Schema};
+use pretty_xmlish::XmlNode;
+use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::utils::{childless_record, Distill};
 use super::{
-    gen_filter_and_pushdown, BatchInsert, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
+use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -33,134 +34,101 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// It corresponds to the `INSERT` statements in SQL. Especially, for `INSERT ... VALUES`
 /// statements, the input relation would be [`super::LogicalValues`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalInsert {
     pub base: PlanBase,
-    table_name: String, // explain-only
-    table_id: TableId,
-    input: PlanRef,
-    column_indices: Vec<usize>, // columns in which to insert
-    row_id_index: Option<usize>,
-    returning: bool,
+    core: generic::Insert<PlanRef>,
 }
 
 impl LogicalInsert {
-    /// Create a [`LogicalInsert`] node. Used internally by optimizer.
-    pub fn new(
-        input: PlanRef,
-        table_name: String,
-        table_id: TableId,
-        column_indices: Vec<usize>,
-        row_id_index: Option<usize>,
-        returning: bool,
-    ) -> Self {
-        let ctx = input.ctx();
-        let schema = if returning {
-            input.schema().clone()
+    pub fn new(core: generic::Insert<PlanRef>) -> Self {
+        let ctx = core.ctx();
+        let schema = if core.returning {
+            core.input.schema().clone()
         } else {
             Schema::new(vec![Field::unnamed(DataType::Int64)])
         };
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
-        Self {
-            base,
-            table_name,
-            table_id,
-            input,
-            column_indices,
-            row_id_index,
-            returning,
-        }
-    }
-
-    /// Create a [`LogicalInsert`] node. Used by planner.
-    pub fn create(
-        input: PlanRef,
-        table_name: String,
-        table_id: TableId,
-        column_indices: Vec<usize>,
-        row_id_index: Option<usize>,
-        returning: bool,
-    ) -> Result<Self> {
-        Ok(Self::new(
-            input,
-            table_name,
-            table_id,
-            column_indices,
-            row_id_index,
-            returning,
-        ))
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ table: {}{} }}",
-            name,
-            self.table_name,
-            if self.returning {
-                ", returning: true"
-            } else {
-                ""
-            }
-        )
+        Self { base, core }
     }
 
     // Get the column indexes in which to insert to
     #[must_use]
     pub fn column_indices(&self) -> Vec<usize> {
-        self.column_indices.clone()
+        self.core.column_indices.clone()
+    }
+
+    #[must_use]
+    pub fn default_columns(&self) -> Vec<(usize, ExprImpl)> {
+        self.core.default_columns.clone()
     }
 
     #[must_use]
     pub fn table_id(&self) -> TableId {
-        self.table_id
+        self.core.table_id
     }
 
     #[must_use]
     pub fn row_id_index(&self) -> Option<usize> {
-        self.row_id_index
+        self.core.row_id_index
     }
 
     pub fn has_returning(&self) -> bool {
-        self.returning
+        self.core.returning
+    }
+
+    pub fn table_version_id(&self) -> TableVersionId {
+        self.core.table_version_id
     }
 }
 
 impl PlanTreeNodeUnary for LogicalInsert {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
-            input,
-            self.table_name.clone(),
-            self.table_id,
-            self.column_indices.clone(),
-            self.row_id_index,
-            self.returning,
-        )
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
 impl_plan_tree_node_for_unary! {LogicalInsert}
 
-impl fmt::Display for LogicalInsert {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalInsert")
+impl Distill for LogicalInsert {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let vec = self.core.fields_pretty(self.base.ctx.is_explain_verbose());
+        childless_record("LogicalInsert", vec)
     }
 }
 
 impl ColPrunable for LogicalInsert {
     fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
-        self.clone_with_input(self.input.prune_col(&required_cols, ctx))
+        let input = &self.core.input;
+        let required_cols: Vec<_> = (0..input.schema().len()).collect();
+        self.clone_with_input(input.prune_col(&required_cols, ctx))
             .into()
     }
 }
 
-impl ExprRewritable for LogicalInsert {}
+impl ExprRewritable for LogicalInsert {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut new = self.clone();
+        new.core.default_columns = new
+            .core
+            .default_columns
+            .into_iter()
+            .map(|(c, e)| (c, r.rewrite_expr(e)))
+            .collect();
+        new.into()
+    }
+}
 
 impl PredicatePushdown for LogicalInsert {
     fn predicate_pushdown(
@@ -175,8 +143,9 @@ impl PredicatePushdown for LogicalInsert {
 impl ToBatch for LogicalInsert {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
-        Ok(BatchInsert::new(new_logical).into())
+        let mut logical = self.core.clone();
+        logical.input = new_input;
+        Ok(BatchInsert::new(logical).into())
     }
 }
 

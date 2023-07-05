@@ -12,21 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
-use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
-};
+use super::utils::{childless_record, Distill};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order, OrderDisplay};
 
 /// `BatchExchange` imposes a particular distribution on its input
 /// without changing its content.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExchange {
     pub base: PlanBase,
     input: PlanRef,
@@ -41,20 +39,18 @@ impl BatchExchange {
     }
 }
 
-impl fmt::Display for BatchExchange {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchExchange {{ order: {}, dist: {} }}",
-            OrderDisplay {
-                order: &self.base.order,
-                input_schema: self.input.schema()
-            },
-            DistributionDisplay {
-                distribution: &self.base.dist,
-                input_schema: self.input.schema()
-            }
-        )
+impl Distill for BatchExchange {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let input_schema = self.input.schema();
+        let order = Pretty::display(&OrderDisplay {
+            order: &self.base.order,
+            input_schema,
+        });
+        let dist = Pretty::display(&DistributionDisplay {
+            distribution: &self.base.dist,
+            input_schema,
+        });
+        childless_record("BatchExchange", vec![("order", order), ("dist", dist)])
     }
 }
 
@@ -76,7 +72,7 @@ impl ToDistributedBatch for BatchExchange {
 }
 
 /// The serialization of Batch Exchange is default cuz it will be rewritten in scheduler.
-impl ToBatchProst for BatchExchange {
+impl ToBatchPb for BatchExchange {
     fn to_batch_prost_body(&self) -> NodeBody {
         if self.base.order.is_any() {
             NodeBody::Exchange(ExchangeNode {

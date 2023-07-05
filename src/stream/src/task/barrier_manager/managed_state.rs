@@ -123,8 +123,12 @@ impl ManagedBarrierState {
                         chain_actor_id: actor,
                         done: matches!(state, ChainState::Done),
                         consumed_epoch: match state {
-                            ChainState::ConsumingUpstream(consumed_epoch) => consumed_epoch,
+                            ChainState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
                             ChainState::Done => epoch,
+                        },
+                        consumed_rows: match state {
+                            ChainState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
+                            ChainState::Done => 0,
                         },
                     })
                     .collect();
@@ -168,13 +172,16 @@ impl ManagedBarrierState {
                     ref remaining_actors,
                     ref mut collect_notifier,
                 } => {
-                    if remaining_actors.contains(&actor_id) && let Some(collect_notifier) = collect_notifier.take() && collect_notifier
+                    if remaining_actors.contains(&actor_id)
+                        && let Some(collect_notifier) = collect_notifier.take()
+                        && collect_notifier
                             .send(Err(anyhow!(format!(
                                 "Actor {actor_id} exit unexpectedly: {:?}",
                                 err
                             ))
                             .into()))
-                            .is_err() {
+                            .is_err()
+                    {
                         warn!("failed to notify actor {} exit: {:?}", actor_id, err);
                     }
                 }

@@ -13,15 +13,29 @@
 // limitations under the License.
 
 use std::cell::RefCell;
+use std::hash::Hash;
 
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Share<PlanRef> {
     pub input: RefCell<PlanRef>,
+}
+
+impl<P: Hash> Hash for Share<P> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.input.borrow().hash(state);
+    }
+}
+
+impl<PlanRef: GenericPlanRef> Share<PlanRef> {
+    pub fn replace_input(&self, plan: PlanRef) {
+        *self.input.borrow_mut() = plan;
+    }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Share<PlanRef> {
@@ -35,5 +49,9 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Share<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.borrow().ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.input.borrow().functional_dependency().clone()
     }
 }

@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
-use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use std::collections::HashMap;
+use std::fmt;
+use std::fmt::{Debug, Formatter};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,41 +24,51 @@ use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
 use itertools::Itertools;
+use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
-use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
-use risingwave_common::system_param::system_params_to_kv;
+use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
+use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
-    SstIdRange,
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
+    SstObjectIdRange,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
-    Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
-    View as ProstView,
+    Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
-use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::*;
+use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
-use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
+use risingwave_pb::meta::serving_service_client::ServingServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
-use risingwave_pb::meta::{SystemParams as ProstSystemParams, *};
+use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use risingwave_pb::meta::{PbReschedule, *};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -68,14 +79,15 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::Endpoint;
 use tonic::{Code, Streaming};
-use tracing::warn;
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
+use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
+type ConnectionId = u32;
 type DatabaseId = u32;
 type SchemaId = u32;
 
@@ -86,6 +98,7 @@ pub struct MetaClient {
     worker_type: WorkerType,
     host_addr: HostAddr,
     inner: GrpcMetaClient,
+    meta_config: MetaConfig,
 }
 
 impl MetaClient {
@@ -113,12 +126,48 @@ impl MetaClient {
             host: Some(self.host_addr.to_protobuf()),
             worker_id: self.worker_id(),
         };
-        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+
+        let retry_strategy = GrpcMetaClient::retry_strategy_to_bound(
+            Duration::from_secs(self.meta_config.max_heartbeat_interval_secs as u64),
+            true,
+        );
+
         tokio_retry::Retry::spawn(retry_strategy, || async {
             let request = request.clone();
             self.inner.subscribe(request).await
         })
         .await
+    }
+
+    pub async fn create_connection(
+        &self,
+        connection_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        req: create_connection_request::Payload,
+    ) -> Result<(ConnectionId, CatalogVersion)> {
+        let request = CreateConnectionRequest {
+            name: connection_name,
+            database_id,
+            schema_id,
+            owner_id,
+            payload: Some(req),
+        };
+        let resp = self.inner.create_connection(request).await?;
+        Ok((resp.connection_id, resp.version))
+    }
+
+    pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
+        let request = ListConnectionsRequest {};
+        let resp = self.inner.list_connections(request).await?;
+        Ok(resp.connections)
+    }
+
+    pub async fn drop_connection(&self, connection_id: ConnectionId) -> Result<CatalogVersion> {
+        let request = DropConnectionRequest { connection_id };
+        let resp = self.inner.drop_connection(request).await?;
+        Ok(resp.version)
     }
 
     pub(crate) fn parse_meta_addr(meta_addr: &str) -> Result<MetaAddressStrategy> {
@@ -164,34 +213,49 @@ impl MetaClient {
         meta_addr: &str,
         worker_type: WorkerType,
         addr: &HostAddr,
-        worker_node_parallelism: usize,
+        property: Property,
+        meta_config: &MetaConfig,
     ) -> Result<(Self, SystemParamsReader)> {
         let addr_strategy = Self::parse_meta_addr(meta_addr)?;
+        tracing::info!("register meta client using strategy: {}", addr_strategy);
 
-        let grpc_meta_client = GrpcMetaClient::new(addr_strategy).await?;
+        // Retry until reaching `max_heartbeat_interval_secs`
+        let retry_strategy = GrpcMetaClient::retry_strategy_to_bound(
+            Duration::from_secs(meta_config.max_heartbeat_interval_secs as u64),
+            true,
+        );
 
-        let add_worker_request = AddWorkerNodeRequest {
-            worker_type: worker_type as i32,
-            host: Some(addr.to_protobuf()),
-            worker_node_parallelism: worker_node_parallelism as u64,
-        };
-        let add_worker_resp =
-            tokio_retry::Retry::spawn(GrpcMetaClient::retry_strategy_for_request(), || async {
-                let request = add_worker_request.clone();
-                grpc_meta_client.add_worker_node(request).await
-            })
-            .await?;
+        if property.is_unschedulable {
+            tracing::warn!("worker {:?} registered as unschedulable", addr.clone());
+        }
+        let init_result: Result<_> = tokio_retry::Retry::spawn(retry_strategy, || async {
+            let grpc_meta_client = GrpcMetaClient::new(&addr_strategy, meta_config.clone()).await?;
+
+            let add_worker_resp = grpc_meta_client
+                .add_worker_node(AddWorkerNodeRequest {
+                    worker_type: worker_type as i32,
+                    host: Some(addr.to_protobuf()),
+                    property: Some(property.clone()),
+                })
+                .await?;
+            if let Some(status) = &add_worker_resp.status
+                && status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+                tracing::error!("invalid worker: {}", status.message);
+                std::process::exit(1);
+            }
+
+            let system_params_resp = grpc_meta_client
+                .get_system_params(GetSystemParamsRequest {})
+                .await?;
+
+            Ok((add_worker_resp, system_params_resp, grpc_meta_client))
+        })
+        .await;
+
+        let (add_worker_resp, system_params_resp, grpc_meta_client) = init_result?;
         let worker_node = add_worker_resp
             .node
             .expect("AddWorkerNodeResponse::node is empty");
-
-        let system_params_request = GetSystemParamsRequest {};
-        let system_params_resp =
-            tokio_retry::Retry::spawn(GrpcMetaClient::retry_strategy_for_request(), || async {
-                let request = system_params_request.clone();
-                grpc_meta_client.get_system_params(request).await
-            })
-            .await?;
 
         Ok((
             Self {
@@ -199,6 +263,7 @@ impl MetaClient {
                 worker_type,
                 host_addr: addr.clone(),
                 inner: grpc_meta_client,
+                meta_config: meta_config.to_owned(),
             },
             system_params_resp.params.unwrap().into(),
         ))
@@ -209,7 +274,10 @@ impl MetaClient {
         let request = ActivateWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
         };
-        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+        let retry_strategy = GrpcMetaClient::retry_strategy_to_bound(
+            Duration::from_secs(self.meta_config.max_heartbeat_interval_secs as u64),
+            true,
+        );
         tokio_retry::Retry::spawn(retry_strategy, || async {
             let request = request.clone();
             self.inner.activate_worker_node(request).await
@@ -238,14 +306,14 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_database(&self, db: ProstDatabase) -> Result<(DatabaseId, CatalogVersion)> {
+    pub async fn create_database(&self, db: PbDatabase) -> Result<(DatabaseId, CatalogVersion)> {
         let request = CreateDatabaseRequest { db: Some(db) };
         let resp = self.inner.create_database(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.database_id, resp.version))
     }
 
-    pub async fn create_schema(&self, schema: ProstSchema) -> Result<(SchemaId, CatalogVersion)> {
+    pub async fn create_schema(&self, schema: PbSchema) -> Result<(SchemaId, CatalogVersion)> {
         let request = CreateSchemaRequest {
             schema: Some(schema),
         };
@@ -256,7 +324,7 @@ impl MetaClient {
 
     pub async fn create_materialized_view(
         &self,
-        table: ProstTable,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateMaterializedViewRequest {
@@ -277,7 +345,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn create_source(&self, source: ProstSource) -> Result<(u32, CatalogVersion)> {
+    pub async fn create_source(&self, source: PbSource) -> Result<(u32, CatalogVersion)> {
         let request = CreateSourceRequest {
             source: Some(source),
         };
@@ -288,7 +356,7 @@ impl MetaClient {
 
     pub async fn create_sink(
         &self,
-        sink: ProstSink,
+        sink: PbSink,
         graph: StreamFragmentGraph,
     ) -> Result<(u32, CatalogVersion)> {
         let request = CreateSinkRequest {
@@ -302,7 +370,7 @@ impl MetaClient {
 
     pub async fn create_function(
         &self,
-        function: ProstFunction,
+        function: PbFunction,
     ) -> Result<(FunctionId, CatalogVersion)> {
         let request = CreateFunctionRequest {
             function: Some(function),
@@ -313,8 +381,8 @@ impl MetaClient {
 
     pub async fn create_table(
         &self,
-        source: Option<ProstSource>,
-        table: ProstTable,
+        source: Option<PbSource>,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateTableRequest {
@@ -327,7 +395,36 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn create_view(&self, view: ProstView) -> Result<(u32, CatalogVersion)> {
+    pub async fn alter_relation_name(
+        &self,
+        relation: Relation,
+        name: &str,
+    ) -> Result<CatalogVersion> {
+        let request = AlterRelationNameRequest {
+            relation: Some(relation),
+            new_name: name.to_string(),
+        };
+        let resp = self.inner.alter_relation_name(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn replace_table(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
+        table_col_index_mapping: ColIndexMapping,
+    ) -> Result<CatalogVersion> {
+        let request = ReplaceTablePlanRequest {
+            table: Some(table),
+            fragment_graph: Some(graph),
+            table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+        };
+        let resp = self.inner.replace_table_plan(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok(resp.version)
+    }
+
+    pub async fn create_view(&self, view: PbView) -> Result<(u32, CatalogVersion)> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -336,8 +433,8 @@ impl MetaClient {
 
     pub async fn create_index(
         &self,
-        index: ProstIndex,
-        table: ProstTable,
+        index: PbIndex,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateIndexRequest {
@@ -487,21 +584,42 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn update_schedulability(
+        &self,
+        worker_ids: &[u32],
+        schedulability: Schedulability,
+    ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
+        let request = UpdateWorkerNodeSchedulabilityRequest {
+            worker_ids: worker_ids.to_vec(),
+            schedulability: schedulability.into(),
+        };
+        let resp = self
+            .inner
+            .update_worker_node_schedulability(request)
+            .await?;
+        Ok(resp)
+    }
+
+    pub async fn list_worker_nodes(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
+        let request = ListAllNodesRequest {
+            worker_type: worker_type as _,
+            include_starting_nodes: true,
+        };
+        let resp = self.inner.list_all_nodes(request).await?;
+        Ok(resp.nodes)
+    }
+
     /// Starts a heartbeat worker.
     ///
     /// When sending heartbeat RPC, it also carries extra info from `extra_info_sources`.
     pub fn start_heartbeat_loop(
         meta_client: MetaClient,
         min_interval: Duration,
-        max_interval: Duration,
         extra_info_sources: Vec<ExtraInfoSourceRef>,
     ) -> (JoinHandle<()>, Sender<()>) {
-        assert!(min_interval < max_interval);
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval_ticker = tokio::time::interval(min_interval);
-            let mut max_interval_ticker = tokio::time::interval(max_interval);
-            max_interval_ticker.reset();
             loop {
                 tokio::select! {
                     biased;
@@ -512,11 +630,6 @@ impl MetaClient {
                     }
                     // Wait for interval
                     _ = min_interval_ticker.tick() => {},
-                    _ = max_interval_ticker.tick() => {
-                        // Client has lost connection to the server and reached time limit, it should exit.
-                        tracing::error!("Heartbeat timeout, exiting...");
-                        std::process::exit(1);
-                    },
                 }
                 let mut extra_info = Vec::with_capacity(extra_info_sources.len());
                 for extra_info_source in &extra_info_sources {
@@ -534,9 +647,7 @@ impl MetaClient {
                 )
                 .await
                 {
-                    Ok(Ok(_)) => {
-                        max_interval_ticker.reset();
-                    }
+                    Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
                         tracing::warn!("Failed to send_heartbeat: error {}", err);
                     }
@@ -549,7 +660,7 @@ impl MetaClient {
         (join_handle, shutdown_tx)
     }
 
-    pub async fn risectl_list_state_tables(&self) -> Result<Vec<ProstTable>> {
+    pub async fn risectl_list_state_tables(&self) -> Result<Vec<PbTable>> {
         let request = RisectlListStateTablesRequest {};
         let resp = self.inner.risectl_list_state_tables(request).await?;
         Ok(resp.tables)
@@ -561,6 +672,12 @@ impl MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
+    pub async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()> {
+        let request = CancelCreatingJobsRequest { infos };
+        let _ = self.inner.cancel_creating_jobs(request).await?;
+        Ok(())
+    }
+
     pub async fn list_table_fragments(
         &self,
         table_ids: &[u32],
@@ -570,6 +687,30 @@ impl MetaClient {
         };
         let resp = self.inner.list_table_fragments(request).await?;
         Ok(resp.table_fragments)
+    }
+
+    pub async fn list_table_fragment_states(&self) -> Result<Vec<TableFragmentState>> {
+        let resp = self
+            .inner
+            .list_table_fragment_states(ListTableFragmentStatesRequest {})
+            .await?;
+        Ok(resp.states)
+    }
+
+    pub async fn list_fragment_distributions(&self) -> Result<Vec<FragmentDistribution>> {
+        let resp = self
+            .inner
+            .list_fragment_distribution(ListFragmentDistributionRequest {})
+            .await?;
+        Ok(resp.distributions)
+    }
+
+    pub async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
+        let resp = self
+            .inner
+            .list_actor_states(ListActorStatesRequest {})
+            .await?;
+        Ok(resp.states)
     }
 
     pub async fn pause(&self) -> Result<()> {
@@ -590,10 +731,30 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn reschedule(&self, reschedules: HashMap<u32, ProstReschedule>) -> Result<bool> {
-        let request = RescheduleRequest { reschedules };
+    pub async fn reschedule(
+        &self,
+        reschedules: HashMap<u32, PbReschedule>,
+        revision: u64,
+    ) -> Result<(bool, u64)> {
+        let request = RescheduleRequest {
+            reschedules,
+            revision,
+        };
         let resp = self.inner.reschedule(request).await?;
-        Ok(resp.success)
+        Ok((resp.success, resp.revision))
+    }
+
+    pub async fn get_reschedule_plan(
+        &self,
+        policy: PbPolicy,
+        revision: u64,
+    ) -> Result<GetReschedulePlanResponse> {
+        let request = GetReschedulePlanRequest {
+            revision,
+            policy: Some(policy),
+        };
+        let resp = self.inner.get_reschedule_plan(request).await?;
+        Ok(resp)
     }
 
     pub async fn risectl_get_pinned_versions_summary(
@@ -614,9 +775,30 @@ impl MetaClient {
             .await
     }
 
+    pub async fn risectl_get_checkpoint_hummock_version(
+        &self,
+    ) -> Result<RiseCtlGetCheckpointVersionResponse> {
+        let request = RiseCtlGetCheckpointVersionRequest {};
+        self.inner.rise_ctl_get_checkpoint_version(request).await
+    }
+
+    pub async fn risectl_pause_hummock_version_checkpoint(
+        &self,
+    ) -> Result<RiseCtlPauseVersionCheckpointResponse> {
+        let request = RiseCtlPauseVersionCheckpointRequest {};
+        self.inner.rise_ctl_pause_version_checkpoint(request).await
+    }
+
+    pub async fn risectl_resume_hummock_version_checkpoint(
+        &self,
+    ) -> Result<RiseCtlResumeVersionCheckpointResponse> {
+        let request = RiseCtlResumeVersionCheckpointRequest {};
+        self.inner.rise_ctl_resume_version_checkpoint(request).await
+    }
+
     pub async fn init_metadata_for_replay(
         &self,
-        tables: Vec<ProstTable>,
+        tables: Vec<PbTable>,
         compaction_groups: Vec<CompactionGroupInfo>,
     ) -> Result<()> {
         let req = InitMetadataForReplayRequest {
@@ -624,15 +806,6 @@ impl MetaClient {
             compaction_groups,
         };
         let _resp = self.inner.init_metadata_for_replay(req).await?;
-        Ok(())
-    }
-
-    pub async fn set_compactor_runtime_config(&self, config: CompactorRuntimeConfig) -> Result<()> {
-        let req = SetCompactorRuntimeConfigRequest {
-            context_id: self.worker_id,
-            config: Some(config.into()),
-        };
-        let _resp = self.inner.set_compactor_runtime_config(req).await?;
         Ok(())
     }
 
@@ -756,10 +929,98 @@ impl MetaClient {
         Ok(resp.manifest.expect("should exist"))
     }
 
+    pub async fn get_telemetry_info(&self) -> Result<TelemetryInfoResponse> {
+        let req = GetTelemetryInfoRequest {};
+        let resp = self.inner.get_telemetry_info(req).await?;
+        Ok(resp)
+    }
+
     pub async fn get_system_params(&self) -> Result<SystemParamsReader> {
         let req = GetSystemParamsRequest {};
         let resp = self.inner.get_system_params(req).await?;
         Ok(resp.params.unwrap().into())
+    }
+
+    pub async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()> {
+        let req = SetSystemParamRequest { param, value };
+        self.inner.set_system_param(req).await?;
+        Ok(())
+    }
+
+    pub async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
+        let req = GetDdlProgressRequest {};
+        let resp = self.inner.get_ddl_progress(req).await?;
+        Ok(resp.ddl_progress)
+    }
+
+    pub async fn split_compaction_group(
+        &self,
+        group_id: CompactionGroupId,
+        table_ids_to_new_group: &[StateTableId],
+    ) -> Result<CompactionGroupId> {
+        let req = SplitCompactionGroupRequest {
+            group_id,
+            table_ids: table_ids_to_new_group.to_vec(),
+        };
+        let resp = self.inner.split_compaction_group(req).await?;
+        Ok(resp.new_group_id)
+    }
+
+    pub async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>> {
+        let req = GetTablesRequest {
+            table_ids: table_ids.to_vec(),
+        };
+        let resp = self.inner.get_tables(req).await?;
+        Ok(resp.tables)
+    }
+
+    pub async fn list_serving_vnode_mappings(
+        &self,
+    ) -> Result<HashMap<u32, (u32, ParallelUnitMapping)>> {
+        let req = GetServingVnodeMappingsRequest {};
+        let resp = self.inner.get_serving_vnode_mappings(req).await?;
+        let mappings = resp
+            .mappings
+            .into_iter()
+            .map(|p| {
+                (
+                    p.fragment_id,
+                    (
+                        resp.fragment_to_table
+                            .get(&p.fragment_id)
+                            .cloned()
+                            .unwrap_or(0),
+                        ParallelUnitMapping::from_protobuf(p.mapping.as_ref().unwrap()),
+                    ),
+                )
+            })
+            .collect();
+        Ok(mappings)
+    }
+
+    pub async fn risectl_list_compaction_status(
+        &self,
+    ) -> Result<(
+        Vec<CompactStatus>,
+        Vec<CompactTaskAssignment>,
+        Vec<CompactTaskProgress>,
+    )> {
+        let req = RiseCtlListCompactionStatusRequest {};
+        let resp = self.inner.rise_ctl_list_compaction_status(req).await?;
+        Ok((
+            resp.compaction_statuses,
+            resp.task_assignment,
+            resp.task_progress,
+        ))
+    }
+
+    pub async fn delete_worker_node(&self, worker: HostAddress) -> Result<()> {
+        let _resp = self
+            .inner
+            .delete_worker_node(DeleteWorkerNodeRequest { host: Some(worker) })
+            .await?;
+
+        Ok(())
     }
 }
 
@@ -819,12 +1080,12 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         let resp = self
             .inner
             .get_new_sst_ids(GetNewSstIdsRequest { number })
             .await?;
-        Ok(SstIdRange::new(resp.start_id, resp.end_id))
+        Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
     async fn report_compaction_task(
@@ -855,25 +1116,27 @@ impl HummockMetaClient for MetaClient {
 
     async fn subscribe_compact_tasks(
         &self,
-        max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
-            max_concurrent_task_number,
+            cpu_core_num,
         };
         let stream = self.inner.subscribe_compact_tasks(req).await?;
         Ok(Box::pin(stream))
     }
 
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
         progress: Vec<CompactTaskProgress>,
+        workload: CompactorWorkload,
     ) -> Result<()> {
-        let req = ReportCompactionTaskProgressRequest {
+        let req = CompactorHeartbeatRequest {
             context_id: self.worker_id(),
             progress,
+            workload: Some(workload),
         };
-        self.inner.report_compaction_task_progress(req).await?;
+        self.inner.compactor_heartbeat(req).await?;
         Ok(())
     }
 
@@ -885,8 +1148,8 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
-        let req = ReportFullScanTaskRequest { sst_ids };
+    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
+        let req = ReportFullScanTaskRequest { object_ids };
         self.inner.report_full_scan_task(req).await?;
         Ok(())
     }
@@ -921,66 +1184,12 @@ impl HummockMetaClient for MetaClient {
     }
 }
 
-/// A wrapper for [`risingwave_pb::meta::SystemParams`] for 2 purposes:
-/// - Avoid misuse of deprecated fields by hiding their getters.
-/// - Abstract fallback logic for fields that might not be provided by meta service due to backward
-///   compatibility.
-pub struct SystemParamsReader {
-    prost: ProstSystemParams,
-}
-
-impl From<ProstSystemParams> for SystemParamsReader {
-    fn from(prost: ProstSystemParams) -> Self {
-        Self { prost }
-    }
-}
-
-impl SystemParamsReader {
-    pub fn barrier_interval_ms(&self) -> u32 {
-        self.prost.barrier_interval_ms.unwrap()
-    }
-
-    pub fn checkpoint_frequency(&self) -> u64 {
-        self.prost.checkpoint_frequency.unwrap()
-    }
-
-    pub fn sstable_size_mb(&self) -> u32 {
-        self.prost.sstable_size_mb.unwrap()
-    }
-
-    pub fn block_size_kb(&self) -> u32 {
-        self.prost.block_size_kb.unwrap()
-    }
-
-    pub fn bloom_false_positive(&self) -> f64 {
-        self.prost.bloom_false_positive.unwrap()
-    }
-
-    // TODO(zhidong): Only read from system params in v0.1.18.
-    pub fn state_store(&self, from_local: String) -> String {
-        let from_prost = self.prost.state_store.as_ref().unwrap();
-        if from_prost.is_empty() {
-            warn!("--state-store is not specified on meta node, reading from CLI instead");
-            from_local
-        } else {
-            from_prost.clone()
-        }
-    }
-
-    pub fn data_directory(&self) -> &str {
-        self.prost.data_directory.as_ref().unwrap()
-    }
-
-    pub fn backup_storage_url(&self) -> &str {
-        self.prost.backup_storage_url.as_ref().unwrap()
-    }
-
-    pub fn backup_storage_directory(&self) -> &str {
-        self.prost.backup_storage_directory.as_ref().unwrap()
-    }
-
-    pub fn to_kv(&self) -> Vec<(String, String)> {
-        system_params_to_kv(&self.prost).unwrap()
+#[async_trait]
+impl TelemetryInfoFetcher for MetaClient {
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<Option<String>> {
+        let resp = self.get_telemetry_info().await?;
+        let tracking_id = resp.get_tracking_id().ok();
+        Ok(tracking_id.map(|id| id.to_owned()))
     }
 }
 
@@ -996,7 +1205,9 @@ struct GrpcMetaClientCore {
     user_client: UserServiceClient<Channel>,
     scale_client: ScaleServiceClient<Channel>,
     backup_client: BackupServiceClient<Channel>,
+    telemetry_client: TelemetryInfoServiceClient<Channel>,
     system_params_client: SystemParamsServiceClient<Channel>,
+    serving_client: ServingServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1011,7 +1222,10 @@ impl GrpcMetaClientCore {
         let user_client = UserServiceClient::new(channel.clone());
         let scale_client = ScaleServiceClient::new(channel.clone());
         let backup_client = BackupServiceClient::new(channel.clone());
-        let system_params_client = SystemParamsServiceClient::new(channel);
+        let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
+        let system_params_client = SystemParamsServiceClient::new(channel.clone());
+        let serving_client = ServingServiceClient::new(channel);
+
         GrpcMetaClientCore {
             cluster_client,
             meta_member_client,
@@ -1023,7 +1237,9 @@ impl GrpcMetaClientCore {
             user_client,
             scale_client,
             backup_client,
+            telemetry_client,
             system_params_client,
+            serving_client,
         }
     }
 }
@@ -1033,7 +1249,7 @@ impl GrpcMetaClientCore {
 /// It is a wrapper of tonic client. See [`rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
-    force_refresh_sender: mpsc::Sender<oneshot::Sender<Result<()>>>,
+    member_monitor_event_sender: mpsc::Sender<Sender<Result<()>>>,
     core: Arc<RwLock<GrpcMetaClientCore>>,
 }
 
@@ -1043,21 +1259,35 @@ pub enum MetaAddressStrategy {
     List(Vec<String>),
 }
 
+impl fmt::Display for MetaAddressStrategy {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            MetaAddressStrategy::LoadBalance(addr) => {
+                write!(f, "LoadBalance({})", addr)?;
+            }
+            MetaAddressStrategy::List(addrs) => {
+                write!(f, "List({:?})", addrs)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 type MetaMemberClient = MetaMemberServiceClient<Channel>;
 
 struct MetaMemberGroup {
-    client_cache: HashMap<String, MetaMemberClient>,
-    members: HashSet<String>,
+    members: LruCache<String, Option<MetaMemberClient>>,
 }
 
-struct ElectionMemberManagement {
+struct MetaMemberManagement {
     core_ref: Arc<RwLock<GrpcMetaClientCore>>,
     members: Either<MetaMemberClient, MetaMemberGroup>,
     current_leader: String,
+    meta_config: MetaConfig,
 }
 
-impl ElectionMemberManagement {
-    const ELECTION_MEMBER_REFRESH_PERIOD: Duration = Duration::from_secs(5);
+impl MetaMemberManagement {
+    const META_MEMBER_REFRESH_PERIOD: Duration = Duration::from_secs(5);
 
     fn host_address_to_url(addr: HostAddress) -> String {
         format!("http://{}:{}", addr.host, addr.port)
@@ -1078,60 +1308,35 @@ impl ElectionMemberManagement {
             Either::Right(member_group) => {
                 let mut fetched_members = None;
 
-                for addr in &member_group.members {
-                    let mut client = match member_group.client_cache.get(addr) {
-                        Some(cached_client) => cached_client.to_owned(),
-                        None => {
-                            let endpoint = match GrpcMetaClient::addr_to_endpoint(addr.clone()) {
-                                Ok(endpoint) => endpoint,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "failed to create endpoint from {}, {}",
-                                        addr,
-                                        e
-                                    );
-                                    continue;
-                                }
-                            };
+                for (addr, client) in member_group.members.iter_mut() {
+                    let client: Result<MetaMemberClient> = try {
+                        match client {
+                            Some(cached_client) => cached_client.to_owned(),
+                            None => {
+                                let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone())?;
+                                let channel = GrpcMetaClient::connect_to_endpoint(endpoint).await?;
+                                let new_client: MetaMemberClient =
+                                    MetaMemberServiceClient::new(channel);
+                                *client = Some(new_client.clone());
 
-                            let channel = match GrpcMetaClient::connect_to_endpoint(endpoint).await
-                            {
-                                Ok(channel) => channel,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "failed to create rpc channel from {}, {}",
-                                        addr,
-                                        e
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            let client: MetaMemberServiceClient<Channel> =
-                                MetaMemberServiceClient::new(channel);
-                            member_group
-                                .client_cache
-                                .insert(addr.clone(), client.clone());
-                            client.to_owned()
+                                new_client
+                            }
                         }
                     };
-
-                    let MembersResponse { members } = match client.members(MembersRequest {}).await
-                    {
-                        Ok(members) => members.into_inner(),
-                        Err(e) => {
-                            tracing::warn!(
-                                "failed to fetch members from MetaMemberClient {}: {}",
-                                addr,
-                                e
-                            );
+                    if let Err(err) = client {
+                        tracing::warn!("failed to create client from {}: {}", addr, err);
+                        continue;
+                    }
+                    match client.unwrap().members(MembersRequest {}).await {
+                        Err(err) => {
+                            tracing::warn!("failed to fetch members from {}: {}", addr, err);
                             continue;
                         }
-                    };
-
-                    fetched_members = Some(members);
-
-                    break;
+                        Ok(resp) => {
+                            fetched_members = Some(resp.into_inner().members);
+                            break;
+                        }
+                    }
                 }
 
                 let members =
@@ -1139,26 +1344,18 @@ impl ElectionMemberManagement {
 
                 // find new leader
                 let mut leader = None;
-                let mut member_addrs = HashSet::new();
                 for member in members {
                     if member.is_leader {
                         leader = Some(member.clone());
                     }
 
-                    member_addrs.insert(Self::host_address_to_url(member.address.unwrap()));
+                    let addr = Self::host_address_to_url(member.address.unwrap());
+                    // We don't clean any expired addrs here to deal with some extreme situations.
+                    if !member_group.members.contains(&addr) {
+                        tracing::info!("new meta member joined: {}", addr);
+                        member_group.members.put(addr, None);
+                    }
                 }
-
-                // drain old cache
-                let drained = member_group
-                    .client_cache
-                    .drain_filter(|addr, _| !member_addrs.borrow().contains(addr));
-
-                for (addr, _) in drained {
-                    tracing::info!("dropping meta client from {}", addr);
-                }
-
-                // update members
-                member_group.members = member_addrs;
 
                 leader
             }
@@ -1169,8 +1366,17 @@ impl ElectionMemberManagement {
 
             if discovered_leader != self.current_leader {
                 tracing::info!("new meta leader {} discovered", discovered_leader);
-                let (channel, _) =
-                    GrpcMetaClient::try_build_rpc_channel(vec![discovered_leader.clone()]).await?;
+
+                let retry_strategy = GrpcMetaClient::retry_strategy_to_bound(
+                    Duration::from_secs(self.meta_config.meta_leader_lease_secs),
+                    false,
+                );
+
+                let channel = tokio_retry::Retry::spawn(retry_strategy, || async {
+                    let endpoint = GrpcMetaClient::addr_to_endpoint(discovered_leader.clone())?;
+                    GrpcMetaClient::connect_to_endpoint(endpoint).await
+                })
+                .await?;
 
                 self.recreate_core(channel).await;
                 self.current_leader = discovered_leader;
@@ -1182,61 +1388,68 @@ impl ElectionMemberManagement {
 }
 
 impl GrpcMetaClient {
-    // Retry base interval in ms for connecting to meta server.
-    const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
-    // Max retry interval in ms for connecting to meta server.
-    const CONN_RETRY_MAX_INTERVAL_MS: u64 = 5000;
     // See `Endpoint::http2_keep_alive_interval`
     const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
     // See `Endpoint::keep_alive_timeout`
     const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
-    // Max retry times for request to meta server.
-    const REQUEST_RETRY_BASE_INTERVAL_MS: u64 = 50;
+    // Retry base interval in ms for connecting to meta server.
+    const INIT_RETRY_BASE_INTERVAL_MS: u64 = 50;
     // Max retry times for connecting to meta server.
-    const REQUEST_RETRY_MAX_ATTEMPTS: usize = 10;
-    // Max retry interval in ms for request to meta server.
-    const REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+    const INIT_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
     async fn start_meta_member_monitor(
         &self,
         init_leader_addr: String,
         members: Either<MetaMemberClient, MetaMemberGroup>,
         force_refresh_receiver: Receiver<Sender<Result<()>>>,
+        meta_config: MetaConfig,
     ) -> Result<()> {
         let core_ref = self.core.clone();
         let current_leader = init_leader_addr;
 
         let enable_period_tick = matches!(members, Either::Right(_));
 
-        let member_management = ElectionMemberManagement {
+        let member_management = MetaMemberManagement {
             core_ref,
             members,
             current_leader,
+            meta_config,
         };
 
         let mut force_refresh_receiver = force_refresh_receiver;
 
         tokio::spawn(async move {
             let mut member_management = member_management;
-            let mut ticker =
-                time::interval(ElectionMemberManagement::ELECTION_MEMBER_REFRESH_PERIOD);
+            let mut ticker = time::interval(MetaMemberManagement::META_MEMBER_REFRESH_PERIOD);
 
             loop {
-                let result_sender: Option<Sender<Result<()>>> = if enable_period_tick {
+                let event: Option<Sender<Result<()>>> = if enable_period_tick {
                     tokio::select! {
                         _ = ticker.tick() => None,
-                        result_sender = force_refresh_receiver.recv() => result_sender,
+                        result_sender = force_refresh_receiver.recv() => {
+                            if result_sender.is_none() {
+                                break;
+                            }
+
+                            result_sender
+                        },
                     }
                 } else {
-                    force_refresh_receiver.recv().await
+                    let result_sender = force_refresh_receiver.recv().await;
+
+                    if result_sender.is_none() {
+                        break;
+                    }
+
+                    result_sender
                 };
 
                 let tick_result = member_management.refresh_members().await;
                 if let Err(e) = tick_result.as_ref() {
-                    tracing::warn!("refresh election client failed {}", e);
+                    tracing::warn!("refresh meta member client failed {}", e);
                 }
 
-                if let Some(sender) = result_sender {
+                if let Some(sender) = event {
                     // ignore resp
                     let _resp = sender.send(tick_result);
                 }
@@ -1249,7 +1462,7 @@ impl GrpcMetaClient {
     async fn force_refresh_leader(&self) -> Result<()> {
         let (sender, receiver) = oneshot::channel();
 
-        self.force_refresh_sender
+        self.member_monitor_event_sender
             .send(sender)
             .await
             .map_err(|e| anyhow!(e))?;
@@ -1258,8 +1471,8 @@ impl GrpcMetaClient {
     }
 
     /// Connect to the meta server from `addrs`.
-    pub async fn new(strategy: MetaAddressStrategy) -> Result<Self> {
-        let (channel, addr) = match &strategy {
+    pub async fn new(strategy: &MetaAddressStrategy, config: MetaConfig) -> Result<Self> {
+        let (channel, addr) = match strategy {
             MetaAddressStrategy::LoadBalance(addr) => {
                 Self::try_build_rpc_channel(vec![addr.clone()]).await
             }
@@ -1267,34 +1480,29 @@ impl GrpcMetaClient {
         }?;
         let (force_refresh_sender, force_refresh_receiver) = mpsc::channel(1);
         let client = GrpcMetaClient {
-            force_refresh_sender,
+            member_monitor_event_sender: force_refresh_sender,
             core: Arc::new(RwLock::new(GrpcMetaClientCore::new(channel))),
         };
 
         let meta_member_client = client.core.read().await.meta_member_client.clone();
-        let members = match &strategy {
+        let members = match strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
-            MetaAddressStrategy::List(_) => {
-                let mut client_cache = HashMap::new();
-                let mut members = HashSet::new();
-                members.insert(addr.to_string());
+            MetaAddressStrategy::List(addrs) => {
+                let mut members = LruCache::new(NonZeroUsize::new(20).unwrap());
+                for addr in addrs {
+                    members.put(addr.clone(), None);
+                }
+                members.put(addr.clone(), Some(meta_member_client));
 
-                client_cache.insert(addr.to_string(), meta_member_client);
-
-                Either::Right(MetaMemberGroup {
-                    client_cache,
-                    members,
-                })
+                Either::Right(MetaMemberGroup { members })
             }
         };
 
         client
-            .start_meta_member_monitor(addr, members, force_refresh_receiver)
+            .start_meta_member_monitor(addr, members, force_refresh_receiver, config)
             .await?;
 
-        if let Err(e) = client.force_refresh_leader().await {
-            tracing::warn!("force refresh leader failed {}, init leader may failed", e);
-        }
+        client.force_refresh_leader().await?;
 
         Ok(client)
     }
@@ -1311,54 +1519,61 @@ impl GrpcMetaClient {
             .map(|addr| Self::addr_to_endpoint(addr.clone()).map(|endpoint| (endpoint, addr)))
             .try_collect()?;
 
-        let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
-            .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
-            .map(jitter);
+        let endpoints = endpoints.clone();
 
-        let channel = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let endpoints = endpoints.clone();
-
-            for (endpoint, addr) in endpoints {
-                match Self::connect_to_endpoint(endpoint).await {
-                    Ok(channel) => {
-                        tracing::info!("Connect to meta server {} successfully", addr);
-                        return Ok((channel, addr));
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to connect to meta server {}, trying next address: {}",
-                            addr,
-                            e
-                        )
-                    }
+        for (endpoint, addr) in endpoints {
+            match Self::connect_to_endpoint(endpoint).await {
+                Ok(channel) => {
+                    tracing::info!("Connect to meta server {} successfully", addr);
+                    return Ok((channel, addr));
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to connect to meta server {}, trying again: {}",
+                        addr,
+                        e
+                    )
                 }
             }
+        }
 
-            Err(RpcError::Internal(anyhow!(
-                "Failed to connect to any meta server"
-            )))
-        })
-        .await?;
-
-        Ok(channel)
+        Err(RpcError::Internal(anyhow!(
+            "Failed to connect to meta server"
+        )))
     }
 
     async fn connect_to_endpoint(endpoint: Endpoint) -> Result<Channel> {
-        endpoint
+        let channel = endpoint
             .http2_keep_alive_interval(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
             .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await
-            .map_err(RpcError::TransportError)
+            .map_err(RpcError::TransportError)?
+            .tracing_injected();
+
+        Ok(channel)
     }
 
-    /// Return retry strategy for retrying meta requests.
-    pub fn retry_strategy_for_request() -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(Self::REQUEST_RETRY_BASE_INTERVAL_MS)
-            .max_delay(Duration::from_millis(Self::REQUEST_RETRY_MAX_INTERVAL_MS))
-            .map(jitter)
-            .take(Self::REQUEST_RETRY_MAX_ATTEMPTS)
+    pub(crate) fn retry_strategy_to_bound(
+        high_bound: Duration,
+        exceed: bool,
+    ) -> impl Iterator<Item = Duration> {
+        let iter = ExponentialBackoff::from_millis(Self::INIT_RETRY_BASE_INTERVAL_MS)
+            .max_delay(Duration::from_millis(Self::INIT_RETRY_MAX_INTERVAL_MS))
+            .map(jitter);
+
+        let mut sum = Duration::default();
+
+        iter.take_while(move |duration| {
+            sum += *duration;
+
+            if exceed {
+                sum < high_bound + *duration
+            } else {
+                sum < high_bound
+            }
+        })
     }
 }
 
@@ -1368,11 +1583,18 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
+            ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
+            ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
+            ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
+            ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
+            ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
+            ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
+            ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -1390,7 +1612,13 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
+            ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
+            ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
+            ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
+            ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
+            ,{ ddl_client, drop_connection, DropConnectionRequest, DropConnectionResponse }
+            ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
@@ -1406,7 +1634,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
-            ,{ hummock_client, report_compaction_task_progress, ReportCompactionTaskProgressRequest, ReportCompactionTaskProgressResponse }
+            ,{ hummock_client, compactor_heartbeat, CompactorHeartbeatRequest, CompactorHeartbeatResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
@@ -1415,8 +1643,12 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_get_pinned_snapshots_summary, RiseCtlGetPinnedSnapshotsSummaryRequest, RiseCtlGetPinnedSnapshotsSummaryResponse }
             ,{ hummock_client, rise_ctl_list_compaction_group, RiseCtlListCompactionGroupRequest, RiseCtlListCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
+            ,{ hummock_client, rise_ctl_get_checkpoint_version, RiseCtlGetCheckpointVersionRequest, RiseCtlGetCheckpointVersionResponse }
+            ,{ hummock_client, rise_ctl_pause_version_checkpoint, RiseCtlPauseVersionCheckpointRequest, RiseCtlPauseVersionCheckpointResponse }
+            ,{ hummock_client, rise_ctl_resume_version_checkpoint, RiseCtlResumeVersionCheckpointRequest, RiseCtlResumeVersionCheckpointResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
-            ,{ hummock_client, set_compactor_runtime_config, SetCompactorRuntimeConfigRequest, SetCompactorRuntimeConfigResponse }
+            ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
+            ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
@@ -1426,12 +1658,16 @@ macro_rules! for_all_meta_rpc {
             ,{ scale_client, resume, ResumeRequest, ResumeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
+            ,{ scale_client, get_reschedule_plan, GetReschedulePlanRequest, GetReschedulePlanResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
             ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
+            ,{ telemetry_client, get_telemetry_info, GetTelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
+            ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
+            ,{ serving_client, get_serving_vnode_mappings, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse }
         }
     };
 }
@@ -1444,7 +1680,11 @@ impl GrpcMetaClient {
         ) {
             tracing::debug!("matching tonic code {}", code);
             let (result_sender, result_receiver) = oneshot::channel();
-            if self.force_refresh_sender.try_send(result_sender).is_ok() {
+            if self
+                .member_monitor_event_sender
+                .try_send(result_sender)
+                .is_ok()
+            {
                 if let Ok(Err(e)) = result_receiver.await {
                     tracing::warn!("force refresh meta client failed {}", e);
                 }

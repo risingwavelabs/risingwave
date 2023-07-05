@@ -22,12 +22,8 @@ use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{SourceColumnDesc, SourceFormat};
 use risingwave_connector::ConnectorParams;
-use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, StreamSourceInfo as ProstStreamSourceInfo,
-};
-use risingwave_pb::plan_common::{
-    ColumnCatalog as ProstColumnCatalog, RowFormatType as ProstRowFormatType,
-};
+use risingwave_pb::catalog::PbStreamSourceInfo;
+use risingwave_pb::plan_common::{PbColumnCatalog, PbRowFormatType};
 
 use crate::connector_source::ConnectorSource;
 use crate::fs_connector_source::FsConnectorSource;
@@ -41,7 +37,6 @@ pub struct SourceDesc {
     pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
-    pub pk_column_ids: Vec<i32>,
 }
 
 /// `FsSourceDesc` describes a stream source.
@@ -51,55 +46,74 @@ pub struct FsSourceDesc {
     pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
-    pub pk_column_ids: Vec<i32>,
 }
 
 #[derive(Clone)]
 pub struct SourceDescBuilder {
-    columns: Vec<ProstColumnCatalog>,
+    columns: Vec<PbColumnCatalog>,
     metrics: Arc<SourceMetrics>,
-    pk_column_ids: Vec<i32>,
-    row_id_index: Option<ProstColumnIndex>,
+    row_id_index: Option<usize>,
     properties: HashMap<String, String>,
-    source_info: ProstStreamSourceInfo,
+    source_info: PbStreamSourceInfo,
     connector_params: ConnectorParams,
     connector_message_buffer_size: usize,
+    pk_indices: Vec<usize>,
 }
 
 impl SourceDescBuilder {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        columns: Vec<ProstColumnCatalog>,
+        columns: Vec<PbColumnCatalog>,
         metrics: Arc<SourceMetrics>,
-        pk_column_ids: Vec<i32>,
-        row_id_index: Option<ProstColumnIndex>,
+        row_id_index: Option<usize>,
         properties: HashMap<String, String>,
-        source_info: ProstStreamSourceInfo,
+        source_info: PbStreamSourceInfo,
         connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
+        pk_indices: Vec<usize>,
     ) -> Self {
         Self {
             columns,
             metrics,
-            pk_column_ids,
             row_id_index,
             properties,
             source_info,
             connector_params,
             connector_message_buffer_size,
+            pk_indices,
         }
+    }
+
+    fn column_catalogs_to_source_column_descs(&self) -> Vec<SourceColumnDesc> {
+        let mut columns: Vec<_> = self
+            .columns
+            .iter()
+            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
+            .collect();
+        if let Some(row_id_index) = self.row_id_index {
+            columns[row_id_index].is_row_id = true;
+        }
+        for pk_index in &self.pk_indices {
+            columns[*pk_index].is_pk = true;
+        }
+        columns
     }
 
     pub async fn build(self) -> Result<SourceDesc> {
         let format = match self.source_info.get_row_format()? {
-            ProstRowFormatType::Json => SourceFormat::Json,
-            ProstRowFormatType::Protobuf => SourceFormat::Protobuf,
-            ProstRowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
-            ProstRowFormatType::Avro => SourceFormat::Avro,
-            ProstRowFormatType::Maxwell => SourceFormat::Maxwell,
-            ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
-            ProstRowFormatType::Native => SourceFormat::Native,
-            ProstRowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
+            PbRowFormatType::Json => SourceFormat::Json,
+            PbRowFormatType::Protobuf => SourceFormat::Protobuf,
+            PbRowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
+            PbRowFormatType::Avro => SourceFormat::Avro,
+            PbRowFormatType::Maxwell => SourceFormat::Maxwell,
+            PbRowFormatType::CanalJson => SourceFormat::CanalJson,
+            PbRowFormatType::Native => SourceFormat::Native,
+            PbRowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
+            PbRowFormatType::UpsertJson => SourceFormat::UpsertJson,
+            PbRowFormatType::UpsertAvro => SourceFormat::UpsertAvro,
+            PbRowFormatType::DebeziumMongoJson => SourceFormat::DebeziumMongoJson,
+            PbRowFormatType::Csv => SourceFormat::Csv,
+            PbRowFormatType::Bytes => SourceFormat::Bytes,
             _ => unreachable!(),
         };
 
@@ -107,18 +121,7 @@ impl SourceDescBuilder {
             return Err(ProtocolError("protobuf file location not provided".to_string()).into());
         }
 
-        let mut columns: Vec<_> = self
-            .columns
-            .iter()
-            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
-            .collect();
-        if let Some(row_id_index) = self.row_id_index.as_ref() {
-            columns[row_id_index.index as usize].is_row_id = true;
-        }
-        assert!(
-            !self.pk_column_ids.is_empty(),
-            "source should have at least one pk column"
-        );
+        let columns = self.column_catalogs_to_source_column_descs();
 
         let psrser_config =
             SpecificParserConfig::new(format, &self.source_info, &self.properties).await?;
@@ -136,7 +139,6 @@ impl SourceDescBuilder {
             format,
             columns,
             metrics: self.metrics,
-            pk_column_ids: self.pk_column_ids,
         })
     }
 
@@ -146,24 +148,12 @@ impl SourceDescBuilder {
 
     pub async fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
         let format = match self.source_info.get_row_format()? {
-            ProstRowFormatType::Csv => SourceFormat::Csv,
+            PbRowFormatType::Csv => SourceFormat::Csv,
+            PbRowFormatType::Json => SourceFormat::Json,
             _ => unreachable!(),
         };
 
-        let mut columns: Vec<_> = self
-            .columns
-            .iter()
-            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
-            .collect();
-
-        if let Some(row_id_index) = self.row_id_index.as_ref() {
-            columns[row_id_index.index as usize].is_row_id = true;
-        }
-
-        assert!(
-            !self.pk_column_ids.is_empty(),
-            "source should have at least one pk column"
-        );
+        let columns = self.column_catalogs_to_source_column_descs();
 
         let parser_config =
             SpecificParserConfig::new(format, &self.source_info, &self.properties).await?;
@@ -180,7 +170,6 @@ impl SourceDescBuilder {
             format,
             columns,
             metrics: self.metrics.clone(),
-            pk_column_ids: self.pk_column_ids.clone(),
         })
     }
 }
@@ -189,19 +178,18 @@ pub mod test_utils {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
-    use risingwave_pb::catalog::{ColumnIndex, StreamSourceInfo};
+    use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::ColumnCatalog;
 
     use super::{SourceDescBuilder, DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE};
 
     pub fn create_source_desc_builder(
         schema: &Schema,
-        pk_column_ids: Vec<i32>,
-        row_id_index: Option<u64>,
+        row_id_index: Option<usize>,
         source_info: StreamSourceInfo,
         properties: HashMap<String, String>,
+        pk_indices: Vec<usize>,
     ) -> SourceDescBuilder {
-        let row_id_index = row_id_index.map(|index| ColumnIndex { index });
         let columns = schema
             .fields
             .iter()
@@ -214,6 +202,7 @@ pub mod test_utils {
                         name: f.name.clone(),
                         field_descs: vec![],
                         type_name: "".to_string(),
+                        generated_or_default_column: None,
                     }
                     .to_protobuf(),
                 ),
@@ -223,12 +212,12 @@ pub mod test_utils {
         SourceDescBuilder {
             columns,
             metrics: Default::default(),
-            pk_column_ids,
             row_id_index,
             properties,
             source_info,
             connector_params: Default::default(),
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
+            pk_indices,
         }
     }
 }

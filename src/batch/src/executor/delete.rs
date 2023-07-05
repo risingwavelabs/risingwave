@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use futures::future::try_join_all;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::array::{
+    Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
+};
+use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::dml_manager::DmlManagerRef;
 
-use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -35,17 +35,20 @@ use crate::task::BatchTaskContext;
 pub struct DeleteExecutor {
     /// Target table id.
     table_id: TableId,
+    table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
     chunk_size: usize,
     schema: Schema,
     identity: String,
     returning: bool,
+    txn_id: TxnId,
 }
 
 impl DeleteExecutor {
     pub fn new(
         table_id: TableId,
+        table_version_id: TableVersionId,
         dml_manager: DmlManagerRef,
         child: BoxedExecutor,
         chunk_size: usize,
@@ -53,8 +56,10 @@ impl DeleteExecutor {
         returning: bool,
     ) -> Self {
         let table_schema = child.schema().clone();
+        let txn_id = dml_manager.gen_txn_id();
         Self {
             table_id,
+            table_version_id,
             dml_manager,
             child,
             chunk_size,
@@ -67,6 +72,7 @@ impl DeleteExecutor {
             },
             identity,
             returning,
+            txn_id,
         }
     }
 }
@@ -91,18 +97,28 @@ impl DeleteExecutor {
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, 1024);
 
-        let mut notifiers = Vec::new();
+        let table_dml_handle = self
+            .dml_manager
+            .table_dml_handle(self.table_id, self.table_version_id)?;
+        let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
+
+        write_handle.begin()?;
 
         // Transform the data chunk to a stream chunk, then write to the source.
-        let mut write_chunk = |chunk: DataChunk| -> Result<()> {
+        let write_txn_data = |chunk: DataChunk| async {
             let cap = chunk.capacity();
             let stream_chunk = StreamChunk::from_parts(vec![Op::Delete; cap], chunk);
 
-            let notifier = self.dml_manager.write_chunk(&self.table_id, stream_chunk)?;
-            notifiers.push(notifier);
+            #[cfg(debug_assertions)]
+            table_dml_handle.check_chunk_schema(&stream_chunk);
 
-            Ok(())
+            let cardinality = stream_chunk.cardinality();
+            write_handle.write_chunk(stream_chunk).await?;
+
+            Result::Ok(cardinality)
         };
+
+        let mut rows_deleted = 0;
 
         #[for_await]
         for data_chunk in self.child.execute() {
@@ -111,20 +127,15 @@ impl DeleteExecutor {
                 yield data_chunk.clone();
             }
             for chunk in builder.append_chunk(data_chunk) {
-                write_chunk(chunk)?;
+                rows_deleted += write_txn_data(chunk).await?;
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            write_chunk(chunk)?;
+            rows_deleted += write_txn_data(chunk).await?;
         }
 
-        // Wait for all chunks to be taken / written.
-        let rows_deleted = try_join_all(notifiers)
-            .await
-            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))?
-            .into_iter()
-            .sum::<usize>();
+        write_handle.end().await?;
 
         // create ret value
         if !self.returning {
@@ -132,7 +143,7 @@ impl DeleteExecutor {
             array_builder.append(Some(rows_deleted as i64));
 
             let array = array_builder.finish();
-            let ret_chunk = DataChunk::new(vec![array.into()], 1);
+            let ret_chunk = DataChunk::new(vec![array.into_ref()], 1);
 
             yield ret_chunk
         }
@@ -155,9 +166,10 @@ impl BoxedExecutorBuilder for DeleteExecutor {
 
         Ok(Box::new(Self::new(
             table_id,
+            delete_node.table_version_id,
             source.context().dml_manager(),
             child,
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             delete_node.returning,
         )))
@@ -171,7 +183,9 @@ mod tests {
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::Array;
-    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::{
+        schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
+    };
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_source::dml_manager::DmlManager;
 
@@ -181,7 +195,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_executor() -> Result<()> {
-        let dml_manager = Arc::new(DmlManager::default());
+        let dml_manager = Arc::new(DmlManager::for_test());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();
@@ -210,13 +224,14 @@ mod tests {
         // We must create a variable to hold this `Arc<TableDmlHandle>` here, or it will be dropped
         // due to the `Weak` reference in `DmlManager`.
         let reader = dml_manager
-            .register_reader(table_id, &column_descs)
+            .register_reader(table_id, INITIAL_TABLE_VERSION_ID, &column_descs)
             .unwrap();
         let mut reader = reader.stream_reader().into_stream();
 
         // Delete
         let delete_executor = Box::new(DeleteExecutor::new(
             table_id,
+            INITIAL_TABLE_VERSION_ID,
             dml_manager,
             Box::new(mock_executor),
             1024,
@@ -232,38 +247,29 @@ mod tests {
             let result = stream.next().await.unwrap().unwrap();
 
             assert_eq!(
-                result
-                    .column_at(0)
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
+                result.column_at(0).as_int64().iter().collect::<Vec<_>>(),
                 vec![Some(5)] // deleted rows
             );
         });
 
         // Read
-        let chunk = reader.next().await.unwrap()?;
+        reader.next().await.unwrap()?.into_begin().unwrap();
 
-        assert_eq!(chunk.chunk.ops().to_vec(), vec![Op::Delete; 5]);
+        let txn_msg = reader.next().await.unwrap()?;
+        let chunk = txn_msg.as_stream_chunk().unwrap();
+        assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
 
         assert_eq!(
-            chunk.chunk.columns()[0]
-                .array()
-                .as_int32()
-                .iter()
-                .collect::<Vec<_>>(),
+            chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
             vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
         );
 
         assert_eq!(
-            chunk.chunk.columns()[1]
-                .array()
-                .as_int32()
-                .iter()
-                .collect::<Vec<_>>(),
+            chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
+
+        reader.next().await.unwrap()?.into_end().unwrap();
 
         handle.await.unwrap();
 

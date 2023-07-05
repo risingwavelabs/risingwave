@@ -14,28 +14,23 @@
 
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
-use std::str::FromStr;
 
-use itertools::Itertools;
-use risingwave_common::catalog::{
-    Field, TableId, DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
-};
+use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
+use thiserror::Error;
 
-use self::watermark::is_watermark_func;
 use super::bind_context::ColumnBinding;
-use crate::binder::{Binder, BoundSetExpr};
-use crate::catalog::system_catalog::pg_catalog::{
-    PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
-};
-use crate::expr::{Expr, ExprImpl, InputRef, TableFunction, TableFunctionType};
+use super::statement::RewriteExprsRecursive;
+use crate::binder::Binder;
+use crate::expr::{ExprImpl, InputRef};
 
 mod join;
 mod share;
 mod subquery;
+mod table_function;
 mod table_or_source;
 mod watermark;
 mod window_table_function;
@@ -59,30 +54,26 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
-    TableFunction(Box<TableFunction>),
+    TableFunction(ExprImpl),
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
 }
 
-impl Relation {
-    pub fn contains_sys_table(&self) -> bool {
+impl RewriteExprsRecursive for Relation {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         match self {
-            Relation::SystemTable(_) => true,
-            Relation::Subquery(s) => {
-                if let BoundSetExpr::Select(select) = &s.query.body
-                    && let Some(relation) = &select.from {
-                    relation.contains_sys_table()
-                } else {
-                    false
-                }
-            },
-            Relation::Join(j) => {
-                j.left.contains_sys_table() || j.right.contains_sys_table()
-            },
-            _ => false,
+            Relation::Subquery(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Join(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::WindowTableFunction(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Watermark(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Share(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::TableFunction(inner) => *inner = rewriter.rewrite_expr(inner.take()),
+            _ => {}
         }
     }
+}
 
+impl Relation {
     pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
             Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
@@ -125,30 +116,74 @@ impl Relation {
     }
 }
 
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ResolveQualifiedNameErrorKind {
+    QualifiedNameTooLong,
+    NotCurrentDatabase,
+}
+
+#[derive(Debug, Error)]
+pub struct ResolveQualifiedNameError {
+    qualified: String,
+    kind: ResolveQualifiedNameErrorKind,
+}
+
+impl std::fmt::Display for ResolveQualifiedNameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            ResolveQualifiedNameErrorKind::QualifiedNameTooLong => write!(
+                f,
+                "improper qualified name (too many dotted names): {}",
+                self.qualified
+            ),
+            ResolveQualifiedNameErrorKind::NotCurrentDatabase => write!(
+                f,
+                "cross-database references are not implemented: \"{}\"",
+                self.qualified
+            ),
+        }
+    }
+}
+
+impl ResolveQualifiedNameError {
+    pub fn new(qualified: String, kind: ResolveQualifiedNameErrorKind) -> Self {
+        Self { qualified, kind }
+    }
+}
+
+impl From<ResolveQualifiedNameError> for RwError {
+    fn from(e: ResolveQualifiedNameError) -> Self {
+        ErrorCode::InvalidInputSyntax(format!("{}", e)).into()
+    }
+}
+
 impl Binder {
     /// return (`schema_name`, `name`)
     pub fn resolve_schema_qualified_name(
         db_name: &str,
         name: ObjectName,
-    ) -> Result<(Option<String>, String)> {
-        let mut indentifiers = name.0;
+    ) -> std::result::Result<(Option<String>, String), ResolveQualifiedNameError> {
+        let formatted_name = name.to_string();
+        let mut identifiers = name.0;
 
-        if indentifiers.len() > 3 {
-            return Err(internal_error(
-                "schema qualified name can contain at most 3 arguments".to_string(),
+        if identifiers.len() > 3 {
+            return Err(ResolveQualifiedNameError::new(
+                formatted_name,
+                ResolveQualifiedNameErrorKind::QualifiedNameTooLong,
             ));
         }
 
-        let name = indentifiers.pop().unwrap().real_value();
+        let name = identifiers.pop().unwrap().real_value();
 
-        let schema_name = indentifiers.pop().map(|ident| ident.real_value());
-        let database_name = indentifiers.pop().map(|ident| ident.real_value());
+        let schema_name = identifiers.pop().map(|ident| ident.real_value());
+        let database_name = identifiers.pop().map(|ident| ident.real_value());
 
         if let Some(database_name) = database_name && database_name != db_name {
-            return Err(internal_error(format!(
-                "database in schema qualified name {}.{}.{} is not equal to current database name {}",
-                database_name, schema_name.unwrap(), name, db_name
-            )));
+            return Err(ResolveQualifiedNameError::new(
+                formatted_name,
+                ResolveQualifiedNameErrorKind::NotCurrentDatabase)
+            );
         }
 
         Ok((schema_name, name))
@@ -180,6 +215,26 @@ impl Binder {
     /// return the `index_name`
     pub fn resolve_index_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "index name")
+    }
+
+    /// return the `view_name`
+    pub fn resolve_view_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "view name")
+    }
+
+    /// return the `sink_name`
+    pub fn resolve_sink_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "sink name")
+    }
+
+    /// return the `table_name`
+    pub fn resolve_table_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "table name")
+    }
+
+    /// return the `source_name`
+    pub fn resolve_source_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "source name")
     }
 
     /// return the `user_name`
@@ -258,6 +313,7 @@ impl Binder {
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
+        for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
         if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
@@ -269,11 +325,11 @@ impl Binder {
             if let Some(from_alias) = alias {
                 original_alias.name = from_alias.name;
                 let mut alias_iter = from_alias.columns.into_iter();
-                original_alias.columns = original_alias.columns.into_iter().map(|ident| {
-                    alias_iter
-                        .next()
-                        .unwrap_or(ident)
-                }).collect();
+                original_alias.columns = original_alias
+                    .columns
+                    .into_iter()
+                    .map(|ident| alias_iter.next().unwrap_or(ident))
+                    .collect();
             }
 
             self.bind_table_to_context(
@@ -289,11 +345,18 @@ impl Binder {
 
             // Share the CTE.
             let input_relation = Relation::Subquery(Box::new(BoundSubquery { query }));
-            let share_relation = Relation::Share(Box::new(BoundShare { share_id, input: input_relation }));
+            let share_relation = Relation::Share(Box::new(BoundShare {
+                share_id,
+                input: input_relation,
+            }));
             Ok(share_relation)
         } else {
-
-            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias)
+            self.bind_relation_by_name_inner(
+                schema_name.as_deref(),
+                &table_name,
+                alias,
+                for_system_time_as_of_proctime,
+            )
         }
     }
 
@@ -313,7 +376,7 @@ impl Binder {
         }?;
 
         Ok((
-            self.bind_relation_by_name(table_name.clone(), None)?,
+            self.bind_relation_by_name(table_name.clone(), None, false)?,
             table_name,
         ))
     }
@@ -325,7 +388,9 @@ impl Binder {
         err_msg: &str,
     ) -> Result<Box<InputRef>> {
         if let Some(time_col_arg) = arg
-          && let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next() {
+            && let Some(ExprImpl::InputRef(time_col)) =
+                self.bind_function_arg(time_col_arg)?.into_iter().next()
+        {
             Ok(time_col)
         } else {
             Err(ErrorCode::BindError(err_msg.to_string()).into())
@@ -358,67 +423,18 @@ impl Binder {
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias)
+        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, false)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, alias } => self.bind_relation_by_name(name, alias),
+            TableFactor::Table {
+                name,
+                alias,
+                for_system_time_as_of_proctime,
+            } => self.bind_relation_by_name(name, alias, for_system_time_as_of_proctime),
             TableFactor::TableFunction { name, alias, args } => {
-                let func_name = &name.0[0].real_value();
-                if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
-                    self.bind_internal_table(args, alias)
-                } else if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
-                    || name.real_value().eq_ignore_ascii_case(
-                        format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME)
-                            .as_str(),
-                    )
-                {
-                    self.bind_relation_by_name_inner(
-                        Some(PG_CATALOG_SCHEMA_NAME),
-                        PG_KEYWORDS_TABLE_NAME,
-                        alias,
-                    )
-                } else if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
-                    let args: Vec<ExprImpl> = args
-                        .into_iter()
-                        .map(|arg| self.bind_function_arg(arg))
-                        .flatten_ok()
-                        .try_collect()?;
-                    let tf = TableFunction::new(table_function_type, args)?;
-                    let columns = [(
-                        false,
-                        Field {
-                            data_type: tf.return_type(),
-                            name: tf.function_type.name().to_string(),
-                            sub_fields: vec![],
-                            type_name: "".to_string(),
-                        },
-                    )]
-                    .into_iter();
-
-                    self.bind_table_to_context(
-                        columns,
-                        tf.function_type.name().to_string(),
-                        alias,
-                    )?;
-
-                    Ok(Relation::TableFunction(Box::new(tf)))
-                } else if let Ok(kind) = WindowTableFunctionKind::from_str(func_name) {
-                    Ok(Relation::WindowTableFunction(Box::new(
-                        self.bind_window_table_function(alias, kind, args)?,
-                    )))
-                } else if is_watermark_func(func_name) {
-                    Ok(Relation::Watermark(Box::new(
-                        self.bind_watermark(alias, args)?,
-                    )))
-                } else {
-                    Err(ErrorCode::NotImplemented(
-                        format!("unknown table function kind: {}", func_name),
-                        1191.into(),
-                    )
-                    .into())
-                }
+                self.bind_table_function(name, alias, args)
             }
             TableFactor::Derived {
                 lateral,

@@ -25,6 +25,8 @@ pub enum Value {
     Number(String),
     /// 'string value'
     SingleQuotedString(String),
+    // $<tag_name>$string value$<tag_name>$ (postgres syntax)
+    DollarQuotedString(DollarQuotedString),
     /// String Constants With C-Style Escapes
     CstyleEscapesString(String),
     /// N'string value'
@@ -63,6 +65,7 @@ impl fmt::Display for Value {
             Value::Number(v) => write!(f, "{}", v),
             Value::DoubleQuotedString(v) => write!(f, "\"{}\"", v),
             Value::SingleQuotedString(v) => write!(f, "'{}'", escape_single_quote_string(v)),
+            Value::DollarQuotedString(v) => write!(f, "{}", v),
             Value::NationalStringLiteral(v) => write!(f, "N'{}'", v),
             Value::HexStringLiteral(v) => write!(f, "X'{}'", v),
             Value::CstyleEscapesString(v) => write!(f, "E'{}'", v),
@@ -108,6 +111,26 @@ impl fmt::Display for Value {
                 Ok(())
             }
             Value::Null => write!(f, "NULL"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DollarQuotedString {
+    pub value: String,
+    pub tag: Option<String>,
+}
+
+impl fmt::Display for DollarQuotedString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.tag {
+            Some(tag) => {
+                write!(f, "${}${}${}$", tag, self.value, tag)
+            }
+            None => {
+                write!(f, "$${}$$", self.value)
+            }
         }
     }
 }

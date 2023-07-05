@@ -19,11 +19,12 @@ use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
-    Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
-    View as ProstView,
+    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
+use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
+use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
@@ -48,7 +49,7 @@ impl CatalogReader {
     }
 }
 
-/// [`CatalogWriter`] initiate DDL operations (create table/schema/database/function).
+/// [`CatalogWriter`] initiate DDL operations (create table/schema/database/function/connection).
 /// It will only send rpc to meta and get the catalog version as response.
 /// Then it will wait for the local catalog to be synced to the version, which is performed by
 /// [observer](`crate::observer::FrontendObserverNode`).
@@ -63,33 +64,49 @@ pub trait CatalogWriter: Send + Sync {
         owner: UserId,
     ) -> Result<()>;
 
-    async fn create_view(&self, view: ProstView) -> Result<()>;
+    async fn create_view(&self, view: PbView) -> Result<()>;
 
     async fn create_materialized_view(
         &self,
-        table: ProstTable,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<()>;
 
     async fn create_table(
         &self,
-        source: Option<ProstSource>,
-        table: ProstTable,
+        source: Option<PbSource>,
+        table: PbTable,
         graph: StreamFragmentGraph,
+    ) -> Result<()>;
+
+    async fn replace_table(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
+        mapping: ColIndexMapping,
     ) -> Result<()>;
 
     async fn create_index(
         &self,
-        index: ProstIndex,
-        table: ProstTable,
+        index: PbIndex,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<()>;
 
-    async fn create_source(&self, source: ProstSource) -> Result<()>;
+    async fn create_source(&self, source: PbSource) -> Result<()>;
 
-    async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()>;
+    async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()>;
 
-    async fn create_function(&self, function: ProstFunction) -> Result<()>;
+    async fn create_function(&self, function: PbFunction) -> Result<()>;
+
+    async fn create_connection(
+        &self,
+        connection_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        connection: create_connection_request::Payload,
+    ) -> Result<()>;
 
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()>;
 
@@ -108,6 +125,18 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_index(&self, index_id: IndexId) -> Result<()>;
 
     async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
+
+    async fn drop_connection(&self, connection_id: u32) -> Result<()>;
+
+    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()>;
+
+    async fn alter_view_name(&self, view_id: u32, view_name: &str) -> Result<()>;
+
+    async fn alter_index_name(&self, index_id: u32, index_name: &str) -> Result<()>;
+
+    async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()>;
+
+    async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -121,7 +150,7 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
         let (_, version) = self
             .meta_client
-            .create_database(ProstDatabase {
+            .create_database(PbDatabase {
                 name: db_name.to_string(),
                 id: 0,
                 owner,
@@ -138,7 +167,7 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         let (_, version) = self
             .meta_client
-            .create_schema(ProstSchema {
+            .create_schema(PbSchema {
                 id: 0,
                 name: schema_name.to_string(),
                 database_id: db_id,
@@ -151,7 +180,7 @@ impl CatalogWriter for CatalogWriterImpl {
     // TODO: maybe here to pass a materialize plan node
     async fn create_materialized_view(
         &self,
-        table: ProstTable,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
         let (_, version) = self
@@ -161,15 +190,15 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_view(&self, view: ProstView) -> Result<()> {
+    async fn create_view(&self, view: PbView) -> Result<()> {
         let (_, version) = self.meta_client.create_view(view).await?;
         self.wait_version(version).await
     }
 
     async fn create_index(
         &self,
-        index: ProstIndex,
-        table: ProstTable,
+        index: PbIndex,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
         let (_, version) = self.meta_client.create_index(index, table, graph).await?;
@@ -178,26 +207,60 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn create_table(
         &self,
-        source: Option<ProstSource>,
-        table: ProstTable,
+        source: Option<PbSource>,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
         let (_, version) = self.meta_client.create_table(source, table, graph).await?;
         self.wait_version(version).await
     }
 
-    async fn create_source(&self, source: ProstSource) -> Result<()> {
+    async fn replace_table(
+        &self,
+        table: PbTable,
+        graph: StreamFragmentGraph,
+        mapping: ColIndexMapping,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .replace_table(table, graph, mapping)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn create_source(&self, source: PbSource) -> Result<()> {
         let (_id, version) = self.meta_client.create_source(source).await?;
         self.wait_version(version).await
     }
 
-    async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()> {
+    async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()> {
         let (_id, version) = self.meta_client.create_sink(sink, graph).await?;
         self.wait_version(version).await
     }
 
-    async fn create_function(&self, function: ProstFunction) -> Result<()> {
+    async fn create_function(&self, function: PbFunction) -> Result<()> {
         let (_, version) = self.meta_client.create_function(function).await?;
+        self.wait_version(version).await
+    }
+
+    async fn create_connection(
+        &self,
+        connection_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        connection: create_connection_request::Payload,
+    ) -> Result<()> {
+        let (_, version) = self
+            .meta_client
+            .create_connection(
+                connection_name,
+                database_id,
+                schema_id,
+                owner_id,
+                connection,
+            )
+            .await?;
         self.wait_version(version).await
     }
 
@@ -243,6 +306,51 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_database(&self, database_id: u32) -> Result<()> {
         let version = self.meta_client.drop_database(database_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_connection(&self, connection_id: u32) -> Result<()> {
+        let version = self.meta_client.drop_connection(connection_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_relation_name(Relation::TableId(table_id), table_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_view_name(&self, view_id: u32, view_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_relation_name(Relation::ViewId(view_id), view_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_index_name(&self, index_id: u32, index_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_relation_name(Relation::IndexId(index_id), index_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_relation_name(Relation::SinkId(sink_id), sink_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_relation_name(Relation::SourceId(source_id), source_name)
+            .await?;
         self.wait_version(version).await
     }
 }

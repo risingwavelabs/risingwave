@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg(enable_task_local_alloc)]
+
 use std::alloc::System;
 use std::hint::black_box;
 use std::time::Duration;

@@ -38,6 +38,7 @@ http://ecotrust-canada.github.io/markdown-toc/
   * [Planner tests](#planner-tests)
   * [End-to-end tests](#end-to-end-tests)
   * [End-to-end tests on CI](#end-to-end-tests-on-ci)
+  * [Fuzzing tests](#fuzzing-tests)
   * [DocSlt tests](#docslt-tests)
   * [Deterministic simulation tests](#deterministic-simulation-tests)
 - [Miscellaneous checks](#miscellaneous-checks)
@@ -68,26 +69,29 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 * Rust toolchain
 * CMake
 * protobuf (>= 3.12.0)
-* OpenSSL
 * PostgreSQL (psql) (>= 14.1)
 * Tmux (>= v3.2a)
-* LLVM 15 (To workaround some bugs in macOS toolchain, see https://github.com/risingwavelabs/risingwave/issues/6205).
+* LLVM 16 (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205)
 
 To install the dependencies on macOS, run:
 
 ```shell
-brew install postgresql cmake protobuf openssl tmux cyrus-sasl llvm
+brew install postgresql cmake protobuf tmux cyrus-sasl llvm
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
+sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 Then you'll be able to compile and start RiseDev!
+
+> **Note**
+>
+> `.cargo/config.toml` contains `rustflags` configurations like `-Clink-arg` and `-Ctarget-feature`. Since it will be [merged](https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure) with `$HOME/.cargo/config.toml`, check the config files and make sure they don't conflict if you have global `rustflags` configurations for e.g. linker there.
 
 ## Start and monitor a dev cluster
 
@@ -130,7 +134,7 @@ Use the `./risedev configure` command to start the interactive configuration mod
 - Prometheus and Grafana: Enable this component to view RisingWave metrics. You can view the metrics through a built-in Grafana dashboard.
 - Etcd: Enable this component if you want to persist metadata node data.
 - Kafka: Enable this component if you want to create a streaming source from a Kafka topic.
-- Jaeger: Use this component for tracing.
+- Grafana Tempo: Use this component for tracing.
 
 To manually add those components into the cluster, you will need to configure RiseDev to download them first. For example,
 
@@ -244,13 +248,15 @@ for more information.
 
 ### Monitoring
 
-Uncomment `grafana` and `prometheus` lines in `risedev.yml` to enable Grafana and Prometheus services. 
+Uncomment `grafana` and `prometheus` lines in `risedev.yml` to enable Grafana and Prometheus services.
 
 ### Tracing
 
 Compute nodes support streaming tracing. Tracing is not enabled by default. You need to
-use `./risedev configure` to download the tracing components first. After that, you will need to uncomment `jaeger`
+use `./risedev configure` to download the tracing components first. After that, you will need to uncomment `tempo`
 service in `risedev.yml` and start a new dev cluster to allow the components to work.
+
+Traces are visualized in Grafana. You may also want to uncomment `grafana` service in `risedev.yml` to enable it.
 
 ### Dashboard
 
@@ -295,6 +301,11 @@ If you want to see the coverage report, run this command:
 ```shell
 ./risedev test-cov
 ```
+
+Some unit tests will not work if the `/tmp` directory is on a TmpFS file system: these unit tests will fail with this
+error message: `Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.`. 
+If this happens you can override the use of `/tmp` by setting the  environment variable `RISINGWAVE_TEST_DIR` to a 
+directory that is on a non-TmpFS filesystem, the unit tests will then place temporary files under your specified path.
 
 ### Planner tests
 
@@ -358,6 +369,12 @@ Basically, CI is using the following two configurations to run the full e2e test
 ```
 
 You can adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
+
+### Fuzzing tests
+
+#### SqlSmith
+
+Currently, SqlSmith supports for e2e and frontend fuzzing. Take a look at [Fuzzing tests](../src/tests/sqlsmith/README.md) for more details on running it locally.
 
 ### DocSlt tests
 

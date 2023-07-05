@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 
+use super::utils::{childless_record, Distill};
 use super::{
     ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch,
     ToStream,
@@ -31,7 +32,7 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalGenerateSeries` implements Hop Table Function.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalTableFunction {
     pub base: PlanBase,
     pub table_function: TableFunction,
@@ -40,11 +41,15 @@ pub struct LogicalTableFunction {
 impl LogicalTableFunction {
     /// Create a [`LogicalTableFunction`] node. Used internally by optimizer.
     pub fn new(table_function: TableFunction, ctx: OptimizerContextRef) -> Self {
-        let schema = Schema {
-            fields: vec![Field::with_name(
-                table_function.return_type(),
-                table_function.function_type.name(),
-            )],
+        let schema = if let DataType::Struct(s) = table_function.return_type() {
+            Schema::from(&s)
+        } else {
+            Schema {
+                fields: vec![Field::with_name(
+                    table_function.return_type(),
+                    table_function.name(),
+                )],
+            }
         };
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
@@ -57,9 +62,10 @@ impl LogicalTableFunction {
 
 impl_plan_tree_node_for_leaf! { LogicalTableFunction }
 
-impl fmt::Display for LogicalTableFunction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "LogicalTableFunction {{ {:?} }}", self.table_function)
+impl Distill for LogicalTableFunction {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = Pretty::debug(&self.table_function);
+        childless_record("LogicalTableFunction", vec![("table_function", data)])
     }
 }
 

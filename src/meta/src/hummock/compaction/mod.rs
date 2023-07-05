@@ -15,6 +15,8 @@
 pub mod compaction_config;
 mod level_selector;
 mod overlap_strategy;
+use risingwave_common::catalog::TableOption;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 
@@ -23,19 +25,20 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use picker::{
-    LevelCompactionPicker, ManualCompactionPicker, MinOverlappingPicker, TierCompactionPicker,
+use picker::{LevelCompactionPicker, ManualCompactionPicker, TierCompactionPicker};
+use risingwave_hummock_sdk::{
+    can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
+use risingwave_pb::hummock::{CompactTask, CompactionConfig, KeyRange, LevelType};
 
 pub use crate::hummock::compaction::level_selector::{
-    default_level_selector, DynamicLevelSelector, LevelSelector, ManualCompactionSelector,
-    SpaceReclaimCompactionSelector, TtlCompactionSelector,
+    default_level_selector, DynamicLevelSelector, DynamicLevelSelectorCore, LevelSelector,
+    ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
+use crate::hummock::compaction::picker::{CompactionInput, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
@@ -70,29 +73,13 @@ impl Clone for CompactStatus {
     }
 }
 
-pub struct CompactionInput {
-    pub input_levels: Vec<InputLevel>,
-    pub target_level: usize,
-    pub target_sub_level_id: u64,
-}
-
-impl CompactionInput {
-    pub fn add_pending_task(&self, task_id: u64, level_handlers: &mut [LevelHandler]) {
-        for level in &self.input_levels {
-            level_handlers[level.level_idx as usize].add_pending_task(
-                task_id,
-                self.target_level,
-                &level.table_infos,
-            );
-        }
-    }
-}
-
 pub struct CompactionTask {
     pub input: CompactionInput,
+    pub base_level: usize,
     pub compression_algorithm: String,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
+    pub enable_split_by_table: bool,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -121,12 +108,19 @@ impl CompactStatus {
         group: &CompactionGroup,
         stats: &mut LocalSelectorStatistic,
         selector: &mut Box<dyn LevelSelector>,
+        table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
-        let ret =
-            selector.pick_compaction(task_id, group, levels, &mut self.level_handlers, stats)?;
+        let ret = selector.pick_compaction(
+            task_id,
+            group,
+            levels,
+            &mut self.level_handlers,
+            stats,
+            table_id_to_options,
+        )?;
         let target_level_id = ret.input.target_level;
 
         let compression_algorithm = match ret.compression_algorithm.as_str() {
@@ -145,6 +139,7 @@ impl CompactStatus {
             // only gc delete keys in last level because there may be older version in more bottom
             // level.
             gc_delete_keys: target_level_id == self.level_handlers.len() - 1,
+            base_level: ret.base_level as u32,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id: group.group_id,
             existing_table_ids: vec![],
@@ -155,13 +150,18 @@ impl CompactStatus {
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
+            split_by_state_table: group.compaction_config.split_by_state_table,
+            split_weight_by_vnode: group.compaction_config.split_weight_by_vnode,
         };
         Some(compact_task)
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
-        if task.input_ssts.len() != 2
-            || task.input_ssts[0].level_type != LevelType::Nonoverlapping as i32
+        if task.input_ssts.len() == 1 {
+            return task.input_ssts[0].level_idx == 0
+                && can_concat(&task.input_ssts[0].table_infos);
+        } else if task.input_ssts.len() != 2
+            || task.input_ssts[0].level_type() != LevelType::Nonoverlapping
         {
             return false;
         }
@@ -180,6 +180,17 @@ impl CompactStatus {
         }
 
         false
+    }
+
+    pub fn is_trivial_reclaim(task: &CompactTask) -> bool {
+        let exist_table_ids = HashSet::<u32>::from_iter(task.existing_table_ids.clone());
+        task.input_ssts.iter().all(|level| {
+            level.table_infos.iter().all(|sst| {
+                sst.table_ids
+                    .iter()
+                    .all(|table_id| !exist_table_ids.contains(table_id))
+            })
+        })
     }
 
     /// Declares a task as either succeeded, failed or canceled.
@@ -210,11 +221,11 @@ impl CompactStatus {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ManualCompactionOption {
     /// Filters out SSTs to pick. Has no effect if empty.
-    pub sst_ids: Vec<u64>,
+    pub sst_ids: Vec<HummockSstableId>,
     /// Filters out SSTs to pick.
     pub key_range: KeyRange,
     /// Filters out SSTs to pick. Has no effect if empty.
-    pub internal_table_id: HashSet<u32>,
+    pub internal_table_id: HashSet<StateTableId>,
     /// Input level.
     pub level: usize,
 }
@@ -232,14 +243,6 @@ impl Default for ManualCompactionOption {
             level: 1,
         }
     }
-}
-
-#[derive(Default)]
-pub struct LocalPickerStatistic {
-    skip_by_write_amp_limit: u64,
-    skip_by_count_limit: u64,
-    skip_by_pending_files: u64,
-    skip_by_overlapping: u64,
 }
 
 #[derive(Default)]
@@ -283,15 +286,6 @@ impl LocalSelectorStatistic {
     }
 }
 
-pub trait CompactionPicker {
-    fn pick_compaction(
-        &mut self,
-        levels: &Levels,
-        level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput>;
-}
-
 pub fn create_compaction_task(
     compaction_config: &CompactionConfig,
     input: CompactionInput,
@@ -300,22 +294,41 @@ pub fn create_compaction_task(
 ) -> CompactionTask {
     let target_file_size = if input.target_level == 0 {
         compaction_config.target_file_size_base
+    } else if input.target_level == base_level {
+        // This is just a temporary optimization measure. We hope to reduce the size of SST as much
+        // as possible to reduce the amount of data blocked by a single task during compaction,
+        // but too many files will increase computing overhead.
+        // TODO: remove it after can reduce configuration `target_file_size_base`.
+        compaction_config.target_file_size_base / 4
     } else {
         assert!(input.target_level >= base_level);
         let step = (input.target_level - base_level) / 2;
         compaction_config.target_file_size_base << step
     };
-    let compression_algorithm = if input.target_level == 0 {
-        compaction_config.compression_algorithm[0].clone()
-    } else {
-        let idx = input.target_level - base_level + 1;
-        compaction_config.compression_algorithm[idx].clone()
-    };
 
     CompactionTask {
+        compression_algorithm: get_compression_algorithm(
+            compaction_config,
+            base_level,
+            input.target_level,
+        ),
+        base_level,
         input,
-        compression_algorithm,
         target_file_size,
         compaction_task_type,
+        enable_split_by_table: false,
+    }
+}
+
+pub fn get_compression_algorithm(
+    compaction_config: &CompactionConfig,
+    base_level: usize,
+    level: usize,
+) -> String {
+    if level == 0 || level < base_level {
+        compaction_config.compression_algorithm[0].clone()
+    } else {
+        let idx = level - base_level + 1;
+        compaction_config.compression_algorithm[idx].clone()
     }
 }

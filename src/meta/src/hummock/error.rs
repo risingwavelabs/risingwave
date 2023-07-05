@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_hummock_sdk::{HummockContextId, HummockSstableId};
+use risingwave_hummock_sdk::{HummockContextId, HummockSstableObjectId};
+use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
 
 use crate::model::MetadataModelError;
@@ -26,14 +27,16 @@ pub enum Error {
     InvalidContext(HummockContextId),
     #[error(transparent)]
     MetaStore(anyhow::Error),
+    #[error(transparent)]
+    ObjectStore(ObjectError),
     #[error("compactor {0} is disconnected")]
     CompactorUnreachable(HummockContextId),
     #[error("compaction task {0} already assigned to compactor {1}")]
     CompactionTaskAlreadyAssigned(u64, HummockContextId),
-    #[error("compaction group error {0}")]
+    #[error("compaction group error: {0}")]
     CompactionGroup(String),
     #[error("SST {0} is invalid")]
-    InvalidSst(HummockSstableId),
+    InvalidSst(HummockSstableObjectId),
     #[error(transparent)]
     Internal(anyhow::Error),
 }
@@ -78,5 +81,11 @@ impl From<Error> for tonic::Status {
 impl From<anyhow::Error> for Error {
     fn from(e: anyhow::Error) -> Self {
         Error::Internal(e)
+    }
+}
+
+impl From<ObjectError> for Error {
+    fn from(e: ObjectError) -> Self {
+        Error::ObjectStore(e)
     }
 }

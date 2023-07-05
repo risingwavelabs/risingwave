@@ -31,6 +31,12 @@ pub enum BackupError {
         #[source]
         BoxedError,
     ),
+    #[error("StateStorage error: {0}")]
+    StateStorage(
+        #[backtrace]
+        #[source]
+        BoxedError,
+    ),
     #[error("Encoding error: {0}")]
     Encoding(
         #[backtrace]

@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
     TableFunction, UserDefinedFunction, WindowFunction,
 };
+use crate::expr::Now;
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
 /// Implementations can override a subset of methods and perform transformation on some particular
@@ -32,6 +33,8 @@ pub trait ExprRewriter {
             ExprImpl::TableFunction(inner) => self.rewrite_table_function(*inner),
             ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
             ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
+            ExprImpl::Parameter(inner) => self.rewrite_parameter(*inner),
+            ExprImpl::Now(inner) => self.rewrite_now(*inner),
         }
     }
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
@@ -43,16 +46,19 @@ pub trait ExprRewriter {
         FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
-        let (func_type, inputs, distinct, order_by, filter) = agg_call.decompose();
+        let (func_type, inputs, distinct, order_by, filter, direct_args) = agg_call.decompose();
         let inputs = inputs
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         let order_by = order_by.rewrite_expr(self);
         let filter = filter.rewrite_expr(self);
-        AggCall::new(func_type, inputs, distinct, order_by, filter)
+        AggCall::new(func_type, inputs, distinct, order_by, filter, direct_args)
             .unwrap()
             .into()
+    }
+    fn rewrite_parameter(&mut self, parameter: Parameter) -> ExprImpl {
+        parameter.into()
     }
     fn rewrite_literal(&mut self, literal: Literal) -> ExprImpl {
         literal.into()
@@ -71,6 +77,7 @@ pub trait ExprRewriter {
             args,
             return_type,
             function_type,
+            udtf_catalog,
         } = table_func;
         let args = args
             .into_iter()
@@ -80,6 +87,7 @@ pub trait ExprRewriter {
             args,
             return_type,
             function_type,
+            udtf_catalog,
         }
         .into()
     }
@@ -87,20 +95,22 @@ pub trait ExprRewriter {
         let WindowFunction {
             args,
             return_type,
-            function_type,
+            kind,
             partition_by,
             order_by,
+            frame,
         } = window_func;
         let args = args
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         WindowFunction {
+            kind,
             args,
             return_type,
-            function_type,
             partition_by,
             order_by,
+            frame,
         }
         .into()
     }
@@ -111,5 +121,8 @@ pub trait ExprRewriter {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         UserDefinedFunction { args, catalog }.into()
+    }
+    fn rewrite_now(&mut self, now: Now) -> ExprImpl {
+        now.into()
     }
 }

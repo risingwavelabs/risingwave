@@ -15,9 +15,13 @@
 use std::collections::{BTreeMap, HashMap};
 
 use comfy_table::{Attribute, Cell, Row, Table};
+use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::GetClusterInfoResponse;
+use risingwave_pb::source::ConnectorSplits;
+use risingwave_pb::stream_plan::FragmentTypeFlag;
 
 use crate::CtlContext;
 
@@ -27,12 +31,56 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
     Ok(response)
 }
 
+pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
+    let GetClusterInfoResponse {
+        worker_nodes: _,
+        source_infos: _,
+        table_fragments,
+        mut actor_splits,
+        revision: _,
+    } = get_cluster_info(context).await?;
+
+    for table_fragment in &table_fragments {
+        if table_fragment.actor_splits.is_empty() {
+            continue;
+        }
+
+        println!("Table #{}", table_fragment.table_id);
+
+        for fragment in table_fragment.fragments.values() {
+            if fragment.fragment_type_mask & FragmentTypeFlag::Source as u32 == 0 {
+                continue;
+            }
+
+            println!("\tFragment #{}", fragment.fragment_id);
+            for actor in &fragment.actors {
+                let ConnectorSplits { splits } = actor_splits.remove(&actor.actor_id).unwrap();
+                let splits = splits
+                    .iter()
+                    .map(|split| SplitImpl::try_from(split).unwrap())
+                    .map(|split| split.id())
+                    .collect_vec();
+
+                println!(
+                    "\t\tActor #{} ({}): [{}]",
+                    actor.actor_id,
+                    splits.len(),
+                    splits.join(",")
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
     let GetClusterInfoResponse {
         worker_nodes,
         table_fragments,
         actor_splits: _,
         source_infos: _,
+        revision,
     } = get_cluster_info(context).await?;
 
     // Fragment ID -> [Parallel Unit ID -> (Parallel Unit, Actor)]
@@ -100,10 +148,16 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
             "".into()
         } else {
             last_worker_id = Some(worker.id);
+            let cordoned = if worker.get_property().map_or(true, |p| p.is_unschedulable) {
+                " (cordoned)"
+            } else {
+                ""
+            };
             Cell::new(format!(
-                "{}@{}",
+                "{}@{}{}",
                 worker.id,
-                HostAddr::from(worker.get_host().unwrap())
+                HostAddr::from(worker.get_host().unwrap()),
+                cordoned,
             ))
             .add_attribute(Attribute::Bold)
         });
@@ -121,6 +175,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
     }
 
     println!("{table}");
+    println!("Revision: {}", revision);
 
     Ok(())
 }

@@ -59,13 +59,13 @@ impl Task for ZooKeeperService {
             Path::new(&env::var("PREFIX_DATA")?).join(self.id())
         } else {
             let path = Path::new("/tmp/risedev").join(self.id());
-            std::fs::remove_dir_all(&path).ok();
+            fs_err::remove_dir_all(&path).ok();
             path
         };
-        std::fs::create_dir_all(&path)?;
+        fs_err::create_dir_all(&path)?;
 
         let config_path = Path::new(&prefix_config).join(format!("{}.properties", self.id()));
-        std::fs::write(
+        fs_err::write(
             &config_path,
             ZooKeeperGen.gen_server_properties(&self.config, &path.to_string_lossy()),
         )?;

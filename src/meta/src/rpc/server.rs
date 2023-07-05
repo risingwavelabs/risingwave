@@ -13,16 +13,21 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
 use either::Either;
 use etcd_client::ConnectOptions;
-use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
+use futures::future::join_all;
+use itertools::Itertools;
+use regex::Regex;
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::telemetry::manager::TelemetryManager;
+use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -32,9 +37,13 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
+use risingwave_pb::meta::serving_service_server::ServingServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
+use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
+use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
@@ -44,16 +53,18 @@ use super::intercept::MetricsMiddlewareLayer;
 use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
+use super::service::serving_service::ServingServiceImpl;
 use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
-    SystemParamManager,
+    SystemParamsManager,
 };
+use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -61,10 +72,13 @@ use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::meta_member_service::MetaMemberServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
+use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
+use crate::serving::ServingVnodeMapping;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::{hummock, MetaResult};
+use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
+use crate::{hummock, serving, MetaError, MetaResult};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -101,9 +115,10 @@ pub type ElectionClientRef = Arc<dyn ElectionClient>;
 pub async fn rpc_serve(
     address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
+    init_system_params: SystemParams,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
     match meta_store_backend {
         MetaStoreBackend::Etcd {
@@ -115,28 +130,37 @@ pub async fn rpc_serve(
             if let Some((username, password)) = &credentials {
                 options = options.with_user(username, password)
             }
-            let client = EtcdClient::connect(
-                endpoints.clone(),
-                Some(options.clone()),
-                credentials.is_some(),
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
+            let auth_enabled = credentials.is_some();
+            let client =
+                EtcdClient::connect(endpoints.clone(), Some(options.clone()), auth_enabled)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
-            let election_client = Arc::new(EtcdElectionClient::new(
-                endpoints,
-                Some(options),
-                address_info.advertise_addr.clone(),
-            ));
+            // `with_keep_alive` option will break the long connection in election client.
+            let mut election_options = ConnectOptions::default();
+            if let Some((username, password)) = &credentials {
+                election_options = election_options.with_user(username, password)
+            }
+
+            let election_client = Arc::new(
+                EtcdElectionClient::new(
+                    endpoints,
+                    Some(election_options),
+                    auth_enabled,
+                    address_info.advertise_addr.clone(),
+                )
+                .await?,
+            );
 
             rpc_serve_with_store(
                 meta_store,
                 Some(election_client),
                 address_info,
-                max_heartbeat_interval,
+                max_cluster_heartbeat_interval,
                 lease_interval_secs,
                 opts,
+                init_system_params,
             )
             .await
         }
@@ -146,9 +170,10 @@ pub async fn rpc_serve(
                 meta_store,
                 None,
                 address_info,
-                max_heartbeat_interval,
+                max_cluster_heartbeat_interval,
                 lease_interval_secs,
                 opts,
+                init_system_params,
             )
             .await
         }
@@ -159,9 +184,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
     election_client: Option<ElectionClientRef>,
     address_info: AddressInfo,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
+    init_system_params: SystemParams,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
     let (svc_shutdown_tx, svc_shutdown_rx) = watch::channel(());
 
@@ -240,8 +266,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         start_service_as_election_leader(
             meta_store,
             address_info,
-            max_heartbeat_interval,
+            max_cluster_heartbeat_interval,
             opts,
+            init_system_params,
             election_client,
             svc_shutdown_rx,
         )
@@ -267,19 +294,20 @@ pub async fn start_service_as_election_follower(
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
+        .layer(TracingExtractLayer::new())
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(HealthServer::new(health_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 // shutdown service if all services should be shut down
-                res = svc_shutdown_rx.changed() =>  {
+                res = svc_shutdown_rx.changed() => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down services"),
                         Err(_) => tracing::error!("Service shutdown sender dropped")
                     }
                 },
                 // shutdown service if follower becomes leader
-                res = follower_shutdown_rx =>  {
+                res = follower_shutdown_rx => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down follower services"),
                         Err(_) => tracing::error!("Follower service shutdown sender dropped")
@@ -300,29 +328,51 @@ pub async fn start_service_as_election_follower(
 pub async fn start_service_as_election_leader<S: MetaStore>(
     meta_store: Arc<S>,
     address_info: AddressInfo,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
+    init_system_params: SystemParams,
     election_client: Option<ElectionClientRef>,
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let init_system_params = opts.init_system_params();
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
+    let env = MetaSrvEnv::<S>::new(opts, init_system_params, meta_store.clone()).await?;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
 
+    let system_params_manager = env.system_params_manager_ref();
+    let system_params_reader = system_params_manager.get_params().await;
+
+    let data_directory = system_params_reader.data_directory();
+    if !is_correct_data_directory(data_directory) {
+        return Err(MetaError::system_param(format!(
+            "The data directory {:?} is misconfigured. 
+            Please use a combination of uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9]. 
+            The string cannot start or end with '/', and consecutive '/' are not allowed.
+            The data directory cannot be empty and its length should not exceed 800 characters.",
+            data_directory
+        )));
+    }
+
     let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), max_heartbeat_interval)
+        ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
             .await
             .unwrap(),
     );
+    let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
+    serving::on_meta_start(
+        env.notification_manager_ref(),
+        cluster_manager.clone(),
+        fragment_manager.clone(),
+        serving_vnode_mapping.clone(),
+    )
+    .await;
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
 
     let compactor_manager = Arc::new(
-        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
+        hummock::CompactorManager::with_meta(env.clone())
             .await
             .unwrap(),
     );
@@ -338,7 +388,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     .await
     .unwrap();
 
-    let meta_member_srv = MetaMemberServiceImpl::new(match election_client {
+    let meta_member_srv = MetaMemberServiceImpl::new(match election_client.clone() {
         None => Either::Right(address_info.clone()),
         Some(election_client) => Either::Left(election_client),
     });
@@ -347,21 +397,25 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr: *dashboard_addr,
-            cluster_manager: cluster_manager.clone(),
-            fragment_manager: fragment_manager.clone(),
-            meta_store: env.meta_store_ref(),
             prometheus_endpoint: prometheus_endpoint.clone(),
             prometheus_client: prometheus_endpoint.as_ref().map(|x| {
                 use std::str::FromStr;
                 prometheus_http_query::Client::from_str(x).unwrap()
             }),
+            cluster_manager: cluster_manager.clone(),
+            fragment_manager: fragment_manager.clone(),
+            compute_clients: ComputeClientPool::default(),
+            meta_store: env.meta_store_ref(),
         };
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
     }
 
-    let (barrier_scheduler, scheduled_barriers) =
-        BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
+    let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
+        hummock_manager.clone(),
+        meta_metrics.clone(),
+        system_params_reader.checkpoint_frequency() as usize,
+    );
 
     let source_manager = Arc::new(
         SourceManager::new(
@@ -369,6 +423,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
+            meta_metrics.clone(),
         )
         .await
         .unwrap(),
@@ -406,47 +461,42 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     hummock_manager
         .purge(
-            &fragment_manager
-                .list_table_fragments()
+            &catalog_manager
+                .list_tables()
                 .await
-                .expect("list_table_fragments"),
+                .into_iter()
+                .map(|t| t.id)
+                .collect_vec(),
         )
-        .await
-        .unwrap();
+        .await?;
 
     // Initialize services.
-    let backup_object_store = Arc::new(
-        parse_remote_object_store(
-            &env.opts.backup_storage_url,
-            Arc::new(ObjectStoreMetrics::unused()),
-            "Meta Backup",
-        )
-        .await,
-    );
-    let backup_storage = Arc::new(
-        ObjectStoreMetaSnapshotStorage::new(
-            &env.opts.backup_storage_directory,
-            backup_object_store,
-        )
-        .await?,
-    );
-    let backup_manager = Arc::new(BackupManager::new(
+    let backup_manager = BackupManager::new(
         env.clone(),
         hummock_manager.clone(),
-        backup_storage,
-        meta_metrics.registry().clone(),
-    ));
+        meta_metrics.clone(),
+        system_params_reader.backup_storage_url(),
+        system_params_reader.backup_storage_directory(),
+    )
+    .await?;
     let vacuum_manager = Arc::new(hummock::VacuumManager::new(
         env.clone(),
         hummock_manager.clone(),
         backup_manager.clone(),
         compactor_manager.clone(),
     ));
-    let system_params_manager =
-        Arc::new(SystemParamManager::new(env.clone(), init_system_params).await?);
+
+    let mut aws_cli = None;
+    if let Some(my_vpc_id) = &env.opts.vpc_id
+        && let Some(security_group_id) = &env.opts.security_group_id
+    {
+        let cli = AwsEc2Client::new(my_vpc_id, security_group_id).await;
+        aws_cli = Some(cli);
+    }
 
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
+        aws_cli,
         catalog_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
@@ -470,11 +520,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
         barrier_scheduler.clone(),
+        stream_manager.clone(),
+        catalog_manager.clone(),
         fragment_manager.clone(),
     );
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
-        compactor_manager.clone(),
         vacuum_manager.clone(),
         fragment_manager.clone(),
     );
@@ -485,10 +536,14 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         hummock_manager.clone(),
         fragment_manager.clone(),
         backup_manager.clone(),
+        serving_vnode_mapping.clone(),
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
-    let system_params_srv = SystemParamsServiceImpl::new(system_params_manager);
+    let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone());
+    let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
+    let serving_srv =
+        ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -504,21 +559,48 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     ));
 
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
-    let mut sub_tasks =
-        hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
+    let mut sub_tasks = hummock::start_hummock_workers(
+        hummock_manager.clone(),
+        vacuum_manager,
+        compaction_scheduler,
+        &env.opts,
+    );
     sub_tasks.push(
-        ClusterManager::start_worker_num_monitor(
+        start_worker_info_monitor(
             cluster_manager.clone(),
+            election_client.clone(),
             Duration::from_secs(env.opts.node_num_monitor_interval_sec),
             meta_metrics.clone(),
         )
         .await,
     );
-    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
+    sub_tasks.push(
+        start_fragment_info_monitor(
+            cluster_manager.clone(),
+            fragment_manager.clone(),
+            meta_metrics.clone(),
+        )
+        .await,
+    );
+    sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
+    sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager).await);
+    sub_tasks.push(
+        serving::start_serving_vnode_mapping_worker(
+            env.notification_manager_ref(),
+            cluster_manager.clone(),
+            fragment_manager.clone(),
+            serving_vnode_mapping,
+        )
+        .await,
+    );
 
     if cfg!(not(test)) {
         sub_tasks.push(
-            ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
+            ClusterManager::start_heartbeat_checker(
+                cluster_manager.clone(),
+                Duration::from_secs(1),
+            )
+            .await,
         );
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
@@ -530,33 +612,74 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let (abort_sender, abort_recv) = tokio::sync::oneshot::channel();
     let notification_mgr = env.notification_manager_ref();
-    let abort_notification_handler = tokio::spawn(async move {
+    let stream_abort_handler = tokio::spawn(async move {
         abort_recv.await.unwrap();
         notification_mgr.abort_all().await;
+        compactor_manager.abort_all_compactors();
     });
-    sub_tasks.push((abort_notification_handler, abort_sender));
+    sub_tasks.push((stream_abort_handler, abort_sender));
+
+    let local_system_params_manager = LocalSystemParamsManager::new(system_params_reader.clone());
+
+    let mgr = TelemetryManager::new(
+        local_system_params_manager.watch_params(),
+        Arc::new(MetaTelemetryInfoFetcher::new(env.cluster_id().clone())),
+        Arc::new(MetaReportCreator::new(
+            cluster_manager,
+            meta_store.meta_store_type(),
+        )),
+    );
+
+    // May start telemetry reporting
+    if env.opts.telemetry_enabled && telemetry_env_enabled() {
+        if system_params_reader.telemetry_enabled() {
+            mgr.start_telemetry_reporting().await;
+        }
+        sub_tasks.push(mgr.watch_params_change());
+    } else {
+        tracing::info!("Telemetry didn't start due to meta backend or config");
+    }
 
     let shutdown_all = async move {
+        let mut handles = Vec::with_capacity(sub_tasks.len());
+
         for (join_handle, shutdown_sender) in sub_tasks {
             if let Err(_err) = shutdown_sender.send(()) {
                 continue;
             }
-            // The barrier manager can't be shutdown gracefully if it's under recovering, try to
-            // abort it using timeout.
-            match tokio::time::timeout(Duration::from_secs(1), join_handle).await {
-                Ok(Err(err)) => {
-                    tracing::warn!("Failed to join shutdown: {:?}", err);
+
+            handles.push(join_handle);
+        }
+
+        // The barrier manager can't be shutdown gracefully if it's under recovering, try to
+        // abort it using timeout.
+        match tokio::time::timeout(Duration::from_secs(1), join_all(handles)).await {
+            Ok(results) => {
+                for result in results {
+                    if let Err(err) = result {
+                        tracing::warn!("Failed to join shutdown: {:?}", err);
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("Join shutdown timeout: {:?}", e);
-                }
-                _ => {}
+            }
+            Err(e) => {
+                tracing::warn!("Join shutdown timeout: {:?}", e);
             }
         }
     };
 
+    // Persist params before starting services so that invalid params that cause meta node
+    // to crash will not be persisted.
+    system_params_manager.flush_params().await?;
+    env.cluster_id()
+        .put_at_meta_store(meta_store.deref())
+        .await?;
+
+    tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
+    tracing::info!("Starting meta services");
+
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
+        .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))
@@ -569,6 +692,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
         .add_service(SystemParamsServiceServer::new(system_params_srv))
+        .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
+        .add_service(ServingServiceServer::new(serving_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 res = svc_shutdown_rx.changed() => {
@@ -586,4 +711,18 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .await
         .unwrap();
     Ok(())
+}
+
+fn is_correct_data_directory(data_directory: &str) -> bool {
+    let data_directory_regex = Regex::new(r"^[0-9a-zA-Z_/-]{1,}$").unwrap();
+    if data_directory.is_empty()
+        || !data_directory_regex.is_match(data_directory)
+        || data_directory.ends_with('/')
+        || data_directory.starts_with('/')
+        || data_directory.contains("//")
+        || data_directory.len() > 800
+    {
+        return false;
+    }
+    true
 }

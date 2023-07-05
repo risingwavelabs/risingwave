@@ -16,8 +16,8 @@ use async_trait::async_trait;
 use risingwave_common::system_param::{system_params_from_kv, system_params_to_kv};
 use risingwave_pb::meta::SystemParams;
 
-use crate::model::{MetadataModelError, MetadataModelResult};
-use crate::storage::{MetaStore, Transaction};
+use crate::model::{MetadataModelError, MetadataModelResult, Transactional};
+use crate::storage::{MetaStore, Snapshot, Transaction};
 
 const SYSTEM_PARAMS_CF_NAME: &str = "cf/system_params";
 
@@ -26,6 +26,9 @@ const SYSTEM_PARAMS_CF_NAME: &str = "cf/system_params";
 pub trait SystemParamsModel: Sized {
     fn cf_name() -> String;
     async fn get<S: MetaStore>(store: &S) -> MetadataModelResult<Option<Self>>;
+    async fn get_at_snapshot<S: MetaStore>(
+        store: &S::Snapshot,
+    ) -> MetadataModelResult<Option<Self>>;
     async fn insert<S: MetaStore>(&self, store: &S) -> MetadataModelResult<()>;
 }
 
@@ -35,13 +38,19 @@ impl SystemParamsModel for SystemParams {
         SYSTEM_PARAMS_CF_NAME.to_string()
     }
 
-    /// All undeprecated fields are guaranteed to be `Some`.
     /// Return error if there are missing or unrecognized fields.
     async fn get<S>(store: &S) -> MetadataModelResult<Option<Self>>
     where
         S: MetaStore,
     {
-        let kvs = store.list_cf(&Self::cf_name()).await?;
+        Self::get_at_snapshot::<S>(&store.snapshot().await).await
+    }
+
+    async fn get_at_snapshot<S>(snapshot: &S::Snapshot) -> MetadataModelResult<Option<SystemParams>>
+    where
+        S: MetaStore,
+    {
+        let kvs = snapshot.list_cf(&SystemParams::cf_name()).await?;
         if kvs.is_empty() {
             Ok(None)
         } else {
@@ -58,9 +67,20 @@ impl SystemParamsModel for SystemParams {
         S: MetaStore,
     {
         let mut txn = Transaction::default();
-        for (k, v) in system_params_to_kv(self).map_err(MetadataModelError::internal)? {
-            txn.put(Self::cf_name(), k.into_bytes(), v.into_bytes());
-        }
+        self.upsert_in_transaction(&mut txn)?;
         Ok(store.txn(txn).await?)
+    }
+}
+
+impl Transactional for SystemParams {
+    fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
+        for (k, v) in system_params_to_kv(self).map_err(MetadataModelError::internal)? {
+            trx.put(Self::cf_name(), k.into_bytes(), v.into_bytes());
+        }
+        Ok(())
+    }
+
+    fn delete_in_transaction(&self, _trx: &mut Transaction) -> MetadataModelResult<()> {
+        unreachable!()
     }
 }

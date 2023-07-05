@@ -60,7 +60,7 @@ SELECT '6' AS "One",
 
 
 SELECT '7' AS "None",
-   CASE WHEN random() < 0 THEN 1
+   CASE WHEN 1 < 0 THEN 1
    END AS "NULL on no matches";
 
 -- Constant-expression folding shouldn't evaluate unreachable subexpressions
@@ -139,14 +139,14 @@ SELECT *
 
 -- Tests for constant subexpression simplification
 
-explain (costs off)
-SELECT * FROM CASE_TBL WHERE NULLIF(1, 2) = 2;
-
-explain (costs off)
-SELECT * FROM CASE_TBL WHERE NULLIF(1, 1) IS NOT NULL;
-
-explain (costs off)
-SELECT * FROM CASE_TBL WHERE NULLIF(1, null) = 2;
+--@ explain (costs off)
+--@ SELECT * FROM CASE_TBL WHERE NULLIF(1, 2) = 2;
+--@ 
+--@ explain (costs off)
+--@ SELECT * FROM CASE_TBL WHERE NULLIF(1, 1) IS NOT NULL;
+--@ 
+--@ explain (costs off)
+--@ SELECT * FROM CASE_TBL WHERE NULLIF(1, null) = 2;
 
 --
 -- Examples of updates involving tables
@@ -164,13 +164,13 @@ UPDATE CASE_TBL
 
 SELECT * FROM CASE_TBL;
 
-UPDATE CASE_TBL
-  SET i = CASE WHEN b.i >= 2 THEN (2 * j)
-                ELSE (3 * j) END
-  FROM CASE2_TBL b
-  WHERE j = -CASE_TBL.i;
-
-SELECT * FROM CASE_TBL;
+--@ UPDATE CASE_TBL
+--@   SET i = CASE WHEN b.i >= 2 THEN (2 * j)
+--@                 ELSE (3 * j) END
+--@   FROM CASE2_TBL b
+--@   WHERE j = -CASE_TBL.i;
+--@ 
+--@ SELECT * FROM CASE_TBL;
 
 --
 -- Nested CASE expressions
@@ -185,77 +185,77 @@ SELECT * FROM CASE_TBL;
 
 -- Wrap this in a single transaction so the transient '=' operator doesn't
 -- cause problems in concurrent sessions
-BEGIN;
-
-CREATE FUNCTION vol(text) returns text as
-  'begin return $1; end' language plpgsql volatile;
-
-SELECT CASE
-  (CASE vol('bar')
-    WHEN 'foo' THEN 'it was foo!'
-    WHEN vol(null) THEN 'null input'
-    WHEN 'bar' THEN 'it was bar!' END
-  )
-  WHEN 'it was foo!' THEN 'foo recognized'
-  WHEN 'it was bar!' THEN 'bar recognized'
-  ELSE 'unrecognized' END;
-
--- In this case, we can't inline the SQL function without confusing things.
-CREATE DOMAIN foodomain AS text;
-
-CREATE FUNCTION volfoo(text) returns foodomain as
-  'begin return $1::foodomain; end' language plpgsql volatile;
-
-CREATE FUNCTION inline_eq(foodomain, foodomain) returns boolean as
-  'SELECT CASE $2::text WHEN $1::text THEN true ELSE false END' language sql;
-
-CREATE OPERATOR = (procedure = inline_eq,
-                   leftarg = foodomain, rightarg = foodomain);
-
-SELECT CASE volfoo('bar') WHEN 'foo'::foodomain THEN 'is foo' ELSE 'is not foo' END;
-
-ROLLBACK;
+--@ BEGIN;
+--@ 
+--@ CREATE FUNCTION vol(text) returns text as
+--@   'begin return $1; end' language plpgsql volatile;
+--@ 
+--@ SELECT CASE
+--@   (CASE vol('bar')
+--@     WHEN 'foo' THEN 'it was foo!'
+--@     WHEN vol(null) THEN 'null input'
+--@     WHEN 'bar' THEN 'it was bar!' END
+--@   )
+--@   WHEN 'it was foo!' THEN 'foo recognized'
+--@   WHEN 'it was bar!' THEN 'bar recognized'
+--@   ELSE 'unrecognized' END;
+--@ 
+--@ -- In this case, we can't inline the SQL function without confusing things.
+--@ CREATE DOMAIN foodomain AS text;
+--@ 
+--@ CREATE FUNCTION volfoo(text) returns foodomain as
+--@   'begin return $1::foodomain; end' language plpgsql volatile;
+--@ 
+--@ CREATE FUNCTION inline_eq(foodomain, foodomain) returns boolean as
+--@   'SELECT CASE $2::text WHEN $1::text THEN true ELSE false END' language sql;
+--@ 
+--@ CREATE OPERATOR = (procedure = inline_eq,
+--@                    leftarg = foodomain, rightarg = foodomain);
+--@ 
+--@ SELECT CASE volfoo('bar') WHEN 'foo'::foodomain THEN 'is foo' ELSE 'is not foo' END;
+--@ 
+--@ ROLLBACK;
 
 -- Test multiple evaluation of a CASE arg that is a read/write object (#14472)
 -- Wrap this in a single transaction so the transient '=' operator doesn't
 -- cause problems in concurrent sessions
-BEGIN;
-
-CREATE DOMAIN arrdomain AS int[];
-
-CREATE FUNCTION make_ad(int,int) returns arrdomain as
-  'declare x arrdomain;
-   begin
-     x := array[$1,$2];
-     return x;
-   end' language plpgsql volatile;
-
-CREATE FUNCTION ad_eq(arrdomain, arrdomain) returns boolean as
-  'begin return array_eq($1, $2); end' language plpgsql;
-
-CREATE OPERATOR = (procedure = ad_eq,
-                   leftarg = arrdomain, rightarg = arrdomain);
-
-SELECT CASE make_ad(1,2)
-  WHEN array[2,4]::arrdomain THEN 'wrong'
-  WHEN array[2,5]::arrdomain THEN 'still wrong'
-  WHEN array[1,2]::arrdomain THEN 'right'
-  END;
-
-ROLLBACK;
+--@ BEGIN;
+--@ 
+--@ CREATE DOMAIN arrdomain AS int[];
+--@ 
+--@ CREATE FUNCTION make_ad(int,int) returns arrdomain as
+--@   'declare x arrdomain;
+--@    begin
+--@      x := array[$1,$2];
+--@      return x;
+--@    end' language plpgsql volatile;
+--@ 
+--@ CREATE FUNCTION ad_eq(arrdomain, arrdomain) returns boolean as
+--@   'begin return array_eq($1, $2); end' language plpgsql;
+--@ 
+--@ CREATE OPERATOR = (procedure = ad_eq,
+--@                    leftarg = arrdomain, rightarg = arrdomain);
+--@ 
+--@ SELECT CASE make_ad(1,2)
+--@   WHEN array[2,4]::arrdomain THEN 'wrong'
+--@   WHEN array[2,5]::arrdomain THEN 'still wrong'
+--@   WHEN array[1,2]::arrdomain THEN 'right'
+--@   END;
+--@ 
+--@ ROLLBACK;
 
 -- Test interaction of CASE with ArrayCoerceExpr (bug #15471)
-BEGIN;
-
-CREATE TYPE casetestenum AS ENUM ('e', 'f', 'g');
-
-SELECT
-  CASE 'foo'::text
-    WHEN 'foo' THEN ARRAY['a', 'b', 'c', 'd'] || enum_range(NULL::casetestenum)::text[]
-    ELSE ARRAY['x', 'y']
-    END;
-
-ROLLBACK;
+--@ BEGIN;
+--@ 
+--@ CREATE TYPE casetestenum AS ENUM ('e', 'f', 'g');
+--@ 
+--@ SELECT
+--@   CASE 'foo'::text
+--@     WHEN 'foo' THEN ARRAY['a', 'b', 'c', 'd'] || enum_range(NULL::casetestenum)::text[]
+--@     ELSE ARRAY['x', 'y']
+--@     END;
+--@ 
+--@ ROLLBACK;
 
 --
 -- Clean up

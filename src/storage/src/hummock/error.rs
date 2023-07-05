@@ -45,16 +45,16 @@ enum HummockErrorInner {
     SharedBufferError(String),
     #[error("Wait epoch error {0}.")]
     WaitEpoch(String),
-    #[error("ReadCurrentEpoch error {0}.")]
-    ReadCurrentEpoch(String),
+    #[error("Barrier read is unavailable for now. Likely the cluster is recovering.")]
+    ReadCurrentEpoch,
     #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}.")]
     ExpiredEpoch { safe_epoch: u64, epoch: u64 },
     #[error("CompactionExecutor error {0}.")]
     CompactionExecutor(String),
     #[error("TieredCache error {0}.")]
     TieredCache(String),
-    #[error("SstIdTracker error {0}.")]
-    SstIdTrackerError(String),
+    #[error("SstObjectIdTracker error {0}.")]
+    SstObjectIdTrackerError(String),
     #[error("CompactionGroup error {0}.")]
     CompactionGroupError(String),
     #[error("SstableUpload error {0}.")]
@@ -118,8 +118,8 @@ impl HummockError {
         HummockErrorInner::WaitEpoch(error.to_string()).into()
     }
 
-    pub fn read_current_epoch(error: impl ToString) -> HummockError {
-        HummockErrorInner::ReadCurrentEpoch(error.to_string()).into()
+    pub fn read_current_epoch() -> HummockError {
+        HummockErrorInner::ReadCurrentEpoch.into()
     }
 
     pub fn expired_epoch(safe_epoch: u64, epoch: u64) -> HummockError {
@@ -130,12 +130,16 @@ impl HummockError {
         matches!(self.inner, HummockErrorInner::ExpiredEpoch { .. })
     }
 
+    pub fn is_meta_error(&self) -> bool {
+        matches!(self.inner, HummockErrorInner::MetaError(..))
+    }
+
     pub fn compaction_executor(error: impl ToString) -> HummockError {
         HummockErrorInner::CompactionExecutor(error.to_string()).into()
     }
 
-    pub fn sst_id_tracker_error(error: impl ToString) -> HummockError {
-        HummockErrorInner::SstIdTrackerError(error.to_string()).into()
+    pub fn sst_object_id_tracker_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::SstObjectIdTrackerError(error.to_string()).into()
     }
 
     pub fn compaction_group_error(error: impl ToString) -> HummockError {

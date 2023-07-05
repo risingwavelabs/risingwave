@@ -16,19 +16,14 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
-async-trait = "0.1"
 byteorder = "1.4"
 bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
-openssl = "0.10.3"
-pg_interval = "0.4"
-postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
-regex = "1.5"
+openssl = "0.10.48"
+panic-message = "0.3"
 risingwave_common = { path = "../../common" }
 risingwave_sqlparser = { path = "../../sqlparser" }
-rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
 tokio-openssl = "0.6.3"
@@ -38,4 +33,4 @@ tracing = "0.1"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-tokio-postgres = "0.7.7"
+tokio-postgres = "0.7"

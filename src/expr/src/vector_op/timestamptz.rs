@@ -16,10 +16,11 @@ use std::fmt::Write;
 
 use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
-use num_traits::ToPrimitive;
-use risingwave_common::types::{NaiveDateTimeWrapper, OrderedF64};
+use num_traits::CheckedNeg;
+use risingwave_common::cast::{str_to_timestamp, str_with_time_zone_to_timestamptz};
+use risingwave_common::types::{CheckedAdd, Interval, IntoOrdered, Timestamp, F64};
+use risingwave_expr_macro::function;
 
-use crate::vector_op::cast::{str_to_timestamp, str_with_time_zone_to_timestamptz};
 use crate::{ExprError, Result};
 
 /// Just a wrapper to reuse the `map_err` logic.
@@ -31,17 +32,17 @@ fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
     })
 }
 
-#[inline(always)]
-pub fn f64_sec_to_timestamptz(elem: OrderedF64) -> Result<i64> {
+#[function("to_timestamp(float64) -> timestamptz")]
+pub fn f64_sec_to_timestamptz(elem: F64) -> Result<i64> {
     // TODO(#4515): handle +/- infinity
-    (elem * 1e6)
-        .round() // TODO(#5576): should round to even
-        .to_i64()
-        .ok_or(ExprError::NumericOutOfRange)
+    (elem.0 * 1e6)
+        .into_ordered()
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)
 }
 
-#[inline(always)]
-pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> Result<i64> {
+#[function("at_time_zone(timestamp, varchar) -> timestamptz")]
+pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<i64> {
     let time_zone = lookup_time_zone(time_zone)?;
     // https://www.postgresql.org/docs/current/datetime-invalid-input.html
     // Special cases:
@@ -65,6 +66,7 @@ pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> R
     Ok(usec)
 }
 
+#[function("cast_with_time_zone(timestamptz, varchar) -> varchar")]
 pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write) -> Result<()> {
     let time_zone = lookup_time_zone(time_zone)?;
     let secs = elem.div_euclid(1_000_000);
@@ -82,26 +84,100 @@ pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write)
 
 // Tries to interpret the string with a timezone, and if failing, tries to interpret the string as a
 // timestamp and then adjusts it with the session timezone.
+#[function("cast_with_time_zone(varchar, varchar) -> timestamptz")]
 pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
-    str_with_time_zone_to_timestamptz(elem)
-        .or_else(|_| timestamp_at_time_zone(str_to_timestamp(elem)?, time_zone))
+    str_with_time_zone_to_timestamptz(elem).or_else(|_| {
+        timestamp_at_time_zone(
+            str_to_timestamp(elem).map_err(|err| ExprError::Parse(err.into()))?,
+            time_zone,
+        )
+    })
 }
 
-#[inline(always)]
-pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
+#[function("at_time_zone(timestamptz, varchar) -> timestamp")]
+pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<Timestamp> {
     let time_zone = lookup_time_zone(time_zone)?;
     let secs = input.div_euclid(1_000_000);
     let nsecs = input.rem_euclid(1_000_000) * 1000;
     let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     let instant_local = instant_utc.with_timezone(&time_zone);
     let naive = instant_local.naive_local();
-    Ok(NaiveDateTimeWrapper(naive))
+    Ok(Timestamp(naive))
+}
+
+/// This operation is zone agnostic.
+#[function("subtract(timestamptz, timestamptz) -> interval")]
+pub fn timestamptz_timestamptz_sub(l: i64, r: i64) -> Result<Interval> {
+    let usecs = l.checked_sub(r).ok_or(ExprError::NumericOverflow)?;
+    let interval = Interval::from_month_day_usec(0, 0, usecs);
+    // https://github.com/postgres/postgres/blob/REL_15_3/src/backend/utils/adt/timestamp.c#L2697
+    let interval = interval.justify_hour().ok_or(ExprError::NumericOverflow)?;
+    Ok(interval)
+}
+
+#[function("subtract_with_time_zone(timestamptz, interval, varchar) -> timestamptz")]
+pub fn timestamptz_interval_sub(input: i64, interval: Interval, time_zone: &str) -> Result<i64> {
+    timestamptz_interval_add(
+        input,
+        interval.checked_neg().ok_or(ExprError::NumericOverflow)?,
+        time_zone,
+    )
+}
+
+#[function("add_with_time_zone(timestamptz, interval, varchar) -> timestamptz")]
+pub fn timestamptz_interval_add(input: i64, interval: Interval, time_zone: &str) -> Result<i64> {
+    // A month may have 28-31 days, a day may have 23 or 25 hours during Daylight Saving switch.
+    // So their interpretation depends on the local time of a specific zone.
+    let qualitative = interval.truncate_day();
+    // Units smaller than `day` are zone agnostic.
+    let quantitative = interval - qualitative;
+
+    // Note the current implementation simply follows the frontend-rewrite chains of exprs before
+    // refactor. There may be chances to improve.
+    let t = timestamptz_at_time_zone(input, time_zone)?;
+    let t = t
+        .checked_add(qualitative)
+        .ok_or(ExprError::NumericOverflow)?;
+    let t = timestamp_at_time_zone(t, time_zone)?;
+    let t = timestamptz_interval_quantitative(t, quantitative, i64::checked_add)?;
+    Ok(t)
+}
+
+// Retained mostly for backward compatibility with old query plans. The signature is also useful for
+// binder type inference.
+#[function("add(timestamptz, interval) -> timestamptz")]
+pub fn timestamptz_interval_add_legacy(l: i64, r: Interval) -> Result<i64> {
+    timestamptz_interval_quantitative(l, r, i64::checked_add)
+}
+
+#[function("subtract(timestamptz, interval) -> timestamptz")]
+pub fn timestamptz_interval_sub_legacy(l: i64, r: Interval) -> Result<i64> {
+    timestamptz_interval_quantitative(l, r, i64::checked_sub)
+}
+
+#[function("add(interval, timestamptz) -> timestamptz")]
+pub fn interval_timestamptz_add_legacy(l: Interval, r: i64) -> Result<i64> {
+    timestamptz_interval_add_legacy(r, l)
+}
+
+#[inline(always)]
+fn timestamptz_interval_quantitative(
+    l: i64,
+    r: Interval,
+    f: fn(i64, i64) -> Option<i64>,
+) -> Result<i64> {
+    // Without session TimeZone, we cannot add month/day in local time. See #5826.
+    if r.months() != 0 || r.days() != 0 {
+        return Err(ExprError::UnsupportedFunction(
+            "timestamp with time zone +/- interval of days".into(),
+        ));
+    }
+    let delta_usecs = r.usecs();
+    f(l, delta_usecs).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
-
     use risingwave_common::util::iter_util::ZipEqFast;
 
     use super::*;
@@ -157,7 +233,7 @@ mod tests {
             let local = str_to_timestamp(local).unwrap();
 
             let actual = timestamp_at_time_zone(local, zone);
-            assert_matches!(actual, Err(_));
+            assert!(actual.is_err());
         }
     }
 

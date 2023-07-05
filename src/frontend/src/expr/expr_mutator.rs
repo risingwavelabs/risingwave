@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
-    TableFunction, UserDefinedFunction, WindowFunction,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Now, Parameter,
+    Subquery, TableFunction, UserDefinedFunction, WindowFunction,
 };
 
 /// with the same visit logic of `ExprVisitor`, but mutable.
@@ -30,6 +30,8 @@ pub trait ExprMutator {
             ExprImpl::TableFunction(inner) => self.visit_table_function(inner),
             ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
             ExprImpl::UserDefinedFunction(inner) => self.visit_user_defined_function(inner),
+            ExprImpl::Parameter(inner) => self.visit_parameter(inner),
+            ExprImpl::Now(inner) => self.visit_now(inner),
         }
     }
     fn visit_function_call(&mut self, func_call: &mut FunctionCall) {
@@ -47,6 +49,7 @@ pub trait ExprMutator {
         agg_call.filter_mut().visit_expr_mut(self);
     }
     fn visit_literal(&mut self, _: &mut Literal) {}
+    fn visit_parameter(&mut self, _: &mut Parameter) {}
     fn visit_input_ref(&mut self, _: &mut InputRef) {}
     fn visit_subquery(&mut self, _: &mut Subquery) {}
     fn visit_correlated_input_ref(&mut self, _: &mut CorrelatedInputRef) {}
@@ -68,4 +71,5 @@ pub trait ExprMutator {
             .iter_mut()
             .for_each(|expr| self.visit_expr(expr));
     }
+    fn visit_now(&mut self, _: &mut Now) {}
 }

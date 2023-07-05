@@ -39,16 +39,16 @@ mod pull_up_correlated_predicate_rule;
 pub use pull_up_correlated_predicate_rule::*;
 mod index_delta_join_rule;
 pub use index_delta_join_rule::*;
-mod reorder_multijoin_rule;
-pub use reorder_multijoin_rule::*;
+mod left_deep_tree_join_ordering_rule;
+pub use left_deep_tree_join_ordering_rule::*;
 mod apply_agg_transpose_rule;
 pub use apply_agg_transpose_rule::*;
 mod apply_filter_transpose_rule;
 pub use apply_filter_transpose_rule::*;
 mod apply_project_transpose_rule;
 pub use apply_project_transpose_rule::*;
-mod apply_scan_rule;
-pub use apply_scan_rule::*;
+mod apply_eliminate_rule;
+pub use apply_eliminate_rule::*;
 mod translate_apply_rule;
 pub use translate_apply_rule::*;
 mod merge_multijoin_rule;
@@ -66,6 +66,10 @@ pub use index_selection_rule::*;
 mod push_calculation_of_join_rule;
 pub use push_calculation_of_join_rule::*;
 mod join_commute_rule;
+mod over_window_to_agg_and_join_rule;
+pub use over_window_to_agg_and_join_rule::*;
+mod over_window_split_by_window_rule;
+pub use over_window_split_by_window_rule::*;
 mod over_agg_to_topn_rule;
 pub use join_commute_rule::*;
 pub use over_agg_to_topn_rule::*;
@@ -73,8 +77,6 @@ mod union_to_distinct_rule;
 pub use union_to_distinct_rule::*;
 mod agg_project_merge_rule;
 pub use agg_project_merge_rule::*;
-mod agg_dedup_group_key_rule;
-pub use agg_dedup_group_key_rule::*;
 mod union_merge_rule;
 pub use union_merge_rule::*;
 mod dag_to_tree_rule;
@@ -84,40 +86,92 @@ pub use apply_share_eliminate_rule::*;
 mod top_n_on_index_rule;
 pub use top_n_on_index_rule::*;
 mod stream;
+pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
+pub use stream::stream_project_merge_rule::*;
+mod trivial_project_to_values_rule;
+pub use trivial_project_to_values_rule::*;
+mod union_input_values_merge_rule;
+pub use union_input_values_merge_rule::*;
+mod rewrite_like_expr_rule;
+pub use rewrite_like_expr_rule::*;
+mod min_max_on_index_rule;
+pub use min_max_on_index_rule::*;
+mod always_false_filter_rule;
+pub use always_false_filter_rule::*;
+mod join_project_transpose_rule;
+pub use join_project_transpose_rule::*;
+mod limit_push_down_rule;
+pub use limit_push_down_rule::*;
+mod pull_up_hop_rule;
+pub use pull_up_hop_rule::*;
+mod apply_offset_rewriter;
+use apply_offset_rewriter::ApplyOffsetRewriter;
+mod intersect_to_semi_join_rule;
+pub use intersect_to_semi_join_rule::*;
+mod except_to_anti_join_rule;
+pub use except_to_anti_join_rule::*;
+mod intersect_merge_rule;
+pub use intersect_merge_rule::*;
+mod except_merge_rule;
+pub use except_merge_rule::*;
+mod apply_union_transpose_rule;
+pub use apply_union_transpose_rule::*;
+mod apply_dedup_transpose_rule;
+pub use apply_dedup_transpose_rule::*;
+mod project_join_separate_rule;
+pub use project_join_separate_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
     ($macro:ident) => {
         $macro! {
-             {ApplyAggTransposeRule}
-            ,{ApplyFilterTransposeRule}
-            ,{ApplyProjectTransposeRule}
-            ,{ApplyScanRule}
-            ,{ApplyJoinTransposeRule}
-            ,{ApplyShareEliminateRule}
-            ,{ApplyToJoinRule}
-            ,{MaxOneRowEliminateRule}
-            ,{DistinctAggRule}
-            ,{IndexDeltaJoinRule}
-            ,{MergeMultiJoinRule}
-            ,{ProjectEliminateRule}
-            ,{ProjectJoinMergeRule}
-            ,{ProjectMergeRule}
-            ,{PullUpCorrelatedPredicateRule}
-            ,{ReorderMultiJoinRule}
-            ,{TranslateApplyRule}
-            ,{PushCalculationOfJoinRule}
-            ,{IndexSelectionRule}
-            ,{OverAggToTopNRule}
-            ,{JoinCommuteRule}
-            ,{UnionToDistinctRule}
-            ,{AggProjectMergeRule}
-            ,{UnionMergeRule}
-            ,{DagToTreeRule}
-            ,{AggDedupGroupKeyRule}
-            ,{FilterWithNowToJoinRule}
-            ,{TopNOnIndexRule}
+              { ApplyAggTransposeRule }
+            , { ApplyFilterTransposeRule }
+            , { ApplyProjectTransposeRule }
+            , { ApplyEliminateRule }
+            , { ApplyJoinTransposeRule }
+            , { ApplyShareEliminateRule }
+            , { ApplyToJoinRule }
+            , { MaxOneRowEliminateRule }
+            , { DistinctAggRule }
+            , { IndexDeltaJoinRule }
+            , { MergeMultiJoinRule }
+            , { ProjectEliminateRule }
+            , { ProjectJoinMergeRule }
+            , { ProjectMergeRule }
+            , { PullUpCorrelatedPredicateRule }
+            , { LeftDeepTreeJoinOrderingRule }
+            , { TranslateApplyRule }
+            , { PushCalculationOfJoinRule }
+            , { IndexSelectionRule }
+            , { OverWindowToTopNRule }
+            , { OverWindowToAggAndJoinRule }
+            , { OverWindowSplitByWindowRule }
+            , { JoinCommuteRule }
+            , { UnionToDistinctRule }
+            , { AggProjectMergeRule }
+            , { UnionMergeRule }
+            , { DagToTreeRule }
+            , { FilterWithNowToJoinRule }
+            , { TopNOnIndexRule }
+            , { TrivialProjectToValuesRule }
+            , { UnionInputValuesMergeRule }
+            , { RewriteLikeExprRule }
+            , { MinMaxOnIndexRule }
+            , { AlwaysFalseFilterRule }
+            , { BushyTreeJoinOrderingRule }
+            , { StreamProjectMergeRule }
+            , { JoinProjectTransposeRule }
+            , { LimitPushDownRule }
+            , { PullUpHopRule }
+            , { IntersectToSemiJoinRule }
+            , { ExceptToAntiJoinRule }
+            , { IntersectMergeRule }
+            , { ExceptMergeRule }
+            , { ApplyUnionTransposeRule }
+            , { ApplyDedupTransposeRule }
+            , { ProjectJoinSeparateRule }
         }
     };
 }

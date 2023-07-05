@@ -21,10 +21,12 @@ use clap::Subcommand;
 use futures::future::try_join_all;
 use futures::{pin_mut, Future, StreamExt};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_storage::store::PrefetchOptions;
 use size::Size;
 use tokio::task::JoinHandle;
 
 use super::table::{get_table_catalog, make_state_table};
+use crate::common::HummockServiceOpts;
 use crate::CtlContext;
 
 #[derive(Subcommand)]
@@ -36,6 +38,7 @@ pub enum BenchCommands {
         /// number of futures doing scan
         #[clap(long, default_value_t = 1)]
         threads: usize,
+        data_dir: Option<String>,
     },
 }
 
@@ -73,11 +76,17 @@ impl InterestedMetrics {
 
 pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
     let meta = context.meta_client().await?;
-    let (hummock, metrics) = context.hummock_store_with_metrics().await?;
     let next_cnt = Arc::new(AtomicU64::new(0));
     let iter_cnt = Arc::new(AtomicU64::new(0));
     match cmd {
-        BenchCommands::Scan { mv_name, threads } => {
+        BenchCommands::Scan {
+            mv_name,
+            threads,
+            data_dir,
+        } => {
+            let (hummock, metrics) = context
+                .hummock_store_with_metrics(HummockServiceOpts::from_env(data_dir)?)
+                .await?;
             let table = get_table_catalog(meta.clone(), mv_name).await?;
             let mut handlers = vec![];
             for i in 0..threads {
@@ -93,7 +102,9 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                         tb
                     };
                     loop {
-                        let stream = state_table.iter().await?;
+                        let stream = state_table
+                            .iter(PrefetchOptions::new_for_exhaust_iter())
+                            .await?;
                         pin_mut!(stream);
                         iter_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         while let Some(item) = stream.next().await {

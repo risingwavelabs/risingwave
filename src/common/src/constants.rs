@@ -13,6 +13,8 @@
 // limitations under the License.
 
 pub mod hummock {
+    #![expect(clippy::disallowed_methods, reason = "used by bitflags!")]
+
     use bitflags::bitflags;
     bitflags! {
 

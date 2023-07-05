@@ -17,7 +17,8 @@ use risingwave_common::catalog::Schema;
 use super::generic::GenericPlanNode;
 use super::stream::*;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, FunctionalDependencySet};
+use crate::utils::ColIndexMappingRewriteExt;
 
 impl GenericPlanNode for DynamicFilter {
     fn schema(&self) -> Schema {
@@ -31,14 +32,21 @@ impl GenericPlanNode for DynamicFilter {
     fn ctx(&self) -> OptimizerContextRef {
         todo!("new plan node derivation")
     }
-}
 
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        todo!("new plan node derivation")
+    }
+}
 impl StreamPlanNode for DynamicFilter {
     fn distribution(&self) -> Distribution {
         todo!()
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -55,6 +63,10 @@ impl GenericPlanNode for Exchange {
     fn ctx(&self) -> OptimizerContextRef {
         todo!("new plan node derivation")
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        todo!("new plan node derivation")
+    }
 }
 
 impl StreamPlanNode for Exchange {
@@ -63,6 +75,10 @@ impl StreamPlanNode for Exchange {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -79,6 +95,10 @@ impl GenericPlanNode for DeltaJoin {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for DeltaJoin {
@@ -87,6 +107,10 @@ impl StreamPlanNode for DeltaJoin {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -103,6 +127,10 @@ impl GenericPlanNode for Expand {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for Expand {
@@ -111,6 +139,10 @@ impl StreamPlanNode for Expand {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -127,6 +159,10 @@ impl GenericPlanNode for Filter {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for Filter {
@@ -137,9 +173,13 @@ impl StreamPlanNode for Filter {
     fn append_only(&self) -> bool {
         self.core.input.append_only()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        todo!()
+    }
 }
 
-impl GenericPlanNode for GlobalSimpleAgg {
+impl GenericPlanNode for SimpleAgg {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -151,14 +191,22 @@ impl GenericPlanNode for GlobalSimpleAgg {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
-impl StreamPlanNode for GlobalSimpleAgg {
+impl StreamPlanNode for SimpleAgg {
     fn distribution(&self) -> Distribution {
         todo!()
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -175,6 +223,10 @@ impl GenericPlanNode for GroupTopN {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for GroupTopN {
@@ -183,6 +235,10 @@ impl StreamPlanNode for GroupTopN {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -199,6 +255,10 @@ impl GenericPlanNode for HashAgg {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for HashAgg {
@@ -207,6 +267,10 @@ impl StreamPlanNode for HashAgg {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -223,6 +287,10 @@ impl GenericPlanNode for HashJoin {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for HashJoin {
@@ -231,6 +299,10 @@ impl StreamPlanNode for HashJoin {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -247,6 +319,10 @@ impl GenericPlanNode for HopWindow {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for HopWindow {
@@ -255,6 +331,10 @@ impl StreamPlanNode for HopWindow {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -271,6 +351,10 @@ impl GenericPlanNode for IndexScan {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for IndexScan {
@@ -281,9 +365,13 @@ impl StreamPlanNode for IndexScan {
     fn append_only(&self) -> bool {
         todo!()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        todo!()
+    }
 }
 
-impl GenericPlanNode for LocalSimpleAgg {
+impl GenericPlanNode for StatelessSimpleAgg {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -295,14 +383,22 @@ impl GenericPlanNode for LocalSimpleAgg {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
-impl StreamPlanNode for LocalSimpleAgg {
+impl StreamPlanNode for StatelessSimpleAgg {
     fn distribution(&self) -> Distribution {
         todo!()
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -319,6 +415,10 @@ impl GenericPlanNode for Materialize {
     fn ctx(&self) -> OptimizerContextRef {
         todo!("new plan node derivation")
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        todo!("new plan node derivation")
+    }
 }
 
 impl StreamPlanNode for Materialize {
@@ -327,6 +427,10 @@ impl StreamPlanNode for Materialize {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -343,6 +447,10 @@ impl GenericPlanNode for ProjectSet {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for ProjectSet {
@@ -351,6 +459,10 @@ impl StreamPlanNode for ProjectSet {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -367,6 +479,10 @@ impl GenericPlanNode for Project {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for Project {
@@ -378,6 +494,10 @@ impl StreamPlanNode for Project {
 
     fn append_only(&self) -> bool {
         self.core.input.append_only()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.core.input.emit_on_window_close()
     }
 }
 
@@ -393,6 +513,10 @@ impl GenericPlanNode for Sink {
     fn ctx(&self) -> OptimizerContextRef {
         todo!("new plan node derivation")
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        todo!("new plan node derivation")
+    }
 }
 
 impl StreamPlanNode for Sink {
@@ -401,6 +525,10 @@ impl StreamPlanNode for Sink {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -417,6 +545,10 @@ impl GenericPlanNode for Source {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for Source {
@@ -425,6 +557,10 @@ impl StreamPlanNode for Source {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -441,6 +577,10 @@ impl GenericPlanNode for TableScan {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for TableScan {
@@ -449,6 +589,10 @@ impl StreamPlanNode for TableScan {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -465,6 +609,10 @@ impl GenericPlanNode for TopN {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for TopN {
@@ -473,6 +621,10 @@ impl StreamPlanNode for TopN {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }

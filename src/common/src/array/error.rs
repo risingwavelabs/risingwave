@@ -12,22 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Infallible;
+
 pub use anyhow::anyhow;
-use risingwave_pb::ProstFieldNotFound;
+use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 
 use crate::error::{ErrorCode, RwError};
 
 #[derive(Error, Debug)]
 pub enum ArrayError {
-    #[error("Prost decode error: {0}")]
-    ProstDecode(#[from] prost::DecodeError),
+    #[error("Pb decode error: {0}")]
+    PbDecode(#[from] prost::DecodeError),
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
+
+    #[error("Arrow error: {0}")]
+    FromArrow(String),
 }
 
 impl From<ArrayError> for RwError {
@@ -36,9 +41,15 @@ impl From<ArrayError> for RwError {
     }
 }
 
-impl From<ProstFieldNotFound> for ArrayError {
-    fn from(err: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for ArrayError {
+    fn from(err: PbFieldNotFound) -> Self {
         anyhow!("Failed to decode prost: field not found `{}`", err.0).into()
+    }
+}
+
+impl From<Infallible> for ArrayError {
+    fn from(err: Infallible) -> Self {
+        unreachable!("Infallible error: {:?}", err)
     }
 }
 

@@ -12,31 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+use std::rc::Rc;
 
-use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
+use super::utils::{childless_record, column_names_pretty, Distill};
 use super::{
-    ExprRewritable, LogicalSource, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch,
-    ToLocalBatch,
+    generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::property::{Distribution, Order};
 
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
     pub base: PlanBase,
-    logical: LogicalSource,
+    logical: generic::Source,
 }
 
 impl BatchSource {
-    pub fn new(logical: LogicalSource) -> Self {
-        let base = PlanBase::new_batch(
-            logical.ctx(),
-            logical.schema().clone(),
+    pub fn new(logical: generic::Source) -> Self {
+        let base = PlanBase::new_batch_from_logical(
+            &logical,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
             Distribution::Single,
             Order::any(),
@@ -45,16 +45,16 @@ impl BatchSource {
         Self { base, logical }
     }
 
-    pub fn column_names(&self) -> Vec<String> {
-        self.schema()
-            .fields()
-            .iter()
-            .map(|f| f.name.clone())
-            .collect()
+    pub fn column_names(&self) -> Vec<&str> {
+        self.schema().names_str()
     }
 
-    pub fn logical(&self) -> &LogicalSource {
-        &self.logical
+    pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
+        self.logical.catalog.clone()
+    }
+
+    pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
+        self.logical.kafka_timestamp_range_value()
     }
 
     pub fn clone_with_dist(&self) -> Self {
@@ -69,14 +69,15 @@ impl BatchSource {
 
 impl_plan_tree_node_for_leaf! { BatchSource }
 
-impl fmt::Display for BatchSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("BatchSource");
-        builder
-            .field("source", &self.logical.source_catalog().unwrap().name)
-            .field("columns", &self.column_names())
-            .field("filter", &self.logical.kafka_timestamp_range_value())
-            .finish()
+impl Distill for BatchSource {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let src = Pretty::from(self.source_catalog().unwrap().name.clone());
+        let fields = vec![
+            ("source", src),
+            ("columns", column_names_pretty(self.schema())),
+            ("filter", Pretty::debug(&self.kafka_timestamp_range_value())),
+        ];
+        childless_record("BatchSource", fields)
     }
 }
 
@@ -92,18 +93,19 @@ impl ToDistributedBatch for BatchSource {
     }
 }
 
-impl ToBatchProst for BatchSource {
+impl ToBatchPb for BatchSource {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let source_catalog = self.logical.source_catalog().unwrap();
+        let source_catalog = self.source_catalog().unwrap();
         NodeBody::Source(SourceNode {
             source_id: source_catalog.id,
             info: Some(source_catalog.info.clone()),
-            columns: source_catalog
-                .columns
+            columns: self
+                .logical
+                .column_catalog
                 .iter()
                 .map(|c| c.to_protobuf())
-                .collect_vec(),
-            properties: source_catalog.properties.clone(),
+                .collect(),
+            properties: source_catalog.properties.clone().into_iter().collect(),
             split: vec![],
         })
     }

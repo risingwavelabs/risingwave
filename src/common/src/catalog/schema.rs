@@ -15,14 +15,15 @@
 use std::ops::Index;
 
 use itertools::Itertools;
-use risingwave_pb::plan_common::{ColumnDesc as ProstColumnDesc, Field as ProstField};
+use risingwave_pb::plan_common::{PbColumnDesc, PbField};
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
-use crate::types::DataType;
+use crate::types::{DataType, StructType};
+use crate::util::iter_util::ZipEqFast;
 
 /// The field in the schema of the executor's return data
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Field {
     pub data_type: DataType,
     pub name: String,
@@ -40,8 +41,8 @@ impl std::fmt::Debug for Field {
 }
 
 impl Field {
-    pub fn to_prost(&self) -> ProstField {
-        ProstField {
+    pub fn to_prost(&self) -> PbField {
+        PbField {
             data_type: Some(self.data_type.to_protobuf()),
             name: self.name.to_string(),
         }
@@ -74,8 +75,8 @@ impl From<ColumnDesc> for Field {
     }
 }
 
-impl From<&ProstColumnDesc> for Field {
-    fn from(pb_column_desc: &ProstColumnDesc) -> Self {
+impl From<&PbColumnDesc> for Field {
+    fn from(pb_column_desc: &PbColumnDesc) -> Self {
         Self {
             data_type: pb_column_desc.column_type.as_ref().unwrap().into(),
             name: pb_column_desc.name.clone(),
@@ -112,12 +113,17 @@ macro_rules! schema_unnamed {
 }
 
 /// the schema of the executor's return data
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Schema {
     pub fields: Vec<Field>,
 }
 
 impl Schema {
+    pub fn empty() -> &'static Self {
+        static EMPTY: Schema = Schema { fields: Vec::new() };
+        &EMPTY
+    }
+
     pub fn len(&self) -> usize {
         self.fields.len()
     }
@@ -132,6 +138,10 @@ impl Schema {
 
     pub fn names(&self) -> Vec<String> {
         self.fields().iter().map(|f| f.name.clone()).collect()
+    }
+
+    pub fn names_str(&self) -> Vec<&str> {
+        self.fields().iter().map(|f| f.name.as_str()).collect()
     }
 
     pub fn data_types(&self) -> Vec<DataType> {
@@ -157,12 +167,35 @@ impl Schema {
             .collect()
     }
 
-    pub fn to_prost(&self) -> Vec<ProstField> {
+    pub fn to_prost(&self) -> Vec<PbField> {
         self.fields
             .clone()
             .into_iter()
             .map(|field| field.to_prost())
             .collect()
+    }
+
+    pub fn type_eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        for (a, b) in self.fields.iter().zip_eq_fast(other.fields.iter()) {
+            if a.data_type != b.data_type {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn all_type_eq<'a>(inputs: impl IntoIterator<Item = &'a Self>) -> bool {
+        let mut iter = inputs.into_iter();
+        if let Some(first) = iter.next() {
+            iter.all(|x| x.type_eq(first))
+        } else {
+            true
+        }
     }
 }
 
@@ -219,8 +252,8 @@ impl Field {
     }
 }
 
-impl From<&ProstField> for Field {
-    fn from(prost_field: &ProstField) -> Self {
+impl From<&PbField> for Field {
+    fn from(prost_field: &PbField) -> Self {
         Self {
             data_type: DataType::from(prost_field.get_data_type().expect("data type not found")),
             name: prost_field.get_name().clone(),
@@ -243,6 +276,16 @@ impl FromIterator<Field> for Schema {
         Schema {
             fields: iter.into_iter().collect::<Vec<_>>(),
         }
+    }
+}
+
+impl From<&StructType> for Schema {
+    fn from(t: &StructType) -> Self {
+        Schema::new(
+            t.iter()
+                .map(|(s, d)| Field::with_name(d.clone(), s))
+                .collect(),
+        )
     }
 }
 

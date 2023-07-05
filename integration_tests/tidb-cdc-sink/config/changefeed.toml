@@ -1,0 +1,4 @@
+[sink]
+dispatchers = [
+ {matcher = ['*.*'], topic = "ticdc_{schema}_{table}"},
+]

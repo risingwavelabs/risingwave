@@ -12,31 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroUsize;
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use anyhow::Context;
-use itertools::Itertools;
-use risingwave_common::catalog::CatalogVersion;
+use anyhow::anyhow;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::stream_graph_visitor::visit_fragment;
+use risingwave_pb::catalog::connection::private_link_service::{
+    PbPrivateLinkProvider, PrivateLinkProvider,
+};
+use risingwave_pb::catalog::connection::PbPrivateLinkService;
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::{connection, Connection};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
-use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
+use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
-    MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, TableId,
+    CatalogManagerRef, ClusterManagerRef, ConnectionId, FragmentManagerRef, IdCategory,
+    IdCategoryType, MetaSrvEnv, StreamingJob,
 };
-use crate::model::{StreamEnvironment, TableFragments};
+use crate::rpc::cloud_provider::AwsEc2Client;
+use crate::rpc::ddl_controller::{DdlCommand, DdlController, StreamingJobId};
 use crate::storage::MetaStore;
-use crate::stream::{
-    visit_fragment, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
-    CreateStreamingJobContext, GlobalStreamManagerRef, SourceManagerRef, StreamFragmentGraph,
-};
+use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]
@@ -44,11 +47,8 @@ pub struct DdlServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     catalog_manager: CatalogManagerRef<S>,
-    stream_manager: GlobalStreamManagerRef<S>,
-    source_manager: SourceManagerRef<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
-    barrier_manager: BarrierManagerRef<S>,
+    ddl_controller: DdlController<S>,
+    aws_client: Arc<Option<AwsEc2Client>>,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -58,6 +58,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         env: MetaSrvEnv<S>,
+        aws_client: Option<AwsEc2Client>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
         source_manager: SourceManagerRef<S>,
@@ -65,14 +66,22 @@ where
         fragment_manager: FragmentManagerRef<S>,
         barrier_manager: BarrierManagerRef<S>,
     ) -> Self {
-        Self {
-            env,
-            catalog_manager,
+        let aws_cli_ref = Arc::new(aws_client);
+        let ddl_controller = DdlController::new(
+            env.clone(),
+            catalog_manager.clone(),
             stream_manager,
             source_manager,
             cluster_manager,
             fragment_manager,
             barrier_manager,
+            aws_cli_ref.clone(),
+        );
+        Self {
+            env,
+            catalog_manager,
+            ddl_controller,
+            aws_client: aws_cli_ref,
         }
     }
 }
@@ -90,7 +99,10 @@ where
         let id = self.gen_unique_id::<{ IdCategory::Database }>().await?;
         let mut database = req.get_db()?.clone();
         database.id = id;
-        let version = self.catalog_manager.create_database(&database).await?;
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateDatabase(database))
+            .await?;
 
         Ok(Response::new(CreateDatabaseResponse {
             status: None,
@@ -103,19 +115,13 @@ where
         &self,
         request: Request<DropDatabaseRequest>,
     ) -> Result<Response<DropDatabaseResponse>, Status> {
-        self.check_barrier_manager_status().await?;
         let req = request.into_inner();
         let database_id = req.get_database_id();
 
-        // 1. drop all catalogs in this database.
-        let (version, streaming_ids, source_ids) =
-            self.catalog_manager.drop_database(database_id).await?;
-        // 2. Unregister source connector worker.
-        self.source_manager.unregister_sources(source_ids).await;
-        // 3. drop streaming jobs.
-        if !streaming_ids.is_empty() {
-            self.stream_manager.drop_streaming_jobs(streaming_ids).await;
-        }
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::DropDatabase(database_id))
+            .await?;
 
         Ok(Response::new(DropDatabaseResponse {
             status: None,
@@ -131,7 +137,10 @@ where
         let id = self.gen_unique_id::<{ IdCategory::Schema }>().await?;
         let mut schema = req.get_schema()?.clone();
         schema.id = id;
-        let version = self.catalog_manager.create_schema(&schema).await?;
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateSchema(schema))
+            .await?;
 
         Ok(Response::new(CreateSchemaResponse {
             status: None,
@@ -146,7 +155,10 @@ where
     ) -> Result<Response<DropSchemaResponse>, Status> {
         let req = request.into_inner();
         let schema_id = req.get_schema_id();
-        let version = self.catalog_manager.drop_schema(schema_id).await?;
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::DropSchema(schema_id))
+            .await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
             version,
@@ -159,23 +171,17 @@ where
     ) -> Result<Response<CreateSourceResponse>, Status> {
         let mut source = request.into_inner().get_source()?.clone();
 
+        // validate connection before starting the DDL procedure
+        if let Some(connection_id) = source.connection_id {
+            self.validate_connection(connection_id).await?;
+        }
+
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         source.id = id;
 
-        self.catalog_manager
-            .start_create_source_procedure(&source)
-            .await?;
-
-        if let Err(e) = self.source_manager.register_source(&source).await {
-            self.catalog_manager
-                .cancel_create_source_procedure(&source)
-                .await?;
-            return Err(e.into());
-        }
-
         let version = self
-            .catalog_manager
-            .finish_create_source_procedure(&source)
+            .ddl_controller
+            .run_command(DdlCommand::CreateSource(source))
             .await?;
         Ok(Response::new(CreateSourceResponse {
             status: None,
@@ -189,13 +195,10 @@ where
         request: Request<DropSourceRequest>,
     ) -> Result<Response<DropSourceResponse>, Status> {
         let source_id = request.into_inner().source_id;
-
-        // 1. Drop source in catalog.
-        let version = self.catalog_manager.drop_source(source_id).await?;
-        // 2. Unregister source connector worker.
-        self.source_manager
-            .unregister_sources(vec![source_id])
-            .await;
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::DropSource(source_id))
+            .await?;
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -213,14 +216,23 @@ where
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
 
+        // validate connection before starting the DDL procedure
+        if let Some(connection_id) = sink.connection_id {
+            self.validate_connection(connection_id).await?;
+        }
+
         let mut stream_job = StreamingJob::Sink(sink);
+        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+        stream_job.set_id(id);
+
         let version = self
-            .create_stream_job(&mut stream_job, fragment_graph)
+            .ddl_controller
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateSinkResponse {
             status: None,
-            sink_id: stream_job.id(),
+            sink_id: id,
             version,
         }))
     }
@@ -229,22 +241,12 @@ where
         &self,
         request: Request<DropSinkRequest>,
     ) -> Result<Response<DropSinkResponse>, Status> {
-        self.check_barrier_manager_status().await?;
         let sink_id = request.into_inner().sink_id;
-        let table_fragment = self
-            .fragment_manager
-            .select_table_fragments_by_table_id(&sink_id.into())
-            .await?;
-        let internal_tables = table_fragment.internal_table_ids();
-        // 1. Drop sink in catalog.
+
         let version = self
-            .catalog_manager
-            .drop_sink(sink_id, internal_tables)
+            .ddl_controller
+            .run_command(DdlCommand::DropStreamingJob(StreamingJobId::Sink(sink_id)))
             .await?;
-        // 2. drop streaming job of sink.
-        self.stream_manager
-            .drop_streaming_jobs(vec![sink_id.into()])
-            .await;
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -263,13 +265,17 @@ where
         let fragment_graph = req.get_fragment_graph()?.clone();
 
         let mut stream_job = StreamingJob::MaterializedView(mview);
+        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+        stream_job.set_id(id);
+
         let version = self
-            .create_stream_job(&mut stream_job, fragment_graph)
+            .ddl_controller
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
             status: None,
-            table_id: stream_job.id(),
+            table_id: id,
             version,
         }))
     }
@@ -278,24 +284,17 @@ where
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
-        self.check_barrier_manager_status().await?;
         self.env.idle_manager().record_activity();
 
         let request = request.into_inner();
         let table_id = request.table_id;
-        let table_fragment = self
-            .fragment_manager
-            .select_table_fragments_by_table_id(&table_id.into())
-            .await?;
-        let internal_tables = table_fragment.internal_table_ids();
 
-        // 1. Drop table in catalog. Ref count will be checked.
-        let (version, delete_jobs) = self
-            .catalog_manager
-            .drop_table(table_id, internal_tables)
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::DropStreamingJob(
+                StreamingJobId::MaterializedView(table_id),
+            ))
             .await?;
-        // 2. Drop streaming jobs.
-        self.stream_manager.drop_streaming_jobs(delete_jobs).await;
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -315,13 +314,17 @@ where
         let fragment_graph = req.get_fragment_graph()?.clone();
 
         let mut stream_job = StreamingJob::Index(index, index_table);
+        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+        stream_job.set_id(id);
+
         let version = self
-            .create_stream_job(&mut stream_job, fragment_graph)
+            .ddl_controller
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateIndexResponse {
             status: None,
-            index_id: stream_job.id(),
+            index_id: id,
             version,
         }))
     }
@@ -330,21 +333,15 @@ where
         &self,
         request: Request<DropIndexRequest>,
     ) -> Result<Response<DropIndexResponse>, Status> {
-        self.check_barrier_manager_status().await?;
         self.env.idle_manager().record_activity();
 
         let index_id = request.into_inner().index_id;
-        let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
-
-        // 1. Drop index in catalog. Ref count will be checked.
         let version = self
-            .catalog_manager
-            .drop_index(index_id, index_table_id)
+            .ddl_controller
+            .run_command(DdlCommand::DropStreamingJob(StreamingJobId::Index(
+                index_id,
+            )))
             .await?;
-        // 2. drop streaming jobs of the index tables.
-        self.stream_manager
-            .drop_streaming_jobs(vec![index_table_id.into()])
-            .await;
 
         Ok(Response::new(DropIndexResponse {
             status: None,
@@ -360,7 +357,10 @@ where
         let id = self.gen_unique_id::<{ IdCategory::Function }>().await?;
         let mut function = req.get_function()?.clone();
         function.id = id;
-        let version = self.catalog_manager.create_function(&function).await?;
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateFunction(function))
+            .await?;
 
         Ok(Response::new(CreateFunctionResponse {
             status: None,
@@ -373,12 +373,11 @@ where
         &self,
         request: Request<DropFunctionRequest>,
     ) -> Result<Response<DropFunctionResponse>, Status> {
-        self.check_barrier_manager_status().await?;
         let request = request.into_inner();
 
         let version = self
-            .catalog_manager
-            .drop_function(request.function_id)
+            .ddl_controller
+            .run_command(DdlCommand::DropFunction(request.function_id))
             .await?;
 
         Ok(Response::new(DropFunctionResponse {
@@ -395,7 +394,7 @@ where
         let mut source = request.source;
         let mut mview = request.materialized_view.unwrap();
         let mut fragment_graph = request.fragment_graph.unwrap();
-
+        let table_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         // If we're creating a table with connector, we should additionally fill its ID first.
         if let Some(source) = &mut source {
             // Generate source id.
@@ -417,19 +416,27 @@ where
                 "require exactly 1 external stream source when creating table with a connector"
             );
 
+            // Fill in the correct table id for source.
+            source.optional_associated_table_id =
+                Some(OptionalAssociatedTableId::AssociatedTableId(table_id));
+
             // Fill in the correct source id for mview.
             mview.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
 
         let mut stream_job = StreamingJob::Table(source, mview);
+
+        stream_job.set_id(table_id);
+
         let version = self
-            .create_stream_job(&mut stream_job, fragment_graph)
+            .ddl_controller
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateTableResponse {
             status: None,
-            table_id: stream_job.id(),
+            table_id,
             version,
         }))
     }
@@ -438,13 +445,16 @@ where
         &self,
         request: Request<DropTableRequest>,
     ) -> Result<Response<DropTableResponse>, Status> {
-        self.check_barrier_manager_status().await?;
         let request = request.into_inner();
         let source_id = request.source_id;
         let table_id = request.table_id;
 
         let version = self
-            .drop_table_inner(source_id.map(|ProstSourceId::Id(id)| id), table_id)
+            .ddl_controller
+            .run_command(DdlCommand::DropStreamingJob(StreamingJobId::Table(
+                source_id.map(|PbSourceId::Id(id)| id),
+                table_id,
+            )))
             .await?;
 
         Ok(Response::new(DropTableResponse {
@@ -462,7 +472,10 @@ where
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         view.id = id;
 
-        let version = self.catalog_manager.create_view(&view).await?;
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateView(view))
+            .await?;
 
         Ok(Response::new(CreateViewResponse {
             status: None,
@@ -477,7 +490,10 @@ where
     ) -> Result<Response<DropViewResponse>, Status> {
         let req = request.into_inner();
         let view_id = req.get_view_id();
-        let version = self.catalog_manager.drop_view(view_id).await?;
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::DropView(view_id))
+            .await?;
         Ok(Response::new(DropViewResponse {
             status: None,
             version,
@@ -494,11 +510,28 @@ where
 
     async fn replace_table_plan(
         &self,
-        _request: Request<ReplaceTablePlanRequest>,
+        request: Request<ReplaceTablePlanRequest>,
     ) -> Result<Response<ReplaceTablePlanResponse>, Status> {
-        Err(Status::unimplemented(
-            "replace table plan is not implemented yet",
-        ))
+        let req = request.into_inner();
+
+        let stream_job = StreamingJob::Table(None, req.table.unwrap());
+        let fragment_graph = req.fragment_graph.unwrap();
+        let table_col_index_mapping =
+            ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::ReplaceTable(
+                stream_job,
+                fragment_graph,
+                table_col_index_mapping,
+            ))
+            .await?;
+
+        Ok(Response::new(ReplaceTablePlanResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn get_table(
@@ -524,296 +557,178 @@ where
             Ok(Response::new(GetTableResponse { table: None }))
         }
     }
+
+    async fn alter_relation_name(
+        &self,
+        request: Request<AlterRelationNameRequest>,
+    ) -> Result<Response<AlterRelationNameResponse>, Status> {
+        let AlterRelationNameRequest { relation, new_name } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterRelationName(relation.unwrap(), new_name))
+            .await?;
+        Ok(Response::new(AlterRelationNameResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn get_ddl_progress(
+        &self,
+        _request: Request<GetDdlProgressRequest>,
+    ) -> Result<Response<GetDdlProgressResponse>, Status> {
+        Ok(Response::new(GetDdlProgressResponse {
+            ddl_progress: self.ddl_controller.get_ddl_progress().await,
+        }))
+    }
+
+    async fn create_connection(
+        &self,
+        request: Request<CreateConnectionRequest>,
+    ) -> Result<Response<CreateConnectionResponse>, Status> {
+        let req = request.into_inner();
+        if req.payload.is_none() {
+            return Err(Status::invalid_argument("request is empty"));
+        }
+
+        match req.payload.unwrap() {
+            create_connection_request::Payload::PrivateLink(link) => {
+                // currently we only support AWS
+                let private_link_svc = match link.get_provider()? {
+                    PbPrivateLinkProvider::Mock => PbPrivateLinkService {
+                        provider: link.provider,
+                        service_name: String::new(),
+                        endpoint_id: String::new(),
+                        endpoint_dns_name: String::new(),
+                        dns_entries: HashMap::new(),
+                    },
+                    PbPrivateLinkProvider::Aws => {
+                        if let Some(aws_cli) = self.aws_client.as_ref() {
+                            let tags_env = self
+                                .env
+                                .opts
+                                .privatelink_endpoint_default_tags
+                                .as_ref()
+                                .map(|tags| {
+                                    tags.iter()
+                                        .map(|(key, val)| (key.as_str(), val.as_str()))
+                                        .collect()
+                                });
+                            aws_cli
+                                .create_aws_private_link(
+                                    &link.service_name,
+                                    link.tags.as_deref(),
+                                    tags_env,
+                                )
+                                .await?
+                        } else {
+                            return Err(Status::from(MetaError::unavailable(
+                                "AWS client is not configured".into(),
+                            )));
+                        }
+                    }
+                    PbPrivateLinkProvider::Unspecified => {
+                        return Err(Status::invalid_argument("Privatelink provider unspecified"));
+                    }
+                };
+                let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
+                let connection = Connection {
+                    id,
+                    schema_id: req.schema_id,
+                    database_id: req.database_id,
+                    name: req.name,
+                    owner: req.owner_id,
+                    info: Some(connection::Info::PrivateLinkService(private_link_svc)),
+                };
+
+                // save private link info to catalog
+                let version = self
+                    .ddl_controller
+                    .run_command(DdlCommand::CreateConnection(connection))
+                    .await?;
+
+                Ok(Response::new(CreateConnectionResponse {
+                    connection_id: id,
+                    version,
+                }))
+            }
+        }
+    }
+
+    async fn list_connections(
+        &self,
+        _request: Request<ListConnectionsRequest>,
+    ) -> Result<Response<ListConnectionsResponse>, Status> {
+        let conns = self.catalog_manager.list_connections().await;
+        Ok(Response::new(ListConnectionsResponse {
+            connections: conns,
+        }))
+    }
+
+    async fn drop_connection(
+        &self,
+        request: Request<DropConnectionRequest>,
+    ) -> Result<Response<DropConnectionResponse>, Status> {
+        let req = request.into_inner();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::DropConnection(req.connection_id))
+            .await?;
+
+        Ok(Response::new(DropConnectionResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn get_tables(
+        &self,
+        request: Request<GetTablesRequest>,
+    ) -> Result<Response<GetTablesResponse>, Status> {
+        let ret = self
+            .catalog_manager
+            .get_tables(&request.into_inner().table_ids)
+            .await;
+        let mut tables = HashMap::default();
+        for table in ret {
+            tables.insert(table.id, table);
+        }
+        Ok(Response::new(GetTablesResponse { tables }))
+    }
 }
 
 impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
-    /// `check_barrier_manager_status` checks the status of the barrier manager, return unavailable
-    /// when it's not running.
-    async fn check_barrier_manager_status(&self) -> MetaResult<()> {
-        if !self.barrier_manager.is_running().await {
-            return Err(MetaError::unavailable(
-                "The cluster is starting or recovering".into(),
-            ));
-        }
-        Ok(())
-    }
-
-    /// `create_stream_job` creates a stream job and returns the version of the catalog.
-    async fn create_stream_job(
-        &self,
-        stream_job: &mut StreamingJob,
-        fragment_graph: StreamFragmentGraphProto,
-    ) -> MetaResult<NotificationVersion> {
-        self.check_barrier_manager_status().await?;
-
-        let (ctx, table_fragments) = self.prepare_stream_job(stream_job, fragment_graph).await?;
-
-        let result = try {
-            if let Some(source) = stream_job.source() {
-                self.source_manager.register_source(source).await?;
-            }
-            self.stream_manager
-                .create_streaming_job(table_fragments, &ctx)
-                .await?;
-        };
-
-        match result {
-            Ok(_) => self.finish_stream_job(stream_job, &ctx).await,
-            Err(err) => {
-                self.cancel_stream_job(stream_job, &ctx).await?;
-                Err(err)
-            }
-        }
-    }
-
-    /// `prepare_stream_job` prepares a stream job and returns the context and table fragments.
-    async fn prepare_stream_job(
-        &self,
-        stream_job: &mut StreamingJob,
-        fragment_graph: StreamFragmentGraphProto,
-    ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
-        // 1. Assign a new id to the stream job.
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        stream_job.set_id(id);
-
-        // 2. Get the env for streaming jobs.
-        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
-        let default_parallelism = if let Some(Parallelism { parallelism }) =
-            fragment_graph.parallelism
-        {
-            Some(NonZeroUsize::new(parallelism as usize).context("parallelism should not be 0")?)
-        } else {
-            None
-        };
-
-        // 3. Build fragment graph.
-        let fragment_graph =
-            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
-                .await?;
-        let internal_tables = fragment_graph.internal_tables();
-
-        // 4. Set the graph-related fields and freeze the `stream_job`.
-        stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
-        let dependent_relations = fragment_graph.dependent_relations().clone();
-        stream_job.set_dependent_relations(dependent_relations.clone());
-
-        let stream_job = &*stream_job;
-
-        // 5. Mark current relation as "creating" and add reference count to dependent relations.
-        self.catalog_manager
-            .start_create_stream_job_procedure(stream_job)
-            .await?;
-
-        // 6. Resolve the upstream fragments, extend the fragment graph to a complete graph that
-        // contains all information needed for building the actor graph.
-        let upstream_mview_fragments = self
-            .fragment_manager
-            .get_upstream_mview_fragments(&dependent_relations)
-            .await?;
-        let upstream_mview_actors = upstream_mview_fragments
-            .iter()
-            .map(|(&table_id, fragment)| {
-                (
-                    table_id,
-                    fragment.actors.iter().map(|a| a.actor_id).collect_vec(),
-                )
-            })
-            .collect();
-
-        let complete_graph =
-            CompleteStreamFragmentGraph::new(fragment_graph, upstream_mview_fragments)?;
-
-        // 7. Build the actor graph.
-        let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
-        let actor_graph_builder =
-            ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
-
-        let ActorGraphBuildResult {
-            graph,
-            building_locations,
-            existing_locations,
-            dispatchers,
-        } = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
-            .await?;
-
-        // 8. Build the table fragments structure that will be persisted in the stream manager, and
-        // the context that contains all information needed for building the actors on the compute
-        // nodes.
-        let table_fragments =
-            TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
-
-        let ctx = CreateStreamingJobContext {
-            dispatchers,
-            upstream_mview_actors,
-            internal_tables,
-            building_locations,
-            existing_locations,
-            table_properties: stream_job.properties(),
-        };
-
-        // 9. Mark creating tables, including internal tables and the table of the stream job.
-        // Note(bugen): should we take `Sink` into account as well?
-        let creating_tables = ctx
-            .internal_tables()
-            .into_iter()
-            .chain(stream_job.table().cloned())
-            .collect_vec();
-
-        self.catalog_manager
-            .mark_creating_tables(&creating_tables)
-            .await;
-
-        Ok((ctx, table_fragments))
-    }
-
-    /// `cancel_stream_job` cancels a stream job and clean some states.
-    async fn cancel_stream_job(
-        &self,
-        stream_job: &StreamingJob,
-        ctx: &CreateStreamingJobContext,
-    ) -> MetaResult<()> {
-        let mut creating_internal_table_ids = ctx.internal_table_ids();
-        // 1. cancel create procedure.
-        match stream_job {
-            StreamingJob::MaterializedView(table) => {
-                creating_internal_table_ids.push(table.id);
-                self.catalog_manager
-                    .cancel_create_table_procedure(table)
-                    .await?;
-            }
-            StreamingJob::Sink(sink) => {
-                self.catalog_manager
-                    .cancel_create_sink_procedure(sink)
-                    .await?;
-            }
-            StreamingJob::Table(source, table) => {
-                creating_internal_table_ids.push(table.id);
-                if let Some(source) = source {
-                    self.catalog_manager
-                        .cancel_create_table_procedure_with_source(source, table)
-                        .await?;
-                } else {
-                    self.catalog_manager
-                        .cancel_create_table_procedure(table)
-                        .await?;
-                }
-            }
-            StreamingJob::Index(index, table) => {
-                creating_internal_table_ids.push(table.id);
-                self.catalog_manager
-                    .cancel_create_index_procedure(index, table)
-                    .await?;
-            }
-        }
-        // 2. unmark creating tables.
-        self.catalog_manager
-            .unmark_creating_tables(&creating_internal_table_ids, true)
-            .await;
-
-        Ok(())
-    }
-
-    /// `finish_stream_job` finishes a stream job and clean some states.
-    async fn finish_stream_job(
-        &self,
-        stream_job: &StreamingJob,
-        ctx: &CreateStreamingJobContext,
-    ) -> MetaResult<u64> {
-        // 1. finish procedure.
-        let mut creating_internal_table_ids = ctx.internal_table_ids();
-        let version = match stream_job {
-            StreamingJob::MaterializedView(table) => {
-                creating_internal_table_ids.push(table.id);
-                self.catalog_manager
-                    .finish_create_table_procedure(ctx.internal_tables(), table)
-                    .await?
-            }
-            StreamingJob::Sink(sink) => {
-                let internal_tables = ctx.internal_tables();
-                self.catalog_manager
-                    .finish_create_sink_procedure(internal_tables, sink)
-                    .await?
-            }
-            StreamingJob::Table(source, table) => {
-                creating_internal_table_ids.push(table.id);
-                if let Some(source) = source {
-                    let internal_tables: [_; 1] = ctx.internal_tables().try_into().unwrap();
-                    self.catalog_manager
-                        .finish_create_table_procedure_with_source(
-                            source,
-                            table,
-                            &internal_tables[0],
-                        )
-                        .await?
-                } else {
-                    let internal_tables = ctx.internal_tables();
-                    assert!(internal_tables.is_empty());
-                    // Though `internal_tables` is empty here, we pass it as a parameter to reuse
-                    // the method.
-                    self.catalog_manager
-                        .finish_create_table_procedure(internal_tables, table)
-                        .await?
-                }
-            }
-            StreamingJob::Index(index, table) => {
-                creating_internal_table_ids.push(table.id);
-                self.catalog_manager
-                    .finish_create_index_procedure(index, table)
-                    .await?
-            }
-        };
-
-        // 2. unmark creating tables.
-        self.catalog_manager
-            .unmark_creating_tables(&creating_internal_table_ids, false)
-            .await;
-
-        Ok(version)
-    }
-
-    async fn drop_table_inner(
-        &self,
-        source_id: Option<SourceId>,
-        table_id: TableId,
-    ) -> MetaResult<CatalogVersion> {
-        let table_fragment = self
-            .fragment_manager
-            .select_table_fragments_by_table_id(&table_id.into())
-            .await?;
-        let internal_table_ids = table_fragment.internal_table_ids();
-
-        let (version, delete_jobs) = if let Some(source_id) = source_id {
-            // Drop table and source in catalog. Check `source_id` if it is the table's
-            // `associated_source_id`. Indexes also need to be dropped atomically.
-            assert_eq!(internal_table_ids.len(), 1);
-            let (version, delete_jobs) = self
-                .catalog_manager
-                .drop_table_with_source(source_id, table_id, internal_table_ids[0])
-                .await?;
-            // Unregister source connector worker.
-            self.source_manager
-                .unregister_sources(vec![source_id])
-                .await;
-            (version, delete_jobs)
-        } else {
-            assert!(internal_table_ids.is_empty());
-            self.catalog_manager
-                .drop_table(table_id, internal_table_ids)
-                .await?
-        };
-
-        // Drop streaming jobs.
-        self.stream_manager.drop_streaming_jobs(delete_jobs).await;
-
-        Ok(version)
-    }
-
     async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {
         let id = self.env.id_gen_manager().generate::<C>().await? as u32;
         Ok(id)
+    }
+
+    async fn validate_connection(&self, connection_id: ConnectionId) -> MetaResult<()> {
+        let connection = self
+            .catalog_manager
+            .get_connection_by_id(connection_id)
+            .await?;
+        if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info {
+            // skip all checks for mock connection
+            if svc.get_provider()? == PrivateLinkProvider::Mock {
+                return Ok(());
+            }
+
+            // check whether private link is ready
+            if let Some(aws_cli) = self.aws_client.as_ref() {
+                if !aws_cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
+                    return Err(MetaError::from(anyhow!(
+                        "Private link endpoint {} is not ready",
+                        svc.endpoint_id
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 }

@@ -14,16 +14,18 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::fmt::Formatter;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
+use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::utils::ColIndexMapping;
+use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
 fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
     if expr.has_subquery() {
@@ -42,7 +44,7 @@ fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
 }
 
 /// [`Project`] computes a set of expressions from its input relation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[allow(clippy::manual_non_exhaustive)]
 pub struct Project<PlanRef> {
     pub exprs: Vec<ExprImpl>,
@@ -66,21 +68,29 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
         let o2i = self.o2i_col_mapping();
         let exprs = &self.exprs;
         let input_schema = self.input.schema();
+        let ctx = self.ctx();
         let fields = exprs
             .iter()
             .enumerate()
-            .map(|(id, expr)| {
+            .map(|(i, expr)| {
                 // Get field info from o2i.
-                let (name, sub_fields, type_name) = match o2i.try_map(id) {
+                let (name, sub_fields, type_name) = match o2i.try_map(i) {
                     Some(input_idx) => {
                         let field = input_schema.fields()[input_idx].clone();
                         (field.name, field.sub_fields, field.type_name)
                     }
-                    None => (
-                        format!("{:?}", ExprDisplay { expr, input_schema }),
-                        vec![],
-                        String::new(),
-                    ),
+                    None => match expr {
+                        ExprImpl::InputRef(_) | ExprImpl::Literal(_) => (
+                            format!("{:?}", ExprDisplay { expr, input_schema }),
+                            vec![],
+                            String::new(),
+                        ),
+                        _ => (
+                            format!("$expr{}", ctx.next_expr_display_id()),
+                            vec![],
+                            String::new(),
+                        ),
+                    },
                 };
                 Field::with_struct(expr.return_type(), name, sub_fields, type_name)
             })
@@ -99,6 +109,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let i2o = self.i2o_col_mapping();
+        i2o.rewrite_functional_dependency_set(self.input.functional_dependency().clone())
     }
 }
 
@@ -162,20 +177,33 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         (self.exprs, self.input)
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field(
-            "exprs",
-            &self
-                .exprs
-                .iter()
-                .map(|expr| ExprDisplay {
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>, schema: &Schema) {
+        builder.field("exprs", &self.exprs_for_display(schema));
+    }
+
+    pub fn fields_pretty<'a>(&self, schema: &Schema) -> StrAssocArr<'a> {
+        let f = |t| Pretty::debug(&t);
+        let e = Pretty::Array(self.exprs_for_display(schema).iter().map(f).collect());
+        vec![("exprs", e)]
+    }
+
+    fn exprs_for_display<'a>(&'a self, schema: &Schema) -> Vec<AliasedExpr<'a>> {
+        self.exprs
+            .iter()
+            .zip_eq_fast(schema.fields().iter())
+            .map(|(expr, field)| AliasedExpr {
+                expr: ExprDisplay {
                     expr,
                     input_schema: self.input.schema(),
-                })
-                .collect_vec(),
-        );
-        builder.finish()
+                },
+                alias: {
+                    match expr {
+                        ExprImpl::InputRef(_) | ExprImpl::Literal(_) => None,
+                        _ => Some(field.name.clone()),
+                    }
+                },
+            })
+            .collect()
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
@@ -183,9 +211,8 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         let input_len = self.input.schema().len();
         let mut map = vec![None; exprs.len()];
         for (i, expr) in exprs.iter().enumerate() {
-            map[i] = match expr {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
+            if let ExprImpl::InputRef(input) = expr {
+                map[i] = Some(input.index())
             }
         }
         ColIndexMapping::with_target_size(map, input_len)
@@ -194,7 +221,15 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse()
+        let exprs = &self.exprs;
+        let input_len = self.input.schema().len();
+        let mut map = vec![None; input_len];
+        for (i, expr) in exprs.iter().enumerate() {
+            if let ExprImpl::InputRef(input) = expr {
+                map[input.index()] = Some(i)
+            }
+        }
+        ColIndexMapping::with_target_size(map, exprs.len())
     }
 
     pub fn is_all_inputref(&self) -> bool {
@@ -249,6 +284,10 @@ impl ProjectBuilder {
         }
     }
 
+    pub fn get_expr(&self, index: usize) -> Option<&ExprImpl> {
+        self.exprs.get(index)
+    }
+
     pub fn expr_index(&self, expr: &ExprImpl) -> Option<usize> {
         check_expr_type(expr).ok()?;
         self.exprs_index.get(expr).copied()
@@ -257,5 +296,20 @@ impl ProjectBuilder {
     /// build the `LogicalProject` from `LogicalProjectBuilder`
     pub fn build<PlanRef: GenericPlanRef>(self, input: PlanRef) -> Project<PlanRef> {
         Project::new(self.exprs, input)
+    }
+}
+
+/// Auxiliary struct for displaying `expr AS alias`
+pub struct AliasedExpr<'a> {
+    pub expr: ExprDisplay<'a>,
+    pub alias: Option<String>,
+}
+
+impl fmt::Debug for AliasedExpr<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.alias {
+            Some(alias) => write!(f, "{:?} as {}", self.expr, alias),
+            None => write!(f, "{:?}", self.expr),
+        }
     }
 }

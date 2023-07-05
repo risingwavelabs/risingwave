@@ -30,7 +30,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 matches = "0.1"

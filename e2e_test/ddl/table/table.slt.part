@@ -1,0 +1,261 @@
+# Create a table.
+statement ok
+create table ddl_t (v1 int);
+
+statement ok
+explain select v1 from ddl_t;
+
+# Create another table with duplicated name.
+statement error
+create table ddl_t (v2 int);
+
+# Create a table using a empty string.
+statement error
+create table ""(v2 int);
+
+statement ok
+create table if not exists ddl_t (v2 int);
+
+# Drop the table.
+statement ok
+drop table ddl_t;
+
+# Drop it again.
+statement error
+drop table ddl_t;
+
+# Create another table with the same name.
+statement ok
+create table ddl_t (v2 int);
+
+statement ok
+explain select v2 from ddl_t;
+
+# Create a mview on top of it.
+statement ok
+create materialized view ddl_mv as select v2 from ddl_t;
+
+statement ok
+explain select v2 from ddl_t;
+
+statement ok
+explain create sink sink_t from ddl_t with ( connector = 'kafka', type = 'append-only', force_append_only = 'true' );
+
+statement ok
+explain create sink sink_as as select sum(v2) as sum from ddl_t with ( connector = 'kafka', type = 'append-only', force_append_only = 'true' );
+
+# Create a mview with duplicated name.
+statement error
+create materialized view ddl_mv as select v2 from ddl_t;
+
+# Drop the table before dropping the mview.
+statement error
+drop table ddl_t;
+
+# We're not allowed to drop the mview using `DROP TABLE`.
+statement error
+drop table ddl_mv;
+
+# Drop the mview.
+statement ok
+drop materialized view ddl_mv;
+
+# Drop it again.
+statement error
+drop materialized view ddl_mv;
+
+# We're not allowed to drop the table using `DROP MATERIALIZED VIEW`.
+statement error
+drop materialized view ddl_t;
+
+# Now, we can drop the base table.
+statement ok
+drop table ddl_t;
+
+# Create table concludes struct column.
+statement ok
+create table st (v1 int, v2 struct<v1 int, v2 struct<v1 int, v2 int>>);
+
+statement ok
+drop table st
+
+# We test the case sensitivity of table name and column name.
+statement ok
+create table t1 (v1 int);
+
+statement ok
+drop table T1;
+
+statement ok
+create table T1 (v1 int);
+
+statement ok
+drop table t1;
+
+statement ok
+create table "T1" (v1 int);
+
+# Since we have not really bound the columns in the insert statement
+# this test case cannot be enabled.
+# statement error
+# insert into "T1" ("V1") values (1);
+
+statement error
+drop table t1;
+
+statement error
+drop table T1;
+
+statement ok
+drop table "T1";
+
+statement ok
+create table "T2" ("V1" int);
+
+# Since we have not really bound the columns in the insert statement
+# this test case cannot be enabled.
+# statement error
+# insert into "T2" (V1) values (1);
+
+statement ok
+insert into "T2" ("V1") values (1);
+
+statement ok
+drop table "T2"
+
+statement error
+create table C1 (c1 varchar(5));
+
+statement error
+create table t (v1 int not null);
+
+statement error
+create table t (v1 varchar collate "en_US");
+
+# Test create-table-as 
+statement ok
+create table t as select 1;
+
+statement ok
+drop table t;
+
+statement error
+create table t as select 1,2;
+
+statement ok
+create table t as select 1 as a, 2 as b;
+
+statement ok
+drop table t;
+
+statement ok 
+create table t(v1) as select 1;
+
+statement ok
+drop table t;
+
+statement ok
+create table t (v1 int,v2 int);
+
+statement ok
+insert into t values (1,1);
+
+statement ok
+insert into t values (1,1);
+
+statement ok
+insert into t values (1,1);
+
+statement ok
+flush
+
+statement ok
+create table t1 as select * from t;
+
+statement ok
+flush;
+
+query I
+select * from t1;
+----
+1 1
+1 1
+1 1
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t;
+
+statement ok 
+create table t AS SELECT * FROM generate_series(0, 5,1) tbl(i);
+
+statement ok
+flush; 
+
+query I
+select * from t order by i;
+----
+0
+1
+2
+3
+4
+5
+
+statement ok
+drop table t;
+
+statement ok
+create table t (v1 int);
+
+statement ok
+insert into t values (1);
+
+statement ok
+insert into t values (2);
+
+statement ok
+create table n1 as select sum(v1) from t;
+
+statement ok
+flush;
+
+query I
+select * from n1;
+----
+3
+
+statement error
+create table n1 (v2 int);
+
+statement error
+create table n1 as select * from t;
+
+statement ok
+create table if not exists n1 (v2 int);
+
+statement ok
+drop table n1;
+
+statement ok
+drop table t;
+
+statement ok 
+create table t (v1 int,v2 int);
+
+statement ok
+create table t1(a,b) as select v1,v2 from t;
+
+statement ok
+create table t2(a) as select v1,v2 from t;
+
+statement ok 
+drop table t;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

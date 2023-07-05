@@ -19,7 +19,8 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::binder::bind_context::BindContext;
-use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
+use crate::binder::statement::RewriteExprsRecursive;
+use crate::binder::{Binder, Clause, Relation, COLUMN_GROUP_PREFIX};
 use crate::expr::ExprImpl;
 
 #[derive(Debug, Clone)]
@@ -28,6 +29,14 @@ pub struct BoundJoin {
     pub left: Relation,
     pub right: Relation,
     pub cond: ExprImpl,
+}
+
+impl RewriteExprsRecursive for BoundJoin {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.left.rewrite_exprs_recursive(rewriter);
+        self.right.rewrite_exprs_recursive(rewriter);
+        self.cond = rewriter.rewrite_expr(self.cond.take());
+    }
 }
 
 impl Binder {
@@ -133,7 +142,7 @@ impl Binder {
                     .indices_of
                     .iter()
                     .filter(|(s, _)| *s != "_row_id") // filter out `_row_id`
-                    .map(|(s, idxes)| (Ident::new(s.to_owned()), idxes))
+                    .map(|(s, idxes)| (Ident::new_unchecked(s.to_owned()), idxes))
                     .collect::<Vec<_>>();
                 columns.sort_by(|a, b| a.0.real_value().cmp(&b.0.real_value()));
 
@@ -197,9 +206,12 @@ impl Binder {
                 (expr, Some(relation))
             }
             JoinConstraint::On(expr) => {
-                let bound_expr = self
+                let clause = self.context.clause;
+                self.context.clause = Some(Clause::JoinOn);
+                let bound_expr: ExprImpl = self
                     .bind_expr(expr)
                     .and_then(|expr| expr.enforce_bool_clause("JOIN ON"))?;
+                self.context.clause = clause;
                 (bound_expr, None)
             }
         })
@@ -213,12 +225,12 @@ impl Binder {
         if indices.len() == 1 {
             let right_table = context.columns[indices[0]].table_name.clone();
             Ok(Expr::CompoundIdentifier(vec![
-                Ident::new(right_table),
+                Ident::new_unchecked(right_table),
                 column,
             ]))
         } else if let Some(group_id) = context.column_group_context.mapping.get(&indices[0]) {
             Ok(Expr::CompoundIdentifier(vec![
-                Ident::new(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
+                Ident::new_unchecked(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
                 column,
             ]))
         } else {

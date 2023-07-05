@@ -42,7 +42,10 @@ pub use self::query::{
     With,
 };
 pub use self::statement::*;
-pub use self::value::{DateTimeField, TrimWhereField, Value};
+pub use self::value::{DateTimeField, DollarQuotedString, TrimWhereField, Value};
+pub use crate::ast::ddl::{
+    AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
+};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
 
@@ -96,7 +99,8 @@ pub struct Ident {
 
 impl Ident {
     /// Create a new identifier with the given value and no quotes.
-    pub fn new<S>(value: S) -> Self
+    /// the given value must not be a empty string.
+    pub fn new_unchecked<S>(value: S) -> Self
     where
         S: Into<String>,
     {
@@ -106,17 +110,42 @@ impl Ident {
         }
     }
 
-    /// Create a new quoted identifier with the given quote and value. This function
-    /// panics if the given quote is not a valid quote character.
-    pub fn with_quote<S>(quote: char, value: S) -> Self
+    /// Create a new quoted identifier with the given quote and value.
+    /// the given value must not be a empty string and the given quote must be in ['\'', '"', '`',
+    /// '['].
+    pub fn with_quote_unchecked<S>(quote: char, value: S) -> Self
     where
         S: Into<String>,
     {
-        assert!(quote == '\'' || quote == '"' || quote == '`' || quote == '[');
         Ident {
             value: value.into(),
             quote_style: Some(quote),
         }
+    }
+
+    /// Create a new quoted identifier with the given quote and value.
+    /// returns ParserError when the given string is empty or the given quote is illegal.
+    pub fn with_quote_check<S>(quote: char, value: S) -> Result<Ident, ParserError>
+    where
+        S: Into<String>,
+    {
+        let value_str = value.into();
+        if value_str.is_empty() {
+            return Err(ParserError::ParserError(format!(
+                "zero-length delimited identifier at or near \"{value_str}\""
+            )));
+        }
+
+        if !(quote == '\'' || quote == '"' || quote == '`' || quote == '[') {
+            return Err(ParserError::ParserError(
+                "unexpected quote style".to_string(),
+            ));
+        }
+
+        Ok(Ident {
+            value: value_str,
+            quote_style: Some(quote),
+        })
     }
 
     /// Value after considering quote style
@@ -170,6 +199,10 @@ impl ObjectName {
             .map(|ident| ident.real_value())
             .collect::<Vec<_>>()
             .join(".")
+    }
+
+    pub fn from_test_str(s: &str) -> Self {
+        ObjectName::from(vec![s.into()])
     }
 }
 
@@ -249,6 +282,10 @@ pub enum Expr {
     IsFalse(Box<Expr>),
     /// `IS NOT FALSE` operator
     IsNotFalse(Box<Expr>),
+    /// `IS UNKNOWN` operator
+    IsUnknown(Box<Expr>),
+    /// `IS NOT UNKNOWN` operator
+    IsNotUnknown(Box<Expr>),
     /// `IS DISTINCT FROM` operator
     IsDistinctFrom(Box<Expr>, Box<Expr>),
     /// `IS NOT DISTINCT FROM` operator
@@ -309,6 +346,11 @@ pub enum Expr {
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
     },
+    /// POSITION(<expr> IN <expr>)
+    Position {
+        substring: Box<Expr>,
+        string: Box<Expr>,
+    },
     /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
     Overlay {
         expr: Box<Expr>,
@@ -316,13 +358,14 @@ pub enum Expr {
         start: Box<Expr>,
         count: Option<Box<Expr>>,
     },
-    /// TRIM([BOTH | LEADING | TRAILING] <expr> [FROM <expr>])\
+    /// TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)\
     /// Or\
-    /// TRIM(<expr>)
+    /// TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])
     Trim {
         expr: Box<Expr>,
         // ([BOTH | LEADING | TRAILING], <expr>)
-        trim_where: Option<(TrimWhereField, Box<Expr>)>,
+        trim_where: Option<TrimWhereField>,
+        trim_what: Option<Box<Expr>>,
     },
     /// `expr COLLATE collation`
     Collate {
@@ -333,6 +376,8 @@ pub enum Expr {
     Nested(Box<Expr>),
     /// A literal value, such as string, number, date or NULL
     Value(Value),
+    /// Parameter Symbol e.g. `$1`, `$1::int`
+    Parameter { index: u64 },
     /// A constant of form `<data_type> 'value'`.
     /// This can represent ANSI SQL `DATE`, `TIME`, and `TIMESTAMP` literals (such as `DATE
     /// '2020-01-01'`), as well as constants of other types (a non-standard PostgreSQL extension).
@@ -369,6 +414,12 @@ pub enum Expr {
     Array(Array),
     /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
     ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
+    /// An array range index expression e.g. `(Array[1, 2, 3, 4])[1:3]`
+    ArrayRangeIndex {
+        obj: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+    },
 }
 
 impl fmt::Display for Expr {
@@ -384,6 +435,8 @@ impl fmt::Display for Expr {
             Expr::IsNotTrue(ast) => write!(f, "{} IS NOT TRUE", ast),
             Expr::IsFalse(ast) => write!(f, "{} IS FALSE", ast),
             Expr::IsNotFalse(ast) => write!(f, "{} IS NOT FALSE", ast),
+            Expr::IsUnknown(ast) => write!(f, "{} IS UNKNOWN", ast),
+            Expr::IsNotUnknown(ast) => write!(f, "{} IS NOT UNKNOWN", ast),
             Expr::InList {
                 expr,
                 list,
@@ -439,6 +492,7 @@ impl fmt::Display for Expr {
             Expr::Collate { expr, collation } => write!(f, "{} COLLATE {}", expr, collation),
             Expr::Nested(ast) => write!(f, "({})", ast),
             Expr::Value(v) => write!(f, "{}", v),
+            Expr::Parameter { index } => write!(f, "${}", index),
             Expr::TypedString { data_type, value } => {
                 write!(f, "{}", data_type)?;
                 write!(f, " '{}'", &value::escape_single_quote_string(value))
@@ -518,6 +572,9 @@ impl fmt::Display for Expr {
 
                 write!(f, ")")
             }
+            Expr::Position { substring, string } => {
+                write!(f, "POSITION({} IN {})", substring, string)
+            }
             Expr::Overlay {
                 expr,
                 new_substring,
@@ -536,15 +593,19 @@ impl fmt::Display for Expr {
             }
             Expr::IsDistinctFrom(a, b) => write!(f, "{} IS DISTINCT FROM {}", a, b),
             Expr::IsNotDistinctFrom(a, b) => write!(f, "{} IS NOT DISTINCT FROM {}", a, b),
-            Expr::Trim { expr, trim_where } => {
+            Expr::Trim {
+                expr,
+                trim_where,
+                trim_what,
+            } => {
                 write!(f, "TRIM(")?;
-                if let Some((ident, trim_char)) = trim_where {
-                    write!(f, "{} {} FROM {}", ident, trim_char, expr)?;
-                } else {
-                    write!(f, "{}", expr)?;
+                if let Some(ident) = trim_where {
+                    write!(f, "{} ", ident)?;
                 }
-
-                write!(f, ")")
+                if let Some(trim_char) = trim_what {
+                    write!(f, "{} ", trim_char)?;
+                }
+                write!(f, "FROM {})", expr)
             }
             Expr::Row(exprs) => write!(
                 f,
@@ -558,6 +619,18 @@ impl fmt::Display for Expr {
             ),
             Expr::ArrayIndex { obj, index } => {
                 write!(f, "{}[{}]", obj, index)?;
+                Ok(())
+            }
+            Expr::ArrayRangeIndex { obj, start, end } => {
+                let start_str = match start {
+                    None => "".to_string(),
+                    Some(start) => format!("{}", start),
+                };
+                let end_str = match end {
+                    None => "".to_string(),
+                    Some(end) => format!("{}", end),
+                };
+                write!(f, "{}[{}:{}]", obj, start_str, end_str)?;
                 Ok(())
             }
             Expr::Array(exprs) => write!(f, "{}", exprs),
@@ -612,20 +685,7 @@ pub struct WindowFrame {
     /// indicates the shorthand form (e.g. `ROWS 1 PRECEDING`), which must
     /// behave the same as `end_bound = WindowFrameBound::CurrentRow`.
     pub end_bound: Option<WindowFrameBound>,
-    // TBD: EXCLUDE
-}
-
-impl Default for WindowFrame {
-    /// returns default value for window frame
-    ///
-    /// see <https://www.sqlite.org/windowfunctions.html#frame_specifications>
-    fn default() -> Self {
-        Self {
-            units: WindowFrameUnits::Range,
-            start_bound: WindowFrameBound::Preceding(None),
-            end_bound: None,
-        }
-    }
+    pub exclusion: Option<WindowFrameExclusion>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -684,6 +744,27 @@ impl fmt::Display for WindowFrameBound {
     }
 }
 
+/// Frame exclusion option of [WindowFrame].
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum WindowFrameExclusion {
+    CurrentRow,
+    Group,
+    Ties,
+    NoOthers,
+}
+
+impl fmt::Display for WindowFrameExclusion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WindowFrameExclusion::CurrentRow => f.write_str("EXCLUDE CURRENT ROW"),
+            WindowFrameExclusion::Group => f.write_str("EXCLUDE GROUP"),
+            WindowFrameExclusion::Ties => f.write_str("EXCLUDE TIES"),
+            WindowFrameExclusion::NoOthers => f.write_str("EXCLUDE NO OTHERS"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AddDropSync {
@@ -714,6 +795,10 @@ pub enum ShowObject {
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
     Columns { table: ObjectName },
+    Connection { schema: Option<Ident> },
+    Function { schema: Option<Ident> },
+    Indexes { table: ObjectName },
+    Cluster,
 }
 
 impl fmt::Display for ShowObject {
@@ -744,6 +829,12 @@ impl fmt::Display for ShowObject {
             ShowObject::Source { schema } => write!(f, "SOURCES{}", fmt_schema(schema)),
             ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
+            ShowObject::Connection { schema } => write!(f, "CONNECTIONS{}", fmt_schema(schema)),
+            ShowObject::Function { schema } => write!(f, "FUNCTIONS{}", fmt_schema(schema)),
+            ShowObject::Indexes { table } => write!(f, "INDEXES FROM {}", table),
+            ShowObject::Cluster => {
+                write!(f, "CLUSTERS")
+            }
         }
     }
 }
@@ -902,6 +993,7 @@ pub enum Statement {
     CreateView {
         or_replace: bool,
         materialized: bool,
+        if_not_exists: bool,
         /// View name
         name: ObjectName,
         columns: Vec<Ident>,
@@ -922,6 +1014,10 @@ pub enum Statement {
         with_options: Vec<SqlOption>,
         /// Optional schema of the external source with which the table is created
         source_schema: Option<SourceSchema>,
+        /// The watermark defined on source.
+        source_watermarks: Vec<SourceWatermark>,
+        /// Append only table.
+        append_only: bool,
         /// `AS ( query )`
         query: Option<Box<Query>>,
     },
@@ -932,7 +1028,7 @@ pub enum Statement {
         table_name: ObjectName,
         columns: Vec<OrderByExpr>,
         include: Vec<Ident>,
-        distributed_by: Vec<Ident>,
+        distributed_by: Vec<Expr>,
         unique: bool,
         if_not_exists: bool,
     },
@@ -940,6 +1036,8 @@ pub enum Statement {
     CreateSource { stmt: CreateSourceStatement },
     /// CREATE SINK
     CreateSink { stmt: CreateSinkStatement },
+    /// CREATE CONNECTION
+    CreateConnection { stmt: CreateConnectionStatement },
     /// CREATE FUNCTION
     ///
     /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
@@ -948,7 +1046,7 @@ pub enum Statement {
         temporary: bool,
         name: ObjectName,
         args: Option<Vec<OperateFunctionArg>>,
-        return_type: Option<DataType>,
+        returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
         params: CreateFunctionBody,
     },
@@ -957,6 +1055,31 @@ pub enum Statement {
         /// Table name
         name: ObjectName,
         operation: AlterTableOperation,
+    },
+    /// ALTER INDEX
+    AlterIndex {
+        /// Index name
+        name: ObjectName,
+        operation: AlterIndexOperation,
+    },
+    /// ALTER VIEW
+    AlterView {
+        /// View name
+        name: ObjectName,
+        materialized: bool,
+        operation: AlterViewOperation,
+    },
+    /// ALTER SINK
+    AlterSink {
+        /// Sink name
+        name: ObjectName,
+        operation: AlterSinkOperation,
+    },
+    /// ALTER SOURCE
+    AlterSource {
+        /// Source name
+        name: ObjectName,
+        operation: AlterSourceOperation,
     },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
@@ -1007,6 +1130,11 @@ pub enum Statement {
         modes: Vec<TransactionMode>,
         snapshot: Option<Value>,
         session: bool,
+    },
+    /// `SET [ SESSION | LOCAL ] TIME ZONE { value | 'value' | LOCAL | DEFAULT }`
+    SetTimeZone {
+        local: bool,
+        value: SetTimeZoneValue,
     },
     /// `COMMENT ON ...`
     ///
@@ -1217,7 +1345,7 @@ impl fmt::Display for Statement {
                 temporary,
                 name,
                 args,
-                return_type,
+                returns,
                 params,
             } => {
                 write!(
@@ -1229,8 +1357,8 @@ impl fmt::Display for Statement {
                 if let Some(args) = args {
                     write!(f, "({})", display_comma_separated(args))?;
                 }
-                if let Some(return_type) = return_type {
-                    write!(f, " RETURNS {}", return_type)?;
+                if let Some(return_type) = returns {
+                    write!(f, " {}", return_type)?;
                 }
                 write!(f, "{params}")?;
                 Ok(())
@@ -1238,6 +1366,7 @@ impl fmt::Display for Statement {
             Statement::CreateView {
                 name,
                 or_replace,
+                if_not_exists,
                 columns,
                 query,
                 materialized,
@@ -1246,9 +1375,10 @@ impl fmt::Display for Statement {
             } => {
                 write!(
                     f,
-                    "CREATE {or_replace}{materialized}VIEW {name}",
+                    "CREATE {or_replace}{materialized}VIEW {if_not_exists}{name}",
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
                     materialized = if *materialized { "MATERIALIZED " } else { "" },
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     name = name
                 )?;
                 if let Some(emit_mode) = emit_mode {
@@ -1271,6 +1401,8 @@ impl fmt::Display for Statement {
                 if_not_exists,
                 temporary,
                 source_schema,
+                source_watermarks,
+                append_only,
                 query,
             } => {
                 // We want to allow the following options
@@ -1289,14 +1421,13 @@ impl fmt::Display for Statement {
                     name = name,
                 )?;
                 if !columns.is_empty() || !constraints.is_empty() {
-                    write!(f, " ({}", display_comma_separated(columns))?;
-                    if !columns.is_empty() && !constraints.is_empty() {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{})", display_comma_separated(constraints))?;
+                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks)?)?;
                 } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
+                }
+                if *append_only {
+                    write!(f, " APPEND ONLY")?;
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
@@ -1324,7 +1455,7 @@ impl fmt::Display for Statement {
                 if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 name = name,
                 table_name = table_name,
-                columns = display_separated(columns, ","),
+                columns = display_comma_separated(columns),
                 include = if include.is_empty() {
                     "".to_string()
                 } else {
@@ -1344,8 +1475,21 @@ impl fmt::Display for Statement {
                 stmt,
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
+            Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
+            }
+            Statement::AlterIndex { name, operation } => {
+                write!(f, "ALTER INDEX {} {}", name, operation)
+            }
+            Statement::AlterView { materialized, name, operation } => {
+                write!(f, "ALTER {}VIEW {} {}", if *materialized { "MATERIALIZED " } else { "" }, name, operation)
+            }
+            Statement::AlterSink { name, operation } => {
+                write!(f, "ALTER SINK {} {}", name, operation)
+            }
+            Statement::AlterSource { name, operation } => {
+                write!(f, "ALTER SOURCE {} {}", name, operation)
             }
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {
@@ -1414,6 +1558,14 @@ impl fmt::Display for Statement {
                 if let Some(snapshot_id) = snapshot {
                     write!(f, " SNAPSHOT {}", snapshot_id)?;
                 }
+                Ok(())
+            }
+            Statement::SetTimeZone { local, value } => {
+                write!(f, "SET")?;
+                if *local {
+                    write!(f, " LOCAL")?;
+                }
+                write!(f, " TIME ZONE {}", value)?;
                 Ok(())
             }
             Statement::Commit { chain } => {
@@ -1727,12 +1879,30 @@ impl fmt::Display for GrantObjects {
     }
 }
 
-/// SQL assignment `foo = expr` as used in SQLUpdate
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AssignmentValue {
+    /// An expression, e.g. `foo = 1`
+    Expr(Expr),
+    /// The `DEFAULT` keyword, e.g. `foo = DEFAULT`
+    Default,
+}
+
+impl fmt::Display for AssignmentValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AssignmentValue::Expr(expr) => write!(f, "{}", expr),
+            AssignmentValue::Default => f.write_str("DEFAULT"),
+        }
+    }
+}
+
+/// SQL assignment `foo = { expr | DEFAULT }` as used in SQLUpdate
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Assignment {
     pub id: Vec<Ident>,
-    pub value: Expr,
+    pub value: AssignmentValue,
 }
 
 impl fmt::Display for Assignment {
@@ -1751,8 +1921,8 @@ pub enum FunctionArgExpr {
     ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
     QualifiedWildcard(ObjectName),
-    /// An unqualified `*`
-    Wildcard,
+    /// An unqualified `*` or `* with (columns)`
+    WildcardOrWithExcept(Option<Vec<Expr>>),
 }
 
 impl fmt::Display for FunctionArgExpr {
@@ -1770,7 +1940,19 @@ impl fmt::Display for FunctionArgExpr {
                 )
             }
             FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            FunctionArgExpr::Wildcard => f.write_str("*"),
+            FunctionArgExpr::WildcardOrWithExcept(w) => match w {
+                Some(exprs) => write!(
+                    f,
+                    "EXCEPT ({})",
+                    exprs
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => f.write_str("*"),
+            },
         }
     }
 }
@@ -1812,6 +1994,7 @@ pub struct Function {
     // aggregate functions may contain order_by_clause
     pub order_by: Vec<OrderByExpr>,
     pub filter: Option<Box<Expr>>,
+    pub within_group: Option<Box<OrderByExpr>>,
 }
 
 impl Function {
@@ -1823,6 +2006,7 @@ impl Function {
             distinct: false,
             order_by: vec![],
             filter: None,
+            within_group: None,
         }
     }
 }
@@ -1864,6 +2048,7 @@ pub enum ObjectType {
     Sink,
     Database,
     User,
+    Connection,
 }
 
 impl fmt::Display for ObjectType {
@@ -1878,6 +2063,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
+            ObjectType::Connection => "CONNECTION",
         })
     }
 }
@@ -1902,9 +2088,11 @@ impl ParseTo for ObjectType {
             ObjectType::Database
         } else if parser.parse_keyword(Keyword::USER) {
             ObjectType::User
+        } else if parser.parse_keyword(Keyword::CONNECTION) {
+            ObjectType::Connection
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE, USER or CONNECTION after DROP",
                 parser.peek_token(),
             );
         };
@@ -1938,6 +2126,26 @@ impl fmt::Display for EmitMode {
             EmitMode::Immediately => "IMMEDIATELY",
             EmitMode::OnWindowClose => "ON WINDOW CLOSE",
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SetTimeZoneValue {
+    Ident(Ident),
+    Literal(Value),
+    Local,
+    Default,
+}
+
+impl fmt::Display for SetTimeZoneValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SetTimeZoneValue::Ident(ident) => write!(f, "{}", ident),
+            SetTimeZoneValue::Literal(value) => write!(f, "{}", value),
+            SetTimeZoneValue::Local => f.write_str("LOCAL"),
+            SetTimeZoneValue::Default => f.write_str("DEFAULT"),
+        }
     }
 }
 
@@ -2154,6 +2362,41 @@ impl fmt::Display for FunctionDefinition {
     }
 }
 
+/// Return types of a function.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateFunctionReturns {
+    /// RETURNS rettype
+    Value(DataType),
+    /// RETURNS TABLE ( column_name column_type [, ...] )
+    Table(Vec<TableColumnDef>),
+}
+
+impl fmt::Display for CreateFunctionReturns {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Value(data_type) => write!(f, "RETURNS {}", data_type),
+            Self::Table(columns) => {
+                write!(f, "RETURNS TABLE ({})", display_comma_separated(columns))
+            }
+        }
+    }
+}
+
+/// Table column definition
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct TableColumnDef {
+    pub name: Ident,
+    pub data_type: DataType,
+}
+
+impl fmt::Display for TableColumnDef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.name, self.data_type)
+    }
+}
+
 /// Postgres specific feature.
 ///
 /// See [Postgresdocs](https://www.postgresql.org/docs/15/sql-createfunction.html)
@@ -2171,6 +2414,8 @@ pub struct CreateFunctionBody {
     pub as_: Option<FunctionDefinition>,
     /// RETURN expression
     pub return_: Option<Expr>,
+    /// USING ...
+    pub using: Option<CreateFunctionUsing>,
 }
 
 impl fmt::Display for CreateFunctionBody {
@@ -2187,7 +2432,25 @@ impl fmt::Display for CreateFunctionBody {
         if let Some(expr) = &self.return_ {
             write!(f, " RETURN {expr}")?;
         }
+        if let Some(using) = &self.using {
+            write!(f, " {using}")?;
+        }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateFunctionUsing {
+    Link(String),
+}
+
+impl fmt::Display for CreateFunctionUsing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "USING ")?;
+        match self {
+            CreateFunctionUsing::Link(uri) => write!(f, "LINK '{uri}'"),
+        }
     }
 }
 
@@ -2215,36 +2478,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_window_frame_default() {
-        let window_frame = WindowFrame::default();
-        assert_eq!(WindowFrameBound::Preceding(None), window_frame.start_bound);
-    }
-
-    #[test]
     fn test_grouping_sets_display() {
         // a and b in different group
         let grouping_sets = Expr::GroupingSets(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
-            vec![Expr::Identifier(Ident::new("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("GROUPING SETS ((a), (b))", format!("{}", grouping_sets));
 
         // a and b in the same group
         let grouping_sets = Expr::GroupingSets(vec![vec![
-            Expr::Identifier(Ident::new("a")),
-            Expr::Identifier(Ident::new("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("GROUPING SETS ((a, b))", format!("{}", grouping_sets));
 
         // (a, b) and (c, d) in different group
         let grouping_sets = Expr::GroupingSets(vec![
             vec![
-                Expr::Identifier(Ident::new("a")),
-                Expr::Identifier(Ident::new("b")),
+                Expr::Identifier(Ident::new_unchecked("a")),
+                Expr::Identifier(Ident::new_unchecked("b")),
             ],
             vec![
-                Expr::Identifier(Ident::new("c")),
-                Expr::Identifier(Ident::new("d")),
+                Expr::Identifier(Ident::new_unchecked("c")),
+                Expr::Identifier(Ident::new_unchecked("d")),
             ],
         ]);
         assert_eq!(
@@ -2255,56 +2512,56 @@ mod tests {
 
     #[test]
     fn test_rollup_display() {
-        let rollup = Expr::Rollup(vec![vec![Expr::Identifier(Ident::new("a"))]]);
+        let rollup = Expr::Rollup(vec![vec![Expr::Identifier(Ident::new_unchecked("a"))]]);
         assert_eq!("ROLLUP (a)", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![vec![
-            Expr::Identifier(Ident::new("a")),
-            Expr::Identifier(Ident::new("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("ROLLUP ((a, b))", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
-            vec![Expr::Identifier(Ident::new("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("ROLLUP (a, b)", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
             vec![
-                Expr::Identifier(Ident::new("b")),
-                Expr::Identifier(Ident::new("c")),
+                Expr::Identifier(Ident::new_unchecked("b")),
+                Expr::Identifier(Ident::new_unchecked("c")),
             ],
-            vec![Expr::Identifier(Ident::new("d"))],
+            vec![Expr::Identifier(Ident::new_unchecked("d"))],
         ]);
         assert_eq!("ROLLUP (a, (b, c), d)", format!("{}", rollup));
     }
 
     #[test]
     fn test_cube_display() {
-        let cube = Expr::Cube(vec![vec![Expr::Identifier(Ident::new("a"))]]);
+        let cube = Expr::Cube(vec![vec![Expr::Identifier(Ident::new_unchecked("a"))]]);
         assert_eq!("CUBE (a)", format!("{}", cube));
 
         let cube = Expr::Cube(vec![vec![
-            Expr::Identifier(Ident::new("a")),
-            Expr::Identifier(Ident::new("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("CUBE ((a, b))", format!("{}", cube));
 
         let cube = Expr::Cube(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
-            vec![Expr::Identifier(Ident::new("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("CUBE (a, b)", format!("{}", cube));
 
         let cube = Expr::Cube(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
             vec![
-                Expr::Identifier(Ident::new("b")),
-                Expr::Identifier(Ident::new("c")),
+                Expr::Identifier(Ident::new_unchecked("b")),
+                Expr::Identifier(Ident::new_unchecked("c")),
             ],
-            vec![Expr::Identifier(Ident::new("d"))],
+            vec![Expr::Identifier(Ident::new_unchecked("d"))],
         ]);
         assert_eq!("CUBE (a, (b, c), d)", format!("{}", cube));
     }
@@ -2312,7 +2569,7 @@ mod tests {
     #[test]
     fn test_array_index_display() {
         let array_index = Expr::ArrayIndex {
-            obj: Box::new(Expr::Identifier(Ident::new("v1"))),
+            obj: Box::new(Expr::Identifier(Ident::new_unchecked("v1"))),
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1]", format!("{}", array_index));

@@ -19,40 +19,42 @@
 #![feature(let_chains)]
 #![feature(result_option_inspect)]
 #![feature(lint_reasons)]
+#![feature(impl_trait_in_assoc_type)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
 extern crate tracing;
 
 pub mod memory_management;
+pub mod observer;
 pub mod rpc;
 pub mod server;
+pub mod telemetry;
 
-use clap::Parser;
-use risingwave_common::config::{true_if_present, AsyncStackTraceOption, Flag};
+use clap::{Parser, ValueEnum};
+use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
-use risingwave_common_proc_macro::OverrideConfig;
+use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The worker node that executes query plans and handles data ingestion and output"
+)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(
-        long,
-        alias = "host",
-        env = "RW_LISTEN_ADDR",
-        default_value = "127.0.0.1:5688"
-    )]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5688")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long, alias = "client-address", env = "RW_ADVERTISE_ADDR", long)]
+    #[clap(long, env = "RW_ADVERTISE_ADDR", long)]
     pub advertise_addr: Option<String>,
 
     #[clap(
@@ -62,21 +64,16 @@ pub struct ComputeNodeOpts {
     )]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, env = "RW_META_ADDRESS", default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
     /// Endpoint of the connector node
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
-    /// One of:
-    /// 1. `hummock+{object_store}` where `object_store`
-    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
-    /// `memory` or `memory-shared`.
-    /// 2. `in-memory`
-    /// 3. `sled://{path}`
-    #[clap(long, env = "RW_STATE_STORE")]
-    pub state_store: Option<String>,
+    /// Payload format of connector sink rpc
+    #[clap(long, env = "RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT")]
+    pub connector_rpc_sink_payload_format: Option<String>,
 
     /// The path of `risingwave.toml` configuration file.
     ///
@@ -91,6 +88,10 @@ pub struct ComputeNodeOpts {
     /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     pub parallelism: usize,
+
+    /// Decides whether the compute node can be used for streaming and serving.
+    #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
+    pub role: Role,
 
     #[clap(flatten)]
     override_config: OverrideConfigOpts,
@@ -112,15 +113,49 @@ struct OverrideConfigOpts {
     #[override_opts(path = storage.file_cache.dir)]
     pub file_cache_dir: Option<String>,
 
-    /// Enable reporting tracing information to jaeger.
-    #[clap(long, env = "RW_ENABLE_JAEGER_TRACING", parse(from_flag = true_if_present))]
-    #[override_opts(path = streaming.enable_jaeger_tracing)]
-    pub enable_jaeger_tracing: Flag,
-
-    /// Enable async stack tracing for risectl.
-    #[clap(long, env = "RW_ASYNC_STACK_TRACE", arg_enum)]
+    /// Enable async stack tracing through `await-tree` for risectl.
+    #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
+
+    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
+    pub object_store_streaming_read_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_UPLOAD_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_streaming_upload_timeout_ms)]
+    pub object_store_streaming_upload_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_UPLOAD_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_upload_timeout_ms)]
+    pub object_store_upload_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_READ_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_read_timeout_ms)]
+    pub object_store_read_timeout_ms: Option<u64>,
+}
+
+#[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
+pub enum Role {
+    Serving,
+    Streaming,
+    #[default]
+    Both,
+}
+
+impl Role {
+    pub fn for_streaming(&self) -> bool {
+        match self {
+            Role::Serving => false,
+            Role::Streaming => true,
+            Role::Both => true,
+        }
+    }
+
+    pub fn for_serving(&self) -> bool {
+        match self {
+            Role::Serving => true,
+            Role::Streaming => false,
+            Role::Both => true,
+        }
+    }
 }
 
 fn validate_opts(opts: &ComputeNodeOpts) {
@@ -151,12 +186,14 @@ use std::pin::Pin;
 use crate::server::compute_node_serve;
 
 /// Start compute node
-pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: ComputeNodeOpts,
+    registry: prometheus::Registry,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("options: {:?}", opts);
-        warn_future_deprecate_options(&opts);
         validate_opts(&opts);
 
         let listen_addr = opts.listen_addr.parse().unwrap();
@@ -174,7 +211,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         tracing::info!("advertise addr is {}", advertise_addr);
 
         let (join_handle_vec, _shutdown_send) =
-            compute_node_serve(listen_addr, advertise_addr, opts).await;
+            compute_node_serve(listen_addr, advertise_addr, opts, registry).await;
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();
@@ -190,8 +227,6 @@ fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
 }
 
-fn warn_future_deprecate_options(opts: &ComputeNodeOpts) {
-    if opts.state_store.is_some() {
-        tracing::warn!("`--state-store` will not be accepted by compute node in the next release. Please consider moving this argument to the meta node.");
-    }
+fn default_role() -> Role {
+    Role::Both
 }

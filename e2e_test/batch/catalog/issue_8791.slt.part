@@ -1,0 +1,16 @@
+# UNION and other complex queries should also be in local mode
+query I
+SELECT name FROM pg_catalog.pg_settings union select 'a';
+----
+a
+
+query T
+SELECT name FROM  (SELECT pg_catalog.lower(name) AS name FROM pg_catalog.pg_settings UNION ALL SELECT 'session authorization'   UNION ALL SELECT 'all') ss  WHERE substring(name,1,0)=''
+LIMIT 1000
+----
+session authorization
+all
+
+query I
+with q as ( select name FROM pg_catalog.pg_settings ) select * from q;
+----

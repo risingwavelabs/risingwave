@@ -14,19 +14,22 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 #![feature(let_chains)]
-#![feature(fn_traits)]
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
 #![feature(iterator_try_collect)]
 #![feature(exclusive_range_pattern)]
-#![feature(once_cell)]
-#![feature(try_blocks)]
+#![feature(lazy_cell)]
+#![feature(round_ties_even)]
+#![feature(generators)]
 
+pub mod agg;
 mod error;
 pub mod expr;
+pub mod function;
 pub mod sig;
 pub mod table_function;
 pub mod vector_op;
 
 pub use error::{ExprError, Result};
 use risingwave_common::{bail, ensure};
+pub use risingwave_expr_macro::*;

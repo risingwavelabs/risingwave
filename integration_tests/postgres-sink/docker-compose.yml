@@ -1,0 +1,96 @@
+---
+version: "3"
+services:
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
+  datagen:
+    build: ../datagen
+    depends_on: [message_queue]
+    command:
+      - /bin/sh
+      - -c
+      - /datagen --mode clickstream --qps 2 kafka --brokers message_queue:29092
+    restart: always
+    container_name: datagen
+  # Use this command to connect to the DB from outside the container:
+  #   docker exec postgres psql --username=myuser --dbname=mydb
+  postgres:
+    image: postgres
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=123456
+      - POSTGRES_DB=mydb
+    ports:
+      - 5432:5432
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready --username=myuser --dbname=mydb" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: [ "postgres", "-c", "wal_level=logical" ]
+    restart: always
+    container_name: postgres
+  connector-node:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: connector-node
+  prepare_postgres:
+    image: postgres
+    depends_on: 
+      - postgres
+    command:
+      - /bin/sh
+      - -c
+      - "psql postgresql://myuser:123456@postgres:5432/mydb < postgres_prepare.sql"
+    volumes:
+      - "./postgres_prepare.sql:/postgres_prepare.sql"      
+    container_name: prepare_postgres
+    restart: on-failure
+volumes:
+  compute-node-0:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  message_queue:
+    external: false
+name: risingwave-compose

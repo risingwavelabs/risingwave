@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Bytes;
 use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
 
+use crate::common::UpsertMessage;
 use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
 
@@ -25,11 +25,30 @@ pub struct KafkaMeta {
     pub timestamp: Option<i64>,
 }
 
+impl SourceMessage {
+    pub fn from_kafka_message_upsert(message: BorrowedMessage<'_>) -> Self {
+        let encoded = bincode::serialize(&UpsertMessage {
+            primary_key: message.key().unwrap_or_default().into(),
+            record: message.payload().unwrap_or_default().into(),
+        })
+        .unwrap();
+        SourceMessage {
+            // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
+            payload: Some(encoded),
+            offset: message.offset().to_string(),
+            split_id: message.partition().to_string().into(),
+            meta: SourceMeta::Kafka(KafkaMeta {
+                timestamp: message.timestamp().to_millis(),
+            }),
+        }
+    }
+}
+
 impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
     fn from(message: BorrowedMessage<'a>) -> Self {
         SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
-            payload: message.payload().map(Bytes::copy_from_slice),
+            payload: message.payload().map(|p| p.to_vec()),
             offset: message.offset().to_string(),
             split_id: message.partition().to_string().into(),
             meta: SourceMeta::Kafka(KafkaMeta {

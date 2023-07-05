@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
-use risingwave_pb::ProstFieldNotFound;
+use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 
 /// A specialized Result type for expression operations.
@@ -40,6 +40,12 @@ pub enum ExprError {
     #[error("Numeric out of range")]
     NumericOutOfRange,
 
+    #[error("Numeric out of range: underflow")]
+    NumericUnderflow,
+
+    #[error("Numeric out of range: overflow")]
+    NumericOverflow,
+
     #[error("Division by zero")]
     DivisionByZero,
 
@@ -60,6 +66,15 @@ pub enum ExprError {
 
     #[error("UDF error: {0}")]
     Udf(#[from] risingwave_udf::Error),
+
+    #[error("not a constant")]
+    NotConstant,
+
+    #[error("Context not found")]
+    Context,
+
+    #[error("field name must not be null")]
+    FieldNameNull,
 }
 
 impl From<ExprError> for RwError {
@@ -83,8 +98,8 @@ impl From<chrono::ParseError> for ExprError {
     }
 }
 
-impl From<ProstFieldNotFound> for ExprError {
-    fn from(err: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for ExprError {
+    fn from(err: PbFieldNotFound) -> Self {
         Self::Internal(anyhow::anyhow!(
             "Failed to decode prost: field not found `{}`",
             err.0

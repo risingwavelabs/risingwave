@@ -30,7 +30,7 @@ import {
 } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { dagStratify } from "d3-dag"
-import { toLower } from "lodash"
+import _ from "lodash"
 import Head from "next/head"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
@@ -40,6 +40,7 @@ import Title from "../components/Title"
 import { ActorBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
+import useFetch from "./api/fetch"
 import { getFragments, getStreamingJobs } from "./api/streaming"
 
 interface DispatcherNode {
@@ -71,9 +72,19 @@ function buildPlanNodeDependency(
 
   let dispatcherName = "noDispatcher"
   if (firstActor.dispatcher.length > 1) {
-    dispatcherName = "multipleDispatchers"
+    if (
+      firstActor.dispatcher.every(
+        (d) => d.type === firstActor.dispatcher[0].type
+      )
+    ) {
+      dispatcherName = `${_.camelCase(
+        firstActor.dispatcher[0].type
+      )}Dispatchers`
+    } else {
+      dispatcherName = "multipleDispatchers"
+    }
   } else if (firstActor.dispatcher.length === 1) {
-    dispatcherName = `${toLower(firstActor.dispatcher[0].type)}Dispatcher`
+    dispatcherName = `${_.camelCase(firstActor.dispatcher[0].type)}Dispatcher`
   }
 
   const dispatcherNode = fragment.actors.reduce((obj, actor) => {
@@ -124,32 +135,6 @@ function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
 }
 
 const SIDEBAR_WIDTH = 200
-
-function useFetch<T>(fetchFn: () => Promise<T>) {
-  const [response, setResponse] = useState<T>()
-  const toast = useToast()
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await fetchFn()
-        setResponse(res)
-      } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
-      }
-    }
-    fetchData()
-  }, [toast, fetchFn])
-
-  return { response }
-}
 
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)

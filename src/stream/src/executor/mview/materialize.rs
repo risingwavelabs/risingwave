@@ -14,28 +14,34 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use enum_as_inner::EnumAsInner;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
-use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::row_serde::OrderedRowSerde;
+use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::StateStore;
 
-use crate::cache::{new_unbounded, ExecutorCache};
-use crate::common::table::state_table::StateTable;
+use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
+use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
     Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
@@ -43,10 +49,10 @@ use crate::executor::{
 use crate::task::AtomicU64Ref;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
-pub struct MaterializeExecutor<S: StateStore> {
+pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     input: BoxedExecutor,
 
-    state_table: StateTable<S>,
+    state_table: StateTableInner<S, SD>,
 
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
@@ -55,11 +61,12 @@ pub struct MaterializeExecutor<S: StateStore> {
 
     info: ExecutorInfo,
 
-    materialize_cache: MaterializeCache,
-    handle_pk_conflict: bool,
+    materialize_cache: MaterializeCache<SD>,
+
+    conflict_behavior: ConflictBehavior,
 }
 
-impl<S: StateStore> MaterializeExecutor<S> {
+impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
     /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
@@ -67,19 +74,32 @@ impl<S: StateStore> MaterializeExecutor<S> {
     pub async fn new(
         input: BoxedExecutor,
         store: S,
-        key: Vec<OrderPair>,
+        key: Vec<ColumnOrder>,
         executor_id: u64,
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
         watermark_epoch: AtomicU64Ref,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
+        let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_index).collect();
 
         let schema = input.schema().clone();
 
-        let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes).await;
+        let state_table = if table_catalog.version.is_some() {
+            // TODO: If we do some `Delete` after schema change, we cannot ensure the encoded value
+            // with the new version of serializer is the same as the old one, even if they can be
+            // decoded into the same value. The table is now performing consistency check on the raw
+            // bytes, so we need to turn off the check here. We may turn it on if we can compare the
+            // decoded row.
+            StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await
+        } else {
+            StateTableInner::from_table_catalog(table_catalog, store, vnodes).await
+        };
+
+        let metrics_info =
+            MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
 
         Self {
             input,
@@ -91,24 +111,105 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch),
-            handle_pk_conflict,
+            materialize_cache: MaterializeCache::new(watermark_epoch, metrics_info),
+            conflict_behavior,
         }
     }
 
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(mut self) {
+        let data_types = self.schema().data_types().clone();
+        let mut input = self.input.execute();
+
+        let barrier = expect_first_barrier(&mut input).await?;
+        self.state_table.init_epoch(barrier.epoch);
+
+        // The first barrier message should be propagated.
+        yield Message::Barrier(barrier);
+
+        #[for_await]
+        for msg in input {
+            let msg = msg?;
+            self.materialize_cache.evict();
+
+            yield match msg {
+                Message::Watermark(w) => Message::Watermark(w),
+                Message::Chunk(chunk) => {
+                    match self.conflict_behavior {
+                        ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
+                            // create MaterializeBuffer from chunk
+                            let buffer = MaterializeBuffer::fill_buffer_from_chunk(
+                                chunk,
+                                self.state_table.value_indices(),
+                                self.state_table.pk_indices(),
+                                self.state_table.pk_serde(),
+                            );
+
+                            if buffer.is_empty() {
+                                // empty chunk
+                                continue;
+                            }
+
+                            let fixed_changes = self
+                                .materialize_cache
+                                .handle_conflict(buffer, &self.state_table, &self.conflict_behavior)
+                                .await?;
+
+                            // TODO(st1page): when materialize partial columns(), we should
+                            // construct some columns in the pk
+                            if self.state_table.value_indices().is_some() {
+                                panic!("materialize executor with data check can not handle only materialize partial columns")
+                            }
+
+                            match generate_output(fixed_changes, data_types.clone())? {
+                                Some(output_chunk) => {
+                                    self.state_table.write_chunk(output_chunk.clone());
+                                    Message::Chunk(output_chunk)
+                                }
+                                None => continue,
+                            }
+                        }
+
+                        ConflictBehavior::NoCheck => {
+                            self.state_table.write_chunk(chunk.clone());
+                            Message::Chunk(chunk)
+                        }
+                    }
+                }
+                Message::Barrier(b) => {
+                    self.state_table.commit(b.epoch).await?;
+
+                    // Update the vnode bitmap for the state table if asked.
+                    if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
+                        let (_, cache_may_stale) =
+                            self.state_table.update_vnode_bitmap(vnode_bitmap);
+
+                        if cache_may_stale {
+                            self.materialize_cache.data.clear();
+                        }
+                    }
+                    self.materialize_cache.data.update_epoch(b.epoch.curr);
+                    Message::Barrier(b)
+                }
+            }
+        }
+    }
+}
+
+impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     /// Create a new `MaterializeExecutor` without distribution info for test purpose.
     #[allow(clippy::too_many_arguments)]
     pub async fn for_test(
         input: BoxedExecutor,
         store: S,
         table_id: TableId,
-        keys: Vec<OrderPair>,
+        keys: Vec<ColumnOrder>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         watermark_epoch: AtomicU64Ref,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
     ) -> Self {
-        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
+        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_index).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
         let columns = column_ids
@@ -117,7 +218,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
 
-        let state_table = StateTable::new_without_distribution(
+        let state_table = StateTableInner::new_without_distribution(
             store,
             table_id,
             columns,
@@ -136,83 +237,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch),
-            handle_pk_conflict,
-        }
-    }
-
-    pub fn handle_conflict(&mut self) {
-        self.handle_pk_conflict = true;
-    }
-
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self) {
-        let data_types = self.schema().data_types().clone();
-        let mut input = self.input.execute();
-
-        let barrier = expect_first_barrier(&mut input).await?;
-        self.state_table.init_epoch(barrier.epoch);
-
-        // The first barrier message should be propagated.
-        yield Message::Barrier(barrier);
-
-        #[for_await]
-        for msg in input {
-            let msg = msg?;
-            yield match msg {
-                Message::Watermark(w) => Message::Watermark(w),
-                Message::Chunk(chunk) => {
-                    match self.handle_pk_conflict {
-                        true => {
-                            // create MaterializeBuffer from chunk
-                            let buffer = MaterializeBuffer::fill_buffer_from_chunk(
-                                chunk,
-                                self.state_table.value_indices(),
-                                self.state_table.pk_indices(),
-                                self.state_table.pk_serde(),
-                            );
-
-                            if buffer.is_empty() {
-                                // empty chunk
-                                continue;
-                            }
-
-                            let fixed_changes = self
-                                .materialize_cache
-                                .apply_changes(buffer, &self.state_table)
-                                .await?;
-
-                            // TODO(st1page): when materialize partial columns(), we should
-                            // construct some columns in the pk
-                            if self.state_table.value_indices().is_some() {
-                                panic!("materialize executor with data check can not handle only materialize partial columns")
-                            }
-
-                            match generate_output(fixed_changes, data_types.clone())? {
-                                Some(output_chunk) => {
-                                    self.state_table.write_chunk(output_chunk.clone());
-                                    Message::Chunk(output_chunk)
-                                }
-                                None => continue,
-                            }
-                        }
-                        false => {
-                            self.state_table.write_chunk(chunk.clone());
-                            Message::Chunk(chunk)
-                        }
-                    }
-                }
-                Message::Barrier(b) => {
-                    self.state_table.commit(b.epoch).await?;
-
-                    // Update the vnode bitmap for the state table if asked.
-                    if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
-                        let _ = self.state_table.update_vnode_bitmap(vnode_bitmap);
-                    }
-                    self.materialize_cache.evict();
-                    Message::Barrier(b)
-                }
-            }
+            materialize_cache: MaterializeCache::new(watermark_epoch, MetricsInfo::for_test()),
+            conflict_behavior,
         }
     }
 }
@@ -293,7 +319,7 @@ impl MaterializeBuffer {
         let key_chunk = data_chunk.reorder_columns(pk_indices);
         key_chunk
             .rows_with_holes()
-            .zip_eq_debug(pks.iter_mut())
+            .zip_eq_fast(pks.iter_mut())
             .for_each(|(r, vnode_and_pk)| {
                 if let Some(r) = r {
                     pk_serde.serialize(r, vnode_and_pk);
@@ -373,7 +399,7 @@ impl MaterializeBuffer {
         self.buffer
     }
 }
-impl<S: StateStore> Executor for MaterializeExecutor<S> {
+impl<S: StateStore, SD: ValueRowSerde> Executor for MaterializeExecutor<S, SD> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -395,7 +421,7 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
     }
 }
 
-impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
+impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S, SD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
             .field("input info", &self.info())
@@ -405,57 +431,153 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
 }
 
 /// A cache for materialize executors.
-pub struct MaterializeCache {
-    data: ExecutorCache<Vec<u8>, Option<CompactedRow>>,
+pub struct MaterializeCache<SD> {
+    data: ManagedLruCache<Vec<u8>, CacheValue>,
+    metrics_info: MetricsInfo,
+    _serde: PhantomData<SD>,
 }
 
-impl MaterializeCache {
-    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
-        let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
-        Self { data: cache }
+#[derive(EnumAsInner, EstimateSize)]
+pub enum CacheValue {
+    Overwrite(Option<CompactedRow>),
+    Ignore(Option<EmptyValue>),
+}
+
+type EmptyValue = ();
+
+impl<SD: ValueRowSerde> MaterializeCache<SD> {
+    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = new_unbounded(watermark_epoch, metrics_info.clone());
+        Self {
+            data: cache,
+            metrics_info,
+            _serde: PhantomData,
+        }
     }
 
-    pub async fn apply_changes<'a, S: StateStore>(
+    pub async fn handle_conflict<'a, S: StateStore>(
         &mut self,
-        changes: MaterializeBuffer,
-        table: &StateTable<S>,
+        buffer: MaterializeBuffer,
+        table: &StateTableInner<S, SD>,
+        conflict_behavior: &ConflictBehavior,
     ) -> StreamExecutorResult<Vec<(Vec<u8>, KeyOp)>> {
         // fill cache
-        self.fetch_keys(changes.keys().map(|v| v.as_ref()), table)
+        self.fetch_keys(buffer.keys().map(|v| v.as_ref()), table, conflict_behavior)
             .await?;
 
         let mut fixed_changes = vec![];
-        // handle pk conflict
-        for (key, row_op) in changes.into_parts() {
+        for (key, row_op) in buffer.into_parts() {
+            let mut update_cache = false;
             match row_op {
                 KeyOp::Insert(new_row) => {
-                    match self.force_get(&key) {
-                        Some(old_row) => fixed_changes.push((
-                            key.clone(),
-                            KeyOp::Update((old_row.row.clone(), new_row.clone())),
-                        )),
-                        None => fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone()))),
+                    match conflict_behavior {
+                        ConflictBehavior::Overwrite => {
+                            match self.force_get(&key).as_overwrite().unwrap() {
+                                Some(old_row) => fixed_changes.push((
+                                    key.clone(),
+                                    KeyOp::Update((old_row.row.clone(), new_row.clone())),
+                                )),
+                                None => fixed_changes
+                                    .push((key.clone(), KeyOp::Insert(new_row.clone()))),
+                            };
+                            update_cache = true;
+                        }
+                        ConflictBehavior::IgnoreConflict => {
+                            match self.force_get(&key).as_ignore().unwrap() {
+                                Some(_) => (),
+                                None => {
+                                    fixed_changes
+                                        .push((key.clone(), KeyOp::Insert(new_row.clone())));
+                                    update_cache = true;
+                                }
+                            };
+                        }
+                        _ => unreachable!(),
                     };
-                    self.put(key, Some(CompactedRow { row: new_row }));
+
+                    if update_cache {
+                        match conflict_behavior {
+                            ConflictBehavior::Overwrite => {
+                                self.data.push(
+                                    key,
+                                    CacheValue::Overwrite(Some(CompactedRow { row: new_row })),
+                                );
+                            }
+                            ConflictBehavior::IgnoreConflict => {
+                                self.data.push(key, CacheValue::Ignore(Some(())));
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
                 }
                 KeyOp::Delete(_) => {
-                    match self.force_get(&key) {
-                        Some(old_row) => {
-                            fixed_changes.push((key.clone(), KeyOp::Delete(old_row.row.clone())));
+                    match conflict_behavior {
+                        ConflictBehavior::Overwrite => {
+                            match self.force_get(&key).as_overwrite().unwrap() {
+                                Some(old_row) => {
+                                    fixed_changes
+                                        .push((key.clone(), KeyOp::Delete(old_row.row.clone())));
+                                }
+                                None => (), // delete a nonexistent value
+                            };
+                            update_cache = true;
                         }
-                        None => (), // delete a nonexistent value
+                        ConflictBehavior::IgnoreConflict => (),
+                        _ => unreachable!(),
                     };
-                    self.put(key, None);
+
+                    if update_cache {
+                        match conflict_behavior {
+                            ConflictBehavior::Overwrite => {
+                                self.data.push(key, CacheValue::Overwrite(None));
+                            }
+                            ConflictBehavior::IgnoreConflict => {
+                                self.data.push(key, CacheValue::Ignore(Some(())));
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
                 }
                 KeyOp::Update((_, new_row)) => {
-                    match self.force_get(&key) {
-                        Some(old_row) => fixed_changes.push((
-                            key.clone(),
-                            KeyOp::Update((old_row.row.clone(), new_row.clone())),
-                        )),
-                        None => fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone()))),
+                    match conflict_behavior {
+                        ConflictBehavior::Overwrite => {
+                            match self.force_get(&key).as_overwrite().unwrap() {
+                                Some(old_row) => fixed_changes.push((
+                                    key.clone(),
+                                    KeyOp::Update((old_row.row.clone(), new_row.clone())),
+                                )),
+                                None => fixed_changes
+                                    .push((key.clone(), KeyOp::Insert(new_row.clone()))),
+                            }
+                            update_cache = true;
+                        }
+                        ConflictBehavior::IgnoreConflict => {
+                            match self.force_get(&key).as_ignore().unwrap() {
+                                Some(_) => (),
+                                None => {
+                                    fixed_changes
+                                        .push((key.clone(), KeyOp::Insert(new_row.clone())));
+                                    update_cache = true;
+                                }
+                            };
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    if update_cache {
+                        match conflict_behavior {
+                            ConflictBehavior::Overwrite => {
+                                self.data.push(
+                                    key,
+                                    CacheValue::Overwrite(Some(CompactedRow { row: new_row })),
+                                );
+                            }
+                            ConflictBehavior::IgnoreConflict => {
+                                self.data.push(key, CacheValue::Ignore(Some(())));
+                            }
+                            _ => unreachable!(),
+                        }
                     }
-                    self.put(key, Some(CompactedRow { row: new_row }));
                 }
             }
         }
@@ -465,14 +587,24 @@ impl MaterializeCache {
     async fn fetch_keys<'a, S: StateStore>(
         &mut self,
         keys: impl Iterator<Item = &'a [u8]>,
-        table: &StateTable<S>,
+        table: &StateTableInner<S, SD>,
+        conflict_behavior: &ConflictBehavior,
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
+            self.metrics_info
+                .metrics
+                .materialize_cache_total_count
+                .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
+                .inc();
             if self.data.contains(key) {
+                self.metrics_info
+                    .metrics
+                    .materialize_cache_hit_count
+                    .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
+                    .inc();
                 continue;
             }
-
             futures.push(async {
                 let key_row = table.pk_serde().deserialize(key).unwrap();
                 (key.to_vec(), table.get_compacted_row(&key_row).await)
@@ -482,13 +614,19 @@ impl MaterializeCache {
         let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {
             let (key, value) = result;
-            self.data.push(key, value?);
+            match conflict_behavior {
+                ConflictBehavior::Overwrite => self.data.push(key, CacheValue::Overwrite(value?)),
+                ConflictBehavior::IgnoreConflict => {
+                    self.data.push(key, CacheValue::Ignore(value?.map(|_| ())))
+                }
+                _ => unreachable!(),
+            };
         }
 
         Ok(())
     }
 
-    pub fn force_get(&mut self, key: &[u8]) -> &Option<CompactedRow> {
+    pub fn force_get(&mut self, key: &[u8]) -> &CacheValue {
         self.data.get(key).unwrap_or_else(|| {
             panic!(
                 "the key {:?} has not been fetched in the materialize executor's cache ",
@@ -497,14 +635,11 @@ impl MaterializeCache {
         })
     }
 
-    pub fn put(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {
-        self.data.push(key, value);
-    }
-
     fn evict(&mut self) {
         self.data.evict()
     }
 }
+
 #[cfg(test)]
 mod tests {
 
@@ -512,10 +647,10 @@ mod tests {
 
     use futures::stream::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -561,7 +696,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -581,11 +716,11 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                false,
+                ConflictBehavior::NoCheck,
             )
             .await,
         )
@@ -678,7 +813,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -698,11 +833,11 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                true,
+                ConflictBehavior::Overwrite,
             )
             .await,
         )
@@ -811,7 +946,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -831,11 +966,11 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                true,
+                ConflictBehavior::Overwrite,
             )
             .await,
         )
@@ -928,6 +1063,326 @@ mod tests {
                 assert_eq!(
                     row,
                     Some(OwnedRow::new(vec![Some(2_i32.into()), Some(8_i32.into())]))
+                );
+
+                // check update wrong pk, should become insert
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(9_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(9_i32.into()), Some(1_i32.into())]))
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ignore_insert_conflict() {
+        // Prepare storage and memtable.
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        // Two columns of int32 type, the first column is PK.
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let column_ids = vec![0.into(), 1.into()];
+
+        // test double insert one pk, the latter needs to override the former.
+        let chunk1 = StreamChunk::from_pretty(
+            " i i
+            + 1 3
+            + 1 4
+            + 2 5
+            + 3 6",
+        );
+
+        let chunk2 = StreamChunk::from_pretty(
+            " i i
+            + 1 5
+            + 2 6",
+        );
+
+        // test delete wrong value, delete inexistent pk
+        let chunk3 = StreamChunk::from_pretty(
+            " i i
+            + 1 6",
+        );
+
+        // Prepare stream executors.
+        let source = MockSource::with_messages(
+            schema.clone(),
+            PkIndices::new(),
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(chunk1),
+                Message::Chunk(chunk2),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Chunk(chunk3),
+                Message::Barrier(Barrier::new_test_barrier(3)),
+            ],
+        );
+
+        let order_types = vec![OrderType::ascending()];
+        let column_descs = vec![
+            ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+            ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ];
+
+        let table = StorageTable::for_test(
+            memory_state_store.clone(),
+            table_id,
+            column_descs,
+            order_types,
+            vec![0],
+            vec![0, 1],
+        );
+
+        let mut materialize_executor = Box::new(
+            MaterializeExecutor::for_test(
+                Box::new(source),
+                memory_state_store,
+                table_id,
+                vec![ColumnOrder::new(0, OrderType::ascending())],
+                column_ids,
+                1,
+                Arc::new(AtomicU64::new(0)),
+                ConflictBehavior::IgnoreConflict,
+            )
+            .await,
+        )
+        .execute();
+        materialize_executor.next().await.transpose().unwrap();
+
+        materialize_executor.next().await.transpose().unwrap();
+        materialize_executor.next().await.transpose().unwrap();
+
+        // First stream chunk. We check the existence of (3) -> (3,6)
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(3_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
+                );
+
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(1_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(1_i32.into()), Some(4_i32.into())]))
+                );
+
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(2_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(5_i32.into())]))
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ignore_delete_and_update_conflict() {
+        // Prepare storage and memtable.
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        // Two columns of int32 type, the first column is PK.
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let column_ids = vec![0.into(), 1.into()];
+
+        // test double insert one pk, the latter should be ignored.
+        let chunk1 = StreamChunk::from_pretty(
+            " i i
+            + 1 4
+            + 2 5
+            + 3 6
+            U- 8 1
+            U+ 8 2
+            + 8 3",
+        );
+
+        // test delete wrong value, delete inexistent pk
+        let chunk2 = StreamChunk::from_pretty(
+            " i i
+            + 7 8
+            - 3 4
+            - 5 0",
+        );
+
+        // test delete wrong value, delete inexistent pk
+        let chunk3 = StreamChunk::from_pretty(
+            " i i
+            + 1 5
+            U- 2 4
+            U+ 2 8
+            U- 9 0
+            U+ 9 1",
+        );
+
+        // Prepare stream executors.
+        let source = MockSource::with_messages(
+            schema.clone(),
+            PkIndices::new(),
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(chunk1),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Chunk(chunk2),
+                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Chunk(chunk3),
+                Message::Barrier(Barrier::new_test_barrier(4)),
+            ],
+        );
+
+        let order_types = vec![OrderType::ascending()];
+        let column_descs = vec![
+            ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+            ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ];
+
+        let table = StorageTable::for_test(
+            memory_state_store.clone(),
+            table_id,
+            column_descs,
+            order_types,
+            vec![0],
+            vec![0, 1],
+        );
+
+        let mut materialize_executor = Box::new(
+            MaterializeExecutor::for_test(
+                Box::new(source),
+                memory_state_store,
+                table_id,
+                vec![ColumnOrder::new(0, OrderType::ascending())],
+                column_ids,
+                1,
+                Arc::new(AtomicU64::new(0)),
+                ConflictBehavior::IgnoreConflict,
+            )
+            .await,
+        )
+        .execute();
+        materialize_executor.next().await.transpose().unwrap();
+
+        materialize_executor.next().await.transpose().unwrap();
+
+        // First stream chunk. We check the existence of (3) -> (3,6)
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                // can read (8, 2), check insert after update
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(8_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(8_i32.into()), Some(3_i32.into())]))
+                );
+            }
+            _ => unreachable!(),
+        }
+        materialize_executor.next().await.transpose().unwrap();
+
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(7_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
+                );
+
+                // check delete wrong value
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(3_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
+                );
+
+                // check delete wrong pk
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(5_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, None);
+            }
+            _ => unreachable!(),
+        }
+
+        materialize_executor.next().await.transpose().unwrap();
+        // materialize_executor.next().await.transpose().unwrap();
+        // Second stream chunk. We check the existence of (7) -> (7,8)
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(1_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(1_i32.into()), Some(4_i32.into())]))
+                );
+
+                // check update wrong value
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(2_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(5_i32.into())]))
                 );
 
                 // check update wrong pk, should become insert

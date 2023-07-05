@@ -47,6 +47,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
             params.executor_id,
             params.env.dml_manager_ref(),
             table_id,
+            node.table_version_id,
             column_descs,
         )))
     }

@@ -20,7 +20,7 @@ use nix::sys::statfs::{
     statfs, FsType as NixFsType, BTRFS_SUPER_MAGIC, EXT4_SUPER_MAGIC, TMPFS_MAGIC,
 };
 use parking_lot::RwLock;
-use risingwave_common::cache::{LruCache, LruCacheEventListener};
+use risingwave_common::cache::{CachePriority, LruCache, LruCacheEventListener};
 use risingwave_common::util::iter_util::ZipEqFast;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::Instrument;
@@ -37,7 +37,7 @@ const CACHE_FILE_FILENAME: &str = "cache";
 
 const FREELIST_DEFAULT_CAPACITY: usize = 64;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FsType {
     Xfs,
     Ext4,
@@ -268,6 +268,7 @@ where
         let fs_block_size = fs_stat.block_size() as usize;
 
         let cf_opts = CacheFileOptions {
+            fs_type,
             // TODO: Make it configurable.
             block_size: fs_block_size,
             fallocate_unit: options.cache_file_fallocate_unit,
@@ -302,7 +303,7 @@ where
 
             metrics: options.metrics,
 
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         })
     }
 
@@ -354,6 +355,7 @@ where
                     hash_builder.hash_one(&key),
                     utils::align_up(self.block_size, block_loc.len as usize),
                     slot,
+                    CachePriority::High,
                 );
             }
         }

@@ -15,10 +15,13 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-pub use avro::*;
+use auto_enums::auto_enum;
+pub use avro::{AvroParser, AvroParserConfig};
 pub use canal::*;
 use csv_parser::CsvParser;
 pub use debezium::*;
+use futures::Future;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 pub use json_parser::*;
 pub use protobuf::*;
@@ -29,24 +32,26 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::StreamSourceInfo;
 
+use self::bytes_parser::BytesParser;
 pub use self::csv_parser::CsvParserConfig;
 use crate::parser::maxwell::MaxwellParser;
 use crate::source::{
-    BoxSourceStream, BoxSourceWithStateStream, SourceColumnDesc, SourceFormat, StreamChunkWithState,
+    BoxSourceStream, SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat, SourceMeta,
+    SourceWithStateStream, SplitId, StreamChunkWithState,
 };
 
 mod avro;
+mod bytes_parser;
 mod canal;
 mod common;
 mod csv_parser;
 mod debezium;
 mod json_parser;
-mod macros;
 mod maxwell;
 mod protobuf;
 mod schema_registry;
+mod unified;
 mod util;
-
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
@@ -126,7 +131,7 @@ impl OpAction for OpActionInsert {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append_datum(&output)
+        builder.append(&output)
     }
 
     #[inline(always)]
@@ -149,7 +154,7 @@ impl OpAction for OpActionDelete {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append_datum(&output)
+        builder.append(&output)
     }
 
     #[inline(always)]
@@ -172,8 +177,8 @@ impl OpAction for OpActionUpdate {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: (Datum, Datum)) {
-        builder.append_datum(&output.0);
-        builder.append_datum(&output.1);
+        builder.append(&output.0);
+        builder.append(&output.1);
     }
 
     #[inline(always)]
@@ -198,7 +203,7 @@ impl SourceStreamChunkRowWriter<'_> {
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
     ) -> Result<WriteGuard> {
-        let mut modify_col = vec![];
+        let mut modify_col = Vec::with_capacity(self.descs.len());
         self.descs
             .iter()
             .zip_eq(self.builders.iter_mut())
@@ -244,11 +249,11 @@ impl SourceStreamChunkRowWriter<'_> {
 
     /// For other op like 'insert', 'update', 'delete', we will leave the hollow for the meta column
     /// builder. e.g after insert
-    /// `data_budiler` = [1], `meta_column_builder` = [], `op` = [insert]
+    /// `data_builder` = [1], `meta_column_builder` = [], `op` = [insert]
     ///
     /// This function is used to fulfill this hollow in `meta_column_builder`.
     /// e.g after fulfill
-    /// `data_budiler` = [1], `meta_column_builder` = [1], `op` = [insert]
+    /// `data_builder` = [1], `meta_column_builder` = [1], `op` = [insert]
     pub fn fulfill_meta_column(
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Option<Datum>,
@@ -258,7 +263,7 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq_fast(self.builders.iter_mut())
             .for_each(|(desc, builder)| {
                 if let Some(output) = f(desc) {
-                    builder.append_datum(output);
+                    builder.append(output);
                 }
             });
 
@@ -295,9 +300,22 @@ impl SourceStreamChunkRowWriter<'_> {
 
 /// `ByteStreamSourceParser` is a new message parser, the parser should consume
 /// the input data stream and return a stream of parsed msgs.
-pub trait ByteStreamSourceParser: Send + Debug + 'static {
-    /// Parse a data stream of one source split into a stream of [`StreamChunk`].
+pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
+    /// The column descriptors of the output chunk.
+    fn columns(&self) -> &[SourceColumnDesc];
 
+    /// The source context, used to report parsing error.
+    fn source_ctx(&self) -> &SourceContext;
+
+    /// Parse one record from the given `payload` and write it to the `writer`.
+    fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> impl Future<Output = Result<WriteGuard>> + Send + 'a;
+
+    /// Parse a data stream of one source split into a stream of [`StreamChunk`].
+    ///
     /// # Arguments
     /// - `data_stream`: A data stream of one source split.
     ///  To be able to split multiple messages from mq, so it is not a pure byte stream
@@ -305,7 +323,67 @@ pub trait ByteStreamSourceParser: Send + Debug + 'static {
     /// # Returns
     ///
     /// A [`BoxSourceWithStateStream`] which is a stream of parsed msgs.
-    fn into_stream(self, data_stream: BoxSourceStream) -> BoxSourceWithStateStream;
+    fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
+        into_chunk_stream(self, data_stream)
+    }
+}
+
+#[try_stream(ok = StreamChunkWithState, error = RwError)]
+async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
+    #[for_await]
+    for batch in data_stream {
+        let batch = batch?;
+        let mut builder =
+            SourceStreamChunkBuilder::with_capacity(parser.columns().to_vec(), batch.len());
+        let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
+
+        for msg in batch {
+            if let Some(content) = msg.payload {
+                split_offset_mapping.insert(msg.split_id, msg.offset);
+
+                let old_op_num = builder.op_num();
+
+                if let Err(e) = parser.parse_one(content, builder.row_writer()).await {
+                    tracing::warn!("message parsing failed {}, skipping", e.to_string());
+                    // This will throw an error for batch
+                    parser.source_ctx().report_user_source_error(e)?;
+                    continue;
+                }
+
+                let new_op_num = builder.op_num();
+
+                // new_op_num - old_op_num is the number of rows added to the builder
+                for _ in old_op_num..new_op_num {
+                    // TODO: support more kinds of SourceMeta
+                    if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
+                        let f =
+                            |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
+                                if !desc.is_meta {
+                                    return None;
+                                }
+                                match desc.name.as_str() {
+                                    "_rw_kafka_timestamp" => Some(kafka_meta.timestamp.map(|ts| {
+                                        risingwave_common::cast::i64_to_timestamptz(ts)
+                                            .unwrap()
+                                            .into()
+                                    })),
+                                    _ => unreachable!(
+                                        "kafka will not have this meta column: {}",
+                                        desc.name
+                                    ),
+                                }
+                            };
+                        builder.row_writer().fulfill_meta_column(f)?;
+                    }
+                }
+            }
+        }
+
+        yield StreamChunkWithState {
+            chunk: builder.finish(),
+            split_offset_mapping: Some(split_offset_mapping),
+        };
+    }
 }
 
 #[derive(Debug)]
@@ -314,46 +392,70 @@ pub enum ByteStreamSourceParserImpl {
     Json(JsonParser),
     Protobuf(ProtobufParser),
     DebeziumJson(DebeziumJsonParser),
+    DebeziumMongoJson(DebeziumMongoJsonParser),
     Avro(AvroParser),
     Maxwell(MaxwellParser),
     CanalJson(CanalJsonParser),
     DebeziumAvro(DebeziumAvroParser),
+    Bytes(BytesParser),
 }
 
+pub type ParserStream = impl SourceWithStateStream + Unpin;
+
 impl ByteStreamSourceParserImpl {
-    pub fn into_stream(self, msg_stream: BoxSourceStream) -> BoxSourceWithStateStream {
-        match self {
+    /// Converts this parser into a stream of [`StreamChunk`].
+    pub fn into_stream(self, msg_stream: BoxSourceStream) -> ParserStream {
+        #[auto_enum(futures03::Stream)]
+        let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
             Self::Json(parser) => parser.into_stream(msg_stream),
             Self::Protobuf(parser) => parser.into_stream(msg_stream),
             Self::DebeziumJson(parser) => parser.into_stream(msg_stream),
+            Self::DebeziumMongoJson(parser) => parser.into_stream(msg_stream),
             Self::Avro(parser) => parser.into_stream(msg_stream),
             Self::Maxwell(parser) => parser.into_stream(msg_stream),
             Self::CanalJson(parser) => parser.into_stream(msg_stream),
             Self::DebeziumAvro(parser) => parser.into_stream(msg_stream),
-        }
+            Self::Bytes(parser) => parser.into_stream(msg_stream),
+        };
+        Box::pin(stream)
     }
+}
 
-    pub fn create(parser_config: ParserConfig) -> Result<Self> {
+impl ByteStreamSourceParserImpl {
+    pub fn create(parser_config: ParserConfig, source_ctx: SourceContextRef) -> Result<Self> {
         let CommonParserConfig { rw_columns } = parser_config.common;
         match parser_config.specific {
-            SpecificParserConfig::Csv(config) => CsvParser::new(rw_columns, config).map(Self::Csv),
-            SpecificParserConfig::Avro(config) => {
-                AvroParser::new(rw_columns, config).map(Self::Avro)
+            SpecificParserConfig::Csv(config) => {
+                CsvParser::new(rw_columns, config, source_ctx).map(Self::Csv)
+            }
+            SpecificParserConfig::Avro(config) | SpecificParserConfig::UpsertAvro(config) => {
+                AvroParser::new(rw_columns, config, source_ctx).map(Self::Avro)
             }
             SpecificParserConfig::Protobuf(config) => {
-                ProtobufParser::new(rw_columns, config).map(Self::Protobuf)
+                ProtobufParser::new(rw_columns, config, source_ctx).map(Self::Protobuf)
             }
-            SpecificParserConfig::Json => JsonParser::new(rw_columns).map(Self::Json),
+            SpecificParserConfig::Json => JsonParser::new(rw_columns, source_ctx).map(Self::Json),
+            SpecificParserConfig::UpsertJson => {
+                JsonParser::new_with_upsert(rw_columns, source_ctx).map(Self::Json)
+            }
             SpecificParserConfig::CanalJson => {
-                CanalJsonParser::new(rw_columns).map(Self::CanalJson)
+                CanalJsonParser::new(rw_columns, source_ctx).map(Self::CanalJson)
             }
             SpecificParserConfig::DebeziumJson => {
-                DebeziumJsonParser::new(rw_columns).map(Self::DebeziumJson)
+                DebeziumJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumJson)
             }
-            SpecificParserConfig::Maxwell => MaxwellParser::new(rw_columns).map(Self::Maxwell),
+            SpecificParserConfig::DebeziumMongoJson => {
+                DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
+            }
+            SpecificParserConfig::Maxwell => {
+                MaxwellParser::new(rw_columns, source_ctx).map(Self::Maxwell)
+            }
             SpecificParserConfig::DebeziumAvro(config) => {
-                DebeziumAvroParser::new(rw_columns, config).map(Self::DebeziumAvro)
+                DebeziumAvroParser::new(rw_columns, config, source_ctx).map(Self::DebeziumAvro)
+            }
+            SpecificParserConfig::Bytes => {
+                BytesParser::new(rw_columns, source_ctx).map(Self::Bytes)
             }
             SpecificParserConfig::Native => {
                 unreachable!("Native parser should not be created")
@@ -377,29 +479,46 @@ pub struct CommonParserConfig {
 pub enum SpecificParserConfig {
     Csv(CsvParserConfig),
     Avro(AvroParserConfig),
+    UpsertAvro(AvroParserConfig),
     Protobuf(ProtobufParserConfig),
     Json,
+    UpsertJson,
     DebeziumJson,
+    DebeziumMongoJson,
     Maxwell,
     CanalJson,
     #[default]
     Native,
     DebeziumAvro(DebeziumAvroParserConfig),
+    Bytes,
 }
 
 impl SpecificParserConfig {
     pub fn get_source_format(&self) -> SourceFormat {
         match self {
             SpecificParserConfig::Avro(_) => SourceFormat::Avro,
+            SpecificParserConfig::UpsertAvro(_) => SourceFormat::UpsertAvro,
             SpecificParserConfig::Csv(_) => SourceFormat::Csv,
             SpecificParserConfig::Protobuf(_) => SourceFormat::Protobuf,
             SpecificParserConfig::Json => SourceFormat::Json,
+            SpecificParserConfig::UpsertJson => SourceFormat::UpsertJson,
             SpecificParserConfig::DebeziumJson => SourceFormat::DebeziumJson,
             SpecificParserConfig::Maxwell => SourceFormat::Maxwell,
             SpecificParserConfig::CanalJson => SourceFormat::CanalJson,
             SpecificParserConfig::Native => SourceFormat::Native,
             SpecificParserConfig::DebeziumAvro(_) => SourceFormat::DebeziumAvro,
+            SpecificParserConfig::DebeziumMongoJson => SourceFormat::DebeziumMongoJson,
+            SpecificParserConfig::Bytes => SourceFormat::Bytes,
         }
+    }
+
+    pub fn is_upsert(&self) -> bool {
+        matches!(
+            self,
+            SpecificParserConfig::UpsertJson
+                | SpecificParserConfig::UpsertAvro(_)
+                | SpecificParserConfig::DebeziumAvro(_)
+        )
     }
 
     pub async fn new(
@@ -413,8 +532,28 @@ impl SpecificParserConfig {
                 has_header: info.csv_has_header,
             }),
             SourceFormat::Avro => SpecificParserConfig::Avro(
-                AvroParserConfig::new(props, &info.row_schema_location, info.use_schema_registry)
-                    .await?,
+                AvroParserConfig::new(
+                    props,
+                    &info.row_schema_location,
+                    info.use_schema_registry,
+                    false,
+                    None,
+                )
+                .await?,
+            ),
+            SourceFormat::UpsertAvro => SpecificParserConfig::UpsertAvro(
+                AvroParserConfig::new(
+                    props,
+                    &info.row_schema_location,
+                    info.use_schema_registry,
+                    true,
+                    if info.upsert_avro_primary_key.is_empty() {
+                        None
+                    } else {
+                        Some(info.upsert_avro_primary_key.to_string())
+                    },
+                )
+                .await?,
             ),
             SourceFormat::Protobuf => SpecificParserConfig::Protobuf(
                 ProtobufParserConfig::new(
@@ -426,10 +565,13 @@ impl SpecificParserConfig {
                 .await?,
             ),
             SourceFormat::Json => SpecificParserConfig::Json,
+            SourceFormat::UpsertJson => SpecificParserConfig::UpsertJson,
             SourceFormat::DebeziumJson => SpecificParserConfig::DebeziumJson,
+            SourceFormat::DebeziumMongoJson => SpecificParserConfig::DebeziumMongoJson,
             SourceFormat::Maxwell => SpecificParserConfig::Maxwell,
             SourceFormat::CanalJson => SpecificParserConfig::CanalJson,
             SourceFormat::Native => SpecificParserConfig::Native,
+            SourceFormat::Bytes => SpecificParserConfig::Bytes,
             SourceFormat::DebeziumAvro => SpecificParserConfig::DebeziumAvro(
                 DebeziumAvroParserConfig::new(props, &info.row_schema_location).await?,
             ),

@@ -22,30 +22,30 @@ use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{
     ExpandedParallelUnitMapping, HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode,
 };
-use risingwave_common::row::OwnedRow;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
-use risingwave_expr::expr::{build_from_prost, new_unary_expr, BoxedExpression, LiteralExpression};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    ExchangeInfo, ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan,
-    PlanFragment, PlanNode, RowSeqScanNode, TaskId as ProstTaskId, TaskOutputId,
+    ExchangeInfo, ExchangeNode, LocalExecutePlan, PbExchangeSource, PbTaskId, PlanFragment,
+    PlanNode, RowSeqScanNode, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
-use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::StorageTableDesc;
-use uuid::Uuid;
+use tokio::sync::watch::Receiver;
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
     ExecutorBuilder, JoinType, LookupJoinBase,
 };
-use crate::task::{BatchTaskContext, TaskId};
+use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
 
 /// Inner side executor builder for the `LocalLookupJoinExecutor`
 struct InnerSideExecutorBuilder<C> {
@@ -62,6 +62,8 @@ struct InnerSideExecutorBuilder<C> {
     pu_to_worker_mapping: HashMap<ParallelUnitId, WorkerNode>,
     pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>,
     chunk_size: usize,
+    shutdown_rx: Receiver<ShutdownMsg>,
+    next_stage_id: usize,
 }
 
 /// Used to build the executor for the inner side
@@ -79,20 +81,15 @@ pub type BoxedLookupExecutorBuilder = Box<dyn LookupExecutorBuilder>;
 impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
     /// Gets the virtual node based on the given `scan_range`
     fn get_virtual_node(&self, scan_range: &ScanRange) -> Result<VirtualNode> {
-        let dist_keys = self
+        let dist_key_in_pk_indices = self
             .table_desc
-            .dist_key_indices
+            .dist_key_in_pk_indices
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-        let pk_indices = self
-            .table_desc
-            .pk
-            .iter()
-            .map(|col| col.index as _)
-            .collect_vec();
 
-        let virtual_node = scan_range.try_compute_vnode(&dist_keys, &pk_indices);
+        let virtual_node =
+            scan_range.try_compute_vnode_with_dist_key_in_pk_indices(&dist_key_in_pk_indices);
         virtual_node.ok_or_else(|| internal_error("Could not compute vnode for lookup join"))
     }
 
@@ -120,8 +117,8 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
         Ok(row_seq_scan_node)
     }
 
-    /// Creates the `ProstExchangeSource` using the given `id`.
-    fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<ProstExchangeSource> {
+    /// Creates the `PbExchangeSource` using the given `id`.
+    fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<PbExchangeSource> {
         let worker = self.pu_to_worker_mapping.get(id).ok_or_else(|| {
             internal_error("No worker node found for the given parallel unit id.")
         })?;
@@ -130,7 +127,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             plan: Some(PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
-                    identity: Uuid::new_v4().to_string(),
+                    identity: "SeqScan".to_string(),
                     node_body: Some(self.create_row_seq_scan_node(id)?),
                 }),
                 exchange_info: Some(ExchangeInfo {
@@ -139,17 +136,19 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
                 }),
             }),
             epoch: Some(self.epoch.clone()),
+            tracing_context: TracingContext::from_current_span().to_protobuf(),
         };
 
-        let prost_exchange_source = ProstExchangeSource {
+        let prost_exchange_source = PbExchangeSource {
             task_output_id: Some(TaskOutputId {
-                task_id: Some(ProstTaskId {
+                task_id: Some(PbTaskId {
                     // FIXME: We should replace this random generated uuid to current query_id for
                     // better dashboard. However, due to the lack of info of
                     // stage_id and task_id, we can not do it now. Now just make sure it will not
                     // conflict.
-                    query_id: Uuid::new_v4().to_string(),
-                    ..Default::default()
+                    query_id: self.task_id.query_id.clone(),
+                    stage_id: self.task_id.stage_id + 10000 + self.next_stage_id as u32,
+                    task_id: *id,
                 }),
                 output_id: 0,
             }),
@@ -188,13 +187,9 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
             let datum = if inner_type == outer_type {
                 datum
             } else {
-                let cast_expr = new_unary_expr(
-                    Type::Cast,
-                    inner_type.clone(),
-                    Box::new(LiteralExpression::new(outer_type.clone(), datum.clone())),
-                )?;
-
-                cast_expr.eval_row(&OwnedRow::empty())?
+                return Err(internal_error(format!(
+                    "Join key types are not aligned: LHS: {outer_type:?}, RHS: {inner_type:?}"
+                )));
             };
 
             scan_range.eq_conds.push(datum);
@@ -215,6 +210,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
     /// Builds and returns the `ExchangeExecutor` used for the inner side of the
     /// `LocalLookupJoinExecutor`.
     async fn build_executor(&mut self) -> Result<BoxedExecutor> {
+        self.next_stage_id += 1;
         let mut sources = vec![];
         for id in self.pu_to_scan_range_mapping.keys() {
             sources.push(self.build_prost_exchange_source(id)?);
@@ -244,6 +240,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
             &task_id,
             self.context.clone(),
             self.epoch.clone(),
+            self.shutdown_rx.clone(),
         );
 
         executor_builder.build().await
@@ -378,7 +375,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
         let vnode_mapping = lookup_join_node.get_inner_side_vnode_mapping().to_vec();
         assert!(!vnode_mapping.is_empty());
 
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = source.context.get_config().developer.chunk_size;
 
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
@@ -394,8 +391,11 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             pu_to_worker_mapping: get_pu_to_worker_mapping(lookup_join_node.get_worker_nodes()),
             pu_to_scan_range_mapping: HashMap::new(),
             chunk_size,
+            shutdown_rx: source.shutdown_rx.clone(),
+            next_stage_id: 0,
         };
 
+        let identity = source.plan_node().get_identity().clone();
         Ok(LocalLookupJoinExecutorArgs {
             join_type,
             condition,
@@ -411,7 +411,9 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             schema: actual_schema,
             output_indices,
             chunk_size,
-            identity: source.plan_node().get_identity().clone(),
+            identity: identity.clone(),
+            shutdown_rx: Some(source.shutdown_rx.clone()),
+            mem_ctx: source.context.create_executor_mem_context(&identity),
         }
         .dispatch())
     }
@@ -433,6 +435,8 @@ struct LocalLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    mem_ctx: MemoryContext,
 }
 
 impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
@@ -455,6 +459,8 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
             output_indices: self.output_indices,
             chunk_size: self.chunk_size,
             identity: self.identity,
+            shutdown_rx: self.shutdown_rx,
+            mem_ctx: self.mem_ctx,
             _phantom: PhantomData,
         }))
     }
@@ -469,13 +475,11 @@ mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::memory::MemoryContext;
+    use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_expr::expr::{
-        new_binary_expr, BoxedExpression, InputRefExpression, LiteralExpression,
-    };
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+    use risingwave_expr::expr::{build_from_pretty, BoxedExpression};
 
     use super::LocalLookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
@@ -558,27 +562,30 @@ mod tests {
             output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
             identity: "TestLookupJoinExecutor".to_string(),
+            shutdown_rx: None,
+            mem_ctx: MemoryContext::none(),
         }
         .dispatch()
     }
 
     fn create_order_by_executor(child: BoxedExecutor) -> BoxedExecutor {
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::ascending(),
             },
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Ascending,
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::ascending(),
             },
         ];
 
         Box::new(SortExecutor::new(
             child,
-            order_pairs,
+            column_orders,
             "SortExecutor".into(),
             CHUNK_SIZE,
+            MemoryContext::none(),
         ))
     }
 
@@ -685,21 +692,9 @@ mod tests {
              2 5.5 2 5.5
              2 8.4 2 5.5",
         );
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::Inner, condition, false, expected).await;
+        do_test(JoinType::Inner, Some(condition), false, expected).await;
     }
 
     #[tokio::test]
@@ -714,21 +709,9 @@ mod tests {
              5 9.1 . .
              . .   . .",
         );
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftOuter, condition, false, expected).await;
+        do_test(JoinType::LeftOuter, Some(condition), false, expected).await;
     }
 
     #[tokio::test]
@@ -739,21 +722,9 @@ mod tests {
              2 5.5
              2 8.4",
         );
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftSemi, condition, false, expected).await;
+        do_test(JoinType::LeftSemi, Some(condition), false, expected).await;
     }
 
     #[tokio::test]
@@ -765,20 +736,8 @@ mod tests {
             5 9.1
             . .",
         );
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftAnti, condition, false, expected).await;
+        do_test(JoinType::LeftAnti, Some(condition), false, expected).await;
     }
 }

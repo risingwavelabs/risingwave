@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
@@ -26,18 +28,18 @@ use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
 use risingwave_meta::hummock::test_utils::{
-    add_ssts, setup_compute_env, setup_compute_env_with_config,
+    add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
+    setup_compute_env_with_config,
 };
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
-use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
-use risingwave_storage::hummock::SstableIdManager;
-use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStoreWrite, WriteOptions};
+use risingwave_storage::hummock::{CachePolicy, SstableObjectIdManager};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
+use risingwave_storage::StateStore;
 use serial_test::serial;
 
 use super::compactor_tests::tests::{
@@ -48,46 +50,62 @@ use crate::get_notification_client_for_test;
 #[tokio::test]
 #[cfg(feature = "sync_point")]
 #[serial]
-async fn test_syncpoints_sstable_id_manager() {
+async fn test_syncpoints_sstable_object_id_manager() {
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-    let sstable_id_manager = Arc::new(SstableIdManager::new(hummock_meta_client.clone(), 5));
+    let sstable_object_id_manager =
+        Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
 
     // Block filling cache after fetching ids.
-    sync_point::hook("MAP_NEXT_SST_ID.BEFORE_FILL_CACHE", || async {
-        sync_point::wait_timeout("MAP_NEXT_SST_ID.SIG_FILL_CACHE", Duration::from_secs(10))
-            .await
-            .unwrap();
+    sync_point::hook("MAP_NEXT_SST_OBJECT_ID.BEFORE_FILL_CACHE", || async {
+        sync_point::wait_timeout(
+            "MAP_NEXT_SST_OBJECT_ID.SIG_FILL_CACHE",
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
     });
 
     // Start the task that fetches new ids.
-    let sstable_id_manager_clone = sstable_id_manager.clone();
+    let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
-        sstable_id_manager_clone.get_new_sst_id().await.unwrap();
+        sstable_object_id_manager_clone
+            .get_new_sst_object_id()
+            .await
+            .unwrap();
     });
-    sync_point::wait_timeout("MAP_NEXT_SST_ID.AFTER_FETCH", Duration::from_secs(10))
-        .await
-        .unwrap();
+    sync_point::wait_timeout(
+        "MAP_NEXT_SST_OBJECT_ID.AFTER_FETCH",
+        Duration::from_secs(10),
+    )
+    .await
+    .unwrap();
 
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let sstable_id_manager_clone = sstable_id_manager.clone();
+        let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
-            sstable_id_manager_clone.get_new_sst_id().await.unwrap();
+            sstable_object_id_manager_clone
+                .get_new_sst_object_id()
+                .await
+                .unwrap();
         });
-        sync_point::wait_timeout("MAP_NEXT_SST_ID.AS_FOLLOWER", Duration::from_secs(10))
-            .await
-            .unwrap();
+        sync_point::wait_timeout(
+            "MAP_NEXT_SST_OBJECT_ID.AS_FOLLOWER",
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
         follower_tasks.push(follower_task);
     }
 
     // Continue to fill cache.
-    sync_point::on("MAP_NEXT_SST_ID.SIG_FILL_CACHE").await;
+    sync_point::on("MAP_NEXT_SST_OBJECT_ID.SIG_FILL_CACHE").await;
 
     leader_task.await.unwrap();
     for follower_task in follower_tasks {
@@ -105,42 +123,52 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-    let sstable_id_manager = Arc::new(SstableIdManager::new(hummock_meta_client.clone(), 5));
+    let sstable_object_id_manager =
+        Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
 
     // Block fetching ids.
-    sync_point::hook("MAP_NEXT_SST_ID.BEFORE_FETCH", || async {
-        sync_point::wait_timeout("MAP_NEXT_SST_ID.SIG_FETCH", Duration::from_secs(10))
+    sync_point::hook("MAP_NEXT_SST_OBJECT_ID.BEFORE_FETCH", || async {
+        sync_point::wait_timeout("MAP_NEXT_SST_OBJECT_ID.SIG_FETCH", Duration::from_secs(10))
             .await
             .unwrap();
-        sync_point::remove_action("MAP_NEXT_SST_ID.BEFORE_FETCH");
+        sync_point::remove_action("MAP_NEXT_SST_OBJECT_ID.BEFORE_FETCH");
     });
 
     // Start the task that fetches new ids.
-    let sstable_id_manager_clone = sstable_id_manager.clone();
+    let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
         fail::cfg("get_new_sst_ids_err", "return").unwrap();
-        sstable_id_manager_clone.get_new_sst_id().await.unwrap_err();
+        sstable_object_id_manager_clone
+            .get_new_sst_object_id()
+            .await
+            .unwrap_err();
         fail::remove("get_new_sst_ids_err");
     });
-    sync_point::wait_timeout("MAP_NEXT_SST_ID.AS_LEADER", Duration::from_secs(10))
+    sync_point::wait_timeout("MAP_NEXT_SST_OBJECT_ID.AS_LEADER", Duration::from_secs(10))
         .await
         .unwrap();
 
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let sstable_id_manager_clone = sstable_id_manager.clone();
+        let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
-            sstable_id_manager_clone.get_new_sst_id().await.unwrap();
+            sstable_object_id_manager_clone
+                .get_new_sst_object_id()
+                .await
+                .unwrap();
         });
-        sync_point::wait_timeout("MAP_NEXT_SST_ID.AS_FOLLOWER", Duration::from_secs(10))
-            .await
-            .unwrap();
+        sync_point::wait_timeout(
+            "MAP_NEXT_SST_OBJECT_ID.AS_FOLLOWER",
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
         follower_tasks.push(follower_task);
     }
 
     // Continue to fetch ids.
-    sync_point::on("MAP_NEXT_SST_ID.SIG_FETCH").await;
+    sync_point::on("MAP_NEXT_SST_OBJECT_ID.SIG_FETCH").await;
 
     leader_task.await.unwrap();
     // Failed leader task doesn't block follower tasks.
@@ -156,6 +184,12 @@ async fn test_syncpoints_test_local_notification_receiver() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
 
+    register_table_ids_to_compaction_group(
+        hummock_manager.as_ref(),
+        &[1],
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     // Test cancel compaction task
     let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
     let mut task = hummock_manager
@@ -181,10 +215,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
 
     // Test release hummock contexts
     env.notification_manager()
-        .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(WorkerNode {
-            id: context_id,
-            ..Default::default()
-        }))
+        .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker_node))
         .await;
     sync_point::wait_timeout(
         "AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC",
@@ -256,55 +287,85 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     ));
 
     let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-    compactor_manager.add_compactor(worker_node.id, u64::MAX);
+    compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
+
+    let mut local = storage
+        .new_local(NewLocalOptions::for_test(existing_table_id.into()))
+        .await;
 
     // 1. add sstables
     let val0 = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
     let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
-    let mut local = storage.local.start_write_batch(WriteOptions {
-        epoch: 100,
-        table_id: existing_table_id.into(),
-    });
-    let mut start_key = b"aaa".to_vec();
+
+    local.init(100);
+    let mut start_key = b"\0\0aaa".to_vec();
     for _ in 0..10 {
-        local.put(&start_key, StorageValue::new_put(val0.clone()));
+        local
+            .insert(
+                Bytes::copy_from_slice(start_key.as_slice()),
+                val0.clone(),
+                None,
+            )
+            .unwrap();
         start_key = next_key(&start_key);
     }
-    local.put(b"ggg", StorageValue::new_put(val0.clone()));
-    local.put(b"hhh", StorageValue::new_put(val0.clone()));
-    local.put(b"kkk", StorageValue::new_put(val0.clone()));
-    local.ingest().await.unwrap();
+    local
+        .insert(Bytes::from(b"\0\0ggg".as_slice()), val0.clone(), None)
+        .unwrap();
+    local
+        .insert(Bytes::from(b"\0\0hhh".as_slice()), val0.clone(), None)
+        .unwrap();
+    local
+        .insert(Bytes::from(b"\0\0kkk".as_slice()), val0.clone(), None)
+        .unwrap();
+    local.flush(Vec::new()).await.unwrap();
+    local.seal_current_epoch(101);
     flush_and_commit(&hummock_meta_client, &storage, 100).await;
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
-    let mut local = storage.local.start_write_batch(WriteOptions {
-        epoch: 101,
-        table_id: existing_table_id.into(),
-    });
-    local.put(b"aaa", StorageValue::new_put(val1.clone()));
-    local.put(b"bbb", StorageValue::new_put(val1.clone()));
-    local.delete_range(b"ggg", b"hhh");
-    local.ingest().await.unwrap();
+
+    local
+        .insert(Bytes::from(b"\0\0aaa".as_slice()), val1.clone(), None)
+        .unwrap();
+    local
+        .insert(Bytes::from(b"\0\0bbb".as_slice()), val1.clone(), None)
+        .unwrap();
+    local
+        .flush(vec![(
+            Bound::Included(Bytes::from(b"\0\0ggg".as_slice())),
+            Bound::Excluded(Bytes::from(b"\0\0hhh".as_slice())),
+        )])
+        .await
+        .unwrap();
+    local.seal_current_epoch(102);
     flush_and_commit(&hummock_meta_client, &storage, 101).await;
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
-    let mut local = storage.local.start_write_batch(WriteOptions {
-        epoch: 102,
-        table_id: existing_table_id.into(),
-    });
-    local.put(b"hhh", StorageValue::new_put(val1.clone()));
-    local.put(b"iii", StorageValue::new_put(val1.clone()));
-    local.delete_range(b"jjj", b"kkk");
-    local.ingest().await.unwrap();
+
+    local
+        .insert(Bytes::from(b"\0\0hhh".as_slice()), val1.clone(), None)
+        .unwrap();
+    local
+        .insert(Bytes::from(b"\0\0iii".as_slice()), val1.clone(), None)
+        .unwrap();
+    local
+        .flush(vec![(
+            Bound::Included(Bytes::from(b"\0\0jjj".as_slice())),
+            Bound::Excluded(Bytes::from(b"\0\0kkk".as_slice())),
+        )])
+        .await
+        .unwrap();
+    local.seal_current_epoch(103);
     flush_and_commit(&hummock_meta_client, &storage, 102).await;
     // move this two file to the same level.
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
 
-    let mut local = storage.local.start_write_batch(WriteOptions {
-        epoch: 103,
-        table_id: existing_table_id.into(),
-    });
-    local.put(b"lll", StorageValue::new_put(val1.clone()));
-    local.put(b"mmm", StorageValue::new_put(val1.clone()));
-    local.ingest().await.unwrap();
+    local
+        .insert(Bytes::from(b"\0\0lll".as_slice()), val1.clone(), None)
+        .unwrap();
+    local
+        .insert(Bytes::from(b"\0\0mmm".as_slice()), val1.clone(), None)
+        .unwrap();
+    local.flush(Vec::new()).await.unwrap();
+    local.seal_current_epoch(u64::MAX);
     flush_and_commit(&hummock_meta_client, &storage, 103).await;
     // move this two file to the same level.
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
@@ -334,24 +395,26 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         table_id: TableId::from(existing_table_id),
         retention_seconds: None,
         read_version_from_backup: false,
+        prefetch_options: Default::default(),
+        cache_policy: CachePolicy::Fill(CachePriority::High),
     };
     let get_result = storage
-        .get(b"hhh", 120, read_options.clone())
+        .get(Bytes::from("\0\0hhh"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
-        .get(b"ggg", 120, read_options.clone())
+        .get(Bytes::from("\0\0ggg"), 120, read_options.clone())
         .await
         .unwrap();
     assert!(get_result.is_none());
     let get_result = storage
-        .get(b"aaa", 120, read_options.clone())
+        .get(Bytes::from("\0\0aaa"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
-        .get(b"aab", 120, read_options.clone())
+        .get(Bytes::from("\0\0aab"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val0);
@@ -364,7 +427,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         }
     });
     let get_result = storage
-        .get(b"kkk", 120, read_options.clone())
+        .get(Bytes::from("\0\0kkk"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val0);

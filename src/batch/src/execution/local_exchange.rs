@@ -117,7 +117,6 @@ mod tests {
             self.rpc_called.store(true, Ordering::SeqCst);
             for _ in 0..3 {
                 tx.send(Ok(GetDataResponse {
-                    status: None,
                     record_batch: Some(DataChunk::default()),
                 }))
                 .await

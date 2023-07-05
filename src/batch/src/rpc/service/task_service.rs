@@ -15,10 +15,11 @@
 use std::convert::Into;
 use std::sync::Arc;
 
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
-    AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataResponse,
+    CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataResponse,
     TaskInfoResponse,
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -43,12 +44,14 @@ impl BatchServiceImpl {
         BatchServiceImpl { mgr, env }
     }
 }
-pub(crate) type TaskInfoResponseResult = std::result::Result<TaskInfoResponse, Status>;
-pub(crate) type GetDataResponseResult = std::result::Result<GetDataResponse, Status>;
+
+pub type TaskInfoResponseResult = Result<TaskInfoResponse, Status>;
+pub type GetDataResponseResult = Result<GetDataResponse, Status>;
+
 #[async_trait::async_trait]
 impl TaskService for BatchServiceImpl {
     type CreateTaskStream = ReceiverStream<TaskInfoResponseResult>;
-    type ExecuteStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+    type ExecuteStream = ReceiverStream<GetDataResponseResult>;
 
     #[cfg_attr(coverage, no_coverage)]
     async fn create_task(
@@ -59,6 +62,7 @@ impl TaskService for BatchServiceImpl {
             task_id,
             plan,
             epoch,
+            tracing_context,
         } = request.into_inner();
 
         let (state_tx, state_rx) = tokio::sync::mpsc::channel(TASK_STATUS_BUFFER_SIZE);
@@ -74,6 +78,7 @@ impl TaskService for BatchServiceImpl {
                     TaskId::from(task_id.as_ref().expect("no task id found")),
                 ),
                 state_reporter,
+                TracingContext::from_protobuf(&tracing_context),
             )
             .await;
         match res {
@@ -93,14 +98,15 @@ impl TaskService for BatchServiceImpl {
     }
 
     #[cfg_attr(coverage, no_coverage)]
-    async fn abort_task(
+    async fn cancel_task(
         &self,
-        req: Request<AbortTaskRequest>,
-    ) -> Result<Response<AbortTaskResponse>, Status> {
+        req: Request<CancelTaskRequest>,
+    ) -> Result<Response<CancelTaskResponse>, Status> {
         let req = req.into_inner();
+        tracing::trace!("Aborting task: {:?}", req.get_task_id().unwrap());
         self.mgr
-            .abort_task(req.get_task_id().expect("no task id found"));
-        Ok(Response::new(AbortTaskResponse { status: None }))
+            .cancel_task(req.get_task_id().expect("no task id found"));
+        Ok(Response::new(CancelTaskResponse { status: None }))
     }
 
     #[cfg_attr(coverage, no_coverage)]
@@ -112,10 +118,14 @@ impl TaskService for BatchServiceImpl {
             task_id,
             plan,
             epoch,
+            tracing_context,
         } = req.into_inner();
+
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
         let epoch = epoch.expect("no epoch found");
+        let tracing_context = TracingContext::from_protobuf(&tracing_context);
+
         let context = ComputeNodeContext::new_for_local(self.env.clone());
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
@@ -125,8 +135,7 @@ impl TaskService for BatchServiceImpl {
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
         let task = Arc::new(task);
         let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
-        let state_reporter = StateReporter::new_with_local_sender(tx.clone());
-        if let Err(e) = task.clone().async_execute(state_reporter).await {
+        if let Err(e) = task.clone().async_execute(None, tracing_context).await {
             error!(
                 "failed to build executors and trigger execution of Task {:?}: {}",
                 task_id, e

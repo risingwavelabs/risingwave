@@ -1,0 +1,9 @@
+statement ok
+create table t1 (v1 jsonb);
+
+# Alter table add Generated column
+statement error
+alter table t1 add column v2 varchar as v1->'k2';
+
+statement ok
+drop table t1;

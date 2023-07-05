@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
@@ -24,24 +23,23 @@ use prost_reflect::{
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, F32, F64};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::schema_resolver::*;
-use crate::impl_common_parser_logic;
+use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::SourceColumnDesc;
-
-impl_common_parser_logic!(ProtobufParser);
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug, Clone)]
 pub struct ProtobufParser {
     message_descriptor: MessageDescriptor,
     confluent_wire_type: bool,
     rw_columns: Vec<SourceColumnDesc>,
+    source_ctx: SourceContextRef,
 }
 
 #[derive(Debug, Clone)]
@@ -125,8 +123,13 @@ impl ProtobufParserConfig {
     pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
         let mut columns = Vec::with_capacity(self.message_descriptor.fields().len());
         let mut index = 0;
+        let mut parse_trace: Vec<String> = vec![];
         for field in self.message_descriptor.fields() {
-            columns.push(Self::pb_field_to_col_desc(&field, &mut index)?);
+            columns.push(Self::pb_field_to_col_desc(
+                &field,
+                &mut index,
+                &mut parse_trace,
+            )?);
         }
 
         Ok(columns)
@@ -136,14 +139,15 @@ impl ProtobufParserConfig {
     fn pb_field_to_col_desc(
         field_descriptor: &FieldDescriptor,
         index: &mut i32,
+        parse_trace: &mut Vec<String>,
     ) -> Result<ColumnDesc> {
-        let field_type = protobuf_type_mapping(field_descriptor)?;
+        let field_type = protobuf_type_mapping(field_descriptor, parse_trace)?;
         if let Kind::Message(m) = field_descriptor.kind() {
             let field_descs = if let DataType::List { .. } = field_type {
                 vec![]
             } else {
                 m.fields()
-                    .map(|f| Self::pb_field_to_col_desc(&f, index))
+                    .map(|f| Self::pb_field_to_col_desc(&f, index, parse_trace))
                     .collect::<Result<Vec<_>>>()?
             };
             *index += 1;
@@ -153,6 +157,7 @@ impl ProtobufParserConfig {
                 column_type: Some(field_type.to_protobuf()),
                 field_descs,
                 type_name: m.full_name().to_string(),
+                generated_or_default_column: None,
             })
         } else {
             *index += 1;
@@ -167,7 +172,11 @@ impl ProtobufParserConfig {
 }
 
 impl ProtobufParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, config: ProtobufParserConfig) -> Result<Self> {
+    pub fn new(
+        rw_columns: Vec<SourceColumnDesc>,
+        config: ProtobufParserConfig,
+        source_ctx: SourceContextRef,
+    ) -> Result<Self> {
         let ProtobufParserConfig {
             confluent_wire_type,
             message_descriptor,
@@ -176,19 +185,21 @@ impl ProtobufParser {
             message_descriptor,
             confluent_wire_type,
             rw_columns,
+            source_ctx,
         })
     }
 
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        mut payload: &[u8],
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        if self.confluent_wire_type {
-            let raw_payload = resolve_pb_header(payload)?;
-            payload = raw_payload;
-        }
+        let payload = if self.confluent_wire_type {
+            resolve_pb_header(&payload)?
+        } else {
+            &payload
+        };
 
         let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
             .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
@@ -214,6 +225,38 @@ impl ProtobufParser {
     }
 }
 
+fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> Result<()> {
+    let identifier = format!("{}({})", fd.name(), fd.full_name());
+    if trace.iter().any(|s| s == identifier.as_str()) {
+        return Err(RwError::from(ProtocolError(format!(
+            "circular reference detected: {}, conflict with {}, kind {:?}",
+            trace.iter().join("->"),
+            identifier,
+            fd.kind(),
+        ))));
+    }
+    trace.push(identifier);
+    Ok(())
+}
+
+impl ByteStreamSourceParser for ProtobufParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
+    }
+}
+
 fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
     let v = match value {
         Value::Bool(v) => ScalarImpl::Bool(*v),
@@ -221,8 +264,8 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
         Value::U32(i) => ScalarImpl::Int64(*i as i64),
         Value::I64(i) => ScalarImpl::Int64(*i),
         Value::U64(i) => ScalarImpl::Decimal(Decimal::from(*i)),
-        Value::F32(f) => ScalarImpl::Float32(OrderedF32::from(*f)),
-        Value::F64(f) => ScalarImpl::Float64(OrderedF64::from(*f)),
+        Value::F32(f) => ScalarImpl::Float32(F32::from(*f)),
+        Value::F64(f) => ScalarImpl::Float64(F64::from(*f)),
         Value::String(s) => ScalarImpl::Utf8(s.as_str().into()),
         Value::EnumNumber(idx) => {
             let kind = field_desc.kind();
@@ -279,20 +322,26 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
 }
 
 /// Maps protobuf type to RW type.
-fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType> {
+fn protobuf_type_mapping(
+    field_descriptor: &FieldDescriptor,
+    parse_trace: &mut Vec<String>,
+) -> Result<DataType> {
+    detect_loop_and_push(parse_trace, field_descriptor)?;
     let field_type = field_descriptor.kind();
     let mut t = match field_type {
         Kind::Bool => DataType::Boolean,
         Kind::Double => DataType::Float64,
         Kind::Float => DataType::Float32,
-        Kind::Int32 | Kind::Sfixed32 | Kind::Fixed32 => DataType::Int32,
-        Kind::Int64 | Kind::Sfixed64 | Kind::Fixed64 | Kind::Uint32 => DataType::Int64,
+        Kind::Int32 | Kind::Sint32 | Kind::Sfixed32 | Kind::Fixed32 => DataType::Int32,
+        Kind::Int64 | Kind::Sint64 | Kind::Sfixed64 | Kind::Fixed64 | Kind::Uint32 => {
+            DataType::Int64
+        }
         Kind::Uint64 => DataType::Decimal,
         Kind::String => DataType::Varchar,
         Kind::Message(m) => {
             let fields = m
                 .fields()
-                .map(|f| protobuf_type_mapping(&f))
+                .map(|f| protobuf_type_mapping(&f, parse_trace))
                 .collect::<Result<Vec<_>>>()?;
             let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
             DataType::new_struct(fields, field_names)
@@ -307,10 +356,9 @@ fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType>
         }
     };
     if field_descriptor.cardinality() == Cardinality::Repeated {
-        t = DataType::List {
-            datatype: Box::new(t),
-        }
+        t = DataType::List(Box::new(t))
     }
+    _ = parse_trace.pop();
     Ok(t)
 }
 
@@ -335,7 +383,7 @@ mod test {
 
     use std::path::PathBuf;
 
-    use risingwave_pb::data::data_type::TypeName as ProstTypeName;
+    use risingwave_pb::data::data_type::PbTypeName;
 
     use super::*;
 
@@ -362,7 +410,7 @@ mod test {
         println!("location: {}", location);
         let conf =
             ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false).await?;
-        let parser = ProtobufParser::new(Vec::default(), conf)?;
+        let parser = ProtobufParser::new(Vec::default(), conf, Default::default())?;
         let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
         assert_eq!(
@@ -407,36 +455,47 @@ mod test {
         assert_eq!(columns[2].name, "timestamp".to_string());
 
         let data_type = columns[3].column_type.as_ref().unwrap();
-        assert_eq!(data_type.get_type_name().unwrap(), ProstTypeName::List);
+        assert_eq!(data_type.get_type_name().unwrap(), PbTypeName::List);
         let inner_field_type = data_type.field_type.clone();
         assert_eq!(
             inner_field_type[0].get_type_name().unwrap(),
-            ProstTypeName::Struct
+            PbTypeName::Struct
         );
         let struct_inner = inner_field_type[0].field_type.clone();
-        assert_eq!(
-            struct_inner[0].get_type_name().unwrap(),
-            ProstTypeName::Int32
-        );
-        assert_eq!(
-            struct_inner[1].get_type_name().unwrap(),
-            ProstTypeName::Int32
-        );
+        assert_eq!(struct_inner[0].get_type_name().unwrap(), PbTypeName::Int32);
+        assert_eq!(struct_inner[1].get_type_name().unwrap(), PbTypeName::Int32);
         assert_eq!(
             struct_inner[2].get_type_name().unwrap(),
-            ProstTypeName::Varchar
+            PbTypeName::Varchar
         );
 
         assert_eq!(columns[4].name, "contacts".to_string());
         let inner_field_type = columns[4].column_type.as_ref().unwrap().field_type.clone();
         assert_eq!(
             inner_field_type[0].get_type_name().unwrap(),
-            ProstTypeName::List
+            PbTypeName::List
         );
         assert_eq!(
             inner_field_type[1].get_type_name().unwrap(),
-            ProstTypeName::List
+            PbTypeName::List
         );
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_refuse_recursive_proto_message() {
+        let location = schema_dir() + "/proto_recursive/recursive.pb";
+        let message_name = "recursive.ComplexRecursiveMessage";
+        let conf = ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false)
+            .await
+            .unwrap();
+        let columns = conf.map_to_columns();
+        // expect error message:
+        // "Err(Protocol error: circular reference detected:
+        // parent(recursive.ComplexRecursiveMessage.parent)->siblings(recursive.
+        // ComplexRecursiveMessage.Parent.siblings), conflict with
+        // parent(recursive.ComplexRecursiveMessage.parent), kind
+        // recursive.ComplexRecursiveMessage.Parent"
+        assert!(columns.is_err());
     }
 }

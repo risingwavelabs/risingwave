@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -29,18 +31,19 @@ use risingwave_connector::source::{ConnectorProperties, SplitEnumeratorImpl, Spl
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
-use risingwave_pb::plan_common::Field as FieldProst;
+use risingwave_pb::plan_common::Field as FieldPb;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use uuid::Uuid;
 
 use super::SchedulerError;
 use crate::catalog::catalog_service::CatalogReader;
+use crate::catalog::TableId;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerResult;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -68,7 +71,7 @@ pub struct ExecutionPlanNode {
     pub plan_node_id: PlanNodeId,
     pub plan_node_type: PlanNodeType,
     pub node: NodeBody,
-    pub schema: Vec<FieldProst>,
+    pub schema: Vec<FieldPb>,
 
     pub children: Vec<Arc<ExecutionPlanNode>>,
 
@@ -117,8 +120,14 @@ impl ExecutionPlanNode {
 pub struct BatchPlanFragmenter {
     query_id: QueryId,
     next_stage_id: StageId,
-    worker_node_manager: WorkerNodeManagerRef,
+    worker_node_manager: WorkerNodeSelector,
     catalog_reader: CatalogReader,
+
+    /// if batch_parallelism is None, it means no limit, we will use the available nodes count as
+    /// parallelism.
+    /// if batch_parallelism is Some(num), we will use the min(num, the available
+    /// nodes count) as parallelism.
+    batch_parallelism: Option<NonZeroU64>,
 
     stage_graph_builder: Option<StageGraphBuilder>,
     stage_graph: Option<StageGraph>,
@@ -134,8 +143,9 @@ impl Default for QueryId {
 
 impl BatchPlanFragmenter {
     pub fn new(
-        worker_node_manager: WorkerNodeManagerRef,
+        worker_node_manager: WorkerNodeSelector,
         catalog_reader: CatalogReader,
+        batch_parallelism: Option<NonZeroU64>,
         batch_node: PlanRef,
     ) -> SchedulerResult<Self> {
         let mut plan_fragmenter = Self {
@@ -144,6 +154,7 @@ impl BatchPlanFragmenter {
             next_stage_id: 0,
             worker_node_manager,
             catalog_reader,
+            batch_parallelism,
             stage_graph: None,
         };
         plan_fragmenter.split_into_stage(batch_node)?;
@@ -154,7 +165,11 @@ impl BatchPlanFragmenter {
     fn split_into_stage(&mut self, batch_node: PlanRef) -> SchedulerResult<()> {
         let root_stage = self.new_stage(
             batch_node,
-            Some(Distribution::Single.to_prost(1, &self.catalog_reader, &self.worker_node_manager)),
+            Some(Distribution::Single.to_prost(
+                1,
+                &self.catalog_reader,
+                &self.worker_node_manager,
+            )?),
         )?;
         self.stage_graph = Some(
             self.stage_graph_builder
@@ -343,9 +358,10 @@ pub struct QueryStage {
     pub table_scan_info: Option<TableScanInfo>,
     pub source_info: Option<SourceScanInfo>,
     pub has_lookup_join: bool,
+    pub dml_table_id: Option<TableId>,
 
-    /// Used to generage exchange information when complete source scan information.
-    children_exhchange_distribution: Option<HashMap<StageId, Distribution>>,
+    /// Used to generate exchange information when complete source scan information.
+    children_exchange_distribution: Option<HashMap<StageId, Distribution>>,
 }
 
 impl QueryStage {
@@ -373,7 +389,8 @@ impl QueryStage {
                 table_scan_info: self.table_scan_info.clone(),
                 source_info: self.source_info.clone(),
                 has_lookup_join: self.has_lookup_join,
-                children_exhchange_distribution: self.children_exhchange_distribution.clone(),
+                dml_table_id: self.dml_table_id,
+                children_exchange_distribution: self.children_exchange_distribution.clone(),
             };
         }
         self.clone()
@@ -400,7 +417,8 @@ impl QueryStage {
             table_scan_info: self.table_scan_info.clone(),
             source_info: Some(source_info),
             has_lookup_join: self.has_lookup_join,
-            children_exhchange_distribution: None,
+            dml_table_id: self.dml_table_id,
+            children_exchange_distribution: None,
         }
     }
 }
@@ -443,11 +461,13 @@ struct QueryStageBuilder {
     table_scan_info: Option<TableScanInfo>,
     source_info: Option<SourceScanInfo>,
     has_lookup_join: bool,
+    dml_table_id: Option<TableId>,
 
-    children_exhchange_distribution: HashMap<StageId, Distribution>,
+    children_exchange_distribution: HashMap<StageId, Distribution>,
 }
 
 impl QueryStageBuilder {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         id: StageId,
         query_id: QueryId,
@@ -456,6 +476,7 @@ impl QueryStageBuilder {
         table_scan_info: Option<TableScanInfo>,
         source_info: Option<SourceScanInfo>,
         has_lookup_join: bool,
+        dml_table_id: Option<TableId>,
     ) -> Self {
         Self {
             query_id,
@@ -467,13 +488,14 @@ impl QueryStageBuilder {
             table_scan_info,
             source_info,
             has_lookup_join,
-            children_exhchange_distribution: HashMap::new(),
+            dml_table_id,
+            children_exchange_distribution: HashMap::new(),
         }
     }
 
     fn finish(self, stage_graph_builder: &mut StageGraphBuilder) -> QueryStageRef {
-        let children_exhchange_distribution = if self.parallelism.is_none() {
-            Some(self.children_exhchange_distribution)
+        let children_exchange_distribution = if self.parallelism.is_none() {
+            Some(self.children_exchange_distribution)
         } else {
             None
         };
@@ -486,7 +508,8 @@ impl QueryStageBuilder {
             table_scan_info: self.table_scan_info,
             source_info: self.source_info,
             has_lookup_join: self.has_lookup_join,
-            children_exhchange_distribution,
+            dml_table_id: self.dml_table_id,
+            children_exchange_distribution,
         });
 
         stage_graph_builder.add_node(stage.clone());
@@ -539,7 +562,7 @@ impl StageGraph {
     async fn complete(
         self,
         catalog_reader: &CatalogReader,
-        worker_node_manager: &WorkerNodeManagerRef,
+        worker_node_manager: &WorkerNodeSelector,
     ) -> SchedulerResult<StageGraph> {
         let mut complete_stages = HashMap::new();
         self.complete_stage(
@@ -565,7 +588,7 @@ impl StageGraph {
         exchange_info: Option<ExchangeInfo>,
         complete_stages: &mut HashMap<StageId, QueryStageRef>,
         catalog_reader: &CatalogReader,
-        worker_node_manager: &WorkerNodeManagerRef,
+        worker_node_manager: &WorkerNodeSelector,
     ) -> SchedulerResult<()> {
         let parallelism = if stage.parallelism.is_some() {
             // If the stage has parallelism, it means it's a complete stage.
@@ -599,7 +622,7 @@ impl StageGraph {
         for child_stage_id in self.child_edges.get(&stage.id).unwrap_or(&HashSet::new()) {
             let exchange_info = if let Some(parallelism) = parallelism {
                 let exchange_distribution = stage
-                    .children_exhchange_distribution
+                    .children_exchange_distribution
                     .as_ref()
                     .unwrap()
                     .get(child_stage_id)
@@ -608,7 +631,7 @@ impl StageGraph {
                     parallelism,
                     catalog_reader,
                     worker_node_manager,
-                ))
+                )?)
             } else {
                 None
             };
@@ -698,7 +721,7 @@ impl BatchPlanFragmenter {
 
         let mut table_scan_info = self.collect_stage_table_scan(root.clone())?;
         // For current implementation, we can guarantee that each stage has only one table
-        // scan(except System table) or ont source.
+        // scan(except System table) or one source.
         let source_info = if table_scan_info.is_none() {
             Self::collect_stage_source(root.clone())?
         } else {
@@ -751,17 +774,27 @@ impl BatchPlanFragmenter {
                     lookup_join_parallelism
                 } else if source_info.is_some() {
                     0
+                } else if let Some(num) = self.batch_parallelism {
+                    // can be 0 if no available serving worker
+                    min(
+                        num.get() as usize,
+                        self.worker_node_manager.schedule_unit_count(),
+                    )
                 } else {
+                    // can be 0 if no available serving worker
                     self.worker_node_manager.worker_node_count()
                 }
             }
         };
+        if source_info.is_none() && parallelism == 0 {
+            return Err(SchedulerError::EmptyWorkerNodes);
+        }
         let parallelism = if parallelism == 0 {
             None
         } else {
             Some(parallelism as u32)
         };
-
+        let dml_table_id = Self::collect_dml_table_id(&root);
         let mut builder = QueryStageBuilder::new(
             next_stage_id,
             self.query_id.clone(),
@@ -770,6 +803,7 @@ impl BatchPlanFragmenter {
             table_scan_info,
             source_info,
             has_lookup_join,
+            dml_table_id,
         );
 
         self.visit_node(root, &mut builder, None)?;
@@ -816,7 +850,7 @@ impl BatchPlanFragmenter {
                 parallelism,
                 &self.catalog_reader,
                 &self.worker_node_manager,
-            ))
+            )?)
         } else {
             None
         };
@@ -824,7 +858,7 @@ impl BatchPlanFragmenter {
         execution_plan_node.source_stage_id = Some(child_stage.id);
         if builder.parallelism.is_none() {
             builder
-                .children_exhchange_distribution
+                .children_exchange_distribution
                 .insert(child_stage.id, node.distribution().clone());
         }
 
@@ -849,10 +883,12 @@ impl BatchPlanFragmenter {
         }
 
         if let Some(source_node) = node.as_batch_source() {
-            let source_catalog = source_node.logical().source_catalog();
+            let source_catalog = source_node.source_catalog();
             if let Some(source_catalog) = source_catalog {
-                let property = ConnectorProperties::extract(source_catalog.properties.clone())?;
-                let timestamp_bound = source_node.logical().kafka_timestamp_range_value();
+                let property = ConnectorProperties::extract(
+                    source_catalog.properties.clone().into_iter().collect(),
+                )?;
+                let timestamp_bound = source_node.kafka_timestamp_range_value();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     connector: property,
                     timebound: timestamp_bound,
@@ -877,25 +913,20 @@ impl BatchPlanFragmenter {
         }
 
         if let Some(scan_node) = node.as_batch_seq_scan() {
-            let name = scan_node.logical().table_name().to_owned();
-            let info = if scan_node.logical().is_sys_table() {
+            let name = scan_node.logical().table_name.to_owned();
+            let info = if scan_node.logical().is_sys_table {
                 TableScanInfo::system_table(name)
             } else {
-                let table_desc = scan_node.logical().table_desc();
+                let table_desc = &*scan_node.logical().table_desc;
                 let table_catalog = self
                     .catalog_reader
                     .read_guard()
                     .get_table_by_id(&table_desc.table_id)
+                    .cloned()
                     .map_err(RwError::from)?;
                 let vnode_mapping = self
                     .worker_node_manager
-                    .get_fragment_mapping(&table_catalog.fragment_id)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "failed to get the vnode mapping for the `Materialize` of {}",
-                            table_catalog.name()
-                        )
-                    })?;
+                    .fragment_mapping(table_catalog.fragment_id)?;
                 let partitions =
                     derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
                 TableScanInfo::new(name, partitions)
@@ -909,6 +940,24 @@ impl BatchPlanFragmenter {
         }
     }
 
+    /// Returns the dml table id if any.
+    fn collect_dml_table_id(node: &PlanRef) -> Option<TableId> {
+        if node.node_type() == PlanNodeType::BatchExchange {
+            return None;
+        }
+        if let Some(insert) = node.as_batch_insert() {
+            Some(insert.logical.table_id)
+        } else if let Some(update) = node.as_batch_update() {
+            Some(update.logical.table_id)
+        } else if let Some(delete) = node.as_batch_delete() {
+            Some(delete.logical.table_id)
+        } else {
+            node.inputs()
+                .into_iter()
+                .find_map(|n| Self::collect_dml_table_id(&n))
+        }
+    }
+
     fn collect_stage_lookup_join_parallelism(
         &self,
         node: PlanRef,
@@ -917,23 +966,17 @@ impl BatchPlanFragmenter {
             // Do not visit next stage.
             return Ok(None);
         }
-
         if let Some(lookup_join) = node.as_batch_lookup_join() {
             let table_desc = lookup_join.right_table_desc();
             let table_catalog = self
                 .catalog_reader
                 .read_guard()
                 .get_table_by_id(&table_desc.table_id)
+                .cloned()
                 .map_err(RwError::from)?;
             let vnode_mapping = self
                 .worker_node_manager
-                .get_fragment_mapping(&table_catalog.fragment_id)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "failed to get the vnode mapping for the `Materialize` of {}",
-                        table_catalog.name()
-                    )
-                })?;
+                .fragment_mapping(table_catalog.fragment_id)?;
             let parallelism = vnode_mapping.iter().sorted().dedup().count();
             Ok(Some(parallelism))
         } else {
@@ -942,14 +985,6 @@ impl BatchPlanFragmenter {
                 .find_map(|n| self.collect_stage_lookup_join_parallelism(n).transpose())
                 .transpose()
         }
-    }
-
-    pub fn worker_node_manager(&self) -> &WorkerNodeManagerRef {
-        &self.worker_node_manager
-    }
-
-    pub fn catalog_reader(&self) -> &CatalogReader {
-        &self.catalog_reader
     }
 }
 
@@ -1030,9 +1065,7 @@ fn derive_partitions(
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use risingwave_common::hash::ParallelUnitId;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
-    use risingwave_pb::common::ParallelUnit;
 
     use crate::optimizer::plan_node::PlanNodeType;
     use crate::scheduler::plan_fragmenter::StageId;
@@ -1116,18 +1149,5 @@ mod tests {
         assert_eq!(scan_node2.root.source_stage_id, None);
         assert_eq!(1, scan_node2.root.children.len());
         assert!(scan_node2.has_table_scan());
-    }
-
-    fn generate_parallel_units(
-        start_id: ParallelUnitId,
-        node_id: ParallelUnitId,
-    ) -> Vec<ParallelUnit> {
-        let parallel_degree = 8;
-        (start_id..start_id + parallel_degree)
-            .map(|id| ParallelUnit {
-                id,
-                worker_node_id: node_id,
-            })
-            .collect()
     }
 }

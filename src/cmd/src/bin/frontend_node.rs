@@ -14,17 +14,4 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
-use risingwave_common::enable_jemalloc_on_linux;
-
-enable_jemalloc_on_linux!();
-
-#[cfg_attr(coverage, no_coverage)]
-fn main() {
-    use clap::StructOpt;
-
-    let opts = risingwave_frontend::FrontendOpts::parse();
-
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
-
-    risingwave_rt::main_okk(risingwave_frontend::start(opts))
-}
+risingwave_cmd::main!(frontend);

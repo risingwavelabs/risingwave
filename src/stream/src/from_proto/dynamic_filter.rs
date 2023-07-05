@@ -45,7 +45,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         );
 
         let prost_condition = node.get_condition()?;
-        let comparator = prost_condition.get_expr_type()?;
+        let comparator = prost_condition.get_function_type()?;
         if !matches!(
             comparator,
             GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual
@@ -79,7 +79,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             state_table_l,
             state_table_r,
             params.executor_stats,
-            params.env.config().developer.stream_chunk_size,
+            params.env.config().developer.chunk_size,
         )))
     }
 }

@@ -14,9 +14,14 @@
 
 /// Wrapper and helper functions to help implement [`Executor`] for `TopN` variants
 mod utils;
+use utils::*;
 
 mod top_n_cache;
-use top_n_cache::TopNCacheTrait;
+mod top_n_state;
+use top_n_cache::{TopNCache, TopNCacheTrait};
+mod topn_cache_state;
+use top_n_state::ManagedTopNState;
+use topn_cache_state::CacheKey;
 
 // `TopN` variants
 mod group_top_n;
@@ -27,6 +32,4 @@ mod top_n_plain;
 pub use group_top_n::GroupTopNExecutor;
 pub use group_top_n_appendonly::AppendOnlyGroupTopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
-pub use top_n_cache::{CacheKey, TopNCache};
 pub use top_n_plain::TopNExecutor;
-pub use utils::{create_cache_key_serde, serialize_pk_to_cache_key, CacheKeySerde};

@@ -7,3 +7,8 @@ query T
 SELECT pg_catalog.pg_get_userbyid(1);
 ----
 root
+
+query T
+select (SELECT pg_catalog.pg_get_userbyid(1));
+----
+root

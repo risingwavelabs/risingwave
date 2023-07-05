@@ -29,17 +29,18 @@ use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{scan_range, ScanRange as ProstScanRange};
+use risingwave_pb::batch_plan::{scan_range, PbScanRange};
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
+use risingwave_pb::plan_common::StorageTableDesc;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
-use super::BatchTaskMetricsWithTaskLabels;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
+use crate::monitor::BatchMetricsWithTaskLabels;
 use crate::task::BatchTaskContext;
 
 /// Executor that scans data from row table
@@ -49,7 +50,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchTaskMetricsWithTaskLabels>,
+    metrics: Option<BatchMetricsWithTaskLabels>,
 
     table: StorageTable<S>,
     scan_ranges: Vec<ScanRange>,
@@ -74,7 +75,7 @@ impl ScanRange {
 
     /// Create a scan range from the prost representation.
     pub fn new(
-        scan_range: ProstScanRange,
+        scan_range: PbScanRange,
         mut pk_types: impl Iterator<Item = DataType>,
     ) -> Result<Self> {
         let pk_prefix = OwnedRow::new(
@@ -137,7 +138,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         epoch: BatchQueryEpoch,
         chunk_size: usize,
         identity: String,
-        metrics: Option<BatchTaskMetricsWithTaskLabels>,
+        metrics: Option<BatchMetricsWithTaskLabels>,
     ) -> Self {
         Self {
             chunk_size,
@@ -187,31 +188,33 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let pk_types = table_desc
             .pk
             .iter()
-            .map(|order| column_descs[order.index as usize].clone().data_type)
+            .map(|order| column_descs[order.column_index as usize].clone().data_type)
             .collect_vec();
         let order_types: Vec<OrderType> = table_desc
             .pk
             .iter()
-            .map(|order| {
-                OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
-            })
+            .map(|order| OrderType::from_protobuf(order.get_order_type().unwrap()))
             .collect();
 
-        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
 
-        let dist_key_indices = table_desc
-            .dist_key_indices
+        let dist_key_in_pk_indices = table_desc
+            .dist_key_in_pk_indices
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
         let distribution = match &seq_scan_node.vnode_bitmap {
             Some(vnodes) => Distribution {
                 vnodes: Bitmap::from(vnodes).into(),
-                dist_key_indices,
+                dist_key_in_pk_indices,
             },
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            None => Distribution::all_vnodes(dist_key_indices),
+            None => Distribution::all_vnodes(dist_key_in_pk_indices),
         };
 
         let table_option = TableOption {
@@ -227,6 +230,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(|&k| k as usize)
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        let versioned = table_desc.versioned;
         let scan_ranges = {
             let scan_ranges = &seq_scan_node.scan_ranges;
             if scan_ranges.is_empty() {
@@ -244,11 +248,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let chunk_size = if let Some(chunk_size_) = &seq_scan_node.chunk_size {
             chunk_size_
                 .get_chunk_size()
-                .min(source.context.get_config().developer.batch_chunk_size as u32)
+                .min(source.context.get_config().developer.chunk_size as u32)
         } else {
-            source.context.get_config().developer.batch_chunk_size as u32
+            source.context.get_config().developer.chunk_size as u32
         };
-        let metrics = source.context().task_metrics();
+        let metrics = source.context().batch_metrics();
 
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(
@@ -262,6 +266,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 table_option,
                 value_indices,
                 prefix_hint_len,
+                versioned,
             );
             Ok(Box::new(RowSeqScanExecutor::new(
                 table,
@@ -305,18 +310,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         let table = Arc::new(table);
 
         // Create collector.
-        let histogram = if let Some(ref metrics) = metrics {
-            let mut labels = metrics.task_labels();
-            labels.push(identity.as_str());
-            Some(
-                metrics
-                    .metrics
-                    .task_row_seq_scan_next_duration
-                    .with_label_values(&labels),
-            )
-        } else {
-            None
-        };
+        let histogram = metrics
+            .as_ref()
+            .map(|metrics| metrics.create_collector_for_row_seq_scan_next_duration(vec![identity]));
 
         if ordered {
             // Currently we execute range-scans concurrently so the order is not guaranteed if
@@ -401,9 +397,10 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         } = scan_range;
 
         let (start_bound, end_bound) =
-            match table.pk_serializer().get_order_types()[pk_prefix.len()] {
-                OrderType::Ascending => (next_col_bounds.0, next_col_bounds.1),
-                OrderType::Descending => (next_col_bounds.1, next_col_bounds.0),
+            if table.pk_serializer().get_order_types()[pk_prefix.len()].is_ascending() {
+                (next_col_bounds.0, next_col_bounds.1)
+            } else {
+                (next_col_bounds.1, next_col_bounds.0)
             };
 
         // Range Scan.
@@ -417,6 +414,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     end_bound.map(|x| OwnedRow::new(vec![x])),
                 ),
                 ordered,
+                PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;
 

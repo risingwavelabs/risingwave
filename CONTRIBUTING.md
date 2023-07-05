@@ -18,6 +18,7 @@ To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/rising
     - [Pull Request title](#pull-request-title)
     - [Pull Request description](#pull-request-description)
     - [Sign the CLA](#sign-the-cla)
+    - [Cherry pick the commit to release candidate branch](#cherry-pick-the-commit-to-release-candidate-branch)
 
 ## Tests and miscellaneous checks
 
@@ -32,12 +33,12 @@ As described in [here](https://github.com/commitizen/conventional-commit-types/b
 - `feat`: A new feature
 - `fix`: A bug fix
 - `doc`: Documentation only changes
-- `style`: Changes that do not affect the meaning of the code (white-space, formatting, missing semi-colons, etc)
 - `refactor`: A code change that neither fixes a bug nor adds a feature
+- `style`: A refactoring that improves code style
 - `perf`: A code change that improves performance
 - `test`: Adding missing tests or correcting existing tests
-- `build`: Changes that affect the build system or external dependencies (example scopes: gulp, broccoli, npm)
-- `ci`: Changes to RisingWave CI configuration files and scripts (example scopes: Travis, Circle, BrowserStack, SauceLabs)
+- `build`: Changes that affect the build system or external dependencies (example scopes: `.config`, `.cargo`, `Cargo.toml`)
+- `ci`: Changes to RisingWave CI configuration files and scripts (example scopes: `.github`, `ci` (Buildkite))
 - `chore`: Other changes that don't modify src or test files
 - `revert`: Reverts a previous commit
 
@@ -56,3 +57,16 @@ You may also check out previous PRs in the [PR list](https://github.com/risingwa
 ### Sign the CLA
 
 Contributors will need to sign RisingWave Labs' CLA.
+
+### Cherry pick the commit to release candidate branch
+We have a GitHub Action to help cherry-pick commits from `main` branch to a `release candidate` branch, such as `v*.*.*-rc` where `*` is a number.
+
+Checkout details at: https://github.com/risingwavelabs/risingwave/blob/main/.github/workflows/cherry-pick-to-release-branch.yml
+
+To trigger the action, we give a correct label to the PR on `main` branch :
+https://github.com/risingwavelabs/risingwave/blob/main/.github/workflows/cherry-pick-to-release-branch.yml#L10
+
+It will act when the PR on `main` branch merged:
+- If `git cherry-pick` does not find any conflicts, it will open a PR to the `release candidate` branch, and assign the original author as the reviewer.
+
+- If there is a conflict, it will open an issue and make the original author the assignee.

@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::SinkConfig;
+use risingwave_connector::sink::kafka::KAFKA_SINK;
+use risingwave_connector::sink::{SinkConfig, DOWNSTREAM_SINK_KEY};
 use risingwave_pb::stream_plan::SinkNode;
 
 use super::*;
+use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
 use crate::executor::{SinkExecutor, StreamExecutorError};
 
 pub struct SinkExecutorBuilder;
@@ -35,30 +38,44 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
+        let sink_id = sink_desc.get_id().into();
         let mut properties = sink_desc.get_properties().clone();
         let pk_indices = sink_desc
-            .pk
+            .downstream_pk
             .iter()
-            .map(|pk| pk.index as usize)
-            .collect::<Vec<_>>();
-        let schema = sink_desc.columns.iter().map(Into::into).collect();
+            .map(|i| *i as usize)
+            .collect_vec();
+        let columns = sink_desc
+            .column_catalogs
+            .clone()
+            .into_iter()
+            .map(ColumnCatalog::from)
+            .collect_vec();
         // This field can be used to distinguish a specific actor in parallelism to prevent
         // transaction execution errors
-        properties.insert(
-            "identifier".to_string(),
-            format!("sink-{:?}", params.executor_id),
-        );
+        if let Some(connector) = properties.get(DOWNSTREAM_SINK_KEY) && connector == KAFKA_SINK {
+            properties.insert(
+                "identifier".to_string(),
+                format!("sink-{:?}", params.executor_id),
+            );
+        }
         let config = SinkConfig::from_hashmap(properties).map_err(StreamExecutorError::from)?;
 
-        Ok(Box::new(SinkExecutor::new(
-            materialize_executor,
-            stream.streaming_metrics.clone(),
-            config,
-            params.executor_id,
-            params.env.connector_params(),
-            schema,
-            pk_indices,
-            sink_type,
-        )))
+        Ok(Box::new(
+            SinkExecutor::new(
+                materialize_executor,
+                stream.streaming_metrics.clone(),
+                config,
+                params.executor_id,
+                params.env.connector_params(),
+                columns,
+                pk_indices,
+                sink_type,
+                sink_id,
+                params.actor_context,
+                BoundedInMemLogStoreFactory::new(1),
+            )
+            .await?,
+        ))
     }
 }

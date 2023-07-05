@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use prometheus::HistogramTimer;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress as ProstCreateMviewProgress;
+use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::Receiver;
@@ -42,7 +42,7 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
 pub struct CollectResult {
-    pub create_mview_progress: Vec<ProstCreateMviewProgress>,
+    pub create_mview_progress: Vec<PbCreateMviewProgress>,
 }
 
 enum BarrierState {

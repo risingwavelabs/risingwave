@@ -23,9 +23,12 @@
 //! (such as an optimizer based on the Volcano/Cascades model).
 //!
 //! [PlanNode]: super::plan_node::PlanNode
+
 pub(crate) mod order;
 pub use order::*;
 mod distribution;
 pub use distribution::*;
 mod func_dep;
 pub use func_dep::*;
+mod cardinality;
+pub use cardinality::*;

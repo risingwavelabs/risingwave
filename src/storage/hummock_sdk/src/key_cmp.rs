@@ -14,10 +14,8 @@
 
 use std::cmp::{self, Ordering};
 
-use bytes::Buf;
-
 use super::key::split_key_epoch;
-use crate::key::{UserKey, TABLE_PREFIX_LEN};
+use crate::key::UserKey;
 
 /// A comparator for comparing [`FullKey`] and [`UserKey`] with possibly different table key types.
 pub struct KeyComparator;
@@ -32,16 +30,17 @@ impl KeyComparator {
         l_p.cmp(r_p).then_with(|| r_s.cmp(l_s))
     }
 
+    #[inline]
+    pub fn encoded_full_key_less_than(lhs: &[u8], rhs: &[u8]) -> bool {
+        Self::compare_encoded_full_key(lhs, rhs) == cmp::Ordering::Less
+    }
+
     /// Used to compare [`UserKey`] and its encoded format.
     pub fn compare_user_key_cross_format(
         encoded: impl AsRef<[u8]>,
         unencoded: &UserKey<impl AsRef<[u8]>>,
     ) -> Ordering {
-        let encoded = encoded.as_ref();
-        (&encoded[..TABLE_PREFIX_LEN])
-            .get_u32()
-            .cmp(&unencoded.table_id.table_id())
-            .then_with(|| encoded[TABLE_PREFIX_LEN..].cmp(unencoded.table_key.as_ref()))
+        UserKey::decode(encoded.as_ref()).cmp(&unencoded.as_ref())
     }
 
     #[inline(always)]

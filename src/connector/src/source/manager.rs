@@ -29,6 +29,8 @@ pub struct SourceColumnDesc {
     pub is_row_id: bool,
 
     pub is_meta: bool,
+    // `is_pk` is used to indicate whether the column is part of the primary key columns.
+    pub is_pk: bool,
 }
 
 impl SourceColumnDesc {
@@ -39,14 +41,21 @@ impl SourceColumnDesc {
             !matches!(data_type, DataType::List { .. } | DataType::Struct(..)),
             "called `SourceColumnDesc::simple` with a composite type."
         );
+        let name = name.into();
         Self {
-            name: name.into(),
+            name,
             data_type,
             column_id,
             fields: vec![],
             is_row_id: false,
             is_meta: false,
+            is_pk: false,
         }
+    }
+
+    #[inline]
+    pub fn is_visible(&self) -> bool {
+        !self.is_row_id && !self.is_meta
     }
 }
 
@@ -58,8 +67,9 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             data_type: c.data_type.clone(),
             column_id: c.column_id,
             fields: c.field_descs.clone(),
-            is_row_id: false,
+            is_row_id: c.name.as_str() == "_row_id",
             is_meta,
+            is_pk: false,
         }
     }
 }
@@ -72,6 +82,23 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             name: s.name.clone(),
             field_descs: s.fields.clone(),
             type_name: "".to_string(),
+            generated_or_default_column: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_visible() {
+        let mut c = SourceColumnDesc::simple("a", DataType::Int32, ColumnId::new(0));
+        assert!(c.is_visible());
+        c.is_row_id = true;
+        assert!(!c.is_visible());
+        c.is_row_id = false;
+        c.is_meta = true;
+        assert!(!c.is_visible());
     }
 }

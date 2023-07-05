@@ -26,20 +26,22 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
+use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-use risingwave_common::column_nonnull;
+use risingwave_common::catalog::{
+    ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
+};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
-use risingwave_pb::plan_common::RowFormatType as ProstRowFormatType;
+use risingwave_pb::plan_common::PbRowFormatType;
 use risingwave_source::connector_test_utils::create_source_desc_builder;
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::memory::MemoryStateStore;
@@ -100,16 +102,16 @@ async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_common::types::DataType;
 
     let memory_state_store = MemoryStateStore::new();
-    let dml_manager = Arc::new(DmlManager::default());
+    let dml_manager = Arc::new(DmlManager::for_test());
     let table_id = TableId::default();
     let schema = Schema {
         fields: vec![
-            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Serial),
             Field::unnamed(DataType::Float64),
         ],
     };
     let source_info = StreamSourceInfo {
-        row_format: ProstRowFormatType::Json as i32,
+        row_format: PbRowFormatType::Json as i32,
         ..Default::default()
     };
     let properties = convert_args!(hashmap!(
@@ -118,14 +120,13 @@ async fn test_table_materialize() -> StreamResult<()> {
         "fields.v1.max" => "1000",
         "fields.v1.seed" => "12345",
     ));
-    let pk_column_ids = vec![0];
     let row_id_index: usize = 0;
     let source_builder = create_source_desc_builder(
         &schema,
-        pk_column_ids,
-        Some(row_id_index as _),
+        Some(row_id_index),
         source_info,
         properties,
+        vec![row_id_index],
     );
 
     // Ensure the source exists.
@@ -155,6 +156,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             name: field.name,
             field_descs: vec![],
             type_name: "".to_string(),
+            generated_or_default_column: None,
         })
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();
@@ -172,6 +174,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         barrier_rx,
         u64::MAX,
         1,
+        SourceCtrlOpts::default(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
@@ -182,6 +185,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         2,
         dml_manager.clone(),
         table_id,
+        INITIAL_TABLE_VERSION_ID,
         column_descs.clone(),
     );
 
@@ -200,11 +204,11 @@ async fn test_table_materialize() -> StreamResult<()> {
         Box::new(row_id_gen_executor),
         memory_state_store.clone(),
         table_id,
-        vec![OrderPair::new(0, OrderType::Ascending)],
+        vec![ColumnOrder::new(0, OrderType::ascending())],
         all_column_ids.clone(),
         4,
         Arc::new(AtomicU64::new(0)),
-        false,
+        ConflictBehavior::NoCheck,
     )
     .await
     .boxed()
@@ -226,11 +230,13 @@ async fn test_table_materialize() -> StreamResult<()> {
     ));
     let insert = Box::new(InsertExecutor::new(
         table_id,
+        INITIAL_TABLE_VERSION_ID,
         dml_manager.clone(),
         insert_inner,
         1024,
         "InsertExecutor".to_string(),
-        vec![], // ignore insertion order
+        vec![0], // ignore insertion order
+        vec![],
         Some(row_id_index),
         false,
     ));
@@ -247,7 +253,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         memory_state_store.clone(),
         table_id,
         column_descs.clone(),
-        vec![OrderType::Ascending],
+        vec![OrderType::ascending()],
         vec![0],
         value_indices,
     );
@@ -285,14 +291,14 @@ async fn test_table_materialize() -> StreamResult<()> {
     let mut col_row_ids = vec![];
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].array_ref().as_int64();
+            let col_row_id = c.columns()[0].as_serial();
             col_row_ids.push(col_row_id.value_at(0).unwrap());
             col_row_ids.push(col_row_id.value_at(1).unwrap());
 
-            let col_data = c.columns()[1].array_ref().as_float64();
+            let col_data = c.columns()[1].as_float64();
             assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
             assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
         }
@@ -328,7 +334,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let mut stream = scan.execute();
     let result = stream.next().await.unwrap().unwrap();
 
-    let col_data = result.columns()[1].array_ref().as_float64();
+    let col_data = result.columns()[1].as_float64();
     assert_eq!(col_data.len(), 2);
     assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
     assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
@@ -339,13 +345,14 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Delete some data using `DeleteExecutor`, assuming we are inserting into the "mv".
     let columns = vec![
-        column_nonnull! { I64Array, [ col_row_ids[0]] }, // row id column
-        column_nonnull! { F64Array, [1.14] },
+        SerialArray::from_iter([col_row_ids[0]]).into_ref(), // row id column
+        F64Array::from_iter([1.14]).into_ref(),
     ];
     let chunk = DataChunk::new(columns.clone(), 1);
     let delete_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
     let delete = Box::new(DeleteExecutor::new(
         table_id,
+        INITIAL_TABLE_VERSION_ID,
         dml_manager.clone(),
         delete_inner,
         1024,
@@ -363,13 +370,13 @@ async fn test_table_materialize() -> StreamResult<()> {
     let message = materialize.next().await.unwrap()?;
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].array_ref().as_int64();
+            let col_row_id = c.columns()[0].as_serial();
             assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
 
-            let col_data = c.columns()[1].array_ref().as_float64();
+            let col_data = c.columns()[1].as_float64();
             assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
         }
         Message::Barrier(_) => panic!(),
@@ -402,7 +409,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let mut stream = scan.execute();
     let result = stream.next().await.unwrap().unwrap();
-    let col_data = result.columns()[1].array_ref().as_float64();
+    let col_data = result.columns()[1].as_float64();
     assert_eq!(col_data.len(), 1);
     assert_eq!(col_data.value_at(0).unwrap(), 5.14.into_ordered());
 
@@ -431,7 +438,7 @@ async fn test_row_seq_scan() -> Result<()> {
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
-        vec![OrderType::Ascending],
+        vec![OrderType::ascending()],
         vec![0_usize],
     )
     .await;
@@ -439,7 +446,7 @@ async fn test_row_seq_scan() -> Result<()> {
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
-        vec![OrderType::Ascending],
+        vec![OrderType::ascending()],
         vec![0],
         vec![0, 1, 2],
     );
@@ -477,21 +484,11 @@ async fn test_row_seq_scan() -> Result<()> {
 
     assert_eq!(res_chunk.dimension(), 3);
     assert_eq!(
-        res_chunk
-            .column_at(0)
-            .array()
-            .as_int32()
-            .iter()
-            .collect::<Vec<_>>(),
+        res_chunk.column_at(0).as_int32().iter().collect::<Vec<_>>(),
         vec![Some(1)]
     );
     assert_eq!(
-        res_chunk
-            .column_at(1)
-            .array()
-            .as_int32()
-            .iter()
-            .collect::<Vec<_>>(),
+        res_chunk.column_at(1).as_int32().iter().collect::<Vec<_>>(),
         vec![Some(4)]
     );
 
@@ -500,7 +497,6 @@ async fn test_row_seq_scan() -> Result<()> {
     assert_eq!(
         res_chunk2
             .column_at(0)
-            .array()
             .as_int32()
             .iter()
             .collect::<Vec<_>>(),
@@ -509,7 +505,6 @@ async fn test_row_seq_scan() -> Result<()> {
     assert_eq!(
         res_chunk2
             .column_at(1)
-            .array()
             .as_int32()
             .iter()
             .collect::<Vec<_>>(),

@@ -55,6 +55,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile_well_known_types(true)
         .protoc_arg("--experimental_allow_proto3_optional")
         .type_attribute(".", "#[derive(prost_helpers::AnyPB)]")
+        .type_attribute("node_body", "#[derive(::enum_as_inner::EnumAsInner)]")
+        .type_attribute("rex_node", "#[derive(::enum_as_inner::EnumAsInner)]")
+        .type_attribute("catalog.WatermarkDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.ExprNode", "#[derive(Eq, Hash)]")
+        .type_attribute("data.DataType", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.ExprNode.NowRexNode", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.InputRef", "#[derive(Eq, Hash)]")
+        .type_attribute("data.Datum", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
+        .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "plan_common.ColumnDesc.generated_or_default_column",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute("plan_common.GeneratedColumnDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.DefaultColumnDesc", "#[derive(Eq, Hash)]")
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])
         .expect("Failed to compile grpc!");

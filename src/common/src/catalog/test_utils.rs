@@ -56,6 +56,7 @@ impl ColumnDescTestExt for ColumnDesc {
             name: name.to_string(),
             type_name: type_name.to_string(),
             field_descs: fields,
+            generated_or_default_column: None,
         }
     }
 }

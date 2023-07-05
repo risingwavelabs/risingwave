@@ -1,0 +1,22 @@
+<configuration>
+    <property>
+        <name>presto.s3.endpoint</name>
+        <value>http://minio-0:9301</value>
+    </property>
+    <property>
+        <name>presto.s3.path-style-access</name>
+        <value>true</value>
+    </property>
+    <property>
+        <name>presto.s3.access-key</name>
+        <value>hummockadmin</value>
+    </property>
+    <property>
+        <name>presto.s3.secret-key</name>
+        <value>hummockadmin</value>
+    </property>
+    <property>
+        <name>fs.s3a.impl</name>
+        <value>com.facebook.presto.hive.s3.PrestoS3FileSystem</value>
+    </property>
+</configuration>

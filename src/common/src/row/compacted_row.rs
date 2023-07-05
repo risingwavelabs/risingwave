@@ -15,17 +15,26 @@
 use bytes::Bytes;
 
 use super::{OwnedRow, Row, RowDeserializer};
+use crate::estimate_size::EstimateSize;
 use crate::types::DataType;
 use crate::util::value_encoding;
 
 /// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
 /// Executors need to serialize Row into `CompactedRow` before writing into cache.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, EstimateSize)]
 pub struct CompactedRow {
     pub row: Bytes,
 }
 
 impl CompactedRow {
+    /// Create a new [`CompactedRow`] from given bytes. Caller must ensure the bytes are in valid
+    /// value-encoding row format.
+    pub fn new(value_encoding_bytes: Bytes) -> Self {
+        Self {
+            row: value_encoding_bytes,
+        }
+    }
+
     /// Deserialize [`CompactedRow`] into [`OwnedRow`] with given types.
     pub fn deserialize(&self, data_types: &[DataType]) -> value_encoding::Result<OwnedRow> {
         RowDeserializer::new(data_types).deserialize(self.row.as_ref())

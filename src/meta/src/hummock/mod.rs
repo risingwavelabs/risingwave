@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 pub mod compaction;
 mod compaction_schedule_policy;
 mod compaction_scheduler;
@@ -49,6 +48,7 @@ use crate::MetaOpts;
 
 /// Start hummock's asynchronous tasks.
 pub fn start_hummock_workers<S>(
+    hummock_manager: HummockManagerRef<S>,
     vacuum_manager: VacuumManagerRef<S>,
     compaction_scheduler: CompactionSchedulerRef<S>,
     meta_opts: &MetaOpts,
@@ -56,14 +56,18 @@ pub fn start_hummock_workers<S>(
 where
     S: MetaStore,
 {
-    let mut workers = vec![start_compaction_scheduler(compaction_scheduler)];
-    // Start vacuum in non-deterministic compaction test
-    if !meta_opts.compaction_deterministic_test {
-        workers.push(start_vacuum_scheduler(
-            vacuum_manager,
-            Duration::from_secs(meta_opts.vacuum_interval_sec),
-        ));
-    }
+    let mut workers = vec![
+        start_compaction_scheduler(compaction_scheduler),
+        start_checkpoint_loop(
+            hummock_manager,
+            Duration::from_secs(meta_opts.hummock_version_checkpoint_interval_sec),
+            meta_opts.min_delta_log_num_for_hummock_version_checkpoint,
+        ),
+    ];
+    workers.push(start_vacuum_scheduler(
+        vacuum_manager,
+        Duration::from_secs(meta_opts.vacuum_interval_sec),
+    ));
     workers
 }
 
@@ -114,6 +118,41 @@ where
                 tracing::warn!("Vacuum SST error {:#?}", err);
             }
             sync_point!("AFTER_SCHEDULE_VACUUM");
+        }
+    });
+    (join_handle, shutdown_tx)
+}
+
+pub fn start_checkpoint_loop<S: MetaStore>(
+    hummock_manager: HummockManagerRef<S>,
+    interval: Duration,
+    min_delta_log_num: u64,
+) -> (JoinHandle<()>, Sender<()>) {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let join_handle = tokio::spawn(async move {
+        let mut min_trigger_interval = tokio::time::interval(interval);
+        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                // Wait for interval
+                _ = min_trigger_interval.tick() => {},
+                // Shutdown checkpoint
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Hummock version checkpoint is stopped");
+                    return;
+                }
+            }
+            if hummock_manager.is_version_checkpoint_paused()
+                || hummock_manager.env.opts.compaction_deterministic_test
+            {
+                continue;
+            }
+            if let Err(err) = hummock_manager
+                .create_version_checkpoint(min_delta_log_num)
+                .await
+            {
+                tracing::warn!("Hummock version checkpoint error {:#?}", err);
+            }
         }
     });
     (join_handle, shutdown_tx)

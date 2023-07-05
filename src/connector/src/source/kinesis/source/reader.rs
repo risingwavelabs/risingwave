@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use aws_sdk_kinesis::error::GetRecordsError;
-use aws_sdk_kinesis::model::ShardIteratorType;
-use aws_sdk_kinesis::output::GetRecordsOutput;
-use aws_sdk_kinesis::types::SdkError;
+use aws_sdk_kinesis::error::SdkError;
+use aws_sdk_kinesis::operation::get_records::{GetRecordsError, GetRecordsOutput};
+use aws_sdk_kinesis::types::ShardIteratorType;
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -31,10 +29,9 @@ use crate::parser::ParserConfig;
 use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::KinesisOffset;
 use crate::source::kinesis::KinesisProperties;
-use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReaderV2,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
+    SplitMetaData, SplitReader,
 };
 
 impl_common_split_reader_logic!(KinesisSplitReader, KinesisProperties);
@@ -51,20 +48,18 @@ pub struct KinesisSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
-impl SplitReaderV2 for KinesisSplitReader {
+impl SplitReader for KinesisSplitReader {
     type Properties = KinesisProperties;
 
     async fn new(
         properties: KinesisProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         assert!(splits.len() == 1);
@@ -108,8 +103,7 @@ impl SplitReaderV2 for KinesisSplitReader {
             end_position: split.end_position,
             split_id,
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
         })
     }
 
@@ -150,7 +144,11 @@ impl KinesisSplitReader {
                     );
                     yield chunk;
                 }
-                Err(SdkError::ServiceError { err, .. }) if err.is_expired_iterator_exception() => {
+                Err(SdkError::ServiceError(e)) if e.err().is_resource_not_found_exception() => {
+                    tracing::warn!("shard {:?} is closed, stop reading", self.shard_id);
+                    break;
+                }
+                Err(SdkError::ServiceError(e)) if e.err().is_expired_iterator_exception() => {
                     tracing::warn!(
                         "stream {:?} shard {:?} iterator expired, renew it",
                         self.stream_name,
@@ -160,8 +158,8 @@ impl KinesisSplitReader {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
                 }
-                Err(SdkError::ServiceError { err, .. })
-                    if err.is_provisioned_throughput_exceeded_exception() =>
+                Err(SdkError::ServiceError(e))
+                    if e.err().is_provisioned_throughput_exceeded_exception() =>
                 {
                     tracing::warn!(
                         "stream {:?} shard {:?} throughput exceeded, retry",
@@ -257,6 +255,7 @@ impl KinesisSplitReader {
     ) -> core::result::Result<GetRecordsOutput, SdkError<GetRecordsError>> {
         self.client
             .get_records()
+            .limit(self.source_ctx.source_ctrl_opts.chunk_size as i32)
             .set_shard_iterator(self.shard_iter.take())
             .send()
             .await
@@ -299,7 +298,6 @@ mod tests {
             })],
             Default::default(),
             Default::default(),
-            Default::default(),
             None,
         )
         .await?
@@ -315,7 +313,6 @@ mod tests {
                 ),
                 end_position: KinesisOffset::None,
             })],
-            Default::default(),
             Default::default(),
             Default::default(),
             None,

@@ -18,17 +18,13 @@ use std::mem::size_of;
 
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
-use risingwave_pb::data::{Array as ProstArray, ArrayType};
+use risingwave_pb::data::{ArrayType, PbArray};
 
-use super::{Array, ArrayBuilder, ArrayResult};
-use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
+use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::estimate_size::EstimateSize;
 use crate::for_all_native_types;
-use crate::types::decimal::Decimal;
-use crate::types::interval::IntervalUnit;
-use crate::types::{
-    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
-};
+use crate::types::*;
 
 /// Physical type of array items which have fixed size.
 pub trait PrimitiveArrayItemType
@@ -36,9 +32,12 @@ where
     for<'a> Self: Sized
         + Default
         + PartialOrd
+        + EstimateSize
         + Scalar<ScalarRefType<'a> = Self>
         + ScalarRef<'a, ScalarType = Self>,
 {
+    /// The data type.
+    const DATA_TYPE: DataType;
     // array methods
     /// A helper to convert a primitive array to `ArrayImpl`.
     fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl;
@@ -48,8 +47,6 @@ where
     fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>>;
     /// Returns array type of the primitive array
     fn array_type() -> ArrayType;
-    /// Creates an `ArrayBuilder` for this primitive type
-    fn create_array_builder(capacity: usize) -> ArrayBuilderImpl;
 
     // item methods
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize>;
@@ -57,6 +54,8 @@ where
 
 macro_rules! impl_array_methods {
     ($scalar_type:ty, $array_type_pb:ident, $array_impl_variant:ident) => {
+        const DATA_TYPE: DataType = DataType::$array_impl_variant;
+
         fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
             ArrayImpl::$array_impl_variant(arr)
         }
@@ -77,11 +76,6 @@ macro_rules! impl_array_methods {
 
         fn array_type() -> ArrayType {
             ArrayType::$array_type_pb
-        }
-
-        fn create_array_builder(capacity: usize) -> ArrayBuilderImpl {
-            let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity);
-            ArrayBuilderImpl::$array_impl_variant(array_builder)
         }
     };
 }
@@ -119,10 +113,10 @@ macro_rules! impl_primitive_for_others {
 
 impl_primitive_for_others! {
     { Decimal, Decimal, Decimal },
-    { IntervalUnit, Interval, Interval },
-    { NaiveDateWrapper, Date, NaiveDate },
-    { NaiveTimeWrapper, Time, NaiveTime },
-    { NaiveDateTimeWrapper, Timestamp, NaiveDateTime }
+    { Interval, Interval, Interval },
+    { Date, Date, Date },
+    { Time, Time, Time },
+    { Timestamp, Timestamp, Timestamp }
 }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
@@ -159,6 +153,30 @@ impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
     }
 }
 
+impl FromIterator<Option<f32>> for PrimitiveArray<F32> {
+    fn from_iter<I: IntoIterator<Item = Option<f32>>>(iter: I) -> Self {
+        iter.into_iter().map(|o| o.map(F32::from)).collect()
+    }
+}
+
+impl FromIterator<Option<f64>> for PrimitiveArray<F64> {
+    fn from_iter<I: IntoIterator<Item = Option<f64>>>(iter: I) -> Self {
+        iter.into_iter().map(|o| o.map(F64::from)).collect()
+    }
+}
+
+impl FromIterator<f32> for PrimitiveArray<F32> {
+    fn from_iter<I: IntoIterator<Item = f32>>(iter: I) -> Self {
+        iter.into_iter().map(F32::from).collect()
+    }
+}
+
+impl FromIterator<f64> for PrimitiveArray<F64> {
+    fn from_iter<I: IntoIterator<Item = f64>>(iter: I) -> Self {
+        iter.into_iter().map(F64::from).collect()
+    }
+}
+
 impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
     /// Build a [`PrimitiveArray`] from iterator and bitmap.
     ///
@@ -187,7 +205,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         self.data.len()
     }
 
-    fn to_protobuf(&self) -> ProstArray {
+    fn to_protobuf(&self) -> PbArray {
         let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
 
         for v in self.iter() {
@@ -199,7 +217,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
             body: output_buffer,
         };
         let null_bitmap = self.null_bitmap().to_protobuf();
-        ProstArray {
+        PbArray {
             null_bitmap: Some(null_bitmap),
             values: vec![buffer],
             array_type: T::array_type() as i32,
@@ -220,8 +238,8 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         self.bitmap = bitmap;
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        T::create_array_builder(capacity)
+    fn data_type(&self) -> DataType {
+        T::DATA_TYPE
     }
 }
 
@@ -235,11 +253,19 @@ pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
 impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     type ArrayType = PrimitiveArray<T>;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
+    fn new(capacity: usize) -> Self {
         Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
         }
+    }
+
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        // Timestamptz shares the same underlying type as Int64
+        assert!(
+            ty == T::DATA_TYPE || ty == DataType::Timestamptz && T::DATA_TYPE == DataType::Int64
+        );
+        Self::new(capacity)
     }
 
     fn append_n(&mut self, n: usize, value: Option<T>) {
@@ -266,6 +292,10 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> PrimitiveArray<T> {
         PrimitiveArray {
             bitmap: self.bitmap.finish(),
@@ -274,10 +304,16 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     }
 }
 
+impl<T: PrimitiveArrayItemType> EstimateSize for PrimitiveArray<T> {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size() + self.data.capacity() * size_of::<T>()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{OrderedF32, OrderedF64};
+    use crate::types::{F32, F64};
 
     fn helper_test_builder<T: PrimitiveArrayItemType>(data: Vec<Option<T>>) -> PrimitiveArray<T> {
         let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());
@@ -325,7 +361,7 @@ mod tests {
 
     #[test]
     fn test_f32_builder() {
-        let arr = helper_test_builder::<OrderedF32>(
+        let arr = helper_test_builder::<F32>(
             (0..1000)
                 .map(|x| {
                     if x % 2 == 0 {
@@ -343,7 +379,7 @@ mod tests {
 
     #[test]
     fn test_f64_builder() {
-        let arr = helper_test_builder::<OrderedF64>(
+        let arr = helper_test_builder::<F64>(
             (0..1000)
                 .map(|x| {
                     if x % 2 == 0 {

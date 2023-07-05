@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use nexmark::event::{Auction, Bid, Event, EventType, Person};
+pub use nexmark::event::EventType;
+use nexmark::event::{Auction, Bid, Event, Person};
 use risingwave_common::array::StructValue;
+use risingwave_common::catalog::row_id_column_name;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, Datum, NaiveDateTimeWrapper, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, StructType, Timestamp};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -66,6 +67,53 @@ pub fn new_combined_event(event: Event) -> CombinedEvent {
     }
 }
 
+pub fn get_event_data_types_with_names(
+    event_type: Option<EventType>,
+    row_id_index: Option<usize>,
+) -> Vec<(String, DataType)> {
+    let mut fields = match event_type {
+        None => {
+            vec![
+                ("event_type".into(), DataType::Int64),
+                ("person".into(), DataType::Struct(get_person_struct_type())),
+                (
+                    "auction".into(),
+                    DataType::Struct(get_auction_struct_type()),
+                ),
+                ("bid".into(), DataType::Struct(get_bid_struct_type())),
+            ]
+        }
+        Some(EventType::Person) => {
+            let struct_type = get_person_struct_type();
+            struct_type
+                .iter()
+                .map(|(n, t)| (n.into(), t.clone()))
+                .collect()
+        }
+        Some(EventType::Auction) => {
+            let struct_type = get_auction_struct_type();
+            struct_type
+                .iter()
+                .map(|(n, t)| (n.into(), t.clone()))
+                .collect()
+        }
+        Some(EventType::Bid) => {
+            let struct_type = get_bid_struct_type();
+            struct_type
+                .iter()
+                .map(|(n, t)| (n.into(), t.clone()))
+                .collect()
+        }
+    };
+
+    if let Some(row_id_index) = row_id_index {
+        // _row_id
+        fields.insert(row_id_index, (row_id_column_name(), DataType::Serial));
+    }
+
+    fields
+}
+
 pub(crate) fn get_event_data_types(
     event_type: Option<EventType>,
     row_id_index: Option<usize>,
@@ -74,116 +122,62 @@ pub(crate) fn get_event_data_types(
         None => {
             vec![
                 DataType::Int64,
-                DataType::Struct(get_person_struct_type().into()),
-                DataType::Struct(get_auction_struct_type().into()),
-                DataType::Struct(get_bid_struct_type().into()),
+                DataType::Struct(get_person_struct_type()),
+                DataType::Struct(get_auction_struct_type()),
+                DataType::Struct(get_bid_struct_type()),
             ]
         }
-        Some(EventType::Person) => get_person_struct_type().fields,
-        Some(EventType::Auction) => get_auction_struct_type().fields,
-        Some(EventType::Bid) => get_bid_struct_type().fields,
+        Some(EventType::Person) => get_person_struct_type().types().cloned().collect(),
+        Some(EventType::Auction) => get_auction_struct_type().types().cloned().collect(),
+        Some(EventType::Bid) => get_bid_struct_type().types().cloned().collect(),
     };
 
     if let Some(row_id_index) = row_id_index {
         // _row_id
-        fields.insert(row_id_index, DataType::Int64);
+        fields.insert(row_id_index, DataType::Serial);
     }
 
     fields
 }
 
 pub(crate) fn get_person_struct_type() -> StructType {
-    let fields = vec![
-        DataType::Int64,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Timestamp,
-        DataType::Varchar,
-    ];
-    let field_names = vec![
-        "id",
-        "name",
-        "email_address",
-        "credit_card",
-        "city",
-        "state",
-        "date_time",
-        "extra",
-    ]
-    .into_iter()
-    .map(ToOwned::to_owned)
-    .collect();
-    StructType {
-        fields,
-        field_names,
-    }
+    StructType::new(vec![
+        ("id", DataType::Int64),
+        ("name", DataType::Varchar),
+        ("email_address", DataType::Varchar),
+        ("credit_card", DataType::Varchar),
+        ("city", DataType::Varchar),
+        ("state", DataType::Varchar),
+        ("date_time", DataType::Timestamp),
+        ("extra", DataType::Varchar),
+    ])
 }
 
 pub(crate) fn get_auction_struct_type() -> StructType {
-    let fields = vec![
-        DataType::Int64,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Int64,
-        DataType::Int64,
-        DataType::Timestamp,
-        DataType::Timestamp,
-        DataType::Int64,
-        DataType::Int64,
-        DataType::Varchar,
-    ];
-    let field_names = vec![
-        "id",
-        "item_name",
-        "description",
-        "initial_bid",
-        "reserve",
-        "date_time",
-        "expires",
-        "seller",
-        "category",
-        "extra",
-    ]
-    .into_iter()
-    .map(ToOwned::to_owned)
-    .collect();
-
-    StructType {
-        fields,
-        field_names,
-    }
+    StructType::new(vec![
+        ("id", DataType::Int64),
+        ("item_name", DataType::Varchar),
+        ("description", DataType::Varchar),
+        ("initial_bid", DataType::Int64),
+        ("reserve", DataType::Int64),
+        ("date_time", DataType::Timestamp),
+        ("expires", DataType::Timestamp),
+        ("seller", DataType::Int64),
+        ("category", DataType::Int64),
+        ("extra", DataType::Varchar),
+    ])
 }
 
 pub(crate) fn get_bid_struct_type() -> StructType {
-    let fields = vec![
-        DataType::Int64,
-        DataType::Int64,
-        DataType::Int64,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Timestamp,
-        DataType::VARCHAR,
-    ];
-    let field_names = vec![
-        "auction",
-        "bidder",
-        "price",
-        "channel",
-        "url",
-        "date_time",
-        "extra",
-    ]
-    .into_iter()
-    .map(ToOwned::to_owned)
-    .collect();
-
-    StructType {
-        fields,
-        field_names,
-    }
+    StructType::new(vec![
+        ("auction", DataType::Int64),
+        ("bidder", DataType::Int64),
+        ("price", DataType::Int64),
+        ("channel", DataType::Varchar),
+        ("url", DataType::Varchar),
+        ("date_time", DataType::Timestamp),
+        ("extra", DataType::Varchar),
+    ])
 }
 
 pub(crate) fn combined_event_to_row(e: CombinedEvent, row_id_index: Option<usize>) -> OwnedRow {
@@ -229,8 +223,8 @@ fn person_to_datum(p: Person) -> Vec<Datum> {
         Some(ScalarImpl::Utf8(p.credit_card.into())),
         Some(ScalarImpl::Utf8(p.city.into())),
         Some(ScalarImpl::Utf8(p.state.into())),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (p.date_time / 1_000) as i64,
                 (p.date_time % 1_000) as u32 * 1_000_000,
             )
@@ -248,15 +242,15 @@ fn auction_to_datum(a: Auction) -> Vec<Datum> {
         Some(ScalarImpl::Utf8(a.description.into())),
         Some(ScalarImpl::Int64(a.initial_bid as i64)),
         Some(ScalarImpl::Int64(a.reserve as i64)),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (a.date_time / 1_000) as i64,
                 (a.date_time % 1_000) as u32 * 1_000_000,
             )
             .unwrap(),
         )),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (a.expires / 1_000) as i64,
                 (a.expires % 1_000) as u32 * 1_000_000,
             )
@@ -277,8 +271,8 @@ fn bid_to_datum(b: Bid) -> Vec<Datum> {
         Some(ScalarImpl::Int64(b.price as i64)),
         Some(ScalarImpl::Utf8(b.channel.into())),
         Some(ScalarImpl::Utf8(b.url.into())),
-        Some(ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
+        Some(ScalarImpl::Timestamp(
+            Timestamp::with_secs_nsecs(
                 (b.date_time / 1_000) as i64,
                 (b.date_time % 1_000) as u32 * 1_000_000,
             )

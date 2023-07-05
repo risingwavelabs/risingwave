@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
@@ -22,6 +23,7 @@ use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -62,11 +64,14 @@ impl<S: MetaStore> NotificationClient for MockNotificationClient<S> {
             hummock_version: Some(hummock_version),
             version: Some(Default::default()),
             meta_backup_manifest_id: Some(MetaBackupManifestId { id: 0 }),
+            hummock_write_limits: Some(WriteLimits {
+                write_limits: HashMap::new(),
+            }),
             ..Default::default()
         };
 
         self.notification_manager
-            .notify_snapshot(worker_key, meta_snapshot);
+            .notify_snapshot(worker_key, subscribe_type, meta_snapshot);
 
         Ok(TestChannel(rx))
     }

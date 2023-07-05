@@ -25,6 +25,7 @@ pub enum Controller {
 // Default constant Cgroup paths and hierarchy.
 const DEFAULT_CGROUP_ROOT_HIERARCYHY: &str = "/sys/fs/cgroup";
 const DEFAULT_CGROUP_V2_CONTROLLER_LIST_PATH: &str = "/sys/fs/cgroup/cgroup.controllers";
+const DEFAULT_CGROUP_MAX_INDICATOR: &str = "max";
 
 mod runtime {
     use std::env;
@@ -66,20 +67,20 @@ pub mod memory {
     use sysinfo::{System, SystemExt};
 
     // Default paths for memory limtiations and usage for cgroup_v1 and cgroup_v2.
-    const V1_MEMORY_LIMIT_HIERARCHY: &str = "/memory/memory.limit_in_bytes";
-    const V1_MEMORY_CURRENT_HIERARCHY: &str = "/memory/memory.usage_in_bytes";
-    const V2_MEMORY_LIMIT_HIERARCHY: &str = "/memory.max";
-    const V2_MEMORY_CURRENT_HIERARCHY: &str = "/memory.current";
+    const V1_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
+    const V1_MEMORY_CURRENT_PATH: &str = "/sys/fs/cgroup/memory/memory.usage_in_bytes";
+    const V2_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory.max";
+    const V2_MEMORY_CURRENT_PATH: &str = "/sys/fs/cgroup/memory.current";
 
     // Returns the system memory.
-    fn get_system_memory() -> usize {
+    pub fn get_system_memory() -> usize {
         let mut sys = System::new();
         sys.refresh_memory();
         sys.total_memory() as usize
     }
 
     // Returns the used memory of the system.
-    fn get_system_memory_used() -> usize {
+    pub fn get_system_memory_used() -> usize {
         let mut sys = System::new();
         sys.refresh_memory();
         sys.used_memory() as usize
@@ -153,24 +154,16 @@ pub mod memory {
 
     // Returns the memory limit of a container if running in a container else returns the system
     // memory available.
-    // When the limit is set to max, which is all memory in system, it will return an error,
-    // which will be handled in total_memory_available_bytes() to return default system memory.
+    // When the limit is set to max, total_memory_available_bytes() will return default system
+    // memory.
     fn get_container_memory_limit(
         cgroup_version: super::CgroupVersion,
     ) -> Result<usize, std::io::Error> {
         let limit_path = match cgroup_version {
-            super::CgroupVersion::V1 => format!(
-                "{}{}",
-                super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
-                V1_MEMORY_LIMIT_HIERARCHY
-            ),
-            super::CgroupVersion::V2 => format!(
-                "{}{}",
-                super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
-                V2_MEMORY_LIMIT_HIERARCHY
-            ),
+            super::CgroupVersion::V1 => V1_MEMORY_LIMIT_PATH,
+            super::CgroupVersion::V2 => V2_MEMORY_LIMIT_PATH,
         };
-        super::util::read_integer_from_file_path(&limit_path)
+        super::util::get_value_from_file(limit_path, get_system_memory())
     }
 
     // Returns the memory used in a container if running in a container else returns the system
@@ -179,30 +172,20 @@ pub mod memory {
         cgroup_version: super::CgroupVersion,
     ) -> Result<usize, std::io::Error> {
         let usage_path = match cgroup_version {
-            super::CgroupVersion::V1 => format!(
-                "{}{}",
-                super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
-                V1_MEMORY_CURRENT_HIERARCHY
-            ),
-            super::CgroupVersion::V2 => format!(
-                "{}{}",
-                super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
-                V2_MEMORY_CURRENT_HIERARCHY
-            ),
+            super::CgroupVersion::V1 => V1_MEMORY_CURRENT_PATH,
+            super::CgroupVersion::V2 => V2_MEMORY_CURRENT_PATH,
         };
-        super::util::read_integer_from_file_path(&usage_path)
+        super::util::get_value_from_file(usage_path, get_system_memory_used())
     }
 }
 
 pub mod cpu {
     use std::thread;
 
-    use super::util;
-
     // Default constant Cgroup paths and hierarchy.
-    const V1_CPU_QUOTA_HIERARCHY: &str = "/cpu/cpu.cfs_quota_us";
-    const V1_CPU_PERIOD_HIERARCHY: &str = "/cpu/cpu.cfs_period_us";
-    const V2_CPU_LIMIT_HIERARCHY: &str = "/cpu.max";
+    const V1_CPU_QUOTA_PATH: &str = "/sys/fs/cgroup/cpu/cpu.cfs_quota_us";
+    const V1_CPU_PERIOD_PATH: &str = "/sys/fs/cgroup/cpu/cpu.cfs_period_us";
+    const V2_CPU_LIMIT_PATH: &str = "/sys/fs/cgroup/cpu.max";
 
     /// Returns the total number of cpu available as a float.
     ///
@@ -244,9 +227,12 @@ pub mod cpu {
     fn get_container_cpu_limit(
         cgroup_version: super::CgroupVersion,
     ) -> Result<f32, std::io::Error> {
+        let max_cpu = thread::available_parallelism()?;
         match cgroup_version {
-            super::CgroupVersion::V1 => get_cpu_limit_v1(),
-            super::CgroupVersion::V2 => get_cpu_limit_v2(),
+            super::CgroupVersion::V1 => {
+                get_cpu_limit_v1(V1_CPU_QUOTA_PATH, V1_CPU_PERIOD_PATH, max_cpu.get() as f32)
+            }
+            super::CgroupVersion::V2 => get_cpu_limit_v2(V2_CPU_LIMIT_PATH, max_cpu.get() as f32),
         }
     }
 
@@ -259,28 +245,28 @@ pub mod cpu {
     }
 
     // Returns the CPU limit when cgroup_V1 is utilised.
-    fn get_cpu_limit_v1() -> Result<f32, std::io::Error> {
-        let cpu_quota = super::util::read_integer_from_file_path(&format!(
-            "{}{}",
-            super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
-            V1_CPU_QUOTA_HIERARCHY
-        ))?;
-
-        let cpu_period = super::util::read_integer_from_file_path(&format!(
-            "{}{}",
-            super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
-            V1_CPU_PERIOD_HIERARCHY
-        ))?;
+    pub fn get_cpu_limit_v1(
+        quota_path: &str,
+        period_path: &str,
+        max_value: f32,
+    ) -> Result<f32, std::io::Error> {
+        let value_in_path = std::fs::read_to_string(quota_path)?;
+        if value_in_path.trim() == super::DEFAULT_CGROUP_MAX_INDICATOR {
+            return Ok(max_value);
+        }
+        let cpu_quota = value_in_path
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number"))?;
+        let cpu_period = super::util::read_integer_from_file_path(period_path)?;
         Ok((cpu_quota as f32) / (cpu_period as f32))
     }
 
     // Returns the CPU limit when cgroup_V2 is utilised.
-    fn get_cpu_limit_v2() -> Result<f32, std::io::Error> {
-        util::read_cgroup_v2_cpu_limit_from_file_path(&format!(
-            "{}{}",
-            super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
-            V2_CPU_LIMIT_HIERARCHY
-        ))
+    pub fn get_cpu_limit_v2(limit_path: &str, max_value: f32) -> Result<f32, std::io::Error> {
+        std::fs::read_to_string(limit_path).and_then(|cpu_limit_string| {
+            super::util::parse_cgroup_v2_cpu_limit_string(&cpu_limit_string, max_value)
+        })
     }
 }
 
@@ -351,21 +337,17 @@ mod util {
         }
     }
 
-    // Helper function to parse a cpu limit file path for cgroup_v2.
-    // returns the CPU limit when cgroup_V2 is utilised.
-    // interface file should have the format as such -> "{cpu_quota} {cpu_period}". e.g "max
-    // 1000000". if max is present, will return an invalid data error kind which will be handled by
-    // total_cpu_available to return the default system cpu.
-    pub fn read_cgroup_v2_cpu_limit_from_file_path(file_path: &str) -> Result<f32, std::io::Error> {
-        fs::read_to_string(file_path)
-            .and_then(|cpu_limit_string| parse_cgroup_v2_cpu_limit_string(&cpu_limit_string))
-    }
-
     // Helper function to parse the string inside the cgroup cpu limit file.
-    pub fn parse_cgroup_v2_cpu_limit_string(cpu_limit_string: &str) -> Result<f32, std::io::Error> {
+    pub fn parse_cgroup_v2_cpu_limit_string(
+        cpu_limit_string: &str,
+        max_value: f32,
+    ) -> Result<f32, std::io::Error> {
         let cpu_data: Vec<&str> = cpu_limit_string.split_whitespace().collect();
         match cpu_data.get(0..2) {
             Some(cpu_data_values) => {
+                if cpu_data_values[0] == super::DEFAULT_CGROUP_MAX_INDICATOR {
+                    return Ok(max_value);
+                }
                 let cpu_quota = cpu_data_values[0].parse::<usize>().map_err(|_| {
                     std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number")
                 })?;
@@ -381,15 +363,35 @@ mod util {
         }
     }
 
+    // Helper function that helps to retrieve value in file, if value is "max", max_value will be
+    // returned instead.
+    pub(super) fn get_value_from_file(
+        file_path: &str,
+        max_value: usize,
+    ) -> Result<usize, std::io::Error> {
+        let value_in_path = std::fs::read_to_string(file_path)?;
+        if value_in_path.trim() == super::DEFAULT_CGROUP_MAX_INDICATOR {
+            return Ok(max_value);
+        }
+        let limit_val = value_in_path
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number"))?;
+        Ok(limit_val)
+    }
+
     #[cfg(test)]
     mod tests {
         use std::collections::HashMap;
         use std::io::prelude::*;
+        use std::thread;
 
         use tempfile;
 
         use super::*;
-        use crate::util::resource_util::Controller;
+        use crate::util::resource_util::cpu::{self, get_system_cpu};
+        use crate::util::resource_util::memory::get_system_memory;
+        use crate::util::resource_util::{Controller, DEFAULT_CGROUP_MAX_INDICATOR};
         const DEFAULT_NON_EXISTENT_PATH: &str = "default-non-existent-path";
 
         #[test]
@@ -451,7 +453,7 @@ mod util {
                     "max-value-in-file",
                     TestCase {
                         file_exists: true,
-                        value_in_file: String::from("max"),
+                        value_in_file: String::from(DEFAULT_CGROUP_MAX_INDICATOR),
                         expected: Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
                             "not a number",
@@ -483,7 +485,196 @@ mod util {
         }
 
         #[test]
-        fn test_parse_cgroup_v2_cpu_limit_string() {
+        fn test_get_value_from_file() {
+            struct TestCase {
+                file_exists: bool,
+                value_in_file: String,
+                expected: Result<usize, std::io::Error>,
+            }
+
+            let test_cases = HashMap::from([
+                (
+                    "valid-integer-value-in-file",
+                    TestCase {
+                        file_exists: true,
+                        value_in_file: String::from("10000"),
+                        expected: Ok(10000),
+                    },
+                ),
+                (
+                    "valid-integer-value-in-file-with-spaces-after",
+                    TestCase {
+                        file_exists: true,
+                        value_in_file: String::from("10000   "),
+                        expected: Ok(10000),
+                    },
+                ),
+                (
+                    "valid-integer-value-in-file-with-spaces-before",
+                    TestCase {
+                        file_exists: true,
+                        value_in_file: String::from("   10000"),
+                        expected: Ok(10000),
+                    },
+                ),
+                (
+                    "invalid-integer-value-in-file",
+                    TestCase {
+                        file_exists: true,
+                        value_in_file: String::from("test-string"),
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "not a number",
+                        )),
+                    },
+                ),
+                (
+                    "file-not-exist",
+                    TestCase {
+                        file_exists: false,
+                        value_in_file: String::from(""),
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "File not found",
+                        )),
+                    },
+                ),
+                (
+                    "max-value-in-file",
+                    TestCase {
+                        file_exists: true,
+                        value_in_file: String::from(DEFAULT_CGROUP_MAX_INDICATOR),
+                        expected: Ok(get_system_memory()),
+                    },
+                ),
+            ]);
+
+            for tc in test_cases {
+                let curr_test_case = &tc.1;
+                let mut file: tempfile::NamedTempFile;
+                let mut test_file_path = String::from(DEFAULT_NON_EXISTENT_PATH);
+                if curr_test_case.file_exists {
+                    file = tempfile::NamedTempFile::new()
+                        .expect("Error encountered while creating file!");
+                    file.as_file_mut()
+                        .write_all(curr_test_case.value_in_file.as_bytes())
+                        .expect("Error while writing to file");
+                    test_file_path = String::from(file.path().to_str().unwrap())
+                }
+                match get_value_from_file(&test_file_path, get_system_memory()) {
+                    Ok(int_val) => assert_eq!(&int_val, curr_test_case.expected.as_ref().unwrap()),
+                    Err(e) => assert_eq!(
+                        e.kind(),
+                        curr_test_case.expected.as_ref().unwrap_err().kind()
+                    ),
+                }
+            }
+        }
+
+        #[test]
+        fn test_get_cpu_limit_v1() {
+            struct TestCase {
+                file_exists: bool,
+                value_in_quota_file: String,
+                value_in_period_file: String,
+                expected: Result<f32, std::io::Error>,
+            }
+
+            let test_cases = HashMap::from([
+                (
+                    "valid-values-in-file",
+                    TestCase {
+                        file_exists: true,
+                        value_in_quota_file: String::from("10000"),
+                        value_in_period_file: String::from("20000"),
+                        expected: Ok(10000.0 / 20000.0),
+                    },
+                ),
+                (
+                    "empty-value-in-files",
+                    TestCase {
+                        file_exists: true,
+                        value_in_quota_file: String::from(""),
+                        value_in_period_file: String::from(""),
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Invalid format in Cgroup CPU interface file",
+                        )),
+                    },
+                ),
+                (
+                    "Invalid-string-value-in-file",
+                    TestCase {
+                        file_exists: true,
+                        value_in_quota_file: String::from("10000"),
+                        value_in_period_file: String::from("test-string "),
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "not a number",
+                        )),
+                    },
+                ),
+                (
+                    "max-value-in-file",
+                    TestCase {
+                        file_exists: true,
+                        value_in_quota_file: String::from("max"),
+                        value_in_period_file: String::from("20000"),
+                        expected: Ok(thread::available_parallelism().unwrap().get() as f32),
+                    },
+                ),
+                (
+                    "file-not-exist",
+                    TestCase {
+                        file_exists: false,
+                        value_in_quota_file: String::from("10000 20000"),
+                        value_in_period_file: String::from("10000 20000"),
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "File not found",
+                        )),
+                    },
+                ),
+            ]);
+            for tc in test_cases {
+                let curr_test_case = &tc.1;
+                let mut quota_file: tempfile::NamedTempFile;
+                let mut period_file: tempfile::NamedTempFile;
+                let mut test_quota_file_path = String::from(DEFAULT_NON_EXISTENT_PATH);
+                let mut test_period_file_path = String::from(DEFAULT_NON_EXISTENT_PATH);
+                if curr_test_case.file_exists {
+                    quota_file = tempfile::NamedTempFile::new()
+                        .expect("Error encountered while creating file!");
+                    quota_file
+                        .as_file_mut()
+                        .write_all(curr_test_case.value_in_quota_file.as_bytes())
+                        .expect("Error while writing to file");
+                    test_quota_file_path = String::from(quota_file.path().to_str().unwrap());
+
+                    period_file = tempfile::NamedTempFile::new()
+                        .expect("Error encountered while creating file!");
+                    period_file
+                        .as_file_mut()
+                        .write_all(curr_test_case.value_in_period_file.as_bytes())
+                        .expect("Error while writing to file");
+                    test_period_file_path = String::from(period_file.path().to_str().unwrap());
+                }
+                match cpu::get_cpu_limit_v1(
+                    &test_quota_file_path,
+                    &test_period_file_path,
+                    get_system_cpu(),
+                ) {
+                    Ok(int_val) => assert_eq!(&int_val, curr_test_case.expected.as_ref().unwrap()),
+                    Err(e) => assert_eq!(
+                        e.kind(),
+                        curr_test_case.expected.as_ref().unwrap_err().kind()
+                    ),
+                }
+            }
+        }
+
+        #[test]
+        fn test_get_cpu_limit_v2() {
             struct TestCase {
                 file_exists: bool,
                 value_in_file: String,
@@ -526,10 +717,7 @@ mod util {
                     TestCase {
                         file_exists: true,
                         value_in_file: String::from("max 20000"),
-                        expected: Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "not a number",
-                        )),
+                        expected: Ok(thread::available_parallelism().unwrap().get() as f32),
                     },
                 ),
                 (
@@ -556,7 +744,7 @@ mod util {
                         .expect("Error while writing to file");
                     test_file_path = String::from(file.path().to_str().unwrap())
                 }
-                match read_cgroup_v2_cpu_limit_from_file_path(&test_file_path) {
+                match cpu::get_cpu_limit_v2(&test_file_path, get_system_cpu()) {
                     Ok(int_val) => assert_eq!(&int_val, curr_test_case.expected.as_ref().unwrap()),
                     Err(e) => assert_eq!(
                         e.kind(),

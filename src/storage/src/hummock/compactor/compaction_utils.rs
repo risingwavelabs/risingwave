@@ -18,17 +18,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use itertools::Itertools;
-use minstant::Instant;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
-use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType};
+use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, SstableInfo};
+use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::{
     MultiCompactionFilter, StateCleanUpCompactionFilter, TtlCompactionFilter,
 };
@@ -36,12 +36,12 @@ use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
 use crate::hummock::{
     CachePolicy, FilterBuilder, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableIdManagerRef, SstableWriterFactory, SstableWriterOptions,
+    SstableBuilderOptions, SstableObjectIdManagerRef, SstableWriterFactory, SstableWriterOptions,
 };
 use crate::monitor::StoreLocalStatistic;
 
 pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
-    pub sstable_id_manager: SstableIdManagerRef,
+    pub sstable_object_id_manager: SstableObjectIdManagerRef,
     pub limiter: Arc<MemoryLimiter>,
     pub options: SstableBuilderOptions,
     pub policy: CachePolicy,
@@ -63,7 +63,10 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
             .require_memory((self.options.capacity + self.options.block_capacity) as u64)
             .await;
         let timer = Instant::now();
-        let table_id = self.sstable_id_manager.get_new_sst_id().await?;
+        let table_id = self
+            .sstable_object_id_manager
+            .get_new_sst_object_id()
+            .await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let writer_options = SstableWriterOptions {
@@ -73,7 +76,8 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
         };
         let writer = self
             .sstable_writer_factory
-            .create_sst_writer(table_id, writer_options)?;
+            .create_sst_writer(table_id, writer_options)
+            .await?;
         let builder = SstableBuilder::new(
             table_id,
             writer,
@@ -121,22 +125,9 @@ pub struct TaskConfig {
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
     pub stats_target_table_ids: Option<HashSet<u32>>,
     pub task_type: compact_task::TaskType,
-}
-
-pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
-    let mut total_memory_size = 0;
-    for level in &task.input_ssts {
-        if level.level_type == LevelType::Nonoverlapping as i32 {
-            if let Some(table) = level.table_infos.first() {
-                total_memory_size += table.file_size * task.splits.len() as u64;
-            }
-        } else {
-            for table in &level.table_infos {
-                total_memory_size += table.file_size;
-            }
-        }
-    }
-    total_memory_size
+    pub is_target_l0_or_lbase: bool,
+    pub split_by_table: bool,
+    pub split_weight_by_vnode: u32,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
@@ -173,20 +164,11 @@ pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompact
     multi_filter
 }
 
-pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<CompactorContext>) {
-    let sstable_infos = compact_task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .collect_vec();
-
-    let compaction_size = compact_task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .map(|table_info| table_info.file_size)
-        .sum::<u64>();
-
+pub async fn generate_splits(
+    sstable_infos: &Vec<SstableInfo>,
+    compaction_size: u64,
+    context: Arc<CompactorContext>,
+) -> HummockResult<Vec<KeyRange_vec>> {
     let sstable_size = (context.storage_opts.sstable_size_mb as u64) << 20;
     if compaction_size > sstable_size * 2 {
         let mut indexes = vec![];
@@ -196,8 +178,7 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
                 context
                     .sstable_store
                     .sstable(sstable_info, &mut StoreLocalStatistic::default())
-                    .await
-                    .unwrap()
+                    .await?
                     .value()
                     .meta
                     .block_metas
@@ -216,7 +197,7 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
         }
         // sort by key, as for every data block has the same size;
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
-        let mut splits: Vec<KeyRange_vec> = vec![];
+        let mut splits = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
         let parallelism = std::cmp::min(
             indexes.len() as u64,
@@ -243,7 +224,27 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
                 remaining_size -= data_size;
                 last_key = key;
             }
-            compact_task.splits = splits;
+            return Ok(splits);
         }
+    }
+
+    Ok(vec![])
+}
+
+pub fn estimate_task_memory_capacity(context: Arc<CompactorContext>, task: &CompactTask) -> usize {
+    let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
+    let total_file_size = task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .map(|table| table.file_size)
+        .sum::<u64>();
+
+    let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
+    let total_file_size = (total_file_size as f64 * 1.2).round() as usize;
+
+    match task.compression_algorithm {
+        0 => std::cmp::min(capacity, total_file_size),
+        _ => capacity,
     }
 }

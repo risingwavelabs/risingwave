@@ -24,6 +24,7 @@ use super::{
 use crate::task::ActorId;
 
 mod epoch_check;
+mod epoch_provide;
 mod schema_check;
 mod trace;
 mod update_check;
@@ -43,8 +44,6 @@ pub struct WrapperExecutor {
     input: BoxedExecutor,
 
     extra: ExtraInfo,
-
-    enable_executor_row_count: bool,
 }
 
 impl WrapperExecutor {
@@ -54,7 +53,6 @@ impl WrapperExecutor {
         actor_id: ActorId,
         executor_id: u64,
         metrics: Arc<StreamingMetrics>,
-        enable_executor_row_count: bool,
     ) -> Self {
         Self {
             input,
@@ -64,20 +62,17 @@ impl WrapperExecutor {
                 executor_id,
                 metrics,
             },
-            enable_executor_row_count,
         }
     }
 
     #[allow(clippy::let_and_return)]
     fn wrap_debug(
-        enable_executor_row_count: bool,
         info: Arc<ExecutorInfo>,
         extra: ExtraInfo,
         stream: impl MessageStream + 'static,
     ) -> impl MessageStream + 'static {
         // Trace
         let stream = trace::trace(
-            enable_executor_row_count,
             info.clone(),
             extra.input_pos,
             extra.actor_id,
@@ -85,13 +80,7 @@ impl WrapperExecutor {
             extra.metrics,
             stream,
         );
-        // Stack trace
-        let stream = trace::stack_trace(info.clone(), extra.actor_id, extra.executor_id, stream);
 
-        // Schema check
-        let stream = schema_check::schema_check(info.clone(), stream);
-        // Epoch check
-        let stream = epoch_check::epoch_check(info.clone(), stream);
         // Update check
         let stream = update_check::update_check(info, stream);
 
@@ -100,38 +89,39 @@ impl WrapperExecutor {
 
     #[allow(clippy::let_and_return)]
     fn wrap_release(
-        enable_executor_row_count: bool,
-        info: Arc<ExecutorInfo>,
+        _info: Arc<ExecutorInfo>,
         extra: ExtraInfo,
         stream: impl MessageStream + 'static,
     ) -> impl MessageStream + 'static {
         // Metrics
-        let stream = trace::metrics(
-            enable_executor_row_count,
-            extra.actor_id,
-            extra.executor_id,
-            extra.metrics,
-            stream,
-        );
-        // Stack trace
-        let stream = trace::stack_trace(info.clone(), extra.actor_id, extra.executor_id, stream);
-
-        // Epoch check
-        let stream = epoch_check::epoch_check(info, stream);
+        let stream = trace::metrics(extra.actor_id, extra.executor_id, extra.metrics, stream);
 
         stream
     }
 
     fn wrap(
-        enable_executor_row_count: bool,
         info: Arc<ExecutorInfo>,
         extra: ExtraInfo,
         stream: impl MessageStream + 'static,
     ) -> BoxedMessageStream {
+        // -- Shared wrappers --
+
+        // Await tree
+        let stream =
+            trace::instrument_await_tree(info.clone(), extra.actor_id, extra.executor_id, stream);
+
+        // Schema check
+        let stream = schema_check::schema_check(info.clone(), stream);
+        // Epoch check
+        let stream = epoch_check::epoch_check(info.clone(), stream);
+
+        // Epoch provide
+        let stream = epoch_provide::epoch_provide(stream);
+
         if cfg!(debug_assertions) {
-            Self::wrap_debug(enable_executor_row_count, info, extra, stream).boxed()
+            Self::wrap_debug(info, extra, stream).boxed()
         } else {
-            Self::wrap_release(enable_executor_row_count, info, extra, stream).boxed()
+            Self::wrap_release(info, extra, stream).boxed()
         }
     }
 }
@@ -139,24 +129,12 @@ impl WrapperExecutor {
 impl Executor for WrapperExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let info = Arc::new(self.input.info());
-        Self::wrap(
-            self.enable_executor_row_count,
-            info,
-            self.extra,
-            self.input.execute(),
-        )
-        .boxed()
+        Self::wrap(info, self.extra, self.input.execute()).boxed()
     }
 
     fn execute_with_epoch(self: Box<Self>, epoch: u64) -> BoxedMessageStream {
         let info = Arc::new(self.input.info());
-        Self::wrap(
-            self.enable_executor_row_count,
-            info,
-            self.extra,
-            self.input.execute_with_epoch(epoch),
-        )
-        .boxed()
+        Self::wrap(info, self.extra, self.input.execute_with_epoch(epoch)).boxed()
     }
 
     fn schema(&self) -> &Schema {

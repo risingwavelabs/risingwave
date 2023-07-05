@@ -36,7 +36,7 @@ pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 pub enum PinnedHummockSnapshot {
     FrontendPinned(
         HummockSnapshotGuard,
-        // `only_checkpoint_visible`.
+        // `is_barrier_read`.
         // It's embedded here because we always use it together with snapshot.
         bool,
     ),
@@ -49,12 +49,19 @@ pub enum PinnedHummockSnapshot {
 impl PinnedHummockSnapshot {
     pub fn get_batch_query_epoch(&self) -> BatchQueryEpoch {
         match self {
-            PinnedHummockSnapshot::FrontendPinned(s, checkpoint) => {
-                s.get_batch_query_epoch(*checkpoint)
+            PinnedHummockSnapshot::FrontendPinned(s, is_barrier_read) => {
+                s.get_batch_query_epoch(*is_barrier_read)
             }
             PinnedHummockSnapshot::Other(e) => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
             },
+        }
+    }
+
+    pub fn support_barrier_read(&self) -> bool {
+        match self {
+            PinnedHummockSnapshot::FrontendPinned(_, is_barrier_read) => *is_barrier_read,
+            PinnedHummockSnapshot::Other(_) => false,
         }
     }
 }
@@ -98,11 +105,11 @@ pub struct HummockSnapshotGuard {
 }
 
 impl HummockSnapshotGuard {
-    pub fn get_batch_query_epoch(&self, checkpoint: bool) -> BatchQueryEpoch {
-        let epoch = if checkpoint {
-            batch_query_epoch::Epoch::Committed(self.snapshot.committed_epoch)
-        } else {
+    pub fn get_batch_query_epoch(&self, is_barrier_read: bool) -> BatchQueryEpoch {
+        let epoch = if is_barrier_read {
             batch_query_epoch::Epoch::Current(self.snapshot.current_epoch)
+        } else {
+            batch_query_epoch::Epoch::Committed(self.snapshot.committed_epoch)
         };
         BatchQueryEpoch { epoch: Some(epoch) }
     }
@@ -245,34 +252,6 @@ impl HummockSnapshotManagerCore {
             epoch_to_query_ids: BTreeMap::default(),
             last_unpin_snapshot: Arc::new(AtomicU64::new(INVALID_EPOCH)),
             latest_snapshot,
-        }
-    }
-
-    /// Retrieve max committed epoch from meta with an rpc. This method provides
-    /// better epoch freshness.
-    async fn get_epoch_for_query_from_rpc(
-        &mut self,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockSnapshot>>)>,
-    ) -> HummockSnapshot {
-        let ret = self.meta_client.get_epoch().await;
-        match ret {
-            Ok(snapshot) => {
-                self.notify_epoch_assigned_for_queries(&snapshot, batches);
-                snapshot
-            }
-            Err(e) => {
-                for (id, cb) in batches.drain(..) {
-                    let _ = cb.send(Err(SchedulerError::Internal(anyhow!(
-                        "Failed to get epoch for query: {:?} because of RPC Error: {:?}",
-                        id,
-                        e
-                    ))));
-                }
-                HummockSnapshot {
-                    committed_epoch: INVALID_EPOCH,
-                    current_epoch: INVALID_EPOCH,
-                }
-            }
         }
     }
 

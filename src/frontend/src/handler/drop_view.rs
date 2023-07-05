@@ -41,10 +41,9 @@ pub async fn handle_drop_view(
                 Ok((t, s)) => (t, s),
                 Err(e) => {
                     return if if_exists {
-                        Ok(RwPgResponse::empty_result_with_notice(
-                            StatementType::DROP_MATERIALIZED_VIEW,
-                            format!("view \"{}\" does not exist, skipping", table_name),
-                        ))
+                        Ok(RwPgResponse::builder(StatementType::DROP_MATERIALIZED_VIEW)
+                            .notice(format!("view \"{}\" does not exist, skipping", table_name))
+                            .into())
                     } else {
                         Err(e.into())
                     }

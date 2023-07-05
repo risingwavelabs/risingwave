@@ -12,71 +12,83 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TopNNode;
 
+use super::generic::TopNLimit;
+use super::utils::impl_distill_by_unit;
 use super::{
-    ExprRewritable, LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
-    ToDistributedBatch,
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::plan_node::{BatchLimit, ToLocalBatch};
 use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchTopN {
     pub base: PlanBase,
-    logical: LogicalTopN,
+    logical: generic::TopN<PlanRef>,
 }
 
 impl BatchTopN {
-    pub fn new(logical: LogicalTopN) -> Self {
-        assert!(logical.group_key().is_empty());
-        let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            logical.input().distribution().clone(),
+    pub fn new(logical: generic::TopN<PlanRef>) -> Self {
+        assert!(logical.group_key.is_empty());
+        let base = PlanBase::new_batch_from_logical(
+            &logical,
+            logical.input.distribution().clone(),
             // BatchTopN outputs data in the order of specified order
-            logical.topn_order().clone(),
+            logical.order.clone(),
         );
         BatchTopN { base, logical }
     }
 
     fn two_phase_topn(&self, input: PlanRef) -> Result<PlanRef> {
-        let new_limit = self.logical.limit() + self.logical.offset();
-        let new_offset = 0;
-        let logical_partial_topn = LogicalTopN::new(
-            input,
-            new_limit,
-            new_offset,
-            self.logical.with_ties(),
-            self.logical.topn_order().clone(),
+        let new_limit = TopNLimit::new(
+            self.logical.limit_attr.limit() + self.logical.offset,
+            self.logical.limit_attr.with_ties(),
         );
-        let batch_partial_topn = Self::new(logical_partial_topn);
-        let ensure_single_dist = RequiredDist::single()
-            .enforce_if_not_satisfies(batch_partial_topn.into(), &Order::any())?;
+        let new_offset = 0;
+        let partial_input: PlanRef = if input.order().satisfies(&self.logical.order) {
+            let logical_partial_limit = generic::Limit::new(input, new_limit.limit(), new_offset);
+            let batch_partial_limit = BatchLimit::new(logical_partial_limit);
+            batch_partial_limit.into()
+        } else {
+            let logical_partial_topn = generic::TopN::without_group(
+                input,
+                new_limit,
+                new_offset,
+                self.logical.order.clone(),
+            );
+            let batch_partial_topn = Self::new(logical_partial_topn);
+            batch_partial_topn.into()
+        };
+
+        let single_dist = RequiredDist::single();
+        let ensure_single_dist = if !partial_input.distribution().satisfies(&single_dist) {
+            single_dist.enforce_if_not_satisfies(partial_input, &Order::any())?
+        } else {
+            // The input's distribution is singleton, so use one phase topn is enough.
+            return Ok(partial_input);
+        };
+
         let batch_global_topn = self.clone_with_input(ensure_single_dist);
         Ok(batch_global_topn.into())
     }
 }
 
-impl fmt::Display for BatchTopN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchTopN")
-    }
-}
+impl_distill_by_unit!(BatchTopN, logical, "BatchTopN");
 
 impl PlanTreeNodeUnary for BatchTopN {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
@@ -88,14 +100,14 @@ impl ToDistributedBatch for BatchTopN {
     }
 }
 
-impl ToBatchProst for BatchTopN {
+impl ToBatchPb for BatchTopN {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let column_orders = self.logical.topn_order().to_protobuf();
+        let column_orders = self.logical.order.to_protobuf();
         NodeBody::TopN(TopNNode {
-            limit: self.logical.limit(),
-            offset: self.logical.offset(),
+            limit: self.logical.limit_attr.limit(),
+            offset: self.logical.offset,
             column_orders,
-            with_ties: self.logical.with_ties(),
+            with_ties: self.logical.limit_attr.with_ties(),
         })
     }
 }

@@ -21,8 +21,10 @@ pub mod hummock_service;
 pub mod meta_member_service;
 pub mod notification_service;
 pub mod scale_service;
+pub mod serving_service;
 pub mod stream_service;
 pub mod system_params_service;
+pub mod telemetry_service;
 pub mod user_service;
 
 use std::pin::Pin;

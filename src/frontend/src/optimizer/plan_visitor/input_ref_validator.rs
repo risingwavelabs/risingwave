@@ -15,9 +15,10 @@
 use paste::paste;
 use risingwave_common::catalog::{Field, Schema};
 
+use super::{DefaultBehavior, Merge};
 use crate::expr::ExprVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{PlanRef, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{Explain, PlanRef, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 struct ExprVis<'a> {
@@ -54,7 +55,7 @@ impl InputRefValidator {
             panic!(
                 "Input references are inconsistent with the input schema: {}, plan:\n{}",
                 err,
-                plan.explain_to_string().expect("failed to explain")
+                plan.explain_to_string()
             );
         }
     }
@@ -101,9 +102,15 @@ macro_rules! visit_project {
 }
 
 impl PlanVisitor<Option<String>> for InputRefValidator {
+    type DefaultBehavior = impl DefaultBehavior<Option<String>>;
+
     visit_filter!(logical, batch, stream);
 
     visit_project!(logical, batch, stream);
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        Merge(|a: Option<String>, b| a.or(b))
+    }
 
     fn visit_logical_scan(
         &mut self,
@@ -123,8 +130,4 @@ impl PlanVisitor<Option<String>> for InputRefValidator {
     }
 
     // TODO: add more checks
-
-    fn merge(a: Option<String>, b: Option<String>) -> Option<String> {
-        a.or(b)
-    }
 }

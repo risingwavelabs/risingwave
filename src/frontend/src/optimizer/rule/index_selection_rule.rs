@@ -48,13 +48,13 @@
 
 use std::cmp::min;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
-    DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    DataType, Date, Decimal, Int256, Interval, Serial, Time, Timestamp,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
@@ -67,8 +67,8 @@ use crate::expr::{
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary,
-    PredicatePushdown, PredicatePushdownContext,
+    generic, ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode,
+    PlanTreeNodeBinary, PredicatePushdown, PredicatePushdownContext,
 };
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -94,7 +94,9 @@ impl Rule for IndexSelectionRule {
         if indexes.is_empty() {
             return None;
         }
-
+        if logical_scan.for_system_time_as_of_proctime() {
+            return None;
+        }
         let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
         let primary_cost = min(
             self.estimate_table_scan_cost(logical_scan, primary_table_row_size),
@@ -102,19 +104,14 @@ impl Rule for IndexSelectionRule {
         );
 
         let mut final_plan: PlanRef = logical_scan.clone().into();
+        #[expect(
+            clippy::redundant_clone,
+            reason = "false positive https://github.com/rust-lang/rust-clippy/issues/10545"
+        )]
         let mut min_cost = primary_cost.clone();
 
-        let required_col_idx = logical_scan.required_col_idx();
         for index in indexes {
-            let p2s_mapping = index.primary_to_secondary_mapping();
-            if required_col_idx.iter().all(|x| p2s_mapping.contains_key(x)) {
-                // covering index selection
-                let index_scan = logical_scan.to_index_scan(
-                    &index.name,
-                    index.index_table.table_desc().into(),
-                    p2s_mapping,
-                );
-
+            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
                 let index_cost = self.estimate_table_scan_cost(
                     &index_scan,
                     TableScanIoEstimator::estimate_row_size(&index_scan),
@@ -150,9 +147,31 @@ impl Rule for IndexSelectionRule {
 }
 
 struct IndexPredicateRewriter<'a> {
-    p2s_mapping: &'a HashMap<usize, usize>,
+    p2s_mapping: &'a BTreeMap<usize, usize>,
+    function_mapping: &'a HashMap<FunctionCall, usize>,
     offset: usize,
+    covered_by_index: bool,
 }
+
+impl<'a> IndexPredicateRewriter<'a> {
+    fn new(
+        p2s_mapping: &'a BTreeMap<usize, usize>,
+        function_mapping: &'a HashMap<FunctionCall, usize>,
+        offset: usize,
+    ) -> Self {
+        Self {
+            p2s_mapping,
+            function_mapping,
+            offset,
+            covered_by_index: true,
+        }
+    }
+
+    fn covered_by_index(&self) -> bool {
+        self.covered_by_index
+    }
+}
+
 impl ExprRewriter for IndexPredicateRewriter<'_> {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         // transform primary predicate to index predicate if it can
@@ -163,8 +182,22 @@ impl ExprRewriter for IndexPredicateRewriter<'_> {
             )
             .into()
         } else {
+            self.covered_by_index = false;
             InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
         }
+    }
+
+    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+        if let Some(index) = self.function_mapping.get(&func_call) {
+            return InputRef::new(*index, func_call.return_type()).into();
+        }
+
+        let (func_type, inputs, ret) = func_call.decompose();
+        let inputs = inputs
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
 }
 
@@ -179,10 +212,11 @@ impl IndexSelectionRule {
         //                index_scan   primary_table_scan
         let predicate = logical_scan.predicate().clone();
         let offset = index.index_item.len();
-        let mut rewriter = IndexPredicateRewriter {
-            p2s_mapping: index.primary_to_secondary_mapping(),
+        let mut rewriter = IndexPredicateRewriter::new(
+            index.primary_to_secondary_mapping(),
+            index.function_mapping(),
             offset,
-        };
+        );
         let new_predicate = predicate.rewrite_expr(&mut rewriter);
 
         let index_scan = LogicalScan::create(
@@ -191,6 +225,7 @@ impl IndexSelectionRule {
             index.index_table.table_desc().into(),
             vec![],
             logical_scan.ctx(),
+            false,
         );
 
         let primary_table_scan = LogicalScan::create(
@@ -199,6 +234,7 @@ impl IndexSelectionRule {
             index.primary_table.table_desc().into(),
             vec![],
             logical_scan.ctx(),
+            false,
         );
 
         let conjunctions = index
@@ -207,10 +243,14 @@ impl IndexSelectionRule {
             .zip_eq_fast(index.primary_table.pk.iter())
             .map(|(x, y)| {
                 Self::create_null_safe_equal_expr(
-                    x.index,
-                    index.index_table.columns[x.index].data_type().clone(),
-                    y.index + index.index_item.len(),
-                    index.primary_table.columns[y.index].data_type().clone(),
+                    x.column_index,
+                    index.index_table.columns[x.column_index]
+                        .data_type()
+                        .clone(),
+                    y.column_index + index.index_item.len(),
+                    index.primary_table.columns[y.column_index]
+                        .data_type()
+                        .clone(),
                 )
             })
             .chain(new_predicate.into_iter())
@@ -293,6 +333,7 @@ impl IndexSelectionRule {
             primary_table_desc.clone().into(),
             vec![],
             logical_scan.ctx(),
+            false,
         );
 
         let conjunctions = primary_table_desc
@@ -303,8 +344,8 @@ impl IndexSelectionRule {
                 Self::create_null_safe_equal_expr(
                     x,
                     schema.fields[x].data_type.clone(),
-                    y.column_idx + index_access_len,
-                    primary_table_desc.columns[y.column_idx].data_type.clone(),
+                    y.column_index + index_access_len,
+                    primary_table_desc.columns[y.column_index].data_type.clone(),
                 )
             })
             .chain(new_predicate.into_iter())
@@ -351,9 +392,9 @@ impl IndexSelectionRule {
         let mut result = vec![];
         for expr in conjunctions {
             // it's OR clause!
-            if let ExprImpl::FunctionCall(function_call) = expr &&
-                function_call.get_expr_type() == ExprType::Or {
-
+            if let ExprImpl::FunctionCall(function_call) = expr
+                && function_call.func_type() == ExprType::Or
+            {
                 let mut index_to_be_merged = vec![];
 
                 let disjunctions = to_disjunctions(expr.clone());
@@ -365,10 +406,16 @@ impl IndexSelectionRule {
                 for (column_index, expr) in iter {
                     let mut index_paths = vec![];
                     let conjunctions = to_conjunctions(expr);
-                    index_paths.extend(self.gen_index_path(column_index, &conjunctions, logical_scan).into_iter());
+                    index_paths.extend(
+                        self.gen_index_path(column_index, &conjunctions, logical_scan)
+                            .into_iter(),
+                    );
                     // complex condition, recursively gen paths
                     if conjunctions.len() > 1 {
-                        index_paths.extend(self.gen_paths(&conjunctions, logical_scan, primary_table_row_size).into_iter());
+                        index_paths.extend(
+                            self.gen_paths(&conjunctions, logical_scan, primary_table_row_size)
+                                .into_iter(),
+                        );
                     }
 
                     match self.choose_min_cost_path(&index_paths, primary_table_row_size) {
@@ -376,8 +423,8 @@ impl IndexSelectionRule {
                             // One arm of OR clause can't use index, bail out
                             index_to_be_merged.clear();
                             break;
-                        },
-                        Some((path, _)) => index_to_be_merged.push(path)
+                        }
+                        Some((path, _)) => index_to_be_merged.push(path),
                     }
                 }
 
@@ -477,7 +524,7 @@ impl IndexSelectionRule {
                 match p2s_mapping.get(column_index.as_ref().unwrap()) {
                     None => continue, // not found, prune this index
                     Some(&idx) => {
-                        if index.index_table.pk()[0].index != idx {
+                        if index.index_table.pk()[0].column_index != idx {
                             // not match, prune this index
                             continue;
                         }
@@ -502,18 +549,18 @@ impl IndexSelectionRule {
         let primary_table_desc = logical_scan.table_desc();
         if let Some(idx) = column_index {
             assert_eq!(conjunctions.len(), 1);
-            if primary_table_desc.pk[0].column_idx != idx {
+            if primary_table_desc.pk[0].column_index != idx {
                 return result;
             }
         }
 
-        let primary_access = LogicalScan::new(
+        let primary_access = generic::Scan::new(
             logical_scan.table_name().to_string(),
             false,
             primary_table_desc
                 .pk
                 .iter()
-                .map(|x| x.column_idx)
+                .map(|x| x.column_index)
                 .collect_vec(),
             primary_table_desc.clone().into(),
             vec![],
@@ -521,6 +568,7 @@ impl IndexSelectionRule {
             Condition {
                 conjunctions: conjunctions.to_vec(),
             },
+            false,
         );
 
         result.push(primary_access.into());
@@ -535,38 +583,32 @@ impl IndexSelectionRule {
         predicate: Condition,
         ctx: OptimizerContextRef,
     ) -> Option<PlanRef> {
-        // check condition is covered by index.
-        let mut input_ref_finder = ExprInputRefFinder::default();
-        predicate.visit_expr(&mut input_ref_finder);
+        let mut rewriter = IndexPredicateRewriter::new(
+            index.primary_to_secondary_mapping(),
+            index.function_mapping(),
+            0,
+        );
+        let new_predicate = predicate.rewrite_expr(&mut rewriter);
 
-        let p2s_mapping = index.primary_to_secondary_mapping();
-        if !input_ref_finder
-            .input_ref_index_set
-            .iter()
-            .all(|x| p2s_mapping.contains_key(x))
-        {
+        // check condition is covered by index.
+        if !rewriter.covered_by_index() {
             return None;
         }
 
-        let mut rewriter = IndexPredicateRewriter {
-            p2s_mapping,
-            offset: 0,
-        };
-        let new_predicate = predicate.rewrite_expr(&mut rewriter);
-
         Some(
-            LogicalScan::new(
+            generic::Scan::new(
                 index.index_table.name.to_string(),
                 false,
                 index
                     .primary_table_pk_ref_to_index_table()
                     .iter()
-                    .map(|x| x.index)
+                    .map(|x| x.column_index)
                     .collect_vec(),
                 index.index_table.table_desc().into(),
                 vec![],
                 ctx,
                 new_predicate,
+                false,
             )
             .into(),
         )
@@ -688,7 +730,7 @@ impl<'a> TableScanIoEstimator<'a> {
                     table_desc
                         .pk
                         .iter()
-                        .map(|x| &table_desc.columns[x.column_idx]),
+                        .map(|x| &table_desc.columns[x.column_index]),
                 )
                 .map(|x| TableScanIoEstimator::estimate_data_type_size(&x.data_type))
                 .sum::<usize>()
@@ -702,16 +744,19 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Int16 => size_of::<i16>(),
             DataType::Int32 => size_of::<i32>(),
             DataType::Int64 => size_of::<i64>(),
+            DataType::Serial => size_of::<Serial>(),
             DataType::Float32 => size_of::<f32>(),
             DataType::Float64 => size_of::<f64>(),
             DataType::Decimal => size_of::<Decimal>(),
-            DataType::Date => size_of::<NaiveDateWrapper>(),
-            DataType::Time => size_of::<NaiveTimeWrapper>(),
-            DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
+            DataType::Date => size_of::<Date>(),
+            DataType::Time => size_of::<Time>(),
+            DataType::Timestamp => size_of::<Timestamp>(),
             DataType::Timestamptz => size_of::<i64>(),
-            DataType::Interval => size_of::<IntervalUnit>(),
+            DataType::Interval => size_of::<Interval>(),
+            DataType::Int256 => Int256::size(),
             DataType::Varchar => 20,
             DataType::Bytea => 20,
+            DataType::Jsonb => 20,
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
         }
@@ -773,16 +818,18 @@ impl<'a> TableScanIoEstimator<'a> {
         // Equal
         for (i, expr) in conjunctions.iter().enumerate() {
             if let Some((input_ref, _const_expr)) = expr.as_eq_const()
-                && input_ref.index == column_idx {
-                    conjunctions.remove(i);
-                    return MatchItem::Equal;
+                && input_ref.index == column_idx
+            {
+                conjunctions.remove(i);
+                return MatchItem::Equal;
             }
         }
 
         // In
         for (i, expr) in conjunctions.iter().enumerate() {
             if let Some((input_ref, in_const_list)) = expr.as_in_const_list()
-                && input_ref.index == column_idx {
+                && input_ref.index == column_idx
+            {
                 conjunctions.remove(i);
                 return MatchItem::In(in_const_list.len());
             }
@@ -795,12 +842,13 @@ impl<'a> TableScanIoEstimator<'a> {
         while i < conjunctions.len() {
             let expr = &conjunctions[i];
             if let Some((input_ref, op, _const_expr)) = expr.as_comparison_const()
-                && input_ref.index == column_idx {
+                && input_ref.index == column_idx
+            {
                 conjunctions.remove(i);
                 match op {
                     ExprType::LessThan | ExprType::LessThanOrEqual => right_side_bound = true,
                     ExprType::GreaterThan | ExprType::GreaterThanOrEqual => left_side_bound = true,
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 };
             } else {
                 i += 1;
@@ -866,7 +914,7 @@ impl IndexCost {
 
 impl ExprVisitor<IndexCost> for TableScanIoEstimator<'_> {
     fn visit_function_call(&mut self, func_call: &FunctionCall) -> IndexCost {
-        match func_call.get_expr_type() {
+        match func_call.func_type() {
             ExprType::Or => func_call
                 .inputs()
                 .iter()

@@ -15,15 +15,10 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use crate::Result;
+use risingwave_expr_macro::function;
 
-#[inline(always)]
-pub fn translate(
-    s: &str,
-    match_str: &str,
-    replace_str: &str,
-    writer: &mut dyn Write,
-) -> Result<()> {
+#[function("translate(varchar, varchar, varchar) -> varchar")]
+pub fn translate(s: &str, match_str: &str, replace_str: &str, writer: &mut dyn Write) {
     let mut char_map = HashMap::new();
     let mut match_chars = match_str.chars();
     let mut replace_chars = replace_str.chars();
@@ -46,7 +41,6 @@ pub fn translate(
     for c in iter {
         writer.write_char(c).unwrap();
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -54,7 +48,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_translate() -> Result<()> {
+    fn test_translate() {
         let cases = [
             ("hello world", "lo", "12", "he112 w2r1d"),
             (
@@ -73,9 +67,8 @@ mod tests {
 
         for (s, match_str, replace_str, expected) in cases {
             let mut writer = String::new();
-            translate(s, match_str, replace_str, &mut writer)?;
+            translate(s, match_str, replace_str, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
     }
 }

@@ -13,10 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::array::list_array::display_for_explain;
-use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::{literal_type_match, DataType, Datum};
+use risingwave_common::types::{literal_type_match, DataType, Datum, ToText};
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
-use risingwave_pb::data::Datum as ProstDatum;
+use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
@@ -24,7 +23,8 @@ use crate::expr::ExprType;
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct Literal {
     data: Datum,
-    data_type: DataType,
+    // `null` or `'foo'` is of `unknown` type until used in a typed context (e.g. func arg)
+    data_type: Option<DataType>,
 }
 
 impl std::fmt::Debug for Literal {
@@ -35,13 +35,15 @@ impl std::fmt::Debug for Literal {
                 .field("data_type", &self.data_type)
                 .finish()
         } else {
+            let data_type = self.return_type();
             match &self.data {
                 None => write!(f, "null"),
-                Some(v) => match self.data_type {
+                Some(v) => match data_type {
                     DataType::Boolean => write!(f, "{}", v.as_bool()),
                     DataType::Int16
                     | DataType::Int32
                     | DataType::Int64
+                    | DataType::Serial
                     | DataType::Decimal
                     | DataType::Float32
                     | DataType::Float64 => write!(f, "{}", v.as_scalar_ref_impl().to_text()),
@@ -52,15 +54,17 @@ impl std::fmt::Debug for Literal {
                     | DataType::Timestamptz
                     | DataType::Time
                     | DataType::Interval
+                    | DataType::Jsonb
+                    | DataType::Int256
                     | DataType::Struct(_) => write!(
                         f,
                         "'{}'",
-                        v.as_scalar_ref_impl().to_text_with_type(&self.data_type)
+                        v.as_scalar_ref_impl().to_text_with_type(&data_type)
                     ),
                     DataType::List { .. } => write!(f, "{}", display_for_explain(v.as_list())),
                 },
             }?;
-            write!(f, ":{:?}", self.data_type)
+            write!(f, ":{:?}", data_type)
         }
     }
 }
@@ -68,15 +72,25 @@ impl std::fmt::Debug for Literal {
 impl Literal {
     pub fn new(data: Datum, data_type: DataType) -> Self {
         assert!(literal_type_match(&data_type, data.as_ref()));
-        Literal { data, data_type }
+        Literal {
+            data,
+            data_type: Some(data_type),
+        }
     }
 
-    pub fn get_expr_type(&self) -> ExprType {
-        ExprType::ConstantValue
+    pub fn new_untyped(data: Option<String>) -> Self {
+        Literal {
+            data: data.map(Into::into),
+            data_type: None,
+        }
     }
 
     pub fn get_data(&self) -> &Datum {
         &self.data
+    }
+
+    pub fn is_untyped(&self) -> bool {
+        self.data_type.is_none()
     }
 
     pub(super) fn from_expr_proto(
@@ -85,34 +99,30 @@ impl Literal {
         let data_type = proto.get_return_type()?;
         Ok(Self {
             data: value_encoding_to_literal(&proto.rex_node, &data_type.into())?,
-            data_type: data_type.into(),
+            data_type: Some(data_type.into()),
         })
     }
 }
 
 impl Expr for Literal {
     fn return_type(&self) -> DataType {
-        self.data_type.clone()
+        self.data_type.clone().unwrap_or(DataType::Varchar)
     }
 
     fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         use risingwave_pb::expr::*;
         ExprNode {
-            expr_type: self.get_expr_type() as i32,
+            function_type: ExprType::Unspecified as i32,
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: literal_to_value_encoding(self.get_data()),
+            rex_node: Some(literal_to_value_encoding(self.get_data())),
         }
     }
 }
 
 /// Convert a literal value (datum) into protobuf.
-fn literal_to_value_encoding(d: &Datum) -> Option<RexNode> {
-    if d.is_none() {
-        return None;
-    }
-
+pub fn literal_to_value_encoding(d: &Datum) -> RexNode {
     let body = serialize_datum(d.as_ref());
-    Some(RexNode::Constant(ProstDatum { body }))
+    RexNode::Constant(PbDatum { body })
 }
 
 /// Convert protobuf into a literal value (datum).
@@ -123,9 +133,7 @@ fn value_encoding_to_literal(
     if let Some(rex_node) = proto {
         if let RexNode::Constant(prost_datum) = rex_node {
             let datum = deserialize_datum(prost_datum.body.as_ref(), ty)?;
-            // remove unwrap
-            // https://github.com/risingwavelabs/risingwave/issues/7862
-            Ok(Some(datum.unwrap()))
+            Ok(datum)
         } else {
             unreachable!()
         }
@@ -152,7 +160,7 @@ mod tests {
         ]);
         let data = Some(ScalarImpl::Struct(value.clone()));
         let node = literal_to_value_encoding(&data);
-        if let RexNode::Constant(prost) = node.as_ref().unwrap() {
+        if let RexNode::Constant(prost) = node {
             let data2 = deserialize_datum(
                 prost.get_body().as_slice(),
                 &DataType::new_struct(
@@ -175,12 +183,10 @@ mod tests {
         ]);
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_value_encoding(&data);
-        if let RexNode::Constant(prost) = node.as_ref().unwrap() {
+        if let RexNode::Constant(prost) = node {
             let data2 = deserialize_datum(
                 prost.get_body().as_slice(),
-                &DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                },
+                &DataType::List(Box::new(DataType::Varchar)),
             )
             .unwrap()
             .unwrap();

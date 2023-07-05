@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
+use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::*;
@@ -36,6 +37,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             input,
             pk_indices,
             executor_id,
+            env,
             ..
         } = params;
 
@@ -47,7 +49,18 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             .map(|&x| x as usize)
             .collect_vec();
 
-        let time_col = node.get_time_col()?.column_idx as usize;
+        let window_start_exprs: Vec<_> = node
+            .get_window_start_exprs()
+            .iter()
+            .map(build_from_prost)
+            .try_collect()?;
+        let window_end_exprs: Vec<_> = node
+            .get_window_end_exprs()
+            .iter()
+            .map(build_from_prost)
+            .try_collect()?;
+
+        let time_col = node.get_time_col() as usize;
         let time_col_data_type = input.schema().fields()[time_col].data_type();
         let output_type = DataType::window_of(&time_col_data_type).unwrap();
         let original_schema: Schema = input
@@ -72,6 +85,8 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         let window_slide = node.get_window_slide()?.into();
         let window_size = node.get_window_size()?.into();
 
+        let chunk_size = env.config().developer.chunk_size;
+
         Ok(HopWindowExecutor::new(
             actor_context,
             input,
@@ -79,7 +94,10 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             time_col,
             window_slide,
             window_size,
+            window_start_exprs,
+            window_end_exprs,
             output_indices,
+            chunk_size,
         )
         .boxed())
     }

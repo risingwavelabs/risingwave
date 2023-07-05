@@ -73,3 +73,7 @@ app.get("/clusters/2", (req, res, next) => {
 app.get("/metrics/cluster", (req, res, next) => {
   res.json(require("./mock/metrics_cluster.json"))
 })
+
+app.get("/monitor/await_tree/1", (req, res, next) => {
+  res.json(require("./mock/await_tree_1.json"))
+})

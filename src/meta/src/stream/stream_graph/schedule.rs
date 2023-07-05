@@ -29,7 +29,9 @@ use rand::thread_rng;
 use risingwave_common::bail;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::common::{ActorInfo, ParallelUnit};
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
+use risingwave_pb::meta::table_fragments::fragment::{
+    FragmentDistributionType, PbFragmentDistributionType,
+};
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::manager::{WorkerId, WorkerLocations};
@@ -52,7 +54,9 @@ enum DistId {
 /// Facts as the input of the scheduler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Fact {
-    /// An edge in the stream graph.
+    /// An internal(building) fragment.
+    Fragment(Id),
+    /// An edge in the fragment graph.
     Edge {
         from: Id,
         to: Id,
@@ -80,10 +84,10 @@ crepe::crepe! {
     @input
     struct Input(Fact);
 
+    struct Fragment(Id);
     struct Edge(Id, Id, DispatcherType);
     struct ExternalReq(Id, DistId);
     struct SingletonReq(Id);
-    struct Fragment(Id);
     struct Requirement(Id, DistId);
 
     @output
@@ -93,13 +97,10 @@ crepe::crepe! {
     struct Failed(Id);
 
     // Extract facts.
+    Fragment(id) <- Input(f), let Fact::Fragment(id) = f;
     Edge(from, to, dt) <- Input(f), let Fact::Edge { from, to, dt } = f;
     ExternalReq(id, dist) <- Input(f), let Fact::ExternalReq { id, dist } = f;
     SingletonReq(id) <- Input(f), let Fact::SingletonReq(id) = f;
-
-    // Internal fragments.
-    Fragment(x) <- Edge(x, _, _), !ExternalReq(x, _);
-    Fragment(y) <- Edge(_, y, _), !ExternalReq(y, _);
 
     // Requirements from the facts.
     Requirement(x, d) <- ExternalReq(x, d);
@@ -171,6 +172,14 @@ impl Distribution {
             FragmentDistributionType::Hash => Distribution::Hash(mapping),
         }
     }
+
+    /// Convert the distribution to [`PbFragmentDistributionType`].
+    pub fn to_distribution_type(&self) -> PbFragmentDistributionType {
+        match self {
+            Distribution::Singleton(_) => PbFragmentDistributionType::Single,
+            Distribution::Hash(_) => PbFragmentDistributionType::Hash,
+        }
+    }
 }
 
 /// [`Scheduler`] schedules the distribution of fragments in a stream graph.
@@ -190,8 +199,8 @@ impl Scheduler {
     /// `None`, all parallel units will be used.
     pub fn new(
         parallel_units: impl IntoIterator<Item = ParallelUnit>,
-        default_parallelism: Option<NonZeroUsize>,
-    ) -> MetaResult<Self> {
+        default_parallelism: NonZeroUsize,
+    ) -> Self {
         // Group parallel units with worker node.
         let mut parallel_units_map = BTreeMap::new();
         for p in parallel_units {
@@ -200,12 +209,6 @@ impl Scheduler {
                 .or_insert_with(Vec::new)
                 .push(p);
         }
-
-        // Use all parallel units if no default parallelism is specified.
-        let default_parallelism = default_parallelism.map_or_else(
-            || parallel_units_map.values().map(|p| p.len()).sum::<usize>(),
-            NonZeroUsize::get,
-        );
 
         let mut parallel_units: LinkedList<_> = parallel_units_map
             .into_values()
@@ -224,14 +227,8 @@ impl Scheduler {
                 }
             });
         }
-        round_robin.truncate(default_parallelism);
-
-        if round_robin.len() < default_parallelism {
-            bail!(
-                "Not enough parallel units to schedule {} parallelism",
-                default_parallelism
-            );
-        }
+        round_robin.truncate(default_parallelism.get());
+        assert_eq!(round_robin.len(), default_parallelism.get());
 
         // Sort all parallel units by ID to achieve better vnode locality.
         round_robin.sort_unstable_by_key(|p| p.id);
@@ -241,10 +238,10 @@ impl Scheduler {
         // Randomly choose a parallel unit as the default singleton parallel unit.
         let default_singleton_parallel_unit = round_robin.choose(&mut thread_rng()).unwrap().id;
 
-        Ok(Self {
+        Self {
             default_hash_mapping,
             default_singleton_parallel_unit,
-        })
+        }
     }
 
     /// Schedule the given complete graph and returns the distribution of each **building
@@ -270,9 +267,10 @@ impl Scheduler {
 
         let mut facts = Vec::new();
 
-        // Singletons
+        // Building fragments and Singletons
         for (&id, fragment) in graph.building_fragments() {
-            if fragment.is_singleton {
+            facts.push(Fact::Fragment(id));
+            if fragment.requires_singleton {
                 facts.push(Fact::SingletonReq(id));
             }
         }
@@ -348,13 +346,6 @@ impl Locations {
             .into_group_map()
     }
 
-    /// Returns the `ActorInfo` map for every actor.
-    pub fn actor_info_map(&self) -> HashMap<ActorId, ActorInfo> {
-        self.actor_infos()
-            .map(|info| (info.actor_id, info))
-            .collect()
-    }
-
     /// Returns an iterator of `ActorInfo`.
     pub fn actor_infos(&self) -> impl Iterator<Item = ActorInfo> + '_ {
         self.actor_locations
@@ -395,6 +386,37 @@ mod tests {
         assert!(!failed.is_empty());
     }
 
+    // 101
+    #[test]
+    fn test_single_fragment_hash() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::Fragment(101.into()),
+        ];
+
+        let expected = maplit::hashmap! {
+            101.into() => Result::DefaultHash,
+        };
+
+        test_success(facts, expected);
+    }
+
+    // 101
+    #[test]
+    fn test_single_fragment_singleton() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::Fragment(101.into()),
+            Fact::SingletonReq(101.into()),
+        ];
+
+        let expected = maplit::hashmap! {
+            101.into() => Result::DefaultSingleton,
+        };
+
+        test_success(facts, expected);
+    }
+
     // 1 -|-> 101 -->
     //                103 --> 104
     // 2 -|-> 102 -->
@@ -402,6 +424,10 @@ mod tests {
     fn test_scheduling_mv_on_mv() {
         #[rustfmt::skip]
         let facts = [
+            Fact::Fragment(101.into()),
+            Fact::Fragment(102.into()),
+            Fact::Fragment(103.into()),
+            Fact::Fragment(104.into()),
             Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
             Fact::ExternalReq { id: 2.into(), dist: DistId::Singleton(2) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
@@ -428,6 +454,11 @@ mod tests {
     fn test_delta_join() {
         #[rustfmt::skip]
         let facts = [
+            Fact::Fragment(101.into()),
+            Fact::Fragment(102.into()),
+            Fact::Fragment(103.into()),
+            Fact::Fragment(104.into()),
+            Fact::Fragment(105.into()),
             Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
             Fact::ExternalReq { id: 2.into(), dist: DistId::Hash(2) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
@@ -458,6 +489,9 @@ mod tests {
     fn test_singleton_leaf() {
         #[rustfmt::skip]
         let facts = [
+            Fact::Fragment(101.into()),
+            Fact::Fragment(102.into()),
+            Fact::Fragment(103.into()),
             Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
             Fact::SingletonReq(102.into()), // like `Now`
@@ -481,6 +515,7 @@ mod tests {
     fn test_upstream_hash_shard_failed() {
         #[rustfmt::skip]
         let facts = [
+            Fact::Fragment(101.into()),
             Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
             Fact::ExternalReq { id: 2.into(), dist: DistId::Hash(2) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },

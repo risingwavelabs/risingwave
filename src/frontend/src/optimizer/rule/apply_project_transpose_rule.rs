@@ -15,11 +15,10 @@
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
-use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use super::{ApplyOffsetRewriter, BoxedRule, Rule};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{LogicalApply, LogicalProject};
 use crate::optimizer::PlanRef;
-use crate::utils::ColIndexMapping;
 
 /// Transpose `LogicalApply` and `LogicalProject`.
 ///
@@ -64,18 +63,8 @@ impl Rule for ApplyProjectTransposeRule {
         let (proj_exprs, proj_input) = project.clone().decompose();
 
         // replace correlated_input_ref in project exprs
-        let mut rewriter = Rewriter {
-            offset: left.schema().len(),
-            index_mapping: ColIndexMapping::new(
-                correlated_indices
-                    .clone()
-                    .into_iter()
-                    .map(Some)
-                    .collect_vec(),
-            )
-            .inverse(),
-            correlated_id,
-        };
+        let mut rewriter =
+            ApplyOffsetRewriter::new(left.schema().len(), &correlated_indices, correlated_id);
 
         let new_proj_exprs: Vec<ExprImpl> = proj_exprs
             .into_iter()
@@ -122,32 +111,5 @@ impl ExprRewriter for ApplyOnConditionRewriter {
         } else {
             input_ref.into()
         }
-    }
-}
-
-/// Convert `CorrelatedInputRef` to `InputRef` and shift `InputRef` with offset.
-struct Rewriter {
-    offset: usize,
-    index_mapping: ColIndexMapping,
-    correlated_id: CorrelatedId,
-}
-impl ExprRewriter for Rewriter {
-    fn rewrite_correlated_input_ref(
-        &mut self,
-        correlated_input_ref: CorrelatedInputRef,
-    ) -> ExprImpl {
-        if correlated_input_ref.correlated_id() == self.correlated_id {
-            InputRef::new(
-                self.index_mapping.map(correlated_input_ref.index()),
-                correlated_input_ref.return_type(),
-            )
-            .into()
-        } else {
-            correlated_input_ref.into()
-        }
-    }
-
-    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
     }
 }

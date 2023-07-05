@@ -21,6 +21,7 @@ use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
+use tokio::time::Instant;
 
 use super::error::StreamExecutorError;
 use super::exchange::input::BoxedInput;
@@ -85,12 +86,12 @@ impl MergeExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>) -> Self {
+    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>, schema: Schema) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
         Self::new(
-            Schema::default(),
+            schema,
             vec![],
             ActorContext::create(114),
             514,
@@ -108,15 +109,15 @@ impl MergeExecutor {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self: Box<Self>) {
+    async fn execute_inner(mut self: Box<Self>) {
         // Futures of all active upstreams.
         let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
         let actor_id = self.actor_context.id;
         let actor_id_str = actor_id.to_string();
-        let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
+        let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
         // Channels that're blocked by the barrier to align.
-        let mut start_time = minstant::Instant::now();
+        let mut start_time = Instant::now();
         pin_mut!(select_all);
         while let Some(msg) = select_all.next().await {
             self.metrics
@@ -144,19 +145,44 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
+                    if let Some(Mutation::Update { dispatchers, .. }) = barrier.mutation.as_deref()
+                    {
+                        if select_all
+                            .upstream_actor_ids()
+                            .iter()
+                            .any(|actor_id| dispatchers.contains_key(actor_id))
+                        {
+                            // `Watermark` of upstream may become stale after downstream scaling.
+                            select_all
+                                .buffered_watermarks
+                                .values_mut()
+                                .for_each(|buffers| buffers.clear());
+                        }
+                    }
+
                     if let Some(update) =
                         barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)
                     {
+                        let new_upstream_fragment_id = update
+                            .new_upstream_fragment_id
+                            .unwrap_or(self.upstream_fragment_id);
+                        let added_upstream_actor_id = update.added_upstream_actor_id.clone();
+                        let removed_upstream_actor_id: HashSet<_> =
+                            if update.new_upstream_fragment_id.is_some() {
+                                select_all.upstream_actor_ids().iter().copied().collect()
+                            } else {
+                                update.removed_upstream_actor_id.iter().copied().collect()
+                            };
+
                         // `Watermark` of upstream may become stale after upstream scaling.
                         select_all
                             .buffered_watermarks
                             .values_mut()
                             .for_each(|buffers| buffers.clear());
 
-                        if !update.added_upstream_actor_id.is_empty() {
+                        if !added_upstream_actor_id.is_empty() {
                             // Create new upstreams receivers.
-                            let new_upstreams: Vec<_> = update
-                                .added_upstream_actor_id
+                            let new_upstreams: Vec<_> = added_upstream_actor_id
                                 .iter()
                                 .map(|&upstream_actor_id| {
                                     new_input(
@@ -165,7 +191,7 @@ impl MergeExecutor {
                                         self.actor_context.id,
                                         self.fragment_id,
                                         upstream_actor_id,
-                                        self.upstream_fragment_id,
+                                        new_upstream_fragment_id,
                                     )
                                 })
                                 .try_collect()
@@ -186,36 +212,31 @@ impl MergeExecutor {
                                 .buffered_watermarks
                                 .values_mut()
                                 .for_each(|buffers| {
-                                    buffers.add_buffers(update.added_upstream_actor_id.clone())
+                                    buffers.add_buffers(added_upstream_actor_id.clone())
                                 });
                         }
 
-                        if !update.get_removed_upstream_actor_id().is_empty() {
+                        if !removed_upstream_actor_id.is_empty() {
                             // Remove upstreams.
-                            select_all.remove_upstreams(
-                                &update.removed_upstream_actor_id.iter().copied().collect(),
-                            );
+                            select_all.remove_upstreams(&removed_upstream_actor_id);
 
                             for buffers in select_all.buffered_watermarks.values_mut() {
                                 // Call `check_heap` in case the only upstream(s) that does not have
                                 // watermark in heap is removed
-                                buffers.remove_buffer(
-                                    update.removed_upstream_actor_id.iter().copied().collect(),
-                                );
+                                buffers.remove_buffer(removed_upstream_actor_id.clone());
                             }
                         }
 
-                        if !update.added_upstream_actor_id.is_empty()
-                            || !update.get_removed_upstream_actor_id().is_empty()
-                        {
-                            select_all.update_actor_ids();
-                        }
+                        self.upstream_fragment_id = new_upstream_fragment_id;
+                        upstream_fragment_id_str = new_upstream_fragment_id.to_string();
+
+                        select_all.update_actor_ids();
                     }
                 }
             }
 
             yield msg;
-            start_time = minstant::Instant::now();
+            start_time = Instant::now();
         }
     }
 }
@@ -325,7 +346,7 @@ impl Stream for SelectReceivers {
         // If this barrier asks the actor to stop, we do not reset the active upstreams so that the
         // next call would return `Poll::Ready(None)` due to `is_terminated`.
         let upstreams = std::mem::take(&mut self.blocked);
-        if barrier.is_stop_or_update_drop_actor(self.actor_id) {
+        if barrier.is_stop(self.actor_id) {
             drop(upstreams);
         } else {
             self.extend_active(upstreams);
@@ -359,6 +380,10 @@ impl SelectReceivers {
 
         self.active
             .extend(upstreams.into_iter().map(|s| s.into_future()));
+    }
+
+    fn upstream_actor_ids(&self) -> &[ActorId] {
+        &self.upstream_actor_ids
     }
 
     fn update_actor_ids(&mut self) {
@@ -425,7 +450,7 @@ mod tests {
         ExchangeService, ExchangeServiceServer,
     };
     use risingwave_pb::task_service::{
-        GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
+        GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
     };
     use risingwave_rpc_client::ComputeClientPool;
     use tokio::time::sleep;
@@ -436,7 +461,7 @@ mod tests {
     use crate::executor::exchange::input::RemoteInput;
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{Barrier, Executor, Mutation};
-    use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
+    use crate::task::test_utils::helper_make_local_actor;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.
@@ -454,7 +479,7 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::for_test(rxs);
+        let merger = MergeExecutor::for_test(rxs, Schema::default());
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
@@ -534,7 +559,7 @@ mod tests {
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
-        // 1. Register info and channels in context.
+        // 1. Register info in context.
         {
             let mut actor_infos = ctx.actor_infos.write();
 
@@ -542,10 +567,9 @@ mod tests {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
-        add_local_channels(
-            ctx.clone(),
-            vec![(untouched, actor_id), (old, actor_id), (new, actor_id)],
-        );
+        // untouched -> actor_id
+        // old -> actor_id
+        // new -> actor_id
 
         let (upstream_fragment_id, fragment_id) = (10, 18);
 
@@ -610,6 +634,7 @@ mod tests {
             (actor_id, upstream_fragment_id) => MergeUpdate {
                 actor_id,
                 upstream_fragment_id,
+                new_upstream_fragment_id: None,
                 added_upstream_actor_id: vec![new],
                 removed_upstream_actor_id: vec![old],
             }
@@ -667,7 +692,7 @@ mod tests {
                         ),
                     ),
                 }),
-                permits: 1,
+                permits: Some(PbPermits::default()),
             }))
             .await
             .unwrap();
@@ -681,7 +706,7 @@ mod tests {
                         ),
                     ),
                 }),
-                permits: 0,
+                permits: Some(PbPermits::default()),
             }))
             .await
             .unwrap();

@@ -16,7 +16,6 @@ create table shipments (
  username = 'posres',
  password = 'postgres',
  database.name = 'cdc_test',
- schema.name = 'public',
  table.name = 'shipments',
  slot.name = 'shipments'
 );
@@ -38,7 +37,6 @@ create table shipments (
  username = 'postgres',
  password = 'otgres',
  database.name = 'cdc_test',
- schema.name = 'public',
  table.name = 'shipments',
  slot.name = 'shipments'
 );
@@ -59,7 +57,6 @@ create table shipments (
  username = 'postgres',
  password = 'postgres',
  database.name = 'cdc_test',
- schema.name = 'public',
  table.name = 'shipment',
  slot.name = 'shipments'
 );

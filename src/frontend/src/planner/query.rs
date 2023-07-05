@@ -38,23 +38,25 @@ impl Planner {
 
         let extra_order_exprs_len = extra_order_exprs.len();
         let mut plan = self.plan_set_expr(body, extra_order_exprs, &order)?;
-        let order = Order { field_order: order };
+        let order = Order {
+            column_orders: order,
+        };
         if limit.is_some() || offset.is_some() {
             let limit = limit.unwrap_or(LIMIT_ALL_COUNT);
             let offset = offset.unwrap_or_default();
-            plan = if order.field_order.is_empty() {
+            plan = if order.column_orders.is_empty() {
                 // Should be rejected by parser.
                 assert!(!with_ties);
                 // Create a logical limit if with limit/offset but without order-by
                 LogicalLimit::create(plan, limit, offset)
             } else {
                 // Create a logical top-n if with limit/offset and order-by
-                LogicalTopN::create(plan, limit, offset, order.clone(), with_ties)?
+                LogicalTopN::create(plan, limit, offset, order.clone(), with_ties, vec![])?
             }
         }
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..plan.schema().len() - extra_order_exprs_len);
-        if let Some(field) = plan.schema().fields.get(0) && field.name == "projected_row_id"  {
+        if let Some(field) = plan.schema().fields.get(0) && field.name == "projected_row_id" {
             // Do not output projected_row_id hidden column.
             out_fields.set(0, false);
         }

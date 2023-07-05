@@ -1,0 +1,37 @@
+statement ok
+create table t1 (v1 smallint, v2 int, v3 bigint);
+
+statement ok
+create materialized view agg_mv as select
+bit_xor(v1) as a1,
+bit_xor(v2) as a2,
+bit_xor(v3) as a3
+from t1;
+
+statement ok
+insert into t1 values (1, 1, 1), (10, 10, 10), (38, 38, 38), (41, 41, 41);
+
+statement ok
+flush;
+
+query III
+select * from agg_mv;
+----
+4 4 4
+
+statement ok
+delete from t1 where v1 = 1;
+
+statement ok
+flush;
+
+query III
+select * from agg_mv;
+----
+5 5 5
+
+statement ok
+drop materialized view agg_mv;
+
+statement ok
+drop table t1;

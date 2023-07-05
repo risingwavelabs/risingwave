@@ -17,9 +17,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
-use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{
+    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+};
 
-use super::{DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
+use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
@@ -34,6 +36,7 @@ pub type Catalog = (
     Vec<Index>,
     Vec<View>,
     Vec<Function>,
+    Vec<Connection>,
 );
 
 type DatabaseKey = String;
@@ -59,16 +62,17 @@ pub struct DatabaseManager {
     pub(super) views: BTreeMap<ViewId, View>,
     /// Cached function information.
     pub(super) functions: BTreeMap<FunctionId, Function>,
+    /// Cached connection information.
+    pub(super) connections: BTreeMap<ConnectionId, Connection>,
 
-    /// Relation refer count mapping.
+    /// Relation reference count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
     pub(super) relation_ref_count: HashMap<RelationId, usize>,
-
-    // In-progress creation tracker
+    // In-progress creation tracker.
     pub(super) in_progress_creation_tracker: HashSet<RelationKey>,
     // In-progress creating streaming job tracker: this is a temporary workaround to avoid clean up
     // creating streaming jobs.
-    pub(super) in_progress_creation_streaming_job: HashSet<TableId>,
+    pub(super) in_progress_creation_streaming_job: HashMap<TableId, RelationKey>,
     // In-progress creating tables, including internal tables.
     pub(super) in_progress_creating_tables: HashMap<TableId, Table>,
 }
@@ -83,6 +87,7 @@ impl DatabaseManager {
         let indexes = Index::list(env.meta_store()).await?;
         let views = View::list(env.meta_store()).await?;
         let functions = Function::list(env.meta_store()).await?;
+        let connections = Connection::list(env.meta_store()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -92,8 +97,19 @@ impl DatabaseManager {
                 .map(|database| (database.id, database)),
         );
         let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
-        let sources = BTreeMap::from_iter(sources.into_iter().map(|source| (source.id, source)));
-        let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| (sink.id, sink)));
+        let sources = BTreeMap::from_iter(sources.into_iter().map(|source| {
+            // TODO(weili): wait for yezizp to refactor ref cnt
+            if let Some(connection_id) = source.connection_id {
+                *relation_ref_count.entry(connection_id).or_default() += 1;
+            }
+            (source.id, source)
+        }));
+        let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| {
+            for depend_relation_id in &sink.dependent_relations {
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
+            }
+            (sink.id, sink)
+        }));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
         let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
@@ -108,6 +124,7 @@ impl DatabaseManager {
             (view.id, view)
         }));
         let functions = BTreeMap::from_iter(functions.into_iter().map(|f| (f.id, f)));
+        let connections = BTreeMap::from_iter(connections.into_iter().map(|c| (c.id, c)));
 
         Ok(Self {
             databases,
@@ -118,9 +135,10 @@ impl DatabaseManager {
             tables,
             indexes,
             functions,
+            connections,
             relation_ref_count,
             in_progress_creation_tracker: HashSet::default(),
-            in_progress_creation_streaming_job: HashSet::default(),
+            in_progress_creation_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
         })
     }
@@ -135,6 +153,7 @@ impl DatabaseManager {
             self.indexes.values().cloned().collect_vec(),
             self.views.values().cloned().collect_vec(),
             self.functions.values().cloned().collect_vec(),
+            self.connections.values().cloned().collect_vec(),
         )
     }
 
@@ -169,12 +188,31 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             Err(MetaError::catalog_duplicated("view", &relation_key.2))
-        } else if self.functions.values().any(|x| {
-            x.database_id == relation_key.0
-                && x.schema_id == relation_key.1
-                && x.name.eq(&relation_key.2)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn check_function_duplicated(&self, function: &Function) -> MetaResult<()> {
+        if self.functions.values().any(|x| {
+            x.database_id == function.database_id
+                && x.schema_id == function.schema_id
+                && x.name.eq(&function.name)
+                && x.arg_types == function.arg_types
         }) {
-            Err(MetaError::catalog_duplicated("function", &relation_key.2))
+            Err(MetaError::catalog_duplicated("function", &function.name))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn check_connection_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
+        if self.connections.values().any(|conn| {
+            conn.database_id == relation_key.0
+                && conn.schema_id == relation_key.1
+                && conn.name.eq(&relation_key.2)
+        }) {
+            Err(MetaError::catalog_duplicated("connection", &relation_key.2))
         } else {
             Ok(())
         }
@@ -195,15 +233,14 @@ impl DatabaseManager {
         self.tables.values().cloned().collect_vec()
     }
 
-    pub fn get_table_options(&self, table_ids: &[TableId]) -> HashMap<TableId, TableOption> {
+    pub fn get_table(&self, table_id: TableId) -> Option<&Table> {
+        self.tables.get(&table_id)
+    }
+
+    pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.tables
             .iter()
-            .filter_map(|(id, table)| {
-                if table_ids.contains(id) {
-                    return Some((*id, TableOption::build_table_option(&table.properties)));
-                }
-                None
-            })
+            .map(|(id, table)| (*id, TableOption::build_table_option(&table.properties)))
             .collect()
     }
 
@@ -225,6 +262,14 @@ impl DatabaseManager {
             .filter(|&s| s.schema_id == schema_id)
             .map(|s| s.id)
             .collect_vec()
+    }
+
+    pub fn get_connection(&self, connection_id: ConnectionId) -> Option<&Connection> {
+        self.connections.get(&connection_id)
+    }
+
+    pub fn list_connections(&self) -> Vec<Connection> {
+        self.connections.values().cloned().collect()
     }
 
     pub fn list_stream_job_ids(&self) -> impl Iterator<Item = RelationId> + '_ {
@@ -279,6 +324,18 @@ impl DatabaseManager {
         }
     }
 
+    pub fn has_creation_in_database(&self, database_id: DatabaseId) -> bool {
+        self.in_progress_creation_tracker
+            .iter()
+            .any(|relation_key| relation_key.0 == database_id)
+    }
+
+    pub fn has_creation_in_schema(&self, schema_id: SchemaId) -> bool {
+        self.in_progress_creation_tracker
+            .iter()
+            .any(|relation_key| relation_key.1 == schema_id)
+    }
+
     pub fn has_in_progress_creation(&self, relation: &RelationKey) -> bool {
         self.in_progress_creation_tracker
             .contains(&relation.clone())
@@ -288,8 +345,9 @@ impl DatabaseManager {
         self.in_progress_creation_tracker.insert(relation.clone());
     }
 
-    pub fn mark_creating_streaming_job(&mut self, table_id: TableId) {
-        self.in_progress_creation_streaming_job.insert(table_id);
+    pub fn mark_creating_streaming_job(&mut self, table_id: TableId, key: RelationKey) {
+        self.in_progress_creation_streaming_job
+            .insert(table_id, key);
     }
 
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
@@ -300,8 +358,15 @@ impl DatabaseManager {
         self.in_progress_creation_streaming_job.remove(&table_id);
     }
 
+    pub fn find_creating_streaming_job_id(&self, key: &RelationKey) -> Option<TableId> {
+        self.in_progress_creation_streaming_job
+            .iter()
+            .find(|(_, v)| *v == key)
+            .map(|(k, _)| *k)
+    }
+
     pub fn all_creating_streaming_jobs(&self) -> impl Iterator<Item = TableId> + '_ {
-        self.in_progress_creation_streaming_job.iter().cloned()
+        self.in_progress_creation_streaming_job.keys().cloned()
     }
 
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {
@@ -331,6 +396,14 @@ impl DatabaseManager {
         }
     }
 
+    pub fn ensure_view_id(&self, view_id: ViewId) -> MetaResult<()> {
+        if self.views.contains_key(&view_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("view", view_id))
+        }
+    }
+
     pub fn ensure_table_id(&self, table_id: TableId) -> MetaResult<()> {
         if self.tables.contains_key(&table_id) {
             Ok(())
@@ -339,13 +412,48 @@ impl DatabaseManager {
         }
     }
 
+    pub fn ensure_source_id(&self, source_id: SourceId) -> MetaResult<()> {
+        if self.sources.contains_key(&source_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("source", source_id))
+        }
+    }
+
+    pub fn ensure_sink_id(&self, sink_id: SinkId) -> MetaResult<()> {
+        if self.sinks.contains_key(&sink_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("sink", sink_id))
+        }
+    }
+
+    pub fn ensure_index_id(&self, index_id: IndexId) -> MetaResult<()> {
+        if self.indexes.contains_key(&index_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("index", index_id))
+        }
+    }
+
+    pub fn ensure_connection_id(&self, connection_id: ConnectionId) -> MetaResult<()> {
+        if self.connections.contains_key(&connection_id) {
+            Ok(())
+        } else {
+            Err(MetaError::catalog_id_not_found("connection", connection_id))
+        }
+    }
+
     // TODO(zehua): refactor when using SourceId.
-    pub fn ensure_table_or_source_id(&self, table_id: &TableId) -> MetaResult<()> {
-        if self.tables.contains_key(table_id) || self.sources.contains_key(table_id) {
+    pub fn ensure_table_view_or_source_id(&self, table_id: &TableId) -> MetaResult<()> {
+        if self.tables.contains_key(table_id)
+            || self.sources.contains_key(table_id)
+            || self.views.contains_key(table_id)
+        {
             Ok(())
         } else {
             Err(MetaError::catalog_id_not_found(
-                "table or source",
+                "table, view or source",
                 *table_id,
             ))
         }

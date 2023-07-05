@@ -12,21 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
+use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 
+use super::utils::impl_distill_by_unit;
 use super::{
-    generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalProject,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
-use crate::optimizer::plan_node::generic::GenericPlanNode;
+use crate::expr::{
+    collect_input_refs, Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
+};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{FunctionalDependencySet, Order};
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
@@ -36,7 +39,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
 /// `LogicalProjectSet` is highly similar to [`LogicalProject`], except for the additional hidden
 /// column.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProjectSet {
     pub base: PlanBase,
     core: generic::ProjectSet<PlanRef>,
@@ -50,18 +53,15 @@ impl LogicalProjectSet {
         );
 
         let core = generic::ProjectSet { select_list, input };
-
-        let ctx = core.ctx();
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
-
-        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+        let base = PlanBase::new_logical_with_core(&core);
 
         LogicalProjectSet { base, core }
     }
 
     /// `create` will analyze select exprs with table functions and construct a plan.
+    ///
+    /// When there is no table functions in the select list, it will return a simple
+    /// `LogicalProject`.
     ///
     /// When table functions are used as arguments of a table function or a usual function, the
     /// arguments will be put at a lower `ProjectSet` while the call will be put at a higher
@@ -73,6 +73,13 @@ impl LogicalProjectSet {
     ///
     /// Otherwise it will be a simple `ProjectSet`.
     pub fn create(input: PlanRef, select_list: Vec<ExprImpl>) -> PlanRef {
+        if select_list
+            .iter()
+            .all(|e: &ExprImpl| !e.has_table_function())
+        {
+            return LogicalProject::create(input, select_list);
+        }
+
         /// Rewrites a `FunctionCall` or `TableFunction` whose args contain table functions into one
         /// using `InputRef` as args.
         struct Rewriter {
@@ -94,6 +101,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
+                        udtf_catalog,
                     } = table_func;
                     let args = args
                         .into_iter()
@@ -105,6 +113,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
+                        udtf_catalog,
                     }
                     .into()
                 } else {
@@ -174,42 +183,8 @@ impl LogicalProjectSet {
         }
     }
 
-    fn derive_fd(
-        core: &generic::ProjectSet<PlanRef>,
-        input_fd_set: &FunctionalDependencySet,
-    ) -> FunctionalDependencySet {
-        let i2o = core.i2o_col_mapping();
-        i2o.rewrite_functional_dependency_set(input_fd_set.clone())
-    }
-
     pub fn select_list(&self) -> &Vec<ExprImpl> {
         &self.core.select_list
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let _verbose = self.base.ctx.is_explain_verbose();
-        // TODO: add verbose display like Project
-
-        let mut builder = f.debug_struct(name);
-        builder.field("select_list", self.select_list());
-        builder.finish()
-    }
-}
-
-impl LogicalProjectSet {
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.o2i_col_mapping()
-    }
-
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.core.i2o_col_mapping()
-    }
-
-    /// Map the order of the input to use the updated indices
-    pub fn get_out_column_index_order(&self) -> Order {
-        self.core
-            .i2o_col_mapping()
-            .rewrite_provided_order(self.input().order())
     }
 }
 
@@ -242,18 +217,74 @@ impl PlanTreeNodeUnary for LogicalProjectSet {
 }
 
 impl_plan_tree_node_for_unary! {LogicalProjectSet}
-
-impl fmt::Display for LogicalProjectSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalProjectSet")
-    }
-}
+impl_distill_by_unit!(LogicalProjectSet, core, "LogicalProjectSet");
+// TODO: add verbose display like Project
 
 impl ColPrunable for LogicalProjectSet {
-    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        // TODO: column pruning for ProjectSet
-        let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let output_required_cols = required_cols;
+        let required_cols = {
+            let mut required_cols_set = FixedBitSet::from_iter(required_cols.iter().copied());
+            required_cols_set.grow(self.select_list().len() + 1);
+            let mut cols = required_cols.to_vec();
+            // We should not prune table functions, because the final number of result rows is
+            // depended by all table function calls
+            for (i, e) in self.select_list().iter().enumerate() {
+                if e.has_table_function() && !required_cols_set.contains(i + 1) {
+                    cols.push(i + 1);
+                    required_cols_set.set(i + 1, true);
+                }
+            }
+            cols
+        };
+
+        let input_col_num = self.input().schema().len();
+
+        let input_required_cols = collect_input_refs(
+            input_col_num,
+            required_cols
+                .iter()
+                .filter(|&&i| i > 0)
+                .map(|i| &self.select_list()[*i - 1]),
+        )
+        .ones()
+        .collect_vec();
+        let new_input = self.input().prune_col(&input_required_cols, ctx);
+        let mut mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
+        // Rewrite each InputRef with new index.
+        let select_list = required_cols
+            .iter()
+            .filter(|&&id| id > 0)
+            .map(|&id| mapping.rewrite_expr(self.select_list()[id - 1].clone()))
+            .collect();
+
+        // Reconstruct the LogicalProjectSet
+        let new_node: PlanRef = LogicalProjectSet::create(new_input, select_list);
+        if new_node.schema().len() == output_required_cols.len() {
+            // current schema perfectly fit the required columns
+            new_node
+        } else {
+            // projected_row_id column is not needed so we did a projection to remove it
+            let mut new_output_cols = required_cols.to_vec();
+            if !required_cols.contains(&0) {
+                new_output_cols.insert(0, 0);
+            }
+            let mapping =
+                &ColIndexMapping::with_remaining_columns(&new_output_cols, self.schema().len());
+            let output_required_cols = output_required_cols
+                .iter()
+                .map(|&idx| mapping.map(idx))
+                .collect_vec();
+            let src_size = new_node.schema().len();
+            LogicalProject::with_mapping(
+                new_node,
+                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
+            )
+            .into()
+        }
     }
 }
 
@@ -277,17 +308,43 @@ impl PredicatePushdown for LogicalProjectSet {
     fn predicate_pushdown(
         &self,
         predicate: Condition,
-        _ctx: &mut PredicatePushdownContext,
+        ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // TODO: predicate pushdown for ProjectSet
-        LogicalFilter::create(self.clone().into(), predicate)
+        // convert the predicate to one that references the child of the project
+        let mut subst = Substitute {
+            mapping: {
+                let mut output_list = self.select_list().clone();
+                output_list.insert(
+                    0,
+                    ExprImpl::InputRef(Box::new(InputRef {
+                        index: 0,
+                        data_type: DataType::Int64,
+                    })),
+                );
+                output_list
+            },
+        };
+
+        let remain_mask = {
+            let mut remain_mask = FixedBitSet::with_capacity(self.select_list().len() + 1);
+            remain_mask.set(0, true);
+            self.select_list()
+                .iter()
+                .enumerate()
+                .for_each(|(i, e)| remain_mask.set(i + 1, e.is_impure() || e.has_table_function()));
+            remain_mask
+        };
+        let (remained_cond, pushed_cond) = predicate.split_disjoint(&remain_mask);
+        let pushed_cond = pushed_cond.rewrite_expr(&mut subst);
+
+        gen_filter_and_pushdown(self, remained_cond, pushed_cond, ctx)
     }
 }
 
 impl ToBatch for LogicalProjectSet {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = self.input().to_batch()?;
         Ok(BatchProjectSet::new(new_logical).into())
     }
 }
@@ -331,7 +388,8 @@ impl ToStream for LogicalProjectSet {
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let new_input = self.input().to_stream(ctx)?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(StreamProjectSet::new(new_logical).into())
     }
 }
@@ -374,7 +432,7 @@ mod test {
                 ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
                 ExprImpl::TableFunction(Box::new(
                     TableFunction::new(
-                        crate::expr::TableFunctionType::Generate,
+                        crate::expr::TableFunctionType::GenerateSeries,
                         vec![
                             ExprImpl::InputRef(Box::new(InputRef::new(0, DataType::Int32))),
                             ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),

@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
-use super::{GenericPlanNode, GenericPlanRef};
+use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
 
 /// `Union` returns the union of the rows of its inputs.
 /// If `all` is false, it needs to eliminate duplicates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Union<PlanRef> {
     pub all: bool,
     pub inputs: Vec<PlanRef>,
@@ -53,4 +55,15 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
     fn ctx(&self) -> OptimizerContextRef {
         self.inputs[0].ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        FunctionalDependencySet::new(self.inputs[0].schema().len())
+    }
 }
+
+impl<PlanRef: GenericPlanRef> Union<PlanRef> {
+    pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
+        vec![("all", Pretty::debug(&self.all))]
+    }
+}
+impl_distill_unit_from_fields!(Union, GenericPlanRef);

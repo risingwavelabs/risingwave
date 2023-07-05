@@ -32,4 +32,6 @@ message ReadPlan {
 
   hummock.HummockVersion version = 6;
   catalog.Table table_catalog = 7;
+
+  repeated uint32 vnode_ids = 8;
 }

@@ -22,7 +22,8 @@ RisingWave makes checkpointing via [Chandy–Lamport algorithm](https://en.wikip
 
 ![](./images/checkpoint/checkpoint.svg)
 
-To guarantee consistency, RisingWave introduces Chandy-Lamport algorithm as its checkpoint scheme. In particular, RisingWave periodically repeats the following procedure:
+To guarantee consistency, RisingWave introduces Chandy-Lamport algorithm as its checkpoint scheme.
+In particular, RisingWave periodically (every `barrier_interval_ms`) repeats the following procedure:
 
 1. The meta service initializes a barrier and broadcasts it to all source actors across the streaming engine. 
 2. The barrier messages go through every streaming operator (actors) in the streaming graph. 

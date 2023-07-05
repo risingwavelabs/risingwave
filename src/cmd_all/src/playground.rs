@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use anyhow::Result;
-use clap::StructOpt;
+use clap::Parser;
 use tempfile::TempPath;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -71,6 +71,10 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "0.0.0.0:5691",
                 "--state-store",
                 "hummock+memory",
+                "--data-directory",
+                "hummock_001",
+                "--advertise-addr",
+                "127.0.0.1:5690",
                 "--connector-rpc-endpoint",
                 "127.0.0.1:50051",
             ])),
@@ -82,26 +86,38 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
             RisingWaveService::Meta(osstrs([
                 "--dashboard-host",
                 "0.0.0.0:5691",
+                "--advertise-addr",
+                "127.0.0.1:5690",
                 "--state-store",
                 "hummock+memory-shared",
+                "--data-directory",
+                "hummock_001",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5687",
                 "--parallelism",
                 "4",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5688",
                 "--parallelism",
                 "4",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5689",
                 "--parallelism",
                 "4",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Frontend(osstrs([])),
         ],
@@ -116,6 +132,8 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                     "0.0.0.0:5691",
                     "--state-store",
                     "hummock+memory",
+                    "--data-directory",
+                    "hummock_001",
                     "--connector-rpc-endpoint",
                     "127.0.0.1:50051",
                 ])),
@@ -157,14 +175,18 @@ fn osstrs<const N: usize>(s: [&str; N]) -> Vec<OsString> {
     s.iter().map(OsString::from).collect()
 }
 
-pub async fn playground() -> Result<()> {
-    eprintln!("launching playground");
+#[derive(Debug, Clone, Parser)]
+#[command(about = "The quick way to start a RisingWave cluster for playing around")]
+pub struct PlaygroundOpts {
+    /// The profile to use.
+    #[clap(short, long, env = "PLAYGROUND_PROFILE", default_value = "playground")]
+    profile: String,
+}
 
-    let profile = if let Ok(profile) = std::env::var("PLAYGROUND_PROFILE") {
-        profile.to_string()
-    } else {
-        "playground".to_string()
-    };
+pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
+    let profile = opts.profile;
+
+    tracing::info!("launching playground with profile `{}`", profile);
 
     let (services, idle_exit) = get_services(&profile);
 
@@ -193,8 +215,9 @@ pub async fn playground() -> Result<()> {
                 opts.insert(0, "compute-node".into());
                 tracing::info!("starting compute-node thread with cli args: {:?}", opts);
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from(opts);
-                let _compute_handle =
-                    tokio::spawn(async move { risingwave_compute::start(opts).await });
+                let _compute_handle = tokio::spawn(async move {
+                    risingwave_compute::start(opts, prometheus::Registry::new()).await
+                });
             }
             RisingWaveService::Frontend(mut opts) => {
                 opts.insert(0, "frontend-node".into());
@@ -216,7 +239,7 @@ pub async fn playground() -> Result<()> {
                     "docker-playground" | "online-docker-playground" => {
                         "/risingwave/bin".to_string()
                     }
-                    "playground" => std::env::var("PREFIX_BIN").expect("PREFIX_BIN not set"),
+                    "playground" => std::env::var("PREFIX_BIN").unwrap_or_default(),
                     _ => "".to_string(),
                 };
                 let cmd_path = Path::new(&prefix_bin)
@@ -224,22 +247,28 @@ pub async fn playground() -> Result<()> {
                     .join("start-service.sh");
                 if cmd_path.exists() {
                     tracing::info!("start connector-node with prefix_bin {}", prefix_bin);
-                    let mut cmd = Command::new(cmd_path);
-                    cmd.arg("-p").arg("50051");
-                    cmd.stdout(std::process::Stdio::piped());
-                    let mut child = cmd.spawn().expect("failed to start connector node");
-                    let stdout = child.stdout.take().expect("failed to open stdout");
-                    let _child_handle = tokio::spawn(async move { child.wait().await });
-                    let _stdout_handle = tokio::spawn(async move {
-                        let mut reader = BufReader::new(stdout).lines();
-                        while let Some(line) =
-                            reader.next_line().await.expect("failed to read line")
-                        {
-                            eprintln!("{}", line);
+                    let mut child = Command::new(cmd_path)
+                        .arg("-p")
+                        .arg("50051")
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()?;
+                    let stderr = child.stderr.take().unwrap();
+
+                    let _child_handle = tokio::spawn(async move {
+                        signal::ctrl_c().await.unwrap();
+                        let _ = child.start_kill();
+                    });
+                    let _stderr_handle = tokio::spawn(async move {
+                        let mut reader = BufReader::new(stderr).lines();
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            tracing::info!(target: "risingwave_connector_node", "{}", line);
                         }
                     });
                 } else {
-                    eprintln!("connector node path not exist!");
+                    tracing::warn!(
+                        "Will not start connector node since `{}` does not exist.",
+                        cmd_path.display()
+                    );
                 }
             }
         }

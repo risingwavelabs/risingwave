@@ -12,37 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use pretty_xmlish::XmlNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::{ExprRewritable, LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::property::{Order, OrderDisplay};
+use super::generic::{DistillUnit, TopNLimit};
+use super::utils::{plan_node_name, watermark_pretty, Distill};
+use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::property::Order;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {
     pub base: PlanBase,
-    logical: LogicalTopN,
+    logical: generic::TopN<PlanRef>,
     /// an optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution
     vnode_col_idx: Option<usize>,
 }
 
 impl StreamGroupTopN {
-    pub fn new(logical: LogicalTopN, vnode_col_idx: Option<usize>) -> Self {
-        assert!(!logical.group_key().is_empty());
-        assert!(logical.limit() > 0);
-        let input = logical.input();
+    pub fn new(logical: generic::TopN<PlanRef>, vnode_col_idx: Option<usize>) -> Self {
+        assert!(!logical.group_key.is_empty());
+        assert!(logical.limit_attr.limit() > 0);
+        let input = &logical.input;
         let schema = input.schema().clone();
 
         let watermark_columns = if input.append_only() {
             input.watermark_columns().clone()
         } else {
             let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
-            for &idx in logical.group_key() {
+            for &idx in &logical.group_key {
                 if input.watermark_columns().contains(idx) {
                     watermark_columns.insert(idx);
                 }
@@ -50,12 +51,11 @@ impl StreamGroupTopN {
             watermark_columns
         };
 
-        let base = PlanBase::new_stream(
-            input.ctx(),
-            schema,
-            input.logical_pk().to_vec(),
-            input.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             input.distribution().clone(),
+            false,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/8348
             false,
             watermark_columns,
         );
@@ -66,77 +66,64 @@ impl StreamGroupTopN {
         }
     }
 
-    pub fn limit(&self) -> u64 {
-        self.logical.limit()
+    pub fn limit_attr(&self) -> TopNLimit {
+        self.logical.limit_attr
     }
 
     pub fn offset(&self) -> u64 {
-        self.logical.offset()
+        self.logical.offset
     }
 
     pub fn topn_order(&self) -> &Order {
-        self.logical.topn_order()
+        &self.logical.order
     }
 
     pub fn group_key(&self) -> &[usize] {
-        self.logical.group_key()
-    }
-
-    pub fn with_ties(&self) -> bool {
-        self.logical.with_ties()
+        &self.logical.group_key
     }
 }
 
 impl StreamNode for StreamGroupTopN {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
+
+        let input = self.input();
         let table = self
             .logical
-            .infer_internal_table_catalog(self.vnode_col_idx)
+            .infer_internal_table_catalog(
+                input.schema(),
+                input.ctx(),
+                input.logical_pk(),
+                self.vnode_col_idx,
+            )
             .with_id(state.gen_table_id_wrapped());
+        assert!(!self.group_key().is_empty());
         let group_topn_node = GroupTopNNode {
-            limit: self.limit(),
+            limit: self.limit_attr().limit(),
             offset: self.offset(),
-            with_ties: self.with_ties(),
+            with_ties: self.limit_attr().with_ties(),
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             table: Some(table.to_internal_table_prost()),
             order_by: self.topn_order().to_protobuf(),
         };
         if self.input().append_only() {
-            ProstStreamNode::AppendOnlyGroupTopN(group_topn_node)
+            PbNodeBody::AppendOnlyGroupTopN(group_topn_node)
         } else {
-            ProstStreamNode::GroupTopN(group_topn_node)
+            PbNodeBody::GroupTopN(group_topn_node)
         }
     }
 }
 
-impl fmt::Display for StreamGroupTopN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct(if self.input().append_only() {
-            "StreamAppendOnlyGroupTopN"
-        } else {
-            "StreamGroupTopN"
-        });
-        let input = self.input();
-        let input_schema = input.schema();
-        builder.field(
-            "order",
-            &format!(
-                "{}",
-                OrderDisplay {
-                    order: self.topn_order(),
-                    input_schema
-                }
-            ),
+impl Distill for StreamGroupTopN {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let name = plan_node_name!("StreamGroupTopN",
+            { "append_only", self.input().append_only() },
         );
-        builder
-            .field("limit", &self.limit())
-            .field("offset", &self.offset())
-            .field("group_key", &self.group_key());
-        if self.with_ties() {
-            builder.field("with_ties", &format_args!("{}", "true"));
+        let mut node = self.logical.distill_with_name(name);
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+            node.fields.push(("output_watermarks".into(), ow));
         }
-        builder.finish()
+        node
     }
 }
 
@@ -144,11 +131,13 @@ impl_plan_tree_node_for_unary! { StreamGroupTopN }
 
 impl PlanTreeNodeUnary for StreamGroupTopN {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical, self.vnode_col_idx)
     }
 }
 

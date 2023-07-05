@@ -1,14 +1,15 @@
 create source auction (
     id BIGINT,
-    "item_name" VARCHAR,
+    item_name VARCHAR,
     description VARCHAR,
-    "initial_bid" BIGINT,
+    initial_bid BIGINT,
     reserve BIGINT,
-    "date_time" TIMESTAMP,
+    date_time TIMESTAMP,
     expires TIMESTAMP,
     seller BIGINT,
     category BIGINT,
-    "extra" VARCHAR)
+    extra VARCHAR
+    {watermark_column})
 with (
     connector = 'nexmark',
     nexmark.table.type = 'Auction'
@@ -19,10 +20,11 @@ create source bid (
     auction BIGINT,
     bidder BIGINT,
     price BIGINT,
-    "channel" VARCHAR,
-    "url" VARCHAR,
-    "date_time" TIMESTAMP,
-    "extra" VARCHAR)
+    channel VARCHAR,
+    url VARCHAR,
+    date_time TIMESTAMP,
+    extra VARCHAR
+    {watermark_column})
 with (
     connector = 'nexmark',
     nexmark.table.type = 'Bid'
@@ -30,14 +32,15 @@ with (
 );
 
 create source person (
-    id BIGINT, 
+    id BIGINT,
     name VARCHAR,
-    "email_address" VARCHAR,
-    "credit_card" VARCHAR, 
+    email_address VARCHAR,
+    credit_card VARCHAR,
     city VARCHAR,
     state VARCHAR,
-    "date_time" TIMESTAMP,
-    "extra" VARCHAR)
+    date_time TIMESTAMP,
+    extra VARCHAR
+    {watermark_column})
 with (
     connector = 'nexmark',
     nexmark.table.type = 'Person'

@@ -12,27 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::expand_node::Subset;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ExpandNode;
 
-use super::{ExprRewritable, LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::stream::StreamPlanRef;
+use super::utils::impl_distill_by_unit;
+use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExpand {
     pub base: PlanBase,
-    logical: LogicalExpand,
+    logical: generic::Expand<PlanRef>,
 }
 
 impl StreamExpand {
-    pub fn new(logical: LogicalExpand) -> Self {
-        let input = logical.input();
-        let schema = logical.schema().clone();
+    pub fn new(logical: generic::Expand<PlanRef>) -> Self {
+        let input = logical.input.clone();
 
         let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
@@ -42,7 +41,7 @@ impl StreamExpand {
             Distribution::Broadcast => unreachable!(),
         };
 
-        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+        let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
         watermark_columns.extend(
             input
                 .watermark_columns()
@@ -50,44 +49,39 @@ impl StreamExpand {
                 .map(|idx| idx + input.schema().len()),
         );
 
-        let base = PlanBase::new_stream(
-            logical.base.ctx.clone(),
-            schema,
-            logical.base.logical_pk.to_vec(),
-            logical.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             dist,
             input.append_only(),
+            input.emit_on_window_close(),
             watermark_columns,
         );
         StreamExpand { base, logical }
     }
 
-    pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
-        self.logical.column_subsets()
-    }
-}
-
-impl fmt::Display for StreamExpand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamExpand")
+    pub fn column_subsets(&self) -> &[Vec<usize>] {
+        &self.logical.column_subsets
     }
 }
 
 impl PlanTreeNodeUnary for StreamExpand {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
 impl_plan_tree_node_for_unary! { StreamExpand }
+impl_distill_by_unit!(StreamExpand, logical, "StreamExpand");
 
 impl StreamNode for StreamExpand {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
-        ProstStreamNode::Expand(ExpandNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        PbNodeBody::Expand(ExpandNode {
             column_subsets: self
                 .column_subsets()
                 .iter()

@@ -14,12 +14,18 @@
 
 use std::fmt::Write;
 
-use crate::Result;
+use risingwave_expr_macro::function;
 
-#[inline(always)]
-pub fn md5(s: &str, writer: &mut dyn Write) -> Result<()> {
+#[function("md5(varchar) -> varchar")]
+pub fn md5(s: &str, writer: &mut dyn Write) {
     write!(writer, "{:x}", ::md5::compute(s)).unwrap();
-    Ok(())
+}
+
+#[function("md5(bytea) -> varchar")]
+pub fn md5_from_bytea(s: &[u8], writer: &mut dyn Write) {
+    writer
+        .write_str(&::hex::encode(::md5::compute(s).0))
+        .unwrap();
 }
 
 #[cfg(test)]
@@ -27,7 +33,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_md5() -> Result<()> {
+    fn test_md5() {
         let cases = [
             ("hello world", "5eb63bbbe01eeed093cb22bb8f5acdc3"),
             ("hello RUST", "917b821a0a5f23ab0cfdb36056d2eb9d"),
@@ -39,9 +45,26 @@ mod tests {
 
         for (s, expected) in cases {
             let mut writer = String::new();
-            md5(s, &mut writer)?;
+            md5(s, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
+    }
+
+    #[test]
+    fn test_md5_bytea() {
+        let cases = [
+            ("hello world".as_bytes(), "5eb63bbbe01eeed093cb22bb8f5acdc3"),
+            ("hello RUST".as_bytes(), "917b821a0a5f23ab0cfdb36056d2eb9d"),
+            (
+                "abcdefghijklmnopqrstuvwxyz".as_bytes(),
+                "c3fcd3d76192e4007dfb496cca67e13b",
+            ),
+        ];
+
+        for (s, expected) in cases {
+            let mut writer = String::new();
+            md5_from_bytea(s, &mut writer);
+            assert_eq!(writer, expected);
+        }
     }
 }

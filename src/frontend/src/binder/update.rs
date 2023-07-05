@@ -13,23 +13,27 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableVersionId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_sqlparser::ast::{Assignment, Expr, ObjectName, SelectItem};
+use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
+use super::statement::RewriteExprsRecursive;
 use super::{Binder, Relation};
 use crate::catalog::TableId;
 use crate::expr::{Expr as _, ExprImpl};
 use crate::user::UserId;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundUpdate {
     /// Id of the table to perform updating.
     pub table_id: TableId,
+
+    /// Version id of the table.
+    pub table_version_id: TableVersionId,
 
     /// Name of the table to perform updating.
     pub table_name: String,
@@ -54,6 +58,27 @@ pub struct BoundUpdate {
     pub returning_schema: Option<Schema>,
 }
 
+impl RewriteExprsRecursive for BoundUpdate {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.table.rewrite_exprs_recursive(rewriter);
+
+        self.selection =
+            std::mem::take(&mut self.selection).map(|expr| rewriter.rewrite_expr(expr));
+
+        let new_exprs = std::mem::take(&mut self.exprs)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.exprs = new_exprs;
+
+        let new_returning_list = std::mem::take(&mut self.returning_list)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.returning_list = new_returning_list;
+    }
+}
+
 impl Binder {
     pub(super) fn bind_update(
         &mut self,
@@ -66,10 +91,27 @@ impl Binder {
             Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
+        let default_columns_from_catalog =
+            table_catalog.default_columns().collect::<BTreeMap<_, _>>();
+
+        // TODO(yuhao): update a table with generated columns
+        if table_catalog.has_generated_column() {
+            return Err(ErrorCode::BindError(
+                "Update a table with generated columns is not supported.".to_string(),
+            )
+            .into());
+        }
+
+        let pk_indices = table_catalog
+            .pk()
+            .iter()
+            .map(|column_order| column_order.column_index)
+            .collect_vec();
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
+        let table_version_id = table_catalog.version_id().expect("table must be versioned");
 
-        let table = self.bind_relation_by_name(name, None)?;
+        let table = self.bind_relation_by_name(name, None, false)?;
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 
@@ -83,7 +125,7 @@ impl Binder {
                 }
 
                 // (col1, col2) = (subquery)
-                (_ids, Expr::Subquery(_)) => {
+                (_ids, AssignmentValue::Expr(Expr::Subquery(_))) => {
                     return Err(ErrorCode::NotImplemented(
                         "subquery on the right side of multi-assignment".to_owned(),
                         None.into(),
@@ -91,9 +133,11 @@ impl Binder {
                     .into())
                 }
                 // (col1, col2) = (expr1, expr2)
-                (ids, Expr::Row(values)) if ids.len() == values.len() => {
-                    id.into_iter().zip_eq_fast(values.into_iter()).collect()
-                }
+                // TODO: support `DEFAULT` in multiple assignments
+                (ids, AssignmentValue::Expr(Expr::Row(values))) if ids.len() == values.len() => id
+                    .into_iter()
+                    .zip_eq_fast(values.into_iter().map(AssignmentValue::Expr))
+                    .collect(),
                 // (col1, col2) = <other expr>
                 _ => {
                     return Err(ErrorCode::BindError(
@@ -105,7 +149,30 @@ impl Binder {
 
             for (id, value) in assignments {
                 let id_expr = self.bind_expr(Expr::Identifier(id.clone()))?;
-                let value_expr = self.bind_expr(value)?.cast_assign(id_expr.return_type())?;
+                let id_index = if let Some(id_input_ref) = id_expr.clone().as_input_ref() {
+                    let id_index = id_input_ref.index;
+                    for &pk in &pk_indices {
+                        if id_index == pk {
+                            return Err(ErrorCode::BindError(
+                                "update modifying the PK column is banned".to_owned(),
+                            )
+                            .into());
+                        }
+                    }
+                    id_index
+                } else {
+                    unreachable!()
+                };
+
+                let value_expr = match value {
+                    AssignmentValue::Expr(expr) => {
+                        self.bind_expr(expr)?.cast_assign(id_expr.return_type())?
+                    }
+                    AssignmentValue::Default => default_columns_from_catalog
+                        .get(&id_index)
+                        .cloned()
+                        .unwrap_or_else(|| ExprImpl::literal_null(id_expr.return_type())),
+                };
 
                 match assignment_exprs.entry(id_expr) {
                     Entry::Occupied(_) => {
@@ -132,6 +199,7 @@ impl Binder {
 
         Ok(BoundUpdate {
             table_id,
+            table_version_id,
             table_name,
             owner,
             table,

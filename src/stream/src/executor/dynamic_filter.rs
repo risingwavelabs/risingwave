@@ -15,23 +15,22 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use futures::{pin_mut, StreamExt};
+use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{once, OwnedRow as RowData, Row};
-use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::{
-    new_binary_expr, BoxedExpression, InputRefExpression, LiteralExpression,
-};
+use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
 };
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -41,7 +40,7 @@ use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::table::state_table::StateTable;
-use crate::common::{InfallibleExpression, StreamChunkBuilder};
+use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
 
 pub struct DynamicFilterExecutor<S: StateStore> {
@@ -92,7 +91,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         }
     }
 
-    fn apply_batch(
+    async fn apply_batch(
         &mut self,
         data_chunk: &DataChunk,
         ops: Vec<Op>,
@@ -103,11 +102,16 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
         let mut last_res = false;
 
-        let eval_results = condition.map(|cond| {
-            cond.eval_infallible(data_chunk, |err| {
-                self.ctx.on_compute_error(err, self.identity())
-            })
-        });
+        let eval_results = if let Some(cond) = condition {
+            Some(
+                cond.eval_infallible(data_chunk, |err| {
+                    self.ctx.on_compute_error(err, &self.identity)
+                })
+                .await,
+            )
+        } else {
+            None
+        };
 
         for (idx, (row, op)) in data_chunk.rows().zip_eq_debug(ops.iter()).enumerate() {
             let left_val = row.datum_at(self.key_l).to_owned_datum();
@@ -207,7 +211,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 (range, is_lower, is_insert)
             }
             (Some(c), Some(p)) => {
-                if c < p {
+                if c.default_cmp(&p).is_lt() {
                     let range = match self.comparator {
                         GreaterThan | LessThanOrEqual => (Excluded(c), Included(p)),
                         GreaterThanOrEqual | LessThan => (Included(c), Excluded(p)),
@@ -232,7 +236,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
     async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
         // Recover value for RHS if available
-        let rhs_stream = self.right_table.iter().await?;
+        let rhs_stream = self.right_table.iter(Default::default()).await?;
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
@@ -261,11 +265,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         assert_eq!(l_data_type, r_data_type);
         let dynamic_cond = move |literal: Datum| {
             literal.map(|scalar| {
-                new_binary_expr(
+                build_func(
                     self.comparator,
                     DataType::Boolean,
-                    Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
-                    Box::new(LiteralExpression::new(r_data_type.clone(), Some(scalar))),
+                    vec![
+                        Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
+                        Box::new(LiteralExpression::new(r_data_type.clone(), Some(scalar))),
+                    ],
                 )
             })
         };
@@ -322,7 +328,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let condition = dynamic_cond(right_val).transpose()?;
 
                     let (new_ops, new_visibility) =
-                        self.apply_batch(&data_chunk, ops, condition)?;
+                        self.apply_batch(&data_chunk, ops, condition).await?;
 
                     let (columns, _) = data_chunk.into_parts();
 
@@ -386,21 +392,28 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
 
                         // TODO: prefetching for append-only case.
-                        for vnode in self.left_table.vnodes().iter_ones() {
-                            let row_stream = self
-                                .left_table
-                                .iter_with_pk_range(&range, VirtualNode::from_index(vnode))
-                                .await?;
-                            pin_mut!(row_stream);
-                            while let Some(res) = row_stream.next().await {
-                                let row = res?;
-                                if let Some(chunk) = stream_chunk_builder.append_row_matched(
-                                    // All rows have a single identity at this point
-                                    if is_insert { Op::Insert } else { Op::Delete },
-                                    row,
-                                ) {
-                                    yield Message::Chunk(chunk);
-                                }
+                        let streams = futures::future::try_join_all(
+                            self.left_table.vnodes().iter_vnodes().map(|vnode| {
+                                self.left_table.iter_with_pk_range(
+                                    &range,
+                                    vnode,
+                                    PrefetchOptions::new_for_exhaust_iter(),
+                                )
+                            }),
+                        )
+                        .await?
+                        .into_iter()
+                        .map(Box::pin);
+
+                        #[for_await]
+                        for res in stream::select_all(streams) {
+                            let row = res?;
+                            if let Some(chunk) = stream_chunk_builder.append_row_matched(
+                                // All rows have a single identity at this point
+                                if is_insert { Op::Insert } else { Op::Delete },
+                                row,
+                            ) {
+                                yield Message::Chunk(chunk);
                             }
                         }
 
@@ -410,7 +423,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     }
 
                     if let Some(mut watermark) = unused_clean_hint.take() {
-                        self.left_table.update_watermark(watermark.val.clone());
+                        self.left_table
+                            .update_watermark(watermark.val.clone(), false);
                         watermark.col_idx = self.key_l;
                         yield Message::Watermark(watermark);
                     };
@@ -446,7 +460,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     // Update the vnode bitmap for the left state table if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let _previous_vnode_bitmap =
+                        let (_previous_vnode_bitmap, _cache_may_stale) =
                             self.left_table.update_vnode_bitmap(vnode_bitmap);
                     }
 
@@ -496,7 +510,7 @@ mod tests {
             mem_state.clone(),
             TableId::new(0),
             vec![column_descs.clone()],
-            vec![OrderType::Ascending],
+            vec![OrderType::ascending()],
             vec![0],
         )
         .await;
@@ -504,7 +518,7 @@ mod tests {
             mem_state,
             TableId::new(1),
             vec![column_descs],
-            vec![OrderType::Ascending],
+            vec![OrderType::ascending()],
             vec![0],
         )
         .await;

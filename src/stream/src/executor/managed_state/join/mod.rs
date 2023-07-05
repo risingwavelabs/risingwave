@@ -18,24 +18,25 @@ use std::alloc::Global;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use fixedbitset::FixedBitSet;
 use futures::future::try_join;
 use futures::StreamExt;
 use futures_async_stream::for_await;
 pub(super) use join_entry_state::JoinEntryState;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::collection::estimate_size::EstimateSize;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::row;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use crate::cache::{cache_may_stale, new_with_hasher_in, ExecutorCache};
+use crate::cache::{new_with_hasher_in, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
@@ -84,7 +85,7 @@ impl<R: Row> JoinRow<R> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, EstimateSize)]
 pub struct EncodedJoinRow {
     pub compacted_row: CompactedRow,
     degree: DegreeType,
@@ -104,17 +105,17 @@ impl EncodedJoinRow {
     }
 }
 
-impl EstimateSize for EncodedJoinRow {
-    fn estimated_heap_size(&self) -> usize {
-        self.compacted_row.row.len()
-    }
-}
-
 /// Memcomparable encoding.
 type PkType = Vec<u8>;
 
 pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = Box<JoinEntryState>;
+
+impl EstimateSize for HashValueType {
+    fn estimated_heap_size(&self) -> usize {
+        self.as_ref().estimated_heap_size()
+    }
+}
 
 /// The wrapper for [`JoinEntryState`] which should be `Some` most of the time in the hash table.
 ///
@@ -122,6 +123,12 @@ pub type HashValueType = Box<JoinEntryState>;
 /// the entry by taking the value out of the `Option`, instead of holding a mutable reference to the
 /// map, which can make the compiler happy.
 struct HashValueWrapper(Option<HashValueType>);
+
+impl EstimateSize for HashValueWrapper {
+    fn estimated_heap_size(&self) -> usize {
+        self.0.estimated_heap_size()
+    }
+}
 
 impl HashValueWrapper {
     const MESSAGE: &str = "the state should always be `Some`";
@@ -147,13 +154,15 @@ impl DerefMut for HashValueWrapper {
 }
 
 type JoinHashMapInner<K> =
-    ExecutorCache<K, HashValueWrapper, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+    ManagedLruCache<K, HashValueWrapper, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
     metrics: Arc<StreamingMetrics>,
     /// Basic information
     actor_id: String,
+    join_table_id: String,
+    degree_table_id: String,
     side: &'static str,
     /// How many times have we hit the cache of join executor
     lookup_miss_count: usize,
@@ -163,10 +172,18 @@ pub struct JoinHashMapMetrics {
 }
 
 impl JoinHashMapMetrics {
-    pub fn new(metrics: Arc<StreamingMetrics>, actor_id: ActorId, side: &'static str) -> Self {
+    pub fn new(
+        metrics: Arc<StreamingMetrics>,
+        actor_id: ActorId,
+        side: &'static str,
+        join_table_id: u32,
+        degree_table_id: u32,
+    ) -> Self {
         Self {
             metrics,
             actor_id: actor_id.to_string(),
+            join_table_id: join_table_id.to_string(),
+            degree_table_id: degree_table_id.to_string(),
             side,
             lookup_miss_count: 0,
             total_lookup_count: 0,
@@ -177,15 +194,30 @@ impl JoinHashMapMetrics {
     pub fn flush(&mut self) {
         self.metrics
             .join_lookup_miss_count
-            .with_label_values(&[&self.actor_id, self.side])
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+            ])
             .inc_by(self.lookup_miss_count as u64);
         self.metrics
             .join_total_lookup_count
-            .with_label_values(&[&self.actor_id, self.side])
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+            ])
             .inc_by(self.total_lookup_count as u64);
         self.metrics
             .join_insert_cache_miss_count
-            .with_label_values(&[&self.actor_id, self.side])
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+            ])
             .inc_by(self.insert_cache_miss_count as u64);
         self.total_lookup_count = 0;
         self.lookup_miss_count = 0;
@@ -199,7 +231,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Data types of the join key columns
     join_key_data_types: Vec<DataType>,
     /// Null safe bitmap for each join pair
-    null_matched: FixedBitSet,
+    null_matched: K::Bitmap,
     /// The memcomparable serializer of primary key.
     pk_serializer: OrderedRowSerde,
     /// State table. Contains the data from upstream.
@@ -247,7 +279,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         degree_all_data_types: Vec<DataType>,
         degree_table: StateTable<S>,
         degree_pk_indices: Vec<usize>,
-        null_matched: FixedBitSet,
+        null_matched: K::Bitmap,
         need_degree_table: bool,
         pk_contained_in_jk: bool,
         metrics: Arc<StreamingMetrics>,
@@ -262,9 +294,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .collect();
         let pk_serializer = OrderedRowSerde::new(
             pk_data_types,
-            vec![OrderType::Ascending; state_pk_indices.len()],
+            vec![OrderType::ascending(); state_pk_indices.len()],
         );
 
+        let join_table_id = state_table.table_id();
+        let degree_table_id = degree_table.table_id();
         let state = TableInner {
             pk_indices: state_pk_indices,
             order_key_indices: state_table.pk_indices().to_vec(),
@@ -279,11 +313,15 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        let cache = ExecutorCache::new(new_with_hasher_in(
-            watermark_epoch,
-            PrecomputedBuildHasher,
-            alloc,
-        ));
+        let metrics_info = MetricsInfo::new(
+            metrics.clone(),
+            join_table_id,
+            actor_id,
+            &format!("hash join {}", side),
+        );
+
+        let cache =
+            new_with_hasher_in(watermark_epoch, metrics_info, PrecomputedBuildHasher, alloc);
 
         Self {
             inner: cache,
@@ -294,7 +332,13 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             degree_state,
             need_degree_table,
             pk_contained_in_jk,
-            metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
+            metrics: JoinHashMapMetrics::new(
+                metrics,
+                actor_id,
+                side,
+                join_table_id,
+                degree_table_id,
+            ),
         }
     }
 
@@ -310,22 +354,22 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Update the vnode bitmap and manipulate the cache if necessary.
-    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        let previous_vnode_bitmap = self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
-        let _ = self
-            .degree_state
-            .table
-            .update_vnode_bitmap(vnode_bitmap.clone());
+    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> bool {
+        let (_previous_vnode_bitmap, cache_may_stale) =
+            self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
+        let _ = self.degree_state.table.update_vnode_bitmap(vnode_bitmap);
 
-        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+        if cache_may_stale {
             self.inner.clear();
         }
+
+        cache_may_stale
     }
 
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
         // TODO: remove data in cache.
-        self.state.table.update_watermark(watermark.clone());
-        self.degree_state.table.update_watermark(watermark);
+        self.state.table.update_watermark(watermark.clone(), false);
+        self.degree_state.table.update_watermark(watermark, false);
     }
 
     /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
@@ -337,16 +381,17 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     ///
     /// Note: This will NOT remove anything from remote storage.
     pub async fn take_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
-        // Do not update the LRU statistics here with `peek_mut` since we will put the state back.
-        let state = self.inner.peek_mut(key);
         self.metrics.total_lookup_count += 1;
-        Ok(match state {
-            Some(state) => state.take(),
-            None => {
-                self.metrics.lookup_miss_count += 1;
-                self.fetch_cached_state(key).await?.into()
-            }
-        })
+        let state = if self.inner.contains(key) {
+            // Do not update the LRU statistics here with `peek_mut` since we will put the state
+            // back.
+            let mut state = self.inner.peek_mut(key).unwrap();
+            state.take()
+        } else {
+            self.metrics.lookup_miss_count += 1;
+            self.fetch_cached_state(key).await?.into()
+        };
+        Ok(state)
     }
 
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
@@ -357,8 +402,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let table_iter_fut = self.state.table.iter_key_and_val(&key);
-            let degree_table_iter_fut = self.degree_state.table.iter_key_and_val(&key);
+            let table_iter_fut = self
+                .state
+                .table
+                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter());
+            let degree_table_iter_fut = self
+                .degree_state
+                .table
+                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter());
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
@@ -384,7 +435,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 );
             }
         } else {
-            let table_iter = self.state.table.iter_with_pk_prefix(&key).await?;
+            let table_iter = self
+                .state
+                .table
+                .iter_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
+                .await?;
 
             #[for_await]
             for row in table_iter {
@@ -413,8 +468,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let pk = (&value.row)
             .project(&self.state.pk_indices)
             .memcmp_serialize(&self.pk_serializer);
-        if let Some(entry) = self.inner.get_mut(key) {
+
+        // TODO(yuhao): avoid this `contains`.
+        // https://github.com/risingwavelabs/risingwave/issues/9233
+        if self.inner.contains(key) {
             // Update cache
+            let mut entry = self.inner.get_mut(key).unwrap();
             entry.insert(pk, value.encode());
         } else if self.pk_contained_in_jk {
             // Refill cache when the join key exist in neither cache or storage.
@@ -439,8 +498,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let pk = (&value)
             .project(&self.state.pk_indices)
             .memcmp_serialize(&self.pk_serializer);
-        if let Some(entry) = self.inner.get_mut(key) {
+
+        // TODO(yuhao): avoid this `contains`.
+        // https://github.com/risingwavelabs/risingwave/issues/9233
+        if self.inner.contains(key) {
             // Update cache
+            let mut entry = self.inner.get_mut(key).unwrap();
             entry.insert(pk, join_row.encode());
         } else if self.pk_contained_in_jk {
             // Refill cache when the join key exist in neither cache or storage.
@@ -457,7 +520,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Delete a join row
     pub fn delete(&mut self, key: &K, value: JoinRow<impl Row>) {
-        if let Some(entry) = self.inner.get_mut(key) {
+        if let Some(mut entry) = self.inner.get_mut(key) {
             let pk = (&value.row)
                 .project(&self.state.pk_indices)
                 .memcmp_serialize(&self.pk_serializer);
@@ -473,7 +536,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Delete a row
     /// Used when the side does not need to update degree.
     pub fn delete_row(&mut self, key: &K, value: impl Row) {
-        if let Some(entry) = self.inner.get_mut(key) {
+        if let Some(mut entry) = self.inner.get_mut(key) {
             let pk = (&value)
                 .project(&self.state.pk_indices)
                 .memcmp_serialize(&self.pk_serializer);
@@ -540,18 +603,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.evict();
     }
 
-    /// Cached rows for this hash table.
-    #[expect(dead_code)]
-    pub fn cached_rows(&self) -> usize {
-        self.inner.values().map(|e| e.len()).sum()
-    }
-
     /// Cached entry count for this hash table.
     pub fn entry_count(&self) -> usize {
         self.inner.len()
     }
 
-    pub fn null_matched(&self) -> &FixedBitSet {
+    pub fn null_matched(&self) -> &K::Bitmap {
         &self.null_matched
     }
 }

@@ -53,13 +53,13 @@ impl HummockStorage {
     /// failed due to other non-EOF errors.
     pub async fn get(
         &self,
-        key: &[u8],
+        key: Bytes,
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let key_range = (
-            Bound::Included(TableKey(key.to_vec())),
-            Bound::Included(TableKey(key.to_vec())),
+            Bound::Included(TableKey(key.clone())),
+            Bound::Included(TableKey(key.clone())),
         );
 
         let read_version_tuple = if read_options.read_version_from_backup {
@@ -127,7 +127,12 @@ impl HummockStorage {
                     let read_guard = self.read_version_mapping.read();
                     read_guard
                         .get(&table_id)
-                        .map(|v| v.values().cloned().collect_vec())
+                        .map(|v| {
+                            v.values()
+                                .filter(|v| !v.read_arc().is_replicated())
+                                .cloned()
+                                .collect_vec()
+                        })
                         .unwrap_or(Vec::new())
                 };
 
@@ -136,7 +141,11 @@ impl HummockStorage {
                 if read_version_vec.is_empty() {
                     (Vec::default(), Vec::default(), (**pinned_version).clone())
                 } else {
-                    read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
+                    let (imm_vec, sst_vec) =
+                        read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?;
+                    let committed_version = (**pinned_version).clone();
+
+                    (imm_vec, sst_vec, committed_version)
                 }
             };
 
@@ -149,18 +158,13 @@ impl StateStoreRead for HummockStorage {
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
         self.get(key, epoch, read_options)
     }
 
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
@@ -179,7 +183,7 @@ impl StateStore for HummockStorage {
     /// we will only check whether it is le `sealed_epoch` and won't wait.
     fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
-            self.validate_read_epoch(wait_epoch.clone())?;
+            self.validate_read_epoch(wait_epoch)?;
             let wait_epoch = match wait_epoch {
                 HummockReadEpoch::Committed(epoch) => {
                     assert_ne!(epoch, HummockEpoch::MAX, "epoch should not be u64::MAX");
@@ -285,8 +289,8 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move { self.new_local_inner(table_id).await }
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+        self.new_local_inner(option)
     }
 
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
@@ -298,20 +302,22 @@ impl StateStore for HummockStorage {
             );
             let sealed_epoch = self.seal_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch > sealed_epoch {
-                return Err(HummockError::read_current_epoch(format!(
-                    "Cannot read when cluster is under recovery. read {} > max seal epoch {}",
-                    read_current_epoch, sealed_epoch
-                ))
-                .into());
+                tracing::warn!(
+                    "invalid barrier read {} > max seal epoch {}",
+                    read_current_epoch,
+                    sealed_epoch
+                );
+                return Err(HummockError::read_current_epoch().into());
             }
 
             let min_current_epoch = self.min_current_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch < min_current_epoch {
-                return Err(HummockError::read_current_epoch(format!(
-                    "Cannot read when cluster is under recovery. read {} < min current epoch {}",
-                    read_current_epoch, min_current_epoch
-                ))
-                .into());
+                tracing::warn!(
+                    "invalid barrier read {} < min current epoch {}",
+                    read_current_epoch,
+                    min_current_epoch
+                );
+                return Err(HummockError::read_current_epoch().into());
             }
         }
         Ok(())

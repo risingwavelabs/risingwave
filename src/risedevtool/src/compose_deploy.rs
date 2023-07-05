@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fs;
 use std::os::unix::prelude::PermissionsExt;
 use std::path::Path;
 
@@ -136,7 +135,7 @@ fi
                 r#"echo "{id}: $(tput setaf 2)done sync config$(tput sgr0)""#,
             )?;
             let sh = format!("_deploy.{id}.partial.sh");
-            std::fs::write(Path::new(output_directory).join(&sh), y)?;
+            fs_err::write(Path::new(output_directory).join(&sh), y)?;
             writeln!(x, "{sh}")?;
         }
         writeln!(x, "EOF")?;
@@ -182,7 +181,7 @@ fi
             }
 
             let sh = format!("_stop.{id}.partial.sh");
-            std::fs::write(Path::new(output_directory).join(&sh), y)?;
+            fs_err::write(Path::new(output_directory).join(&sh), y)?;
             writeln!(x, "{sh}")?;
         }
         writeln!(x, "EOF")?;
@@ -233,7 +232,7 @@ fi
             writeln!(y, "ssh {ssh_extra_args} ubuntu@{public_ip} \"bash -c 'cd {base_folder} && docker compose ps'\"")?;
 
             let sh = format!("_check.{id}.partial.sh");
-            std::fs::write(Path::new(output_directory).join(&sh), y)?;
+            fs_err::write(Path::new(output_directory).join(&sh), y)?;
             writeln!(x, "{sh}")?;
         }
         writeln!(x, "EOF")?;
@@ -241,9 +240,9 @@ fi
         x
     };
     let deploy_sh = Path::new(output_directory).join("deploy.sh");
-    fs::write(&deploy_sh, shell_script)?;
-    let mut perms = fs::metadata(&deploy_sh)?.permissions();
+    fs_err::write(&deploy_sh, shell_script)?;
+    let mut perms = fs_err::metadata(&deploy_sh)?.permissions();
     perms.set_mode(perms.mode() | 0o755);
-    fs::set_permissions(&deploy_sh, perms)?;
+    fs_err::set_permissions(&deploy_sh, perms)?;
     Ok(())
 }

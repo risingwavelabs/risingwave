@@ -1,0 +1,54 @@
+[[test]]
+name = "window_hash_join"
+init_sqls = [
+    """
+    CREATE TABLE orders (
+        order_id INTEGER,
+        user_id INTEGER,
+        amount INTEGER,
+        created_at TIMESTAMP,
+        WATERMARK FOR created_at AS created_at - interval '9' second
+    ) APPEND ONLY WITH (
+        connector = 'datagen',
+        rows_per_second = 100,
+        datagen.split.num = 16,
+        fields.created_at.max_past_mode = 'relative',
+        fields.created_at.max_past = '10s',
+        fields.order_id.kind = 'sequence',
+        fields.order_id.start = 0,
+        fields.user_id.min = 0,
+        fields.user_id.max = 20,
+        fields.amount.min = 0,
+        fields.amount.max = 20,
+    );
+    """,
+    """
+    CREATE TABLE clicks (
+        click_id INTEGER,
+        user_id INTEGER,
+        created_at TIMESTAMP,
+        WATERMARK FOR created_at AS created_at - interval '9' second
+    ) APPEND ONLY WITH (
+        connector = 'datagen',
+        rows_per_second = 200,
+        datagen.split.num = 16,
+        fields.created_at.max_past_mode = 'relative',
+        fields.created_at.max_past = '10s',
+        fields.click_id.kind = 'sequence',
+        fields.click_id.start = 0,
+        fields.user_id.min = 0,
+        fields.user_id.max = 20,
+    );
+    """,
+    """
+    CREATE MATERIALIZED VIEW mv_tumble_join AS
+    SELECT clicks.window_start, clicks.user_id AS user_id
+    FROM
+        TUMBLE(orders, created_at, INTERVAL '1' second) AS orders
+        JOIN TUMBLE(clicks, created_at, INTERVAL '1' second) AS clicks
+    ON
+        orders.window_start = clicks.window_start AND
+        clicks.user_id = orders.user_id;
+    """,
+]
+bound_tables = { pattern = '__internal_mv_tumble_join_\d+_hashjoin(left|right)_\d+', limit = 300 }

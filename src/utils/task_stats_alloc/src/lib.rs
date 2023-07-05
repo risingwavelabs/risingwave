@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg(enable_task_local_alloc)]
 #![feature(allocator_api)]
 #![feature(lint_reasons)]
-#![feature(atomic_mut_ptr)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::future::Future;

@@ -15,31 +15,31 @@
 mod compactor_observer;
 mod rpc;
 mod server;
+mod telemetry;
 
 use clap::Parser;
-use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 
 use crate::server::compactor_serve;
 
-/// Command-line arguments for compute-node.
+/// Command-line arguments for compactor-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The stateless worker node that compacts data for the storage engine"
+)]
 pub struct CompactorOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(
-        long,
-        alias = "host",
-        env = "RW_LISTEN_ADDR",
-        default_value = "127.0.0.1:6660"
-    )]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:6660")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long, env = "RW_ADVERTISE_ADDR", alias = "client-address")]
+    #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
     // TODO: This is currently unused.
@@ -53,14 +53,8 @@ pub struct CompactorOpts {
     )]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, env = "RW_META_ADDRESS", default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
-
-    /// Of the form `hummock+{object_store}` where `object_store`
-    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
-    /// `memory` or `memory-shared`.
-    #[clap(long, env = "RW_STATE_STORE")]
-    pub state_store: Option<String>,
 
     #[clap(long, env = "RW_COMPACTION_WORKER_THREADS_NUMBER")]
     pub compaction_worker_threads_number: Option<usize>,
@@ -89,6 +83,24 @@ struct OverrideConfigOpts {
     #[clap(long, env = "RW_MAX_CONCURRENT_TASK_NUMBER")]
     #[override_opts(path = storage.max_concurrent_compaction_task_number)]
     pub max_concurrent_task_number: Option<u64>,
+
+    /// Enable async stack tracing through `await-tree` for risectl.
+    #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
+    #[override_opts(path = streaming.async_stack_trace)]
+    pub async_stack_trace: Option<AsyncStackTraceOption>,
+
+    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
+    pub object_store_streaming_read_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_UPLOAD_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_streaming_upload_timeout_ms)]
+    pub object_store_streaming_upload_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_UPLOAD_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_upload_timeout_ms)]
+    pub object_store_upload_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_READ_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_read_timeout_ms)]
+    pub object_store_read_timeout_ms: Option<u64>,
 }
 
 use std::future::Future;
@@ -99,7 +111,6 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("Compactor node options: {:?}", opts);
-        warn_future_deprecate_options(&opts);
         tracing::info!("meta address: {}", opts.meta_address.clone());
 
         let listen_addr = opts.listen_addr.parse().unwrap();
@@ -122,10 +133,4 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         join_handle.await.unwrap();
         observer_join_handle.abort();
     })
-}
-
-fn warn_future_deprecate_options(opts: &CompactorOpts) {
-    if opts.state_store.is_some() {
-        tracing::warn!("`--state-store` will not be accepted by compactor node in the next release. Please consider moving this argument to the meta node.");
-    }
 }

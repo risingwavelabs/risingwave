@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
+use risingwave_common::types::DataType;
+use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::{
-    CreateFunctionBody, DataType, FunctionDefinition, ObjectName, OperateFunctionArg,
+    CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
 };
+use risingwave_udf::ArrowFlightUdfClient;
 
 use super::*;
 use crate::catalog::CatalogError;
@@ -30,7 +34,7 @@ pub async fn handle_create_function(
     temporary: bool,
     name: ObjectName,
     args: Option<Vec<OperateFunctionArg>>,
-    return_type: Option<DataType>,
+    returns: Option<CreateFunctionReturns>,
     params: CreateFunctionBody,
 ) -> Result<RwPgResponse> {
     if or_replace {
@@ -48,30 +52,47 @@ pub async fn handle_create_function(
         .into());
     }
     let language = match params.language {
-        Some(lang) => lang.real_value(),
+        Some(lang) => lang.real_value().to_lowercase(),
+        None => "".to_string(),
+    };
+    let Some(FunctionDefinition::SingleQuotedDef(identifier)) = params.as_ else {
+        return Err(ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into());
+    };
+    let Some(CreateFunctionUsing::Link(link)) = params.using else {
+        return Err(ErrorCode::InvalidParameterValue("USING must be specified".to_string()).into());
+    };
+    let return_type;
+    let kind = match returns {
+        Some(CreateFunctionReturns::Value(data_type)) => {
+            return_type = bind_data_type(&data_type)?;
+            Kind::Scalar(ScalarFunction {})
+        }
+        Some(CreateFunctionReturns::Table(columns)) => {
+            if columns.len() == 1 {
+                // return type is the original type for single column
+                return_type = bind_data_type(&columns[0].data_type)?;
+            } else {
+                // return type is a struct for multiple columns
+                let datatypes = columns
+                    .iter()
+                    .map(|c| bind_data_type(&c.data_type))
+                    .collect::<Result<Vec<_>>>()?;
+                let names = columns
+                    .iter()
+                    .map(|c| c.name.real_value())
+                    .collect::<Vec<_>>();
+                return_type = DataType::new_struct(datatypes, names);
+            }
+            Kind::Table(TableFunction {})
+        }
         None => {
-            return Err(
-                ErrorCode::InvalidParameterValue("LANGUAGE must be specified".to_string()).into(),
+            return Err(ErrorCode::InvalidParameterValue(
+                "return type must be specified".to_string(),
             )
+            .into())
         }
     };
-    if language != "arrow_flight" {
-        return Err(ErrorCode::InvalidParameterValue(
-            "LANGUAGE should be one of: arrow_flight".to_string(),
-        )
-        .into());
-    }
-    let Some(FunctionDefinition::SingleQuotedDef(flight_server_addr)) = params.as_ else {
-        return Err(ErrorCode::InvalidParameterValue(
-            "AS must be specified".to_string(),
-        )
-        .into());
-    };
-    let Some(return_type) = return_type else {
-        return Err(
-            ErrorCode::InvalidParameterValue("return type must be specified".to_string()).into(),
-        )
-    };
+
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
         arg_types.push(bind_data_type(&arg.data_type)?);
@@ -96,15 +117,39 @@ pub async fn handle_create_function(
         return Err(CatalogError::Duplicated("function", name).into());
     }
 
+    // check the service
+    let client = ArrowFlightUdfClient::connect(&link)
+        .await
+        .map_err(|e| anyhow!(e))?;
+    /// A helper function to create a unnamed field from data type.
+    fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
+        arrow_schema::Field::new("", data_type, true)
+    }
+    let args = arrow_schema::Schema::new(arg_types.iter().map(|t| to_field(t.into())).collect());
+    let returns = arrow_schema::Schema::new(match kind {
+        Kind::Scalar(_) => vec![to_field(return_type.clone().into())],
+        Kind::Table(_) => vec![
+            arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
+            to_field(return_type.clone().into()),
+        ],
+        _ => unreachable!(),
+    });
+    client
+        .check(&identifier, &args, &returns)
+        .await
+        .map_err(|e| anyhow!(e))?;
+
     let function = Function {
         id: FunctionId::placeholder().0,
         schema_id,
         database_id,
         name: function_name,
+        kind: Some(kind),
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
-        return_type: Some(bind_data_type(&return_type)?.into()),
+        return_type: Some(return_type.into()),
         language,
-        path: flight_server_addr,
+        identifier,
+        link,
         owner: session.user_id(),
     };
 

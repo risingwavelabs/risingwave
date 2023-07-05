@@ -27,7 +27,7 @@ fn main() {
             continue;
         }
 
-        let tokens = Tokenizer::new(&sql).tokenize().unwrap();
+        let tokens = Tokenizer::new(&sql).tokenize_with_location().unwrap();
         println!("tokens: {:?}", tokens);
         let ast = Parser::parse_sql(&sql).unwrap();
         println!("ast: {:?}", ast);

@@ -12,7 +12,7 @@ statement ok
 INSERT INTO t VALUES(1), (4), (6), (0), (5);
 
 query II
-SELECT * FROM v JOIN (SELECT COUNT(*) FROM t) T;
+SELECT * FROM v CROSS JOIN (SELECT COUNT(*) FROM t) T;
 ----
 5 5
 

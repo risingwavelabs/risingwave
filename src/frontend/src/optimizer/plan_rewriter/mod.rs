@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod plan_cloner;
 mod share_source_rewriter;
+
 use itertools::Itertools;
 use paste::paste;
+pub use plan_cloner::*;
 pub use share_source_rewriter::*;
 
 use crate::for_all_plan_nodes;
@@ -51,9 +54,6 @@ macro_rules! def_rewriter {
 
         /// it's kind of like a [`PlanVisitor<PlanRef>`](super::plan_visitor::PlanVisitor), but with default behaviour of each rewrite method
         pub trait PlanRewriter {
-            fn check_convention(&self, _convention: Convention) -> bool {
-                return true;
-            }
             paste! {
                 fn rewrite(&mut self, plan: PlanRef) -> PlanRef{
                     match plan.node_type() {

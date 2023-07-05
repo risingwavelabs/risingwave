@@ -79,6 +79,14 @@ impl PrometheusGen {
             .map(|node| format!("\"{}:{}\"", node.address, 9644))
             .join(",");
 
+        let connector_node_targets = config
+            .provide_connector_node
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|node| format!("\"{}:{}\"", node.address, node.exporter_port))
+            .join(",");
+
         let now = Local::now().format("%Y%m%d-%H%M%S");
 
         let remote_write = if config.remote_write {
@@ -143,6 +151,10 @@ scrape_configs:
   - job_name: redpanda
     static_configs:
       - targets: [{redpanda_targets}]
+
+  - job_name: connector-node
+    static_configs:
+      - targets: [{connector_node_targets}]
 "#,
         )
     }

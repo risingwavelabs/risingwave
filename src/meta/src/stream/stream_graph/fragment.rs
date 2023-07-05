@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
@@ -21,15 +22,16 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
+use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
-    StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
+    Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, StreamActor, StreamFragmentGraph as StreamFragmentGraphProto,
+    DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
+    StreamFragmentGraph as StreamFragmentGraphProto,
 };
 
 use crate::manager::{IdGeneratorManagerRef, StreamingJob};
@@ -37,7 +39,6 @@ use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
-use crate::stream::stream_graph::visit;
 use crate::MetaResult;
 
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
@@ -52,6 +53,9 @@ pub(super) struct BuildingFragment {
 
     /// The ID of the job if it's materialized in this fragment.
     table_id: Option<u32>,
+
+    /// The required columns of each upstream table.
+    upstream_table_columns: HashMap<TableId, Vec<i32>>,
 }
 
 impl BuildingFragment {
@@ -69,11 +73,13 @@ impl BuildingFragment {
         };
         let internal_tables = Self::fill_internal_tables(&mut fragment, job, table_id_gen);
         let table_id = Self::fill_job(&mut fragment, job).then(|| job.id());
+        let upstream_table_columns = Self::extract_upstream_table_columns(&mut fragment);
 
         Self {
             inner: fragment,
             internal_tables,
             table_id,
+            upstream_table_columns,
         }
     }
 
@@ -86,7 +92,7 @@ impl BuildingFragment {
         let fragment_id = fragment.fragment_id;
         let mut internal_tables = Vec::new();
 
-        visit::visit_internal_tables(fragment, |table, table_type_name| {
+        stream_graph_visitor::visit_internal_tables(fragment, |table, table_type_name| {
             table.id = table_id_gen.to_global_id(table.id).as_global_id();
             table.schema_id = job.schema_id();
             table.database_id = job.database_id();
@@ -97,6 +103,7 @@ impl BuildingFragment {
                 table_type_name,
             );
             table.fragment_id = fragment_id;
+            table.owner = job.owner();
 
             // Record the internal table.
             internal_tables.push(table.clone());
@@ -111,7 +118,7 @@ impl BuildingFragment {
         let fragment_id = fragment.fragment_id;
         let mut has_table = false;
 
-        visit::visit_fragment(fragment, |node_body| match node_body {
+        stream_graph_visitor::visit_fragment(fragment, |node_body| match node_body {
             NodeBody::Materialize(materialize_node) => {
                 materialize_node.table_id = table_id;
 
@@ -131,11 +138,34 @@ impl BuildingFragment {
             }
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = table_id;
+                dml_node.table_version_id = job.table_version_id().unwrap();
             }
             _ => {}
         });
 
         has_table
+    }
+
+    /// Extract the required columns (in IDs) of each upstream table.
+    fn extract_upstream_table_columns(
+        // TODO: no need to take `&mut` here
+        fragment: &mut StreamFragment,
+    ) -> HashMap<TableId, Vec<i32>> {
+        let mut table_columns = HashMap::new();
+
+        stream_graph_visitor::visit_fragment(fragment, |node_body| {
+            if let NodeBody::Chain(chain_node) = node_body {
+                let table_id = chain_node.table_id.into();
+                let column_ids = chain_node.upstream_column_ids.clone();
+                table_columns
+                    .try_insert(table_id, column_ids)
+                    .expect("currently there should be no two same upstream tables in a fragment");
+            }
+        });
+
+        assert_eq!(table_columns.len(), fragment.upstream_table_ids.len());
+
+        table_columns
     }
 }
 
@@ -149,7 +179,7 @@ impl Deref for BuildingFragment {
 
 /// The ID of an edge in the fragment graph. For different types of edges, the ID will be in
 /// different variants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
 pub(super) enum EdgeId {
     /// The edge between two building (internal) fragments.
     Internal {
@@ -162,7 +192,16 @@ pub(super) enum EdgeId {
     /// MV on MV.
     UpstreamExternal {
         /// The ID of the upstream table or materialized view.
-        upstream_table_id: u32,
+        upstream_table_id: TableId,
+        /// The ID of the downstream fragment.
+        downstream_fragment_id: GlobalFragmentId,
+    },
+
+    /// The edge between an upstream building fragment and downstream external fragment. Used for
+    /// schema change (replace table plan).
+    DownstreamExternal {
+        /// The ID of the original upstream fragment (`Materialize`).
+        original_upstream_fragment_id: GlobalFragmentId,
         /// The ID of the downstream fragment.
         downstream_fragment_id: GlobalFragmentId,
     },
@@ -207,7 +246,11 @@ pub struct StreamFragmentGraph {
     upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 
     /// Dependent relations of this job.
-    dependent_relations: HashSet<TableId>,
+    dependent_table_ids: HashSet<TableId>,
+
+    /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
+    /// variable. If not specified, all active parallel units will be used.
+    default_parallelism: Option<NonZeroUsize>,
 }
 
 impl StreamFragmentGraph {
@@ -263,19 +306,25 @@ impl StreamFragmentGraph {
         }
 
         // Note: Here we directly use the field `dependent_table_ids` in the proto (resolved in
-        // frontend), instead of visiting the graph ourselves. Note that for creating table with a
-        // connector, the source itself is NOT INCLUDED in this list.
-        let dependent_relations = proto
+        // frontend), instead of visiting the graph ourselves.
+        let dependent_table_ids = proto
             .dependent_table_ids
             .iter()
             .map(TableId::from)
             .collect();
 
+        let default_parallelism = if let Some(Parallelism { parallelism }) = proto.parallelism {
+            Some(NonZeroUsize::new(parallelism as usize).context("parallelism should not be 0")?)
+        } else {
+            None
+        };
+
         Ok(Self {
             fragments,
             downstreams,
             upstreams,
-            dependent_relations,
+            dependent_table_ids,
+            default_parallelism,
         })
     }
 
@@ -302,9 +351,24 @@ impl StreamFragmentGraph {
             .expect("require exactly 1 materialize/sink node when creating the streaming job")
     }
 
-    /// Get the dependent relations of this job.
-    pub fn dependent_relations(&self) -> &HashSet<TableId> {
-        &self.dependent_relations
+    /// Returns the fragment id where the table dml is received.
+    pub fn dml_fragment_id(&self) -> Option<FragmentId> {
+        self.fragments
+            .values()
+            .filter(|b| b.fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0)
+            .map(|b| b.fragment_id)
+            .at_most_one()
+            .expect("require at most 1 dml node when creating the streaming job")
+    }
+
+    /// Get the dependent streaming job ids of this job.
+    pub fn dependent_table_ids(&self) -> &HashSet<TableId> {
+        &self.dependent_table_ids
+    }
+
+    /// Get the default parallelism of the job.
+    pub fn default_parallelism(&self) -> Option<NonZeroUsize> {
+        self.default_parallelism
     }
 
     /// Get downstreams of a fragment.
@@ -341,8 +405,11 @@ pub(super) enum EitherFragment {
 /// A wrapper of [`StreamFragmentGraph`] that contains the additional information of existing
 /// fragments, which is connected to the graph's top-most or bottom-most fragments.
 ///
-/// For example, if we're going to build a mview on an existing mview, the upstream fragment
-/// containing the `Materialize` node will be included in this structure.
+/// For example,
+/// - if we're going to build a mview on an existing mview, the upstream fragment containing the
+///   `Materialize` node will be included in this structure.
+/// - if we're going to replace the plan of a table with downstream mviews, the downstream fragments
+///   containing the `Chain` nodes will be included in this structure.
 pub struct CompleteStreamFragmentGraph {
     /// The fragment graph of the streaming job being built.
     building_graph: StreamFragmentGraph,
@@ -370,9 +437,9 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV. Returns an error if the upstream
-    /// `Matererialize` is failed to resolve.
-    pub fn new(
+    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV, with the upstream existing
+    /// `Materialize` fragments.
+    pub fn with_upstreams(
         graph: StreamFragmentGraph,
         upstream_mview_fragments: HashMap<TableId, Fragment>,
     ) -> MetaResult<Self> {
@@ -382,11 +449,35 @@ impl CompleteStreamFragmentGraph {
         // Build the extra edges between the upstream `Materialize` and the downstream `Chain` of
         // the new materialized view.
         for (&id, fragment) in &graph.fragments {
-            for &upstream_table_id in &fragment.upstream_table_ids {
+            for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
                 let mview_fragment = upstream_mview_fragments
-                    .get(&TableId::new(upstream_table_id))
+                    .get(&upstream_table_id)
                     .context("upstream materialized view fragment not found")?;
                 let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
+
+                // Resolve the required output columns from the upstream materialized view.
+                let output_indices = {
+                    let nodes = mview_fragment.actors[0].get_nodes().unwrap();
+                    let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
+                    let all_column_ids = mview_node
+                        .get_table()
+                        .unwrap()
+                        .columns
+                        .iter()
+                        .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                        .collect_vec();
+
+                    output_columns
+                        .iter()
+                        .map(|c| {
+                            all_column_ids
+                                .iter()
+                                .position(|&id| id == *c)
+                                .map(|i| i as u32)
+                        })
+                        .collect::<Option<Vec<_>>>()
+                        .context("column not found in the upstream materialized view")?
+                };
 
                 let edge = StreamFragmentEdge {
                     id: EdgeId::UpstreamExternal {
@@ -397,7 +488,8 @@ impl CompleteStreamFragmentGraph {
                     // and the downstream `Chain` of the new materialized view.
                     dispatch_strategy: DispatchStrategy {
                         r#type: DispatcherType::NoShuffle as _,
-                        ..Default::default()
+                        dist_key_indices: vec![], // not used for `NoShuffle`
+                        output_indices,
                     },
                 };
 
@@ -417,6 +509,57 @@ impl CompleteStreamFragmentGraph {
         let existing_fragments = upstream_mview_fragments
             .into_values()
             .map(|f| (GlobalFragmentId::new(f.fragment_id), f))
+            .collect();
+
+        Ok(Self {
+            building_graph: graph,
+            existing_fragments,
+            extra_downstreams,
+            extra_upstreams,
+        })
+    }
+
+    /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table, with the
+    /// downstream existing `Chain` fragments.
+    pub fn with_downstreams(
+        graph: StreamFragmentGraph,
+        original_table_fragment_id: FragmentId,
+        downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
+    ) -> MetaResult<Self> {
+        let mut extra_downstreams = HashMap::new();
+        let mut extra_upstreams = HashMap::new();
+
+        let original_table_fragment_id = GlobalFragmentId::new(original_table_fragment_id);
+        let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
+
+        // Build the extra edges between the `Materialize` and the downstream `Chain` of the
+        // existing materialized views.
+        for (dispatch_strategy, fragment) in &downstream_fragments {
+            let id = GlobalFragmentId::new(fragment.fragment_id);
+
+            let edge = StreamFragmentEdge {
+                id: EdgeId::DownstreamExternal {
+                    original_upstream_fragment_id: original_table_fragment_id,
+                    downstream_fragment_id: id,
+                },
+                dispatch_strategy: dispatch_strategy.clone(),
+            };
+
+            extra_downstreams
+                .entry(table_fragment_id)
+                .or_insert_with(HashMap::new)
+                .try_insert(id, edge.clone())
+                .unwrap();
+            extra_upstreams
+                .entry(id)
+                .or_insert_with(HashMap::new)
+                .try_insert(table_fragment_id, edge)
+                .unwrap();
+        }
+
+        let existing_fragments = downstream_fragments
+            .into_iter()
+            .map(|(_, f)| (GlobalFragmentId::new(f.fragment_id), f))
             .collect();
 
         Ok(Self {
@@ -513,13 +656,10 @@ impl CompleteStreamFragmentGraph {
             inner,
             internal_tables,
             table_id,
+            upstream_table_columns: _,
         } = self.get_fragment(id).into_building().unwrap();
 
-        let distribution_type = if inner.is_singleton {
-            FragmentDistributionType::Single
-        } else {
-            FragmentDistributionType::Hash
-        } as i32;
+        let distribution_type = distribution.to_distribution_type() as i32;
 
         let state_table_ids = internal_tables
             .iter()

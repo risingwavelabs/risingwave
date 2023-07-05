@@ -29,18 +29,13 @@ pub struct CastSig {
 /// that allows explicit casts, but not vice versa. See details in
 /// [PG](https://www.postgresql.org/docs/current/catalog-pg-cast.html).
 #[derive(Clone, Copy, Debug, Display, Eq, Ord, PartialEq, PartialOrd)]
-#[display(style = "UPPERCASE")]
 pub enum CastContext {
+    #[display("i")]
     Implicit,
+    #[display("a")]
     Assign,
+    #[display("e")]
     Explicit,
-}
-
-impl CastSig {
-    /// Returns a string describing the cast.
-    pub fn to_string_no_return(&self) -> String {
-        format!("cast({:?}->{:?})", self.from_type, self.to_type).to_lowercase()
-    }
 }
 
 pub type CastMap = BTreeMap<(DataTypeName, DataTypeName), CastContext>;
@@ -82,6 +77,7 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
         T::Int16,
         T::Int32,
         T::Int64,
+        T::Int256,
         T::Decimal,
         T::Float32,
         T::Float64,
@@ -90,16 +86,39 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
         T::Timestamptz,
         T::Time,
         T::Interval,
+        T::Jsonb,
+        T::Bytea,
     ] {
         m.insert((t, T::Varchar), CastContext::Assign);
         m.insert((T::Varchar, t), CastContext::Explicit);
     }
+
+    // Casting between `decimal`, `int256`, and `float` is not allowed.
+    m.insert((T::Int16, T::Int256), CastContext::Implicit);
+    m.insert((T::Int32, T::Int256), CastContext::Implicit);
+    m.insert((T::Int64, T::Int256), CastContext::Implicit);
+
+    m.insert((T::Int256, T::Float64), CastContext::Explicit);
 
     // Misc casts allowed by PG that are neither in implicit cast sequences nor from/to string.
     m.insert((T::Timestamp, T::Time), CastContext::Assign);
     m.insert((T::Timestamptz, T::Time), CastContext::Assign);
     m.insert((T::Boolean, T::Int32), CastContext::Explicit);
     m.insert((T::Int32, T::Boolean), CastContext::Explicit);
+
+    // Casting from jsonb to bool / number.
+    for t in [
+        T::Boolean,
+        T::Int16,
+        T::Int32,
+        T::Int64,
+        T::Decimal,
+        T::Float32,
+        T::Float64,
+    ] {
+        m.insert((T::Jsonb, t), CastContext::Explicit);
+    }
+
     m
 });
 

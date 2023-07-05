@@ -1,0 +1,73 @@
+---
+version: "3"
+services:
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  mysql:
+    image: mysql:8.0
+    ports:
+      - "8306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=123456
+      - MYSQL_USER=mysqluser
+      - MYSQL_PASSWORD=mysqlpw
+      - MYSQL_DATABASE=mydb
+    healthcheck:
+      test: [ "CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p123456" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    container_name: mysql
+  connector-node:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: connector-node
+  datagen_tpch:
+    image: ghcr.io/risingwavelabs/go-tpc:v0.1
+    depends_on: 
+      - mysql
+    command: tpch prepare --sf 1 --threads 4 -H mysql -U root -p '123456' -D mydb -P 3306
+    container_name: datagen_tpch
+    restart: on-failure
+volumes:
+  compute-node-0:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+name: risingwave-compose

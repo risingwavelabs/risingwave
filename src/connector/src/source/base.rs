@@ -20,11 +20,13 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
+use futures::Stream;
 use itertools::Itertools;
-use prost::Message;
+use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::error::{ErrorCode, ErrorSuppressor, Result as RwResult, RwError};
+use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
@@ -37,8 +39,8 @@ use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 use crate::source::cdc::{
-    CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, MYSQL_CDC_CONNECTOR,
-    POSTGRES_CDC_CONNECTOR,
+    CdcProperties, CdcSplitReader, DebeziumCdcSplit, DebeziumSplitEnumerator, CITUS_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
@@ -65,6 +67,9 @@ use crate::source::pulsar::{
 };
 use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
 
+const SPLIT_TYPE_FIELD: &str = "split_type";
+const SPLIT_INFO_FIELD: &str = "split_info";
+
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
 #[async_trait]
@@ -76,37 +81,119 @@ pub trait SplitEnumerator: Sized {
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 
+pub type SourceContextRef = Arc<SourceContext>;
+
+/// The max size of a chunk yielded by source stream.
+pub const MAX_CHUNK_SIZE: usize = 1024;
+
+#[derive(Debug, Clone)]
+pub struct SourceCtrlOpts {
+    // comes from developer::stream_chunk_size in stream scenario and developer::batch_chunk_size
+    // in batch scenario
+    pub chunk_size: usize,
+}
+
+impl Default for SourceCtrlOpts {
+    fn default() -> Self {
+        Self {
+            chunk_size: MAX_CHUNK_SIZE,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SourceContext {
+    pub source_info: SourceInfo,
+    pub metrics: Arc<SourceMetrics>,
+    pub source_ctrl_opts: SourceCtrlOpts,
+    error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
+}
+impl SourceContext {
+    pub fn new(
+        actor_id: u32,
+        table_id: TableId,
+        fragment_id: u32,
+        metrics: Arc<SourceMetrics>,
+        source_ctrl_opts: SourceCtrlOpts,
+    ) -> Self {
+        Self {
+            source_info: SourceInfo {
+                actor_id,
+                source_id: table_id,
+                fragment_id,
+            },
+            metrics,
+            error_suppressor: None,
+            source_ctrl_opts,
+        }
+    }
+
+    pub fn add_suppressor(&mut self, error_suppressor: Arc<Mutex<ErrorSuppressor>>) {
+        self.error_suppressor = Some(error_suppressor)
+    }
+
+    pub(crate) fn report_user_source_error(&self, e: RwError) -> RwResult<()> {
+        // Repropagate the error if batch
+        if self.source_info.fragment_id == u32::MAX {
+            return Err(e);
+        }
+        let mut err_str = e.inner().to_string();
+        if let Some(suppressor) = &self.error_suppressor
+            && suppressor.lock().suppress_error(&err_str)
+        {
+            err_str = format!(
+                "error msg suppressed (due to per-actor error limit: {})",
+                suppressor.lock().max()
+            );
+        }
+        self.metrics
+            .user_source_error_count
+            .with_label_values(&[
+                "SourceError",
+                // TODO(jon-chuang): add the error msg truncator to truncate these
+                &err_str,
+                // Let's be a bit more specific for SourceExecutor
+                "SourceExecutor",
+                &self.source_info.fragment_id.to_string(),
+                &self.source_info.source_id.table_id.to_string(),
+            ])
+            .inc();
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SourceInfo {
     pub actor_id: u32,
     pub source_id: TableId,
-}
-
-impl SourceInfo {
-    pub fn new(actor_id: u32, source_id: TableId) -> Self {
-        SourceInfo {
-            actor_id,
-            source_id,
-        }
-    }
+    // There should be a 1-1 mapping between `source_id` & `fragment_id`
+    pub fragment_id: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
     Invalid,
     Json,
+    UpsertJson,
     Protobuf,
     DebeziumJson,
     Avro,
+    UpsertAvro,
     Maxwell,
     CanalJson,
     Csv,
     Native,
     DebeziumAvro,
+    DebeziumMongoJson,
+    Bytes,
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+
+pub trait SourceWithStateStream =
+    Stream<Item = Result<StreamChunkWithState, RwError>> + Send + 'static;
 pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
+pub type BoxTryStream<M> = BoxStream<'static, Result<M, RwError>>;
 
 /// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
 /// current design, one connector source can have multiple split reader. The keys are unique
@@ -127,27 +214,23 @@ impl From<StreamChunk> for StreamChunkWithState {
     }
 }
 
-/// [`SplitReaderV2`] is a new abstraction of the external connector read interface which is
+/// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
 /// stream of parsed [`StreamChunk`]
 #[async_trait]
-pub trait SplitReaderV2: Sized {
+pub trait SplitReader: Sized {
     type Properties;
 
     async fn new(
         properties: Self::Properties,
         state: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
     fn into_stream(self) -> BoxSourceWithStateStream;
 }
-
-/// The max size of a chunk yielded by source stream.
-pub const MAX_CHUNK_SIZE: usize = 1024;
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum ConnectorProperties {
@@ -159,6 +242,7 @@ pub enum ConnectorProperties {
     S3(Box<S3Properties>),
     MySqlCdc(Box<CdcProperties>),
     PostgresCdc(Box<CdcProperties>),
+    CitusCdc(Box<CdcProperties>),
     GooglePubsub(Box<PubsubProperties>),
     Dummy(Box<()>),
 }
@@ -179,6 +263,11 @@ impl ConnectorProperties {
                 source_type: "postgres".to_string(),
                 ..Default::default()
             }))),
+            CITUS_CDC_CONNECTOR => Ok(Self::CitusCdc(Box::new(CdcProperties {
+                props: properties,
+                source_type: "citus".to_string(),
+                ..Default::default()
+            }))),
             _ => Err(anyhow!("unexpected cdc connector '{}'", connector_name,)),
         }
     }
@@ -190,7 +279,9 @@ impl ConnectorProperties {
         table_schema: Option<TableSchema>,
     ) {
         match self {
-            ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
+            ConnectorProperties::MySqlCdc(c)
+            | ConnectorProperties::PostgresCdc(c)
+            | ConnectorProperties::CitusCdc(c) => {
                 c.source_id = source_id;
                 c.connector_node_addr = rpc_addr;
                 c.table_schema = table_schema;
@@ -208,8 +299,9 @@ pub enum SplitImpl {
     Nexmark(NexmarkSplit),
     Datagen(DatagenSplit),
     GooglePubsub(PubsubSplit),
-    MySqlCdc(CdcSplit),
-    PostgresCdc(CdcSplit),
+    MySqlCdc(DebeziumCdcSplit),
+    PostgresCdc(DebeziumCdcSplit),
+    CitusCdc(DebeziumCdcSplit),
     S3(FsSplit),
 }
 
@@ -231,7 +323,7 @@ impl SplitImpl {
     }
 }
 
-pub enum SplitReaderV2Impl {
+pub enum SplitReaderImpl {
     S3(Box<S3FileReader>),
     Dummy(Box<DummySplitReader>),
     Kinesis(Box<KinesisSplitReader>),
@@ -241,6 +333,7 @@ pub enum SplitReaderV2Impl {
     Datagen(Box<DatagenSplitReader>),
     MySqlCdc(Box<CdcSplitReader>),
     PostgresCdc(Box<CdcSplitReader>),
+    CitusCdc(Box<CdcSplitReader>),
     GooglePubsub(Box<PubsubSplitReader>),
 }
 
@@ -252,6 +345,7 @@ pub enum SplitEnumeratorImpl {
     Datagen(DatagenSplitEnumerator),
     MySqlCdc(DebeziumSplitEnumerator),
     PostgresCdc(DebeziumSplitEnumerator),
+    CitusCdc(DebeziumSplitEnumerator),
     GooglePubsub(PubsubSplitEnumerator),
     S3(S3SplitEnumerator),
 }
@@ -265,6 +359,7 @@ impl_connector_properties! {
     { S3, S3_CONNECTOR },
     { MySqlCdc, MYSQL_CDC_CONNECTOR },
     { PostgresCdc, POSTGRES_CDC_CONNECTOR },
+    { CitusCdc, CITUS_CDC_CONNECTOR },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR}
 }
 
@@ -276,6 +371,7 @@ impl_split_enumerator! {
     { Datagen, DatagenSplitEnumerator },
     { MySqlCdc, DebeziumSplitEnumerator },
     { PostgresCdc, DebeziumSplitEnumerator },
+    { CitusCdc, DebeziumSplitEnumerator },
     { GooglePubsub, PubsubSplitEnumerator},
     { S3, S3SplitEnumerator }
 }
@@ -287,8 +383,9 @@ impl_split! {
     { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
     { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit },
-    { MySqlCdc, MYSQL_CDC_CONNECTOR, CdcSplit },
-    { PostgresCdc, POSTGRES_CDC_CONNECTOR, CdcSplit },
+    { MySqlCdc, MYSQL_CDC_CONNECTOR, DebeziumCdcSplit },
+    { PostgresCdc, POSTGRES_CDC_CONNECTOR, DebeziumCdcSplit },
+    { CitusCdc, CITUS_CDC_CONNECTOR, DebeziumCdcSplit },
     { S3, S3_CONNECTOR, FsSplit }
 }
 
@@ -301,6 +398,7 @@ impl_split_reader! {
     { Datagen, DatagenSplitReader },
     { MySqlCdc, CdcSplitReader},
     { PostgresCdc, CdcSplitReader},
+    { CitusCdc, CdcSplitReader },
     { GooglePubsub, PubsubSplitReader },
     { Dummy, DummySplitReader }
 }
@@ -311,6 +409,7 @@ pub type DataType = risingwave_common::types::DataType;
 pub struct Column {
     pub name: String,
     pub data_type: DataType,
+    pub is_visible: bool,
 }
 
 /// Split id resides in every source message, use `Arc` to avoid copying.
@@ -320,7 +419,7 @@ pub type SplitId = Arc<str>;
 /// The third-party message structs will eventually be transformed into this struct.
 #[derive(Debug, Clone)]
 pub struct SourceMessage {
-    pub payload: Option<Bytes>,
+    pub payload: Option<Vec<u8>>,
     pub offset: String,
     pub split_id: SplitId,
 
@@ -350,8 +449,18 @@ impl Eq for SourceMessage {}
 /// The metadata of a split.
 pub trait SplitMetaData: Sized {
     fn id(&self) -> SplitId;
-    fn encode_to_bytes(&self) -> Bytes;
-    fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
+    fn encode_to_bytes(&self) -> Bytes {
+        self.encode_to_json()
+            .as_scalar_ref()
+            .value_serialize()
+            .into()
+    }
+    fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
+        Self::restore_from_json(JsonbVal::value_deserialize(bytes).unwrap())
+    }
+
+    fn encode_to_json(&self) -> JsonbVal;
+    fn restore_from_json(value: JsonbVal) -> Result<Self>;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
@@ -366,6 +475,7 @@ mod tests {
     use nexmark::event::EventType;
 
     use super::*;
+    use crate::source::cdc::MySqlCdcSplit;
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {
@@ -374,6 +484,7 @@ mod tests {
         let get_value = split_impl.into_kafka().unwrap();
         println!("{:?}", get_value);
         assert_eq!(split.encode_to_bytes(), get_value.encode_to_bytes());
+        assert_eq!(split.encode_to_json(), get_value.encode_to_json());
 
         Ok(())
     }
@@ -381,12 +492,29 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let split_impl = SplitImpl::MySqlCdc(CdcSplit::new(1001, offset_str.to_string()));
+        let mysql_split = MySqlCdcSplit::new(1001, offset_str.to_string());
+        let split = DebeziumCdcSplit::new(Some(mysql_split), None);
+        let split_impl = SplitImpl::MySqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
         assert_eq!(
             split_impl.encode_to_bytes(),
             restored_split_impl.encode_to_bytes()
+        );
+        assert_eq!(
+            split_impl.encode_to_json(),
+            restored_split_impl.encode_to_json()
+        );
+
+        let encoded_split = split_impl.encode_to_json();
+        let restored_split_impl = SplitImpl::restore_from_json(encoded_split)?;
+        assert_eq!(
+            split_impl.encode_to_bytes(),
+            restored_split_impl.encode_to_bytes()
+        );
+        assert_eq!(
+            split_impl.encode_to_json(),
+            restored_split_impl.encode_to_json()
         );
         Ok(())
     }
@@ -406,6 +534,25 @@ mod tests {
             assert_eq!(props.split_num, 1);
         } else {
             panic!("extract nexmark config failed");
+        }
+    }
+
+    #[test]
+    fn test_extract_kafka_config() {
+        let props: HashMap<String, String> = convert_args!(hashmap!(
+            "connector" => "kafka",
+            "properties.bootstrap.server" => "b1,b2",
+            "topic" => "test",
+            "scan.startup.mode" => "earliest",
+            "broker.rewrite.endpoints" => r#"{"b-1:9092":"dns-1", "b-2:9092":"dns-2"}"#,
+        ));
+
+        let props = ConnectorProperties::extract(props).unwrap();
+        if let ConnectorProperties::Kafka(k) = props {
+            assert!(k.common.broker_rewrite_map.is_some());
+            println!("{:?}", k.common.broker_rewrite_map);
+        } else {
+            panic!("extract kafka config failed");
         }
     }
 

@@ -13,26 +13,28 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::HashSet;
-use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, TableId, USER_COLUMN_ID_OFFSET};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_connector::sink::catalog::SinkType;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
+use risingwave_common::error::Result;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
+use super::derive::derive_columns;
+use super::utils::{childless_record, Distill};
+use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
-use crate::optimizer::plan_node::{PlanBase, PlanNode};
-use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
+use crate::optimizer::plan_node::derive::derive_pk;
+use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::WithOptions;
 
 /// Materializes a stream.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamMaterialize {
     pub base: PlanBase,
     /// Child of Materialize plan
@@ -47,7 +49,7 @@ impl StreamMaterialize {
         Self { base, input, table }
     }
 
-    /// Create a materialize node, for `MATERIALIZED VIEW`, `INDEX`, and `SINK`.
+    /// Create a materialize node, for `MATERIALIZED VIEW` and `INDEX`.
     ///
     /// When creating index, `TableType` should be `Index`. Then, materialize will distribute keys
     /// using `user_distributed_by`.
@@ -63,48 +65,9 @@ impl StreamMaterialize {
         table_type: TableType,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
-        let schema = input.schema();
-
-        // Used to validate and deduplicate column names.
-        let mut col_names = HashSet::new();
-        for name in &out_names {
-            if !col_names.insert(name.clone()) {
-                Err(ErrorCode::InvalidInputSyntax(format!(
-                    "column \"{}\" specified more than once",
-                    name
-                )))?;
-            }
-        }
-        let mut out_name_iter = out_names.into_iter();
-
-        let columns = schema
-            .fields()
-            .iter()
-            .enumerate()
-            .map(|(i, field)| {
-                let mut c = ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        field,
-                        i as i32 + USER_COLUMN_ID_OFFSET,
-                    ),
-                    is_hidden: !user_cols.contains(i),
-                };
-                c.column_desc.name = if !c.is_hidden {
-                    out_name_iter.next().unwrap()
-                } else {
-                    let mut name = field.name.clone();
-                    let mut count = 0;
-
-                    while !col_names.insert(name.clone()) {
-                        count += 1;
-                        name = format!("{}#{}", field.name, count);
-                    }
-
-                    name
-                };
-                c
-            })
-            .collect_vec();
+        // the hidden column name might refer some expr id
+        let input = reorganize_elements_id(input);
+        let columns = derive_columns(input.schema(), out_names, &user_cols)?;
 
         let table = Self::derive_table_catalog(
             input.clone(),
@@ -112,7 +75,8 @@ impl StreamMaterialize {
             user_order_by,
             columns,
             definition,
-            false,
+            ConflictBehavior::NoCheck,
+            None,
             None,
             table_type,
             None,
@@ -134,7 +98,8 @@ impl StreamMaterialize {
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
+        pk_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
     ) -> Result<Self> {
@@ -146,7 +111,8 @@ impl StreamMaterialize {
             user_order_by,
             columns,
             definition,
-            handle_pk_conflict,
+            conflict_behavior,
+            Some(pk_column_indices),
             row_id_index,
             TableType::Table,
             version,
@@ -164,7 +130,11 @@ impl StreamMaterialize {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
             _ => match table_type {
-                TableType::Table | TableType::MaterializedView => {
+                TableType::Table => {
+                    assert_matches!(user_distributed_by, RequiredDist::ShardByKey(_));
+                    user_distributed_by
+                }
+                TableType::MaterializedView => {
                     assert_matches!(user_distributed_by, RequiredDist::Any);
                     // ensure the same pk will not shuffle to different node
                     RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
@@ -194,79 +164,56 @@ impl StreamMaterialize {
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
+        pk_column_indices: Option<Vec<usize>>, // Is some when create table
         row_id_index: Option<usize>,
         table_type: TableType,
         version: Option<TableVersion>,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
-        let watermark_columns = input.watermark_columns().clone();
-        // Note(congyi): avoid pk duplication
-        let pk_indices = input.logical_pk().iter().copied().unique().collect_vec();
-        let schema = input.schema();
-        let distribution = input.distribution();
-
-        // Assert the uniqueness of column names and IDs, including hidden columns.
-        if let Some(name) = columns.iter().map(|c| c.name()).duplicates().next() {
-            panic!("duplicated column name \"{name}\"");
-        }
-        if let Some(id) = columns.iter().map(|c| c.column_id()).duplicates().next() {
-            panic!("duplicated column ID {id}");
-        }
-        // Assert that the schema of given `columns` is correct.
-        assert_eq!(
-            columns.iter().map(|c| c.data_type().clone()).collect_vec(),
-            input.schema().data_types()
-        );
-
         let value_indices = (0..columns.len()).collect_vec();
-        let mut in_order = FixedBitSet::with_capacity(schema.len());
-        let mut pk_list = vec![];
-
-        for field in &user_order_by.field_order {
-            let idx = field.index;
-            pk_list.push(field.clone());
-            in_order.insert(idx);
-        }
-
-        for &idx in &pk_indices {
-            if in_order.contains(idx) {
-                continue;
-            }
-            pk_list.push(FieldOrder {
-                index: idx,
-                direct: Direction::Asc,
-            });
-            in_order.insert(idx);
-        }
-
-        let distribution_key = distribution.dist_column_indices().to_vec();
+        let distribution_key = input.distribution().dist_column_indices().to_vec();
         let properties = input.ctx().with_options().internal_table_subset(); // TODO: remove this
-        let read_prefix_len_hint = pk_indices.len();
+        let append_only = input.append_only();
+        let watermark_columns = input.watermark_columns().clone();
 
+        let (pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
+            let pk = pk_column_indices
+                .iter()
+                .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
+                .collect();
+            // No order by for create table, so stream key is identical to pk.
+            (pk, pk_column_indices)
+        } else {
+            derive_pk(input, user_order_by, &columns)
+        };
+
+        let read_prefix_len_hint = stream_key.len();
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
             name,
             columns,
-            pk: pk_list,
-            stream_key: pk_indices,
+            pk,
+            stream_key,
             distribution_key,
             table_type,
-            append_only: input.append_only(),
+            append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
+            dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index,
             value_indices,
             definition,
-            handle_pk_conflict,
+            conflict_behavior,
             read_prefix_len_hint,
             version,
             watermark_columns,
+            dist_key_in_pk: vec![],
         })
     }
 
@@ -279,48 +226,44 @@ impl StreamMaterialize {
     pub fn name(&self) -> &str {
         self.table.name()
     }
-
-    /// Rewrite this plan node into [`StreamSink`] with the given `properties`.
-    pub fn rewrite_into_sink(self, properties: WithOptions) -> StreamSink {
-        // TODO(Yuanxin): Deduce sink type here.
-        StreamSink::new(
-            self.input,
-            self.table.to_sink_desc(properties, SinkType::AppendOnly),
-        )
-    }
 }
 
-impl fmt::Display for StreamMaterialize {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Distill for StreamMaterialize {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let table = self.table();
 
-        let column_names = table
-            .columns()
-            .iter()
-            .map(|c| c.name_with_hidden())
-            .join(", ");
+        let column_names = (table.columns.iter())
+            .map(|col| col.name_with_hidden().to_string())
+            .map(Pretty::from)
+            .collect();
 
-        let pk_column_names = table
-            .stream_key
-            .iter()
-            .map(|&pk| &table.columns[pk].column_desc.name)
-            .join(", ");
+        let stream_key = (table.stream_key.iter())
+            .map(|&k| table.columns[k].name().to_string())
+            .map(Pretty::from)
+            .collect();
 
-        let order_descs = table
-            .pk
-            .iter()
-            .map(|order| table.columns()[order.index].column_desc.name.clone())
-            .join(", ");
+        let pk_columns = (table.pk.iter())
+            .map(|o| table.columns[o.column_index].name().to_string())
+            .map(Pretty::from)
+            .collect();
+        let mut vec = Vec::with_capacity(5);
+        vec.push(("columns", Pretty::Array(column_names)));
+        vec.push(("stream_key", Pretty::Array(stream_key)));
+        vec.push(("pk_columns", Pretty::Array(pk_columns)));
+        let pk_conflict_behavior = self.table.conflict_behavior().debug_to_string();
 
-        let mut builder = f.debug_struct("StreamMaterialize");
-        builder
-            .field("columns", &format_args!("[{}]", column_names))
-            .field("pk_columns", &format_args!("[{}]", pk_column_names));
+        vec.push(("pk_conflict", Pretty::from(pk_conflict_behavior)));
 
-        if pk_column_names != order_descs {
-            builder.field("order_descs", &format_args!("[{}]", order_descs));
-        }
-        builder.finish()
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let watermark_column_names = watermark_columns
+                .ones()
+                .map(|i| table.columns()[i].name_with_hidden().to_string())
+                .map(Pretty::from)
+                .collect();
+            vec.push(("watermark_columns", Pretty::Array(watermark_column_names)));
+        };
+        childless_record("StreamMaterialize", vec)
     }
 }
 
@@ -331,7 +274,16 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let new = Self::new(input, self.table().clone());
-        assert_eq!(new.plan_base().schema, self.plan_base().schema);
+        new.base
+            .schema
+            .fields
+            .iter()
+            .zip_eq_fast(self.base.schema.fields.iter())
+            .for_each(|(a, b)| {
+                assert_eq!(a.data_type, b.data_type);
+                assert_eq!(a.type_name, b.type_name);
+                assert_eq!(a.sub_fields, b.sub_fields);
+            });
         assert_eq!(new.plan_base().logical_pk, self.plan_base().logical_pk);
         new
     }
@@ -340,10 +292,10 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 impl_plan_tree_node_for_unary! { StreamMaterialize }
 
 impl StreamNode for StreamMaterialize {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::Materialize(MaterializeNode {
+        PbNodeBody::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
             table_id: 0,
@@ -351,10 +303,9 @@ impl StreamNode for StreamMaterialize {
                 .table()
                 .pk()
                 .iter()
-                .map(FieldOrder::to_protobuf)
+                .map(ColumnOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-            handle_pk_conflict: self.table.handle_pk_conflict(),
         })
     }
 }

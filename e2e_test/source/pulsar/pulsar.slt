@@ -1,0 +1,8 @@
+query IT nosort
+select * FROM t;
+----
+1 name0
+2 name0
+6 name3
+0 name5
+5 name8

@@ -21,6 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{FunctionArg, TableAlias};
 
 use super::{Binder, Relation, Result};
+use crate::binder::statement::RewriteExprsRecursive;
 use crate::expr::{ExprImpl, InputRef};
 
 #[derive(Copy, Clone, Debug)]
@@ -49,6 +50,17 @@ pub struct BoundWindowTableFunction {
     pub(crate) kind: WindowTableFunctionKind,
     pub(crate) time_col: InputRef,
     pub(crate) args: Vec<ExprImpl>,
+}
+
+impl RewriteExprsRecursive for BoundWindowTableFunction {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.input.rewrite_exprs_recursive(rewriter);
+        let new_agrs = std::mem::take(&mut self.args)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.args = new_agrs;
+    }
 }
 
 const ERROR_1ST_ARG: &str = "The 1st arg of window table function should be a table name (incl. source, CTE, view) but not complex structure (subquery, join, another table function). Consider using an intermediate CTE or view as workaround.";

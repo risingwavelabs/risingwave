@@ -19,7 +19,8 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitMetaData, StreamChunkWithState,
+    BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
+    StreamChunkWithState,
 };
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -28,7 +29,7 @@ use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::source::reader::SourceReaderStream;
+use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::*;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
@@ -44,7 +45,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     pk_indices: PkIndices,
 
-    /// Streaming source  for external
+    /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
 
     /// Metrics for monitor.
@@ -55,6 +56,9 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Expected barrier latency.
     expected_barrier_latency_ms: u64,
+
+    // control options for connector level
+    source_ctrl_opts: SourceCtrlOpts,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -68,6 +72,7 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         expected_barrier_latency_ms: u64,
         executor_id: u64,
+        source_ctrl_opts: SourceCtrlOpts,
     ) -> Self {
         Self {
             ctx,
@@ -78,6 +83,7 @@ impl<S: StateStore> SourceExecutor<S> {
             metrics,
             barrier_receiver: Some(barrier_receiver),
             expected_barrier_latency_ms,
+            source_ctrl_opts,
         }
     }
 
@@ -91,82 +97,162 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
+        let mut source_ctx = SourceContext::new(
+            self.ctx.id,
+            self.stream_source_core.as_ref().unwrap().source_id,
+            self.ctx.fragment_id,
+            source_desc.metrics.clone(),
+            self.source_ctrl_opts.clone(),
+        );
+        source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
         source_desc
             .source
-            .stream_reader(
-                state,
-                column_ids,
-                source_desc.metrics.clone(),
-                SourceInfo::new(
-                    self.ctx.id,
-                    self.stream_source_core.as_ref().unwrap().source_id,
-                ),
-            )
+            .stream_reader(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }
 
-    async fn apply_split_change(
+    fn check_split_is_migration(&self, actor_splits: &HashMap<ActorId, Vec<SplitImpl>>) -> bool {
+        let core = self.stream_source_core.as_ref().unwrap();
+
+        let mut revert_index = HashMap::new();
+
+        for (actor_id, splits) in actor_splits {
+            for split in splits {
+                assert!(revert_index.insert(split.id(), actor_id).is_none());
+            }
+        }
+
+        for split_id in core.state_cache.keys() {
+            if let Some(actor_id) = revert_index.remove(split_id) {
+                if self.ctx.id != *actor_id {
+                    tracing::warn!(
+                        "split {} migration detected, from {} to {}",
+                        split_id,
+                        self.ctx.id,
+                        actor_id
+                    );
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    #[inline]
+    fn get_metric_labels(&self) -> [String; 3] {
+        [
+            self.stream_source_core
+                .as_ref()
+                .unwrap()
+                .source_id
+                .to_string(),
+            self.stream_source_core
+                .as_ref()
+                .unwrap()
+                .source_name
+                .clone(),
+            self.ctx.id.to_string(),
+        ]
+    }
+
+    async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut SourceReaderStream,
-        mapping: &HashMap<ActorId, Vec<SplitImpl>>,
-    ) -> StreamExecutorResult<()> {
-        if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
-            if let Some(target_state) = self.get_diff(Some(target_splits)).await? {
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
+    ) -> StreamExecutorResult<Option<Vec<SplitImpl>>> {
+        self.metrics
+            .source_split_change_count
+            .with_label_values(
+                &self
+                    .get_metric_labels()
+                    .iter()
+                    .map(AsRef::as_ref)
+                    .collect::<Vec<&str>>(),
+            )
+            .inc();
+        if let Some(target_splits) = split_assignment.get(&self.ctx.id).cloned() {
+            if let Some(target_state) = self.update_state_if_changed(Some(target_splits)).await? {
                 tracing::info!(
                     actor_id = self.ctx.id,
                     state = ?target_state,
                     "apply split change"
                 );
 
-                self.replace_stream_reader_with_target_state(source_desc, stream, target_state)
-                    .await?;
+                self.replace_stream_reader_with_target_state(
+                    source_desc,
+                    stream,
+                    target_state.clone(),
+                )
+                .await?;
+
+                return Ok(Some(target_state));
             }
         }
 
-        Ok(())
+        Ok(None)
     }
 
-    // Note: `get_diff` will modify `state_cache`
-    // `rhs` can not be None because we do not support split number reduction
-    async fn get_diff(&mut self, rhs: ConnectorState) -> StreamExecutorResult<ConnectorState> {
+    // Note: `update_state_if_changed` will modify `state_cache`
+    async fn update_state_if_changed(
+        &mut self,
+        state: ConnectorState,
+    ) -> StreamExecutorResult<ConnectorState> {
         let core = self.stream_source_core.as_mut().unwrap();
 
-        let split_change = rhs.unwrap();
-        let mut target_state: Vec<SplitImpl> = Vec::with_capacity(split_change.len());
-        let mut no_change_flag = true;
-        for sc in &split_change {
-            if let Some(s) = core.state_cache.get(&sc.id()) {
+        let target_splits: HashMap<_, _> = state
+            .unwrap()
+            .into_iter()
+            .map(|split| (split.id(), split))
+            .collect();
+
+        let mut target_state: Vec<SplitImpl> = Vec::with_capacity(target_splits.len());
+
+        let mut split_changed = false;
+
+        for (split_id, split) in &target_splits {
+            if let Some(s) = core.state_cache.get(split_id) {
+                // existing split, no change, clone from cache
                 target_state.push(s.clone())
             } else {
-                no_change_flag = false;
+                split_changed = true;
                 // write new assigned split to state cache. snapshot is base on cache.
 
-                let state = if let Some(recover_state) = core
+                let initial_state = if let Some(recover_state) = core
                     .split_state_store
-                    .try_recover_from_state_store(sc)
+                    .try_recover_from_state_store(split)
                     .await?
                 {
                     recover_state
                 } else {
-                    sc.clone()
+                    split.clone()
                 };
 
                 core.state_cache
-                    .entry(sc.id())
-                    .or_insert_with(|| state.clone());
-                target_state.push(state);
+                    .entry(split.id())
+                    .or_insert_with(|| initial_state.clone());
+
+                target_state.push(initial_state);
             }
         }
 
-        Ok((!no_change_flag).then_some(target_state))
+        // state cache may be stale
+        for existing_split_id in core.stream_source_splits.keys() {
+            if !target_splits.contains_key(existing_split_id) {
+                tracing::info!("split dropping detected: {}", existing_split_id);
+                split_changed = true;
+            }
+        }
+
+        Ok(split_changed.then_some(target_state))
     }
 
-    async fn replace_stream_reader_with_target_state(
+    async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut SourceReaderStream,
+        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -179,15 +265,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let reader = self
             .build_stream_source_reader(source_desc, Some(target_state.clone()))
             .await?;
-        stream.replace_source_stream(reader);
 
-        self.stream_source_core
-            .as_mut()
-            .unwrap()
-            .stream_source_splits = target_state
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
+        stream.replace_data_stream(reader);
 
         Ok(())
     }
@@ -195,14 +274,39 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn take_snapshot_and_clear_cache(
         &mut self,
         epoch: EpochPair,
+        target_state: Option<Vec<SplitImpl>>,
+        should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
 
-        let cache = core
+        let mut cache = core
             .state_cache
             .values()
             .map(|split_impl| split_impl.to_owned())
             .collect_vec();
+
+        if let Some(target_splits) = target_state {
+            let target_split_ids: HashSet<_> =
+                target_splits.iter().map(|split| split.id()).collect();
+
+            cache.drain_filter(|split| !target_split_ids.contains(&split.id()));
+
+            let dropped_splits = core
+                .stream_source_splits
+                .drain_filter(|split_id, _| !target_split_ids.contains(split_id))
+                .map(|(_, split)| split)
+                .collect_vec();
+
+            if should_trim_state && !dropped_splits.is_empty() {
+                // trim dropped splits' state
+                core.split_state_store.trim_state(&dropped_splits).await?;
+            }
+
+            core.stream_source_splits = target_splits
+                .into_iter()
+                .map(|split| (split.id(), split))
+                .collect();
+        }
 
         if !cache.is_empty() {
             tracing::debug!(actor_id = self.ctx.id, state = ?cache, "take snapshot");
@@ -225,7 +329,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver
             .recv()
-            .stack_trace("source_recv_first_barrier")
+            .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
                 StreamExecutorError::from(anyhow!(
@@ -286,16 +390,21 @@ impl<S: StateStore> SourceExecutor<S> {
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
-            .stack_trace("source_build_reader")
+            .instrument_await("source_build_reader")
             .await?;
 
-        // Merge the chunks from source and the barriers into a single stream.
-        let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
+        // Merge the chunks from source and the barriers into a single stream. We prioritize
+        // barriers over source data chunks here.
+        let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
+        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
+            barrier_stream,
+            source_chunk_reader,
+        );
 
         // If the first barrier is configuration change, then the source executor must be newly
         // created, and we should start with the paused state.
         if barrier.is_update() {
-            stream.pause_source();
+            stream.pause_stream();
         }
 
         yield Message::Barrier(barrier);
@@ -310,47 +419,71 @@ impl<S: StateStore> SourceExecutor<S> {
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
-                Either::Left(barrier) => {
-                    last_barrier_time = Instant::now();
-                    if self_paused {
-                        stream.resume_source();
-                        self_paused = false;
-                    }
-                    let epoch = barrier.epoch;
+                Either::Left(msg) => match &msg {
+                    Message::Barrier(barrier) => {
+                        last_barrier_time = Instant::now();
 
-                    if let Some(ref mutation) = barrier.mutation.as_deref() {
-                        match mutation {
-                            Mutation::SourceChangeSplit(actor_splits) => {
-                                self.apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?
-                            }
-                            Mutation::Pause => stream.pause_source(),
-                            Mutation::Resume => stream.resume_source(),
-                            Mutation::Update { actor_splits, .. } => {
-                                self.apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?;
-                            }
-                            _ => {}
+                        if self_paused {
+                            stream.resume_stream();
+                            self_paused = false;
                         }
+
+                        let epoch = barrier.epoch;
+
+                        let mut target_state = None;
+                        let mut should_trim_state = false;
+
+                        if let Some(ref mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::Pause => stream.pause_stream(),
+                                Mutation::Resume => stream.resume_stream(),
+                                Mutation::SourceChangeSplit(actor_splits) => {
+                                    // In the context of split changes, we do not allow split
+                                    // migration because it can lead to inconsistent states.
+                                    // Therefore, all split migration must be done via update
+                                    // mutation and pause/resume
+                                    assert!(!self.check_split_is_migration(actor_splits));
+
+                                    target_state = self
+                                        .apply_split_change(&source_desc, &mut stream, actor_splits)
+                                        .await?;
+                                    should_trim_state = true;
+                                }
+
+                                Mutation::Update { actor_splits, .. } => {
+                                    target_state = self
+                                        .apply_split_change(&source_desc, &mut stream, actor_splits)
+                                        .await?;
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        self.take_snapshot_and_clear_cache(epoch, target_state, should_trim_state)
+                            .await?;
+
+                        self.metrics
+                            .source_row_per_barrier
+                            .with_label_values(&[
+                                self.ctx.id.to_string().as_str(),
+                                self.stream_source_core
+                                    .as_ref()
+                                    .unwrap()
+                                    .source_id
+                                    .to_string()
+                                    .as_ref(),
+                            ])
+                            .inc_by(metric_row_per_barrier);
+                        metric_row_per_barrier = 0;
+
+                        yield msg;
                     }
-
-                    self.take_snapshot_and_clear_cache(epoch).await?;
-
-                    self.metrics
-                        .source_row_per_barrier
-                        .with_label_values(&[
-                            self.ctx.id.to_string().as_str(),
-                            self.stream_source_core
-                                .as_ref()
-                                .unwrap()
-                                .source_identify
-                                .as_ref(),
-                        ])
-                        .inc_by(metric_row_per_barrier);
-                    metric_row_per_barrier = 0;
-
-                    yield Message::Barrier(barrier);
-                }
+                    _ => {
+                        // For the source executor, the message we receive from this arm should
+                        // always be barrier message.
+                        unreachable!();
+                    }
+                },
 
                 Either::Right(StreamChunkWithState {
                     chunk,
@@ -361,7 +494,12 @@ impl<S: StateStore> SourceExecutor<S> {
                         // we can guarantee the source is not paused since it received stream
                         // chunks.
                         self_paused = true;
-                        stream.pause_source();
+                        tracing::warn!(
+                            "source {} paused, wait barrier for {:?}",
+                            self.identity,
+                            last_barrier_time.elapsed()
+                        );
+                        stream.pause_stream();
                     }
                     if let Some(mapping) = split_offset_mapping {
                         let state: HashMap<_, _> = mapping
@@ -390,18 +528,13 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     self.metrics
                         .source_output_row_count
-                        .with_label_values(&[
-                            self.stream_source_core
-                                .as_ref()
-                                .unwrap()
-                                .source_identify
-                                .as_str(),
-                            self.stream_source_core
-                                .as_ref()
-                                .unwrap()
-                                .source_name
-                                .as_ref(),
-                        ])
+                        .with_label_values(
+                            &self
+                                .get_metric_labels()
+                                .iter()
+                                .map(AsRef::as_ref)
+                                .collect::<Vec<&str>>(),
+                        )
                         .inc_by(chunk.cardinality() as u64);
                     yield Message::Chunk(chunk);
                 }
@@ -422,7 +555,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver
             .recv()
-            .stack_trace("source_recv_first_barrier")
+            .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
                 StreamExecutorError::from(anyhow!(
@@ -476,21 +609,21 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicU64;
     use std::time::Duration;
 
+    use futures::StreamExt;
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::StreamSourceInfo;
-    use risingwave_pb::plan_common::RowFormatType as ProstRowFormatType;
+    use risingwave_pb::plan_common::PbRowFormatType;
     use risingwave_source::connector_test_utils::create_source_desc_builder;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::executor::ActorContext;
@@ -504,10 +637,9 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
         let row_id_index = None;
-        let pk_column_ids = vec![0];
         let pk_indices = vec![0];
         let source_info = StreamSourceInfo {
-            row_format: ProstRowFormatType::Native as i32,
+            row_format: PbRowFormatType::Native as i32,
             ..Default::default()
         };
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
@@ -521,13 +653,8 @@ mod tests {
             "fields.sequence_int.start" => "11",
             "fields.sequence_int.end" => "11111",
         ));
-        let source_desc_builder = create_source_desc_builder(
-            &schema,
-            pk_column_ids,
-            row_id_index,
-            source_info,
-            properties,
-        );
+        let source_desc_builder =
+            create_source_desc_builder(&schema, row_id_index, source_info, properties, vec![]);
         let split_state_store = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             MemoryStateStore::new(),
@@ -536,7 +663,6 @@ mod tests {
         let core = StreamSourceCore::<MemoryStateStore> {
             source_id: table_id,
             column_ids,
-            source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
             source_desc_builder: Some(source_desc_builder),
             stream_source_splits: HashMap::new(),
             split_state_store,
@@ -553,11 +679,13 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
+            SourceCtrlOpts::default(),
         );
         let mut executor = Box::new(executor).execute();
 
         let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
             adds: HashMap::new(),
+            added_actors: HashSet::new(),
             splits: hashmap! {
                 ActorId::default() => vec![
                     SplitImpl::Datagen(DatagenSplit {
@@ -588,6 +716,7 @@ mod tests {
         );
     }
 
+    #[traced_test]
     #[tokio::test]
     async fn test_split_change_mutation() {
         let table_id = TableId::default();
@@ -595,26 +724,20 @@ mod tests {
             fields: vec![Field::with_name(DataType::Int32, "v1")],
         };
         let row_id_index = None;
-        let pk_column_ids = vec![0];
         let pk_indices = vec![0_usize];
         let source_info = StreamSourceInfo {
-            row_format: ProstRowFormatType::Native as i32,
+            row_format: PbRowFormatType::Native as i32,
             ..Default::default()
         };
         let properties = convert_args!(hashmap!(
             "connector" => "datagen",
-            "fields.v1.min" => "1",
-            "fields.v1.max" => "1000",
-            "fields.v1.seed" => "12345",
+            "fields.v1.kind" => "sequence",
+            "fields.v1.start" => "11",
+            "fields.v1.end" => "11111",
         ));
 
-        let source_desc_builder = create_source_desc_builder(
-            &schema,
-            pk_column_ids,
-            row_id_index,
-            source_info,
-            properties,
-        );
+        let source_desc_builder =
+            create_source_desc_builder(&schema, row_id_index, source_info, properties, vec![]);
         let mem_state_store = MemoryStateStore::new();
 
         let column_ids = vec![ColumnId::from(0)];
@@ -628,7 +751,6 @@ mod tests {
         let core = StreamSourceCore::<MemoryStateStore> {
             source_id: table_id,
             column_ids: column_ids.clone(),
-            source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
             source_desc_builder: Some(source_desc_builder),
             stream_source_splits: HashMap::new(),
             split_state_store,
@@ -645,24 +767,13 @@ mod tests {
             barrier_rx,
             u64::MAX,
             1,
+            SourceCtrlOpts::default(),
         );
-
-        let mut materialize = MaterializeExecutor::for_test(
-            Box::new(executor),
-            mem_state_store.clone(),
-            TableId::from(0x2333),
-            vec![OrderPair::new(0, OrderType::Ascending)],
-            column_ids,
-            2,
-            Arc::new(AtomicU64::new(0)),
-            false,
-        )
-        .await
-        .boxed()
-        .execute();
+        let mut handler = Box::new(executor).execute();
 
         let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
             adds: HashMap::new(),
+            added_actors: HashSet::new(),
             splits: hashmap! {
                 ActorId::default() => vec![
                     SplitImpl::Datagen(DatagenSplit {
@@ -675,28 +786,20 @@ mod tests {
         });
         barrier_tx.send(init_barrier).unwrap();
 
-        (materialize.next().await.unwrap().unwrap())
+        // Consume barrier.
+        handler
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
             .into_barrier()
             .unwrap();
 
-        let mut ready_chunks = materialize.ready_chunks(10);
-        let chunks = (ready_chunks.next().await.unwrap())
-            .into_iter()
-            .map(|msg| msg.unwrap().into_chunk().unwrap())
-            .collect();
-        let chunk_1 = StreamChunk::concat(chunks);
-        assert_eq!(
-            chunk_1,
-            StreamChunk::from_pretty(
-                " i
-                + 533
-                + 833
-                + 738
-                + 344",
-            )
-        );
+        let mut ready_chunks = handler.ready_chunks(10);
 
-        let new_assignments = vec![
+        let _ = ready_chunks.next().await.unwrap();
+
+        let new_assignment = vec![
             SplitImpl::Datagen(DatagenSplit {
                 split_index: 0,
                 split_num: 3,
@@ -707,11 +810,16 @@ mod tests {
                 split_num: 3,
                 start_offset: None,
             }),
+            SplitImpl::Datagen(DatagenSplit {
+                split_index: 2,
+                split_num: 3,
+                start_offset: None,
+            }),
         ];
 
         let change_split_mutation =
             Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
-                ActorId::default() => new_assignments.clone()
+                ActorId::default() => new_assignment.clone()
             }));
 
         barrier_tx.send(change_split_mutation).unwrap();
@@ -726,36 +834,60 @@ mod tests {
         // there must exist state for new add partition
         source_state_handler.init_epoch(EpochPair::new_test_epoch(2));
         source_state_handler
-            .get(new_assignments[1].id())
+            .get(new_assignment[1].id())
             .await
             .unwrap()
             .unwrap();
 
         tokio::time::sleep(Duration::from_millis(100)).await;
-        let chunks = (ready_chunks.next().await.unwrap())
-            .into_iter()
-            .map(|msg| msg.unwrap().into_chunk().unwrap())
-            .collect();
-        let chunk_2 = StreamChunk::concat(chunks).sort_rows();
-        assert_eq!(
-            chunk_2,
-            // mixed from datagen split 0 and 1
-            StreamChunk::from_pretty(
-                " i
-                + 29
-                + 201
-                + 344
-                + 425
-                + 525
-                + 533
-                + 833",
-            )
-        );
+
+        let _ = ready_chunks.next().await.unwrap();
 
         let barrier = Barrier::new_test_barrier(3).with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();
 
         let barrier = Barrier::new_test_barrier(4).with_mutation(Mutation::Resume);
         barrier_tx.send(barrier).unwrap();
+
+        // receive all
+        ready_chunks.next().await.unwrap();
+
+        let prev_assignment = new_assignment;
+        let new_assignment = vec![prev_assignment[2].clone()];
+
+        let drop_split_mutation =
+            Barrier::new_test_barrier(5).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+                ActorId::default() => new_assignment.clone()
+            }));
+
+        barrier_tx.send(drop_split_mutation).unwrap();
+
+        ready_chunks.next().await.unwrap(); // barrier
+
+        let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            mem_state_store.clone(),
+        )
+        .await;
+
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(5));
+
+        assert!(source_state_handler
+            .try_recover_from_state_store(&prev_assignment[0])
+            .await
+            .unwrap()
+            .is_none());
+
+        assert!(source_state_handler
+            .try_recover_from_state_store(&prev_assignment[1])
+            .await
+            .unwrap()
+            .is_none());
+
+        assert!(source_state_handler
+            .try_recover_from_state_store(&prev_assignment[2])
+            .await
+            .unwrap()
+            .is_some());
     }
 }

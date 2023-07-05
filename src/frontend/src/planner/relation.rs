@@ -15,17 +15,18 @@
 use std::rc::Rc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, Interval, ScalarImpl};
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, TableFunction};
+use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, LogicalSource,
-    LogicalTableFunction, PlanRef,
+    LogicalTableFunction, LogicalValues, PlanRef,
 };
 use crate::planner::Planner;
 
@@ -42,7 +43,7 @@ impl Planner {
             Relation::Join(join) => self.plan_join(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
-            Relation::TableFunction(tf) => self.plan_table_function(*tf),
+            Relation::TableFunction(tf) => self.plan_table_function(tf),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             Relation::Share(share) => self.plan_share(*share),
         }
@@ -55,6 +56,7 @@ impl Planner {
             Rc::new(sys_table.sys_table_catalog.table_desc()),
             vec![],
             self.ctx(),
+            false,
         )
         .into())
     }
@@ -70,29 +72,13 @@ impl Planner {
                 .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
+            base_table.for_system_time_as_of_proctime,
         )
         .into())
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        let column_descs = source
-            .catalog
-            .columns
-            .iter()
-            .map(|column| column.column_desc.clone())
-            .collect_vec();
-        let pk_col_ids = source.catalog.pk_col_ids.clone();
-        let row_id_index = source.catalog.row_id_index;
-        let gen_row_id = source.catalog.append_only;
-        Ok(LogicalSource::new(
-            Some(Rc::new(source.catalog)),
-            column_descs,
-            pk_col_ids,
-            row_id_index,
-            gen_row_id,
-            self.ctx(),
-        )
-        .into())
+        Ok(LogicalSource::with_catalog(Rc::new(source.catalog), false, self.ctx())?.into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
@@ -130,8 +116,18 @@ impl Planner {
         }
     }
 
-    pub(super) fn plan_table_function(&mut self, table_function: TableFunction) -> Result<PlanRef> {
-        Ok(LogicalTableFunction::new(table_function, self.ctx()).into())
+    pub(super) fn plan_table_function(&mut self, table_function: ExprImpl) -> Result<PlanRef> {
+        // TODO: maybe we can unify LogicalTableFunction with LogicalValues
+        match table_function {
+            ExprImpl::TableFunction(tf) => Ok(LogicalTableFunction::new(*tf, self.ctx()).into()),
+            expr => {
+                let schema = Schema {
+                    // TODO: should be named
+                    fields: vec![Field::unnamed(expr.return_type())],
+                };
+                Ok(LogicalValues::create(vec![vec![expr]], schema, self.ctx()))
+            }
+        }
     }
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
@@ -192,8 +188,8 @@ impl Planner {
         let mut args = args.into_iter();
         let col_data_types: Vec<_> = Self::collect_col_data_types_for_tumble_window(&input)?;
 
-        match (args.next(), args.next()) {
-            (Some(window_size @ ExprImpl::Literal(_)), None) => {
+        match (args.next(), args.next(), args.next()) {
+            (Some(window_size @ ExprImpl::Literal(_)), None, None) => {
                 let mut exprs = Vec::with_capacity(col_data_types.len() + 2);
                 for (idx, col_dt) in col_data_types.iter().enumerate() {
                     exprs.push(InputRef::new(idx, col_dt.clone()).into());
@@ -201,6 +197,36 @@ impl Planner {
                 let window_start: ExprImpl = FunctionCall::new(
                     ExprType::TumbleStart,
                     vec![ExprImpl::InputRef(Box::new(time_col)), window_size.clone()],
+                )?
+                .into();
+                // TODO: `window_end` may be optimized to avoid double calculation of
+                // `tumble_start`, or we can depends on common expression
+                // optimization.
+                let window_end =
+                    FunctionCall::new(ExprType::Add, vec![window_start.clone(), window_size])?
+                        .into();
+                exprs.push(window_start);
+                exprs.push(window_end);
+                let base = self.plan_relation(input)?;
+                let project = LogicalProject::create(base, exprs);
+                Ok(project)
+            }
+            (
+                Some(window_size @ ExprImpl::Literal(_)),
+                Some(window_offset @ ExprImpl::Literal(_)),
+                None,
+            ) => {
+                let mut exprs = Vec::with_capacity(col_data_types.len() + 2);
+                for (idx, col_dt) in col_data_types.iter().enumerate() {
+                    exprs.push(InputRef::new(idx, col_dt.clone()).into());
+                }
+                let window_start: ExprImpl = FunctionCall::new(
+                    ExprType::TumbleStart,
+                    vec![
+                        ExprImpl::InputRef(Box::new(time_col)),
+                        window_size.clone(),
+                        window_offset,
+                    ],
                 )?
                 .into();
                 // TODO: `window_end` may be optimized to avoid double calculation of
@@ -227,14 +253,26 @@ impl Planner {
     ) -> Result<PlanRef> {
         let input = self.plan_relation(input)?;
         let mut args = args.into_iter();
-        let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) = args.next_tuple() else {
+        let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) =
+            args.next_tuple()
+        else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
+
         let Some(ScalarImpl::Interval(window_slide)) = *window_slide.get_data() else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
         let Some(ScalarImpl::Interval(window_size)) = *window_size.get_data() else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
+        };
+
+        let window_offset = match (args.next(), args.next()) {
+            (Some(ExprImpl::Literal(window_offset)), None) => match *window_offset.get_data() {
+                Some(ScalarImpl::Interval(window_offset)) => window_offset,
+                _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
+            },
+            (None, None) => Interval::from_month_day_usec(0, 0, 0),
+            _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
         };
 
         if !window_size.is_positive() || !window_slide.is_positive() {
@@ -248,11 +286,13 @@ impl Planner {
         if window_size.exact_div(&window_slide).is_none() {
             return Err(ErrorCode::BindError(format!("Invalid arguments for HOP window function: window_size {} cannot be divided by window_slide {}",window_size, window_slide)).into());
         }
+
         Ok(LogicalHopWindow::create(
             input,
             time_col,
             window_slide,
             window_size,
+            window_offset,
         ))
     }
 }

@@ -15,11 +15,18 @@
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Query, TableAlias};
 
+use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, BoundQuery, UNNAMED_SUBQUERY};
 
 #[derive(Debug, Clone)]
 pub struct BoundSubquery {
     pub query: BoundQuery,
+}
+
+impl RewriteExprsRecursive for BoundSubquery {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.query.rewrite_exprs_recursive(rewriter);
+    }
 }
 
 impl Binder {

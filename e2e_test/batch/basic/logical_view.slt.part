@@ -40,8 +40,7 @@ SELECT * FROM v3;
 statement error
 DROP TABLE t;
 
-# Currently it is allowed to drop a view even it is depended by another view.
-statement ok
+statement error other relation\(s\) depend on it
 DROP VIEW v2;
 
 statement error
@@ -49,6 +48,9 @@ SELECT * from v3;
 
 statement ok
 DROP VIEW v3;
+
+statement ok
+DROP VIEW v2;
 
 statement error
 SELECT * FROM v3;

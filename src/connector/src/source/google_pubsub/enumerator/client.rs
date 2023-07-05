@@ -47,13 +47,13 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties.initialize_env();
 
         // Validate config
-        let client = Client::default()
+        let client = Client::new(Default::default())
             .await
             .map_err(|e| anyhow!("error initializing pubsub client: {:?}", e))?;
 
         let sub = client.subscription(&subscription);
         if !sub
-            .exists(None, None)
+            .exists(None)
             .await
             .map_err(|e| anyhow!("error checking subscription validity: {:?}", e))?
         {
@@ -62,7 +62,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
 
         // We need the `retain_acked_messages` configuration to be true to seek back to timestamps
         // as done in the [`PubsubSplitReader`] and here.
-        let (_, subscription_config) = sub.config(None, None).await?;
+        let (_, subscription_config) = sub.config(None).await?;
         if let SubscriptionConfig {
             retain_acked_messages: false,
             ..
@@ -87,7 +87,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         };
 
         if let Some(seek_to) = seek_to {
-            sub.seek(seek_to, None, None)
+            sub.seek(seek_to, None)
                 .await
                 .map_err(|e| anyhow!("error seeking subscription: {:?}", e))?;
         }

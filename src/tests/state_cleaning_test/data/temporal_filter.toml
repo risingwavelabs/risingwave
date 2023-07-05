@@ -1,0 +1,45 @@
+[[test]]
+name = "temporal_filter"
+init_sqls = [
+    """
+    CREATE TABLE clicks (
+        click_id INTEGER,
+        user_id INTEGER,
+        created_at TIMESTAMP,
+        WATERMARK FOR created_at AS created_at - interval '9' second
+    ) APPEND ONLY WITH (
+        connector = 'datagen',
+        rows_per_second = 200,
+        datagen.split.num = 16,
+        fields.created_at.max_past_mode = 'relative',
+        fields.created_at.max_past = '10s',
+        fields.click_id.kind = 'sequence',
+        fields.click_id.start = 0,
+        fields.user_id.min = 0,
+        fields.user_id.max = 20,
+    );
+    """,
+    # Used by now()
+    """
+    SET TIME ZONE LOCAL;
+    """,
+    """
+    CREATE MATERIALIZED VIEW clicks_10s AS
+    SELECT * FROM clicks WHERE created_at > now() - INTERVAL '10' second;
+    """,
+    """
+    CREATE MATERIALIZED VIEW clicks_20s AS
+    SELECT * FROM clicks WHERE created_at > now() - INTERVAL '20' second;
+    """,
+    """
+    CREATE MATERIALIZED VIEW clicks_30s AS
+    SELECT * FROM clicks WHERE created_at > now() - INTERVAL '30' second;
+    """,
+]
+bound_tables = [
+    { pattern = '__internal_clicks_10s_\d+_dynamicfilterleft_\d+', limit = 300 },
+    { pattern = '__internal_clicks_20s_\d+_dynamicfilterleft_\d+', limit = 600 },
+    { pattern = '__internal_clicks_30s_\d+_dynamicfilterleft_\d+', limit = 900 },
+    # Right table should always only contains 1 record.
+    { pattern = '__internal_clicks_\d+s_\d+_dynamicfilterright_\d+', limit = 1 },
+]

@@ -14,7 +14,7 @@
 
 use chrono::Duration;
 
-use super::{NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl};
+use super::{Date, ScalarImpl, Timestamp};
 
 /// A successor is a term that comes right after a particular value. Suppose n is a number (where n
 /// belongs to any whole number), then the successor of n is 'n+1'. The other terminologies used for
@@ -47,19 +47,17 @@ impl Successor for i64 {
     }
 }
 
-impl Successor for NaiveDateTimeWrapper {
+impl Successor for Timestamp {
     fn successor(&self) -> Option<Self> {
         self.0
             .checked_add_signed(Duration::nanoseconds(1))
-            .map(NaiveDateTimeWrapper)
+            .map(Timestamp)
     }
 }
 
-impl Successor for NaiveDateWrapper {
+impl Successor for Date {
     fn successor(&self) -> Option<Self> {
-        self.0
-            .checked_add_signed(Duration::days(1))
-            .map(NaiveDateWrapper)
+        self.0.checked_add_signed(Duration::days(1)).map(Date)
     }
 }
 
@@ -76,8 +74,8 @@ impl ScalarImpl {
             ScalarImpl::Int16(v) => v.successor().map(ScalarImpl::Int16),
             ScalarImpl::Int32(v) => v.successor().map(ScalarImpl::Int32),
             ScalarImpl::Int64(v) => v.successor().map(ScalarImpl::Int64),
-            ScalarImpl::NaiveDateTime(v) => v.successor().map(ScalarImpl::NaiveDateTime),
-            ScalarImpl::NaiveDate(v) => v.successor().map(ScalarImpl::NaiveDate),
+            ScalarImpl::Timestamp(v) => v.successor().map(ScalarImpl::Timestamp),
+            ScalarImpl::Date(v) => v.successor().map(ScalarImpl::Date),
             _ => None,
         }
     }

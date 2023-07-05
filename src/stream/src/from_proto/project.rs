@@ -15,6 +15,7 @@
 use multimap::MultiMap;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::build_from_prost;
+use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::*;
@@ -49,7 +50,13 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
                         .map(|key| *key as usize),
                 ),
         );
-
+        let extremely_light = node.get_select_list().iter().all(|expr| {
+            matches!(
+                expr.get_rex_node().unwrap(),
+                RexNode::InputRef(_) | RexNode::Constant(_)
+            )
+        });
+        let materialize_selectivity_threshold = if extremely_light { 0.0 } else { 0.5 };
         Ok(ProjectExecutor::new(
             params.actor_context,
             input,
@@ -57,6 +64,7 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             project_exprs,
             params.executor_id,
             watermark_derivations,
+            materialize_selectivity_threshold,
         )
         .boxed())
     }

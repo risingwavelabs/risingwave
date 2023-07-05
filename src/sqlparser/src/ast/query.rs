@@ -43,6 +43,23 @@ pub struct Query {
     pub fetch: Option<Fetch>,
 }
 
+impl Query {
+    /// Simple `VALUES` without other clauses.
+    pub fn as_simple_values(&self) -> Option<&Values> {
+        match &self {
+            Query {
+                with: None,
+                body: SetExpr::Values(values),
+                order_by,
+                limit: None,
+                offset: None,
+                fetch: None,
+            } if order_by.is_empty() => Some(values),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for Query {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(ref with) = self.with {
@@ -292,8 +309,8 @@ pub enum SelectItem {
     ExprWithAlias { expr: Expr, alias: Ident },
     /// `alias.*` or even `schema.table.*`
     QualifiedWildcard(ObjectName),
-    /// An unqualified `*`
-    Wildcard,
+    /// An unqualified `*`, or `* except (exprs)`
+    WildcardOrWithExcept(Option<Vec<Expr>>),
 }
 
 impl fmt::Display for SelectItem {
@@ -310,7 +327,19 @@ impl fmt::Display for SelectItem {
                     .format_with("", |i, f| f(&format_args!(".{i}")))
             ),
             SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            SelectItem::Wildcard => write!(f, "*"),
+            SelectItem::WildcardOrWithExcept(w) => match w {
+                Some(exprs) => write!(
+                    f,
+                    "* EXCEPT ({})",
+                    exprs
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => write!(f, "*"),
+            },
         }
     }
 }
@@ -339,6 +368,8 @@ pub enum TableFactor {
     Table {
         name: ObjectName,
         alias: Option<TableAlias>,
+        /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
+        for_system_time_as_of_proctime: bool,
     },
     Derived {
         lateral: bool,
@@ -363,8 +394,15 @@ pub enum TableFactor {
 impl fmt::Display for TableFactor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TableFactor::Table { name, alias } => {
+            TableFactor::Table {
+                name,
+                alias,
+                for_system_time_as_of_proctime,
+            } => {
                 write!(f, "{}", name)?;
+                if *for_system_time_as_of_proctime {
+                    write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()")?;
+                }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
                 }

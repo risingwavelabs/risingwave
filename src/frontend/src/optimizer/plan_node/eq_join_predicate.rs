@@ -16,11 +16,13 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use crate::expr::{ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDisplay};
+use crate::expr::{
+    ExprRewriter, ExprType, FunctionCall, InequalityInputPair, InputRef, InputRefDisplay,
+};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// The join predicate used in optimizer
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EqJoinPredicate {
     /// Other conditions, linked with `AND` conjunction.
     other_cond: Condition,
@@ -32,6 +34,7 @@ pub struct EqJoinPredicate {
     eq_keys: Vec<(InputRef, InputRef, bool)>,
 
     left_cols_num: usize,
+    right_cols_num: usize,
 }
 
 impl fmt::Display for EqJoinPredicate {
@@ -77,11 +80,13 @@ impl EqJoinPredicate {
         other_cond: Condition,
         eq_keys: Vec<(InputRef, InputRef, bool)>,
         left_cols_num: usize,
+        right_cols_num: usize,
     ) -> Self {
         Self {
             other_cond,
             eq_keys,
             left_cols_num,
+            right_cols_num,
         }
     }
 
@@ -102,7 +107,7 @@ impl EqJoinPredicate {
     /// ```
     pub fn create(left_cols_num: usize, right_cols_num: usize, on_clause: Condition) -> Self {
         let (eq_keys, other_cond) = on_clause.split_eq_keys(left_cols_num, right_cols_num);
-        Self::new(other_cond, eq_keys, left_cols_num)
+        Self::new(other_cond, eq_keys, left_cols_num, right_cols_num)
     }
 
     /// Get join predicate's eq conds.
@@ -172,6 +177,14 @@ impl EqJoinPredicate {
             .collect()
     }
 
+    pub(crate) fn inequality_pairs(&self) -> (usize, Vec<(usize, InequalityInputPair)>) {
+        (
+            self.left_cols_num,
+            self.other_cond()
+                .extract_inequality_keys(self.left_cols_num, self.right_cols_num),
+        )
+    }
+
     /// Note: `right_col_index` starts from `0`
     pub fn eq_indexes_typed(&self) -> Vec<(InputRef, InputRef)> {
         self.eq_keys
@@ -227,6 +240,15 @@ impl EqJoinPredicate {
         ColIndexMapping::new(map)
     }
 
+    /// return the eq columns index mapping from left inputs to right inputs
+    pub fn l2r_eq_columns_mapping(&self, left_cols_num: usize) -> ColIndexMapping {
+        let mut map = vec![None; left_cols_num];
+        for (left, right, _) in self.eq_keys() {
+            map[left.index] = Some(right.index - left_cols_num);
+        }
+        ColIndexMapping::new(map)
+    }
+
     /// Reorder the `eq_keys` according to the `reorder_idx`.
     pub fn reorder(self, reorder_idx: &[usize]) -> Self {
         assert!(reorder_idx.len() <= self.eq_keys.len());
@@ -240,7 +262,12 @@ impl EqJoinPredicate {
             }
         }
 
-        Self::new(self.other_cond, new_eq_keys, self.left_cols_num)
+        Self::new(
+            self.other_cond,
+            new_eq_keys,
+            self.left_cols_num,
+            self.right_cols_num,
+        )
     }
 
     pub fn rewrite_exprs(&self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {

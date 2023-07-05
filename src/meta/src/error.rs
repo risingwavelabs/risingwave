@@ -15,7 +15,8 @@
 use std::backtrace::Backtrace;
 use std::sync::Arc;
 
-use risingwave_pb::ProstFieldNotFound;
+use risingwave_connector::sink::SinkError;
+use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
 use crate::hummock::error::Error as HummockError;
@@ -42,8 +43,11 @@ enum MetaErrorInner {
     #[error("PermissionDenied: {0}")]
     PermissionDenied(String),
 
-    #[error("Invalid worker: {0}")]
-    InvalidWorker(WorkerId),
+    #[error("Invalid worker: {0}, {1}")]
+    InvalidWorker(WorkerId, String),
+
+    #[error("Invalid parameter: {0}")]
+    InvalidParameter(String),
 
     // Used for catalog errors.
     #[error("{0} id not found: {1}")]
@@ -58,8 +62,14 @@ enum MetaErrorInner {
     #[error("Election failed: {0}")]
     Election(etcd_client::Error),
 
-    #[error("SystemParam error: {0}")]
-    SystemParam(String),
+    #[error("Cancelled: {0}")]
+    Cancelled(String),
+
+    #[error("SystemParams error: {0}")]
+    SystemParams(String),
+
+    #[error("Sink error: {0}")]
+    Sink(SinkError),
 
     #[error(transparent)]
     Internal(anyhow::Error),
@@ -102,13 +112,17 @@ impl MetaError {
         MetaErrorInner::PermissionDenied(s).into()
     }
 
-    pub fn invalid_worker(worker_id: WorkerId) -> Self {
-        MetaErrorInner::InvalidWorker(worker_id).into()
+    pub fn invalid_worker(worker_id: WorkerId, msg: String) -> Self {
+        MetaErrorInner::InvalidWorker(worker_id, msg).into()
     }
 
     pub fn is_invalid_worker(&self) -> bool {
         use std::borrow::Borrow;
-        std::matches!(self.inner.borrow(), &MetaErrorInner::InvalidWorker(_))
+        std::matches!(self.inner.borrow(), &MetaErrorInner::InvalidWorker(..))
+    }
+
+    pub fn invalid_parameter(s: impl Into<String>) -> Self {
+        MetaErrorInner::InvalidParameter(s.into()).into()
     }
 
     pub fn catalog_id_not_found<T: Into<u32>>(relation: &'static str, id: T) -> Self {
@@ -119,12 +133,16 @@ impl MetaError {
         MetaErrorInner::Duplicated(relation, name.into()).into()
     }
 
-    pub fn system_param<T: Into<String>>(s: T) -> Self {
-        MetaErrorInner::SystemParam(s.into()).into()
+    pub fn system_param<T: ToString>(s: T) -> Self {
+        MetaErrorInner::SystemParams(s.to_string()).into()
     }
 
     pub fn unavailable(s: String) -> Self {
         MetaErrorInner::Unavailable(s).into()
+    }
+
+    pub fn cancelled(s: String) -> Self {
+        MetaErrorInner::Cancelled(s).into()
     }
 }
 
@@ -152,9 +170,24 @@ impl From<RpcError> for MetaError {
     }
 }
 
+impl From<SinkError> for MetaError {
+    fn from(e: SinkError) -> Self {
+        MetaErrorInner::Sink(e).into()
+    }
+}
+
 impl From<anyhow::Error> for MetaError {
     fn from(a: anyhow::Error) -> Self {
         MetaErrorInner::Internal(a).into()
+    }
+}
+
+impl<E> From<aws_sdk_ec2::error::SdkError<E>> for MetaError
+where
+    E: std::error::Error + Sync + Send + 'static,
+{
+    fn from(e: aws_sdk_ec2::error::SdkError<E>) -> Self {
+        MetaErrorInner::Internal(e.into()).into()
     }
 }
 
@@ -167,13 +200,17 @@ impl From<MetaError> for tonic::Status {
             MetaErrorInner::CatalogIdNotFound(_, _) => tonic::Status::not_found(err.to_string()),
             MetaErrorInner::Duplicated(_, _) => tonic::Status::already_exists(err.to_string()),
             MetaErrorInner::Unavailable(_) => tonic::Status::unavailable(err.to_string()),
+            MetaErrorInner::Cancelled(_) => tonic::Status::cancelled(err.to_string()),
+            MetaErrorInner::InvalidParameter(msg) => {
+                tonic::Status::invalid_argument(msg.to_owned())
+            }
             _ => tonic::Status::internal(err.to_string()),
         }
     }
 }
 
-impl From<ProstFieldNotFound> for MetaError {
-    fn from(e: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for MetaError {
+    fn from(e: PbFieldNotFound) -> Self {
         MetadataModelError::from(e).into()
     }
 }

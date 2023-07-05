@@ -1,0 +1,19 @@
+# https://github.com/risingwavelabs/risingwave/issues/7698
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (src int, dst int);
+
+statement ok
+create materialized view cycle_3 as select t1.src p1, t1.dst p2, t2.dst p3 from t t1, t t2, t t3 where t1.dst = t2.src and t2.src = t3.dst and t3.dst = t1.src;
+
+statement ok
+insert into t values (1, 2), (2, 1);
+
+statement ok
+drop materialized view cycle_3;
+
+statement ok
+drop table t;

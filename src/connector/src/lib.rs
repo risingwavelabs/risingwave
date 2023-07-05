@@ -21,17 +21,21 @@
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
+#![feature(return_position_impl_trait_in_trait)]
+#![feature(async_fn_in_trait)]
 
 use std::time::Duration;
 
 use duration_str::parse_std;
+use risingwave_pb::connector_service::SinkPayloadFormat;
 use serde::de;
 
+pub mod aws_auth;
 pub mod aws_utils;
 pub mod error;
 mod macros;
@@ -45,14 +49,32 @@ pub mod common;
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
     pub connector_rpc_endpoint: Option<String>,
+    pub sink_payload_format: SinkPayloadFormat,
 }
 
 impl ConnectorParams {
-    pub fn new(connector_rpc_endpoint: Option<String>) -> Self {
+    pub fn new(
+        connector_rpc_endpoint: Option<String>,
+        sink_payload_format: SinkPayloadFormat,
+    ) -> Self {
         Self {
             connector_rpc_endpoint,
+            sink_payload_format,
         }
     }
+}
+
+pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: String = de::Deserialize::deserialize(deserializer)?;
+    s.parse().map_err(|_| {
+        de::Error::invalid_value(
+            de::Unexpected::Str(&s),
+            &"integer greater than or equal to 0",
+        )
+    })
 }
 
 pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>

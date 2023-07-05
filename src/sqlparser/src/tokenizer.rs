@@ -25,12 +25,14 @@ use alloc::{
     vec::Vec,
 };
 use core::fmt;
+use core::fmt::Debug;
 use core::iter::Peekable;
 use core::str::Chars;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::ast::DollarQuotedString;
 use crate::keywords::{Keyword, ALL_KEYWORDS, ALL_KEYWORDS_INDEX};
 
 /// SQL Token enumeration
@@ -47,12 +49,16 @@ pub enum Token {
     Char(char),
     /// Single quoted string: i.e: 'string'
     SingleQuotedString(String),
+    /// Dollar quoted string: i.e: $$string$$ or $tag_name$string$tag_name$
+    DollarQuotedString(DollarQuotedString),
     /// Single quoted string with c-style escapes: i.e: E'string'
     CstyleEscapesString(String),
     /// "National" string literal: i.e: N'string'
     NationalStringLiteral(String),
     /// Hexadecimal string literal: i.e.: X'deadbeef'
     HexStringLiteral(String),
+    /// Parameter symbols: i.e:  $1, $2
+    Parameter(String),
     /// Comma
     Comma,
     /// Whitespace (space, tab, etc)
@@ -109,6 +115,8 @@ pub enum Token {
     Pipe,
     /// Caret `^`
     Caret,
+    /// Prefix `^@`
+    Prefix,
     /// Left brace `{`
     LBrace,
     /// Right brace `}`
@@ -140,6 +148,14 @@ pub enum Token {
     PGSquareRoot,
     /// `||/` , a cube root math operator in PostgreSQL
     PGCubeRoot,
+    /// `->`, access JSON object field or array element in PostgreSQL
+    Arrow,
+    /// `->>`, access JSON object field or array element as text in PostgreSQL
+    LongArrow,
+    /// `#>`, extract JSON sub-object at the specified path in PostgreSQL
+    HashArrow,
+    /// `#>>`, extract JSON sub-object at the specified path as text in PostgreSQL
+    HashLongArrow,
 }
 
 impl fmt::Display for Token {
@@ -150,9 +166,11 @@ impl fmt::Display for Token {
             Token::Number(ref n) => write!(f, "{}", n),
             Token::Char(ref c) => write!(f, "{}", c),
             Token::SingleQuotedString(ref s) => write!(f, "'{}'", s),
+            Token::DollarQuotedString(ref s) => write!(f, "{}", s),
             Token::NationalStringLiteral(ref s) => write!(f, "N'{}'", s),
             Token::HexStringLiteral(ref s) => write!(f, "X'{}'", s),
             Token::CstyleEscapesString(ref s) => write!(f, "E'{}'", s),
+            Token::Parameter(ref s) => write!(f, "${}", s),
             Token::Comma => f.write_str(","),
             Token::Whitespace(ws) => write!(f, "{}", ws),
             Token::DoubleEq => f.write_str("=="),
@@ -180,6 +198,7 @@ impl fmt::Display for Token {
             Token::RBracket => f.write_str("]"),
             Token::Ampersand => f.write_str("&"),
             Token::Caret => f.write_str("^"),
+            Token::Prefix => f.write_str("^@"),
             Token::Pipe => f.write_str("|"),
             Token::LBrace => f.write_str("{"),
             Token::RBrace => f.write_str("}"),
@@ -196,6 +215,10 @@ impl fmt::Display for Token {
             Token::ShiftRight => f.write_str(">>"),
             Token::PGSquareRoot => f.write_str("|/"),
             Token::PGCubeRoot => f.write_str("||/"),
+            Token::Arrow => f.write_str("->"),
+            Token::LongArrow => f.write_str("->>"),
+            Token::HashArrow => f.write_str("#>"),
+            Token::HashLongArrow => f.write_str("#>>"),
         }
     }
 }
@@ -217,6 +240,10 @@ impl Token {
                 Keyword::NoKeyword
             },
         })
+    }
+
+    pub fn with_location(self, location: Location) -> TokenWithLocation {
+        TokenWithLocation::new(self, location.line, location.column)
     }
 }
 
@@ -281,6 +308,61 @@ impl fmt::Display for Whitespace {
     }
 }
 
+/// Location in input string
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct Location {
+    /// Line number, starting from 1
+    pub line: u64,
+    /// Line column, starting from 1
+    pub column: u64,
+}
+
+/// A [Token] with [Location] attached to it
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct TokenWithLocation {
+    pub token: Token,
+    pub location: Location,
+}
+
+impl TokenWithLocation {
+    pub fn new(token: Token, line: u64, column: u64) -> TokenWithLocation {
+        TokenWithLocation {
+            token,
+            location: Location { line, column },
+        }
+    }
+
+    pub fn wrap(token: Token) -> TokenWithLocation {
+        TokenWithLocation::new(token, 0, 0)
+    }
+}
+
+impl PartialEq<Token> for TokenWithLocation {
+    fn eq(&self, other: &Token) -> bool {
+        &self.token == other
+    }
+}
+
+impl PartialEq<TokenWithLocation> for Token {
+    fn eq(&self, other: &TokenWithLocation) -> bool {
+        self == &other.token
+    }
+}
+
+impl fmt::Display for TokenWithLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.token == Token::EOF {
+            write!(f, "EOF at the end")
+        } else {
+            write!(
+                f,
+                "{} at line:{}, column:{}",
+                self.token, self.location.line, self.location.column
+            )
+        }
+    }
+}
+
 /// Tokenizer error
 #[derive(Debug, PartialEq)]
 pub struct TokenizerError {
@@ -319,11 +401,11 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    /// Tokenize the statement and produce a vector of tokens
-    pub fn tokenize(&mut self) -> Result<Vec<Token>, TokenizerError> {
+    /// Tokenize the statement and produce a vector of tokens with locations.
+    pub fn tokenize_with_location(&mut self) -> Result<Vec<TokenWithLocation>, TokenizerError> {
         let mut peekable = self.query.chars().peekable();
 
-        let mut tokens: Vec<Token> = vec![];
+        let mut tokens: Vec<TokenWithLocation> = vec![];
 
         while let Some(token) = self.next_token(&mut peekable)? {
             match &token {
@@ -340,14 +422,22 @@ impl<'a> Tokenizer<'a> {
                 _ => self.col += 1,
             }
 
-            tokens.push(token);
+            let token_with_location = TokenWithLocation::new(token, self.line, self.col);
+
+            tokens.push(token_with_location);
         }
         Ok(tokens)
     }
 
+    /// Tokenize the statement and produce a vector of tokens without locations.
+    #[allow(dead_code)]
+    fn tokenize(&mut self) -> Result<Vec<Token>, TokenizerError> {
+        self.tokenize_with_location()
+            .map(|v| v.into_iter().map(|t| t.token).collect())
+    }
+
     /// Get the next token or return None
     fn next_token(&self, chars: &mut Peekable<Chars<'_>>) -> Result<Option<Token>, TokenizerError> {
-        // println!("next_token: {:?}", chars.peek());
         match chars.peek() {
             Some(&ch) => match ch {
                 ' ' => self.consume_and_return(chars, Token::Whitespace(Whitespace::Space)),
@@ -503,6 +593,16 @@ impl<'a> Tokenizer<'a> {
                                 comment,
                             })))
                         }
+                        Some('>') => {
+                            chars.next(); // consume first '>'
+                            match chars.peek() {
+                                Some('>') => {
+                                    chars.next(); // consume second '>'
+                                    Ok(Some(Token::LongArrow))
+                                }
+                                _ => Ok(Some(Token::Arrow)),
+                            }
+                        }
                         // a regular '-' operator
                         _ => Ok(Some(Token::Minus)),
                     }
@@ -589,12 +689,19 @@ impl<'a> Tokenizer<'a> {
                         _ => Ok(Some(Token::Colon)),
                     }
                 }
+                '$' => Ok(Some(self.tokenize_dollar_preceded_value(chars)?)),
                 ';' => self.consume_and_return(chars, Token::SemiColon),
                 '\\' => self.consume_and_return(chars, Token::Backslash),
                 '[' => self.consume_and_return(chars, Token::LBracket),
                 ']' => self.consume_and_return(chars, Token::RBracket),
                 '&' => self.consume_and_return(chars, Token::Ampersand),
-                '^' => self.consume_and_return(chars, Token::Caret),
+                '^' => {
+                    chars.next();
+                    match chars.peek() {
+                        Some('@') => self.consume_and_return(chars, Token::Prefix),
+                        _ => Ok(Some(Token::Caret)),
+                    }
+                }
                 '{' => self.consume_and_return(chars, Token::LBrace),
                 '}' => self.consume_and_return(chars, Token::RBrace),
                 '~' => {
@@ -604,12 +711,114 @@ impl<'a> Tokenizer<'a> {
                         _ => Ok(Some(Token::Tilde)),
                     }
                 }
-                '#' => self.consume_and_return(chars, Token::Sharp),
+                '#' => {
+                    chars.next(); // consume the '#'
+                    match chars.peek() {
+                        Some('>') => {
+                            chars.next(); // consume first '>'
+                            match chars.peek() {
+                                Some('>') => {
+                                    chars.next(); // consume second '>'
+                                    Ok(Some(Token::HashLongArrow))
+                                }
+                                _ => Ok(Some(Token::HashArrow)),
+                            }
+                        }
+                        // a regular '#' operator
+                        _ => Ok(Some(Token::Sharp)),
+                    }
+                }
                 '@' => self.consume_and_return(chars, Token::AtSign),
                 other => self.consume_and_return(chars, Token::Char(other)),
             },
             None => Ok(None),
         }
+    }
+
+    /// Tokenize dollar preceded value (i.e: a string/placeholder)
+    fn tokenize_dollar_preceded_value(
+        &self,
+        chars: &mut Peekable<Chars<'_>>,
+    ) -> Result<Token, TokenizerError> {
+        let mut s = String::new();
+        let mut value = String::new();
+
+        chars.next();
+
+        if let Some('$') = chars.peek() {
+            chars.next();
+
+            let mut is_terminated = false;
+            let mut prev: Option<char> = None;
+
+            while let Some(&ch) = chars.peek() {
+                if prev == Some('$') {
+                    if ch == '$' {
+                        chars.next();
+                        is_terminated = true;
+                        break;
+                    } else {
+                        s.push('$');
+                        s.push(ch);
+                    }
+                } else if ch != '$' {
+                    s.push(ch);
+                }
+
+                prev = Some(ch);
+                chars.next();
+            }
+
+            return if chars.peek().is_none() && !is_terminated {
+                self.tokenizer_error("Unterminated dollar-quoted string")
+            } else {
+                Ok(Token::DollarQuotedString(DollarQuotedString {
+                    value: s,
+                    tag: None,
+                }))
+            };
+        } else {
+            value.push_str(&peeking_take_while(chars, |ch| {
+                ch.is_alphanumeric() || ch == '_'
+            }));
+
+            if let Some('$') = chars.peek() {
+                chars.next();
+                s.push_str(&peeking_take_while(chars, |ch| ch != '$'));
+
+                match chars.peek() {
+                    Some('$') => {
+                        chars.next();
+                        for (_, c) in value.chars().enumerate() {
+                            let next_char = chars.next();
+                            if Some(c) != next_char {
+                                return self.tokenizer_error(format!(
+                                    "Unterminated dollar-quoted string at or near \"{}\"",
+                                    value
+                                ));
+                            }
+                        }
+
+                        if let Some('$') = chars.peek() {
+                            chars.next();
+                        } else {
+                            return self
+                                .tokenizer_error("Unterminated dollar-quoted string, expected $");
+                        }
+                    }
+                    _ => {
+                        return self.tokenizer_error("Unterminated dollar-quoted, expected $");
+                    }
+                }
+            } else {
+                return Ok(Token::Parameter(value));
+            }
+        }
+
+        Ok(Token::DollarQuotedString(DollarQuotedString {
+            value: s,
+            tag: if value.is_empty() { None } else { Some(value) },
+        }))
     }
 
     fn tokenizer_error<R>(&self, message: impl Into<String>) -> Result<R, TokenizerError> {

@@ -1,0 +1,56 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (k int, v int) append only;
+
+statement ok
+create materialized view mv1 as select distinct on (k) k + v as sum from t1;
+
+statement ok
+insert into t1 values (1,11), (2,22), (3,33), (1,111);
+
+query I rowsort
+select * from mv1;
+----
+12
+24
+36
+
+statement ok
+create table t2 (k int, v int);
+
+statement ok
+create materialized view mv2 as select distinct on (k) k + v as sum from t2;
+
+statement ok
+insert into t2 values (1,11), (2,22), (3,33), (1,111);
+
+query I rowsort
+select * from mv2;
+----
+12
+24
+36
+
+statement ok
+delete from t2 where v = 11;
+
+query I rowsort
+select * from mv2;
+----
+112
+24
+36
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

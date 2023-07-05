@@ -12,41 +12,167 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt::Debug;
+use std::marker::PhantomData;
+use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, Op};
+use risingwave_common::array::stream_record::{Record, RecordType};
+use risingwave_common::array::{ArrayRef, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
-use super::{AggCall, DistinctDeduplicater};
 use crate::common::table::state_table::StateTable;
+use crate::common::StreamChunkBuilder;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
+pub trait Strategy {
+    /// Infer the change type of the aggregation result. Don't need to take the ownership of
+    /// `prev_outputs` and `curr_outputs`.
+    fn infer_change_type(
+        prev_row_count: usize,
+        curr_row_count: usize,
+        prev_outputs: Option<&OwnedRow>,
+        curr_outputs: &OwnedRow,
+    ) -> Option<RecordType>;
+}
+
+/// The strategy that always outputs the aggregation result no matter there're input rows or not.
+pub struct AlwaysOutput;
+/// The strategy that only outputs the aggregation result when there're input rows. If row count
+/// drops to 0, the output row will be deleted.
+pub struct OnlyOutputIfHasInput;
+
+impl Strategy for AlwaysOutput {
+    fn infer_change_type(
+        prev_row_count: usize,
+        curr_row_count: usize,
+        prev_outputs: Option<&OwnedRow>,
+        curr_outputs: &OwnedRow,
+    ) -> Option<RecordType> {
+        match prev_outputs {
+            None => {
+                // First time to build changes, assert to ensure correctness.
+                // Note that it's not true vice versa, i.e. `prev_row_count == 0` doesn't imply
+                // `prev_outputs == None`.
+                assert_eq!(prev_row_count, 0);
+
+                // Generate output no matter whether current row count is 0 or not.
+                Some(RecordType::Insert)
+            }
+            Some(prev_outputs) => {
+                if prev_row_count == 0 && curr_row_count == 0 || prev_outputs == curr_outputs {
+                    // No rows exist, or output is not changed.
+                    None
+                } else {
+                    Some(RecordType::Update)
+                }
+            }
+        }
+    }
+}
+
+impl Strategy for OnlyOutputIfHasInput {
+    fn infer_change_type(
+        prev_row_count: usize,
+        curr_row_count: usize,
+        prev_outputs: Option<&OwnedRow>,
+        curr_outputs: &OwnedRow,
+    ) -> Option<RecordType> {
+        match (prev_row_count, curr_row_count) {
+            (0, 0) => {
+                // No rows of current group exist.
+                None
+            }
+            (0, _) => {
+                // Insert new output row for this newly emerged group.
+                Some(RecordType::Insert)
+            }
+            (_, 0) => {
+                // Delete old output row for this newly disappeared group.
+                Some(RecordType::Delete)
+            }
+            (_, _) => {
+                // Update output row.
+                if prev_outputs.expect("must exist previous outputs") == curr_outputs {
+                    // No output change.
+                    None
+                } else {
+                    Some(RecordType::Update)
+                }
+            }
+        }
+    }
+}
+
+/// [`GroupKey`] wraps a concrete group key and handle its mapping to state table pk.
+#[derive(Clone, Debug)]
+pub struct GroupKey {
+    row_prefix: OwnedRow,
+    table_pk_projection: Arc<[usize]>,
+}
+
+impl GroupKey {
+    pub fn new(row_prefix: OwnedRow, table_pk_projection: Option<Arc<[usize]>>) -> Self {
+        let table_pk_projection =
+            table_pk_projection.unwrap_or_else(|| (0..row_prefix.len()).collect());
+        Self {
+            row_prefix,
+            table_pk_projection,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.row_prefix.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.row_prefix.is_empty()
+    }
+
+    /// Get the group key for state table row prefix.
+    pub fn table_row(&self) -> &OwnedRow {
+        &self.row_prefix
+    }
+
+    /// Get the group key for state table pk prefix.
+    pub fn table_pk(&self) -> impl Row + '_ {
+        (&self.row_prefix).project(&self.table_pk_projection)
+    }
+
+    /// Get the group key for LRU cache key prefix.
+    pub fn cache_key(&self) -> impl Row + '_ {
+        self.table_row()
+    }
+}
+
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
-pub struct AggGroup<S: StateStore> {
+pub struct AggGroup<S: StateStore, Strtg: Strategy> {
     /// Group key.
-    group_key: Option<OwnedRow>,
+    group_key: Option<GroupKey>,
 
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState<S>>,
 
-    /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
-    distinct_dedup: DistinctDeduplicater<S>,
-
     /// Previous outputs of managed states. Initializing with `None`.
     prev_outputs: Option<OwnedRow>,
+
+    /// Index of row count agg call (`count(*)`) in the call list.
+    row_count_index: usize,
+
+    _phantom: PhantomData<Strtg>,
 }
 
-impl<S: StateStore> Debug for AggGroup<S> {
+impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AggGroup")
             .field("group_key", &self.group_key)
@@ -55,32 +181,32 @@ impl<S: StateStore> Debug for AggGroup<S> {
     }
 }
 
-/// We assume the first state of aggregation is always `StreamingRowCountAgg`.
-const ROW_COUNT_COLUMN: usize = 0;
-
-/// Information about the changes built by `AggState::build_changes`.
-pub struct AggChangesInfo {
-    /// The number of rows and corresponding ops in the changes.
-    pub n_appended_ops: usize,
-    /// The result row containing group key prefix. To be inserted into result table.
-    pub result_row: OwnedRow,
-    /// The previous outputs of all agg calls recorded in the `AggState`.
-    pub prev_outputs: Option<OwnedRow>,
+impl<S: StateStore, Strtg: Strategy> EstimateSize for AggGroup<S, Strtg> {
+    fn estimated_heap_size(&self) -> usize {
+        self.states
+            .iter()
+            .map(|state| state.estimated_heap_size())
+            .sum()
+    }
 }
 
-impl<S: StateStore> AggGroup<S> {
+impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// Create [`AggGroup`] for the given [`AggCall`]s and `group_key`.
-    /// For [`crate::executor::GlobalSimpleAggExecutor`], the `group_key` should be `None`.
+    /// For [`crate::executor::SimpleAggExecutor`], the `group_key` should be `None`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
-        group_key: Option<OwnedRow>,
+        group_key: Option<GroupKey>,
         agg_calls: &[AggCall],
         storages: &[AggStateStorage<S>],
         result_table: &StateTable<S>,
         pk_indices: &PkIndices,
+        row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
-    ) -> StreamExecutorResult<AggGroup<S>> {
-        let prev_outputs: Option<OwnedRow> = result_table.get_row(&group_key).await?;
+    ) -> StreamExecutorResult<AggGroup<S, Strtg>> {
+        let prev_outputs: Option<OwnedRow> = result_table
+            .get_row(group_key.as_ref().map(GroupKey::table_pk))
+            .await?;
         if let Some(prev_outputs) = &prev_outputs {
             assert_eq!(prev_outputs.len(), agg_calls.len());
         }
@@ -102,18 +228,19 @@ impl<S: StateStore> AggGroup<S> {
         Ok(Self {
             group_key,
             states,
-            distinct_dedup: DistinctDeduplicater::new(agg_calls),
             prev_outputs,
+            row_count_index,
+            _phantom: PhantomData,
         })
     }
 
-    pub fn group_key(&self) -> Option<&OwnedRow> {
+    pub fn group_key(&self) -> Option<&GroupKey> {
         self.group_key.as_ref()
     }
 
     fn prev_row_count(&self) -> usize {
         match &self.prev_outputs {
-            Some(states) => states[ROW_COUNT_COLUMN]
+            Some(states) => states[self.row_count_index]
                 .as_ref()
                 .map(|x| *x.as_int64() as usize)
                 .unwrap_or(0),
@@ -121,27 +248,20 @@ impl<S: StateStore> AggGroup<S> {
         }
     }
 
+    pub(crate) fn is_uninitialized(&self) -> bool {
+        self.prev_outputs.is_none()
+    }
+
     /// Apply input chunk to all managed agg states.
     /// `visibilities` contains the row visibility of the input chunk for each agg call.
-    pub async fn apply_chunk(
+    pub fn apply_chunk(
         &mut self,
         storages: &mut [AggStateStorage<S>],
         ops: &[Op],
-        columns: &[Column],
+        columns: &[ArrayRef],
         visibilities: Vec<Option<Bitmap>>,
-        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
     ) -> StreamExecutorResult<()> {
-        let visibilities = self
-            .distinct_dedup
-            .dedup_chunk(
-                ops,
-                columns,
-                visibilities,
-                distinct_dedup_tables,
-                self.group_key.as_ref(),
-            )
-            .await?;
-        let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
+        let columns = columns.iter().map(|col| col.as_ref()).collect_vec();
         for ((state, storage), visibility) in self
             .states
             .iter_mut()
@@ -159,7 +279,6 @@ impl<S: StateStore> AggGroup<S> {
     pub async fn flush_state_if_needed(
         &self,
         storages: &mut [AggStateStorage<S>],
-        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
     ) -> StreamExecutorResult<()> {
         futures::future::try_join_all(self.states.iter().zip_eq_fast(storages).filter_map(
             |(state, storage)| match state {
@@ -171,7 +290,6 @@ impl<S: StateStore> AggGroup<S> {
             },
         ))
         .await?;
-        self.distinct_dedup.flush(distinct_dedup_tables)?;
         Ok(())
     }
 
@@ -181,15 +299,17 @@ impl<S: StateStore> AggGroup<S> {
         self.states.iter_mut().for_each(|state| state.reset());
     }
 
-    /// Get the outputs of all managed agg states.
+    /// Get the outputs of all managed agg states, without group key prefix.
     /// Possibly need to read/sync from state table if the state not cached in memory.
+    /// This method is idempotent, i.e. it can be called multiple times and the outputs are
+    /// guaranteed to be the same.
     pub async fn get_outputs(
         &mut self,
         storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<OwnedRow> {
         // Row count doesn't need I/O, so the following statement is supposed to be fast.
-        let row_count = self.states[ROW_COUNT_COLUMN]
-            .get_output(&storages[ROW_COUNT_COLUMN], self.group_key.as_ref())
+        let row_count = self.states[self.row_count_index]
+            .get_output(&storages[self.row_count_index], self.group_key.as_ref())
             .await?
             .as_ref()
             .map(|x| *x.as_int64() as usize)
@@ -198,6 +318,8 @@ impl<S: StateStore> AggGroup<S> {
             // Reset all states (in fact only value states will be reset).
             // This is important because for some agg calls (e.g. `sum`), if no row is applied,
             // they should output NULL, for some other calls (e.g. `sum0`), they should output 0.
+            // FIXME(rc): Deciding whether to reset states according to `row_count` is not precisely
+            // correct, see https://github.com/risingwavelabs/risingwave/issues/7412 for bug description.
             self.reset();
         }
         futures::future::try_join_all(
@@ -210,112 +332,103 @@ impl<S: StateStore> AggGroup<S> {
         .map(OwnedRow::new)
     }
 
-    /// Build changes into `builders` and `new_ops`, according to previous and current agg outputs.
-    /// Returns [`AggChangesInfo`] contains information about changes built.
-    /// The saved previous outputs will be updated to the latest outputs after building changes.
-    pub fn build_changes(
-        &mut self,
-        curr_outputs: OwnedRow,
-        builders: &mut [ArrayBuilderImpl],
-        new_ops: &mut Vec<Op>,
-    ) -> AggChangesInfo {
-        let row_count = curr_outputs[ROW_COUNT_COLUMN]
-            .as_ref()
-            .map(|x| *x.as_int64())
-            .expect("row count should not be None");
+    /// Build aggregation result change, according to previous and current agg outputs.
+    /// The saved previous outputs will be updated to the latest outputs after this method.
+    pub fn build_change(&mut self, curr_outputs: OwnedRow) -> Option<Record<OwnedRow>> {
         let prev_row_count = self.prev_row_count();
+        let curr_row_count = curr_outputs[self.row_count_index]
+            .as_ref()
+            .map(|x| *x.as_int64() as usize)
+            .expect("row count should not be None");
 
         trace!(
-            "prev_row_count = {}, row_count = {}",
+            "prev_row_count = {}, curr_row_count = {}",
             prev_row_count,
-            row_count
+            curr_row_count
         );
 
-        let n_appended_ops = match (
+        let change_type = Strtg::infer_change_type(
             prev_row_count,
-            row_count,
-            self.group_key().is_some(),
-            self.prev_outputs.is_some(),
-        ) {
-            (0, 0, _, _) => {
-                // Previous state is empty, current state is also empty.
-                // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
-                // While other aggs may not be `0`?
+            curr_row_count,
+            self.prev_outputs.as_ref(),
+            &curr_outputs,
+        );
 
-                0
+        change_type.map(|change_type| match change_type {
+            RecordType::Insert => {
+                let new_row = self
+                    .group_key()
+                    .map(GroupKey::table_row)
+                    .chain(&curr_outputs)
+                    .into_owned_row();
+                self.prev_outputs = Some(curr_outputs);
+                Record::Insert { new_row }
             }
-
-            (0, _, true, _) | (0, _, _, false) => {
-                // Previous state is empty, current state is not empty, insert one `Insert` op.
-                new_ops.push(Op::Insert);
-
-                for (builder, new_value) in builders.iter_mut().zip_eq_fast(curr_outputs.iter()) {
-                    trace!("append_datum (0 -> N): {:?}", new_value);
-                    builder.append_datum(new_value);
-                }
-
-                1
+            RecordType::Delete => {
+                let prev_outputs = self.prev_outputs.take();
+                let old_row = self
+                    .group_key()
+                    .map(GroupKey::table_row)
+                    .chain(prev_outputs)
+                    .into_owned_row();
+                Record::Delete { old_row }
             }
-
-            (_, 0, true, _) => {
-                // Previous state is not empty, current state is empty, insert one `Delete` op.
-                new_ops.push(Op::Delete);
-
-                for (builder, old_value) in builders
-                    .iter_mut()
-                    .zip_eq_fast(self.prev_outputs.as_ref().unwrap().iter())
-                {
-                    trace!("append_datum (N -> 0): {:?}", old_value);
-                    builder.append_datum(old_value);
-                }
-
-                1
+            RecordType::Update => {
+                let new_row = self
+                    .group_key()
+                    .map(GroupKey::table_row)
+                    .chain(&curr_outputs)
+                    .into_owned_row();
+                let prev_outputs = self.prev_outputs.replace(curr_outputs);
+                let old_row = self
+                    .group_key()
+                    .map(GroupKey::table_row)
+                    .chain(prev_outputs)
+                    .into_owned_row();
+                Record::Update { old_row, new_row }
             }
+        })
+    }
+}
 
-            _ => {
-                // 1. Previous state is not empty and current state is not empty.
-                //
-                // 2. Previous state is not empty and current state is empty and there is no group
-                // by keys.
-                //
-                // 3. Previous state is empty and current state is not empty and there is no group
-                // by keys and prev_outputs is not none.
-                //
-                // Insert two `Update` op.
-                new_ops.push(Op::UpdateDelete);
-                new_ops.push(Op::UpdateInsert);
+// TODO(rc): split logic of `StreamChunkBuilder` to chunk builder and row merger.
+/// A wrapper of [`StreamChunkBuilder`] that provides a more convenient API.
+pub struct ChunkBuilder {
+    inner: StreamChunkBuilder,
+}
 
-                for (builder, old_value, new_value) in itertools::multizip((
-                    builders.iter_mut(),
-                    self.prev_outputs.as_ref().unwrap().iter(),
-                    curr_outputs.iter(),
-                )) {
-                    trace!(
-                        "append_datum (N -> N): prev = {:?}, cur = {:?}",
-                        old_value,
-                        new_value
-                    );
-
-                    builder.append_datum(old_value);
-                    builder.append_datum(new_value);
-                }
-
-                2
-            }
-        };
-
-        let result_row = self.group_key().chain(&curr_outputs).into_owned_row();
-
-        let prev_outputs = if n_appended_ops == 0 {
-            self.prev_outputs.clone()
-        } else {
-            std::mem::replace(&mut self.prev_outputs, Some(curr_outputs))
-        };
-
-        AggChangesInfo {
-            n_appended_ops,
-            result_row,
-            prev_outputs,
+impl ChunkBuilder {
+    pub fn new(capacity: usize, data_types: &[DataType]) -> Self {
+        Self {
+            inner: StreamChunkBuilder::new(
+                capacity,
+                data_types,
+                (0..data_types.len()).map(|x| (x, x)).collect(),
+                vec![],
+            ),
         }
+    }
+
+    /// Append a row to the builder, return a chunk if the builder is full.
+    #[must_use]
+    pub fn append_row(&mut self, op: Op, row: impl Row) -> Option<StreamChunk> {
+        self.inner.append_row_update(op, row)
+    }
+
+    /// Append a record to the builder, return a chunk if the builder is full.
+    pub fn append_record(&mut self, record: Record<impl Row>) -> Option<StreamChunk> {
+        match record {
+            Record::Insert { new_row } => self.append_row(Op::Insert, new_row),
+            Record::Delete { old_row } => self.append_row(Op::Delete, old_row),
+            Record::Update { old_row, new_row } => {
+                let _none = self.append_row(Op::UpdateDelete, old_row);
+                self.append_row(Op::UpdateInsert, new_row)
+            }
+        }
+    }
+
+    /// Take remaining rows and build a chunk.
+    pub fn take(&mut self) -> Option<StreamChunk> {
+        self.inner.take()
     }
 }

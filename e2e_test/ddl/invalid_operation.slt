@@ -40,29 +40,29 @@ drop view not_exists.not_exists;
 
 # 3. drop relation in another database
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop table not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop materialized view not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop index not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop source not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop sink not_exists.not_exists.not_exists;
 
-statement error not equal to current database name
+statement error cross-database references are not implemented
 drop view not_exists.not_exists.not_exists;
 
 # 4. Relation exists, but the DROP type is wrong.
 
 # 4.1. table
 statement ok
-create table t (v int);
+create table t (v int primary key);
 
 statement error Use `DROP TABLE`
 drop materialized view t;
@@ -184,7 +184,7 @@ drop view src;
 
 # 4.6 sink 
 statement ok
-CREATE SINK sink FROM mv WITH (connector='console', prefix='DEBUG', suffix='');
+CREATE SINK sink FROM mv WITH (connector='blackhole');
 
 # FIXME: improve the error message
 statement error not found
@@ -264,7 +264,7 @@ SELECT * from v limit 0;
 statement ok
 insert into t values (1);
 
-statement ok
+statement error QueryError: Bind error: update modifying the PK column is banned
 update t set v = 2;
 
 statement ok
@@ -360,6 +360,17 @@ create table sink(v int);
 
 statement error view.*exists
 create table v(v int);
+
+# 8. create with unsupport format
+statement error connector datagen does not support row format DebeziumJson
+create table err_t1 (v int) with (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) row format debezium_json;
 
 # cleanup
 

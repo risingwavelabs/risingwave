@@ -17,7 +17,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use proc_macro_error::{proc_macro_error, ResultExt};
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{DataStruct, DeriveInput};
 
 mod generate;
@@ -44,7 +44,7 @@ fn produce(ast: &DeriveInput) -> TokenStream2 {
     let name = &ast.ident;
 
     // Is it a struct?
-    if let syn::Data::Struct(DataStruct { ref fields, .. }) = ast.data {
+    let struct_get = if let syn::Data::Struct(DataStruct { ref fields, .. }) = ast.data {
         let generated = fields.iter().map(generate::implement);
         quote! {
             impl #name {
@@ -54,5 +54,20 @@ fn produce(ast: &DeriveInput) -> TokenStream2 {
     } else {
         // Do nothing.
         quote! {}
+    };
+
+    // Add a `Pb`-prefixed alias for all types.
+    let pb_alias = {
+        let pb_name = format_ident!("Pb{name}");
+        let doc = format!("Alias for [`{name}`].");
+        quote! {
+            #[doc = #doc]
+            pub type #pb_name = #name;
+        }
+    };
+
+    quote! {
+        #pb_alias
+        #struct_get
     }
 }

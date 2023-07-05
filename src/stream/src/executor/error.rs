@@ -21,11 +21,12 @@ use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
-use risingwave_pb::ProstFieldNotFound;
+use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 
 use super::Barrier;
+use crate::common::log_store::LogStoreError;
 
 #[derive(thiserror::Error, Debug)]
 enum Inner {
@@ -35,6 +36,9 @@ enum Inner {
         #[source]
         StorageError,
     ),
+
+    #[error("Log store error: {0}")]
+    LogStoreError(LogStoreError),
 
     #[error("Chunk operation error: {0}")]
     EvalError(Either<ArrayError, ExprError>),
@@ -57,6 +61,9 @@ enum Inner {
 
     #[error("Connector error: {0}")]
     ConnectorError(BoxedError),
+
+    #[error("Dml error: {0}")]
+    DmlError(BoxedError),
 
     #[error("Feature is not yet implemented: {0}, {1}")]
     NotImplemented(String, TrackingIssue),
@@ -84,6 +91,10 @@ impl StreamExecutorError {
 
     pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
         Inner::NotImplemented(error.into(), issue.into()).into()
+    }
+
+    pub fn dml_error(error: impl Error) -> Self {
+        Inner::DmlError(error.into()).into()
     }
 }
 
@@ -119,6 +130,13 @@ impl std::fmt::Debug for StreamExecutorError {
 impl From<StorageError> for StreamExecutorError {
     fn from(s: StorageError) -> Self {
         Inner::Storage(s).into()
+    }
+}
+
+/// Log store error
+impl From<LogStoreError> for StreamExecutorError {
+    fn from(e: LogStoreError) -> Self {
+        Inner::LogStoreError(e).into()
     }
 }
 
@@ -173,8 +191,8 @@ impl From<SinkError> for StreamExecutorError {
     }
 }
 
-impl From<ProstFieldNotFound> for StreamExecutorError {
-    fn from(err: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for StreamExecutorError {
+    fn from(err: PbFieldNotFound) -> Self {
         Self::from(anyhow::anyhow!(
             "Failed to decode prost: field not found `{}`",
             err.0

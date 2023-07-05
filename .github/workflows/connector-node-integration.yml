@@ -1,0 +1,45 @@
+name: Connector Node Integration Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java: [ '11', '17' ]
+    name: Java ${{ matrix.java }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            java:
+              - 'java/**'
+            proto:
+              - 'proto/**'
+      - name: Set up JDK ${{ matrix.java }}
+        if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
+        uses: actions/setup-java@v3
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: 'adopt'
+          cache: 'maven'
+      - name: run integration tests
+        if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
+        run: |
+          set -ex
+          
+          RISINGWAVE_ROOT=${PWD}
+          
+          echo "--- build connector node"
+          cd ${RISINGWAVE_ROOT}/java
+          # run unit test
+          mvn --batch-mode --update-snapshots clean package -Dno-build-rust

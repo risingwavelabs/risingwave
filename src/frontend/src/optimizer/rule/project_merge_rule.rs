@@ -22,19 +22,23 @@ pub struct ProjectMergeRule {}
 impl Rule for ProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let outer_project = plan.as_logical_project()?;
-        let input = outer_project.input();
-        let inner_project = input.as_logical_project()?;
+        let mut input = outer_project.input();
+        // just to check if the plan can be applied
+        let _ = input.as_logical_project()?;
+        let mut exprs = outer_project.exprs().clone();
 
-        let mut subst = Substitute {
-            mapping: inner_project.exprs().clone(),
-        };
-        let exprs = outer_project
-            .exprs()
-            .iter()
-            .cloned()
-            .map(|expr| subst.rewrite_expr(expr))
-            .collect();
-        Some(LogicalProject::new(inner_project.input(), exprs).into())
+        while let Some(inner_project) = input.as_logical_project() {
+            let mut subst = Substitute {
+                mapping: inner_project.exprs().clone(),
+            };
+            for expr in &mut exprs {
+                *expr = subst.rewrite_expr(expr.clone());
+            }
+
+            input = inner_project.input();
+        }
+
+        Some(LogicalProject::new(input, exprs).into())
     }
 }
 

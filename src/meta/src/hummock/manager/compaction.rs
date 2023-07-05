@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockContextId};
-use risingwave_pb::hummock::{compact_task, CompactTaskAssignment};
+use risingwave_pb::hummock::{CompactStatus as PbCompactStatus, CompactTaskAssignment};
 
-use crate::hummock::compaction::{CompactStatus, LevelSelector};
+use crate::hummock::compaction::CompactStatus;
 use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
 use crate::model::BTreeMapTransaction;
@@ -33,9 +33,6 @@ pub struct Compaction {
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
 
     pub deterministic_mode: bool,
-
-    pub compaction_selectors:
-        HashMap<CompactionGroupId, HashMap<compact_task::TaskType, Box<dyn LevelSelector>>>,
 }
 
 impl Compaction {
@@ -125,6 +122,21 @@ where
             })
             .collect_vec()
     }
+
+    #[named]
+    pub async fn list_compaction_status(
+        &self,
+    ) -> (Vec<PbCompactStatus>, Vec<CompactTaskAssignment>) {
+        let compaction = read_lock!(self, compaction).await;
+        (
+            compaction.compaction_statuses.values().map_into().collect(),
+            compaction
+                .compact_task_assignment
+                .values()
+                .cloned()
+                .collect(),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -155,7 +167,8 @@ mod tests {
             compact_task.task_id,
             compact_task.target_level as usize,
             &[SstableInfo {
-                id: 1,
+                object_id: 1,
+                sst_id: 1,
                 ..Default::default()
             }],
         );

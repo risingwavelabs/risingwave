@@ -21,11 +21,14 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
 use futures::TryStreamExt;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, NO_OVERRIDE};
+use risingwave_common::config::{
+    extract_storage_memory_config, load_config, MetaConfig, NO_OVERRIDE,
+};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
@@ -33,7 +36,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
+use risingwave_storage::hummock::{CachePolicy, HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -43,7 +46,7 @@ use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
-const CHECKPOINT_FREQ_FOR_REPLAY: usize = 99999999;
+const CHECKPOINT_FREQ_FOR_REPLAY: u64 = 99999999;
 
 use crate::CompactionTestOpts;
 
@@ -82,6 +85,7 @@ pub async fn compaction_test_main(
 
     let _meta_handle = tokio::spawn(start_meta_node(
         meta_listen_addr.clone(),
+        opts.state_store.clone(),
         opts.config_path_for_meta.clone(),
     ));
 
@@ -92,7 +96,6 @@ pub async fn compaction_test_main(
     let (compactor_thrd, compactor_shutdown_tx) = start_compactor_thread(
         opts.meta_address.clone(),
         advertise_addr.to_string(),
-        opts.state_store.clone(),
         opts.config_path.clone(),
     );
 
@@ -124,13 +127,17 @@ pub async fn compaction_test_main(
     Ok(())
 }
 
-pub async fn start_meta_node(listen_addr: String, config_path: String) {
+pub async fn start_meta_node(listen_addr: String, state_store: String, config_path: String) {
     let meta_opts = risingwave_meta::MetaNodeOpts::parse_from([
         "meta-node",
         "--listen-addr",
         &listen_addr,
+        "--advertise-addr",
+        &listen_addr,
         "--backend",
         "mem",
+        "--state-store",
+        &state_store,
         "--config-path",
         &config_path,
     ]);
@@ -138,36 +145,33 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         &meta_opts.config_path,
         Some(meta_opts.override_opts.clone()),
     );
+    // We set a large checkpoint frequency to prevent the embedded meta node
+    // to commit new epochs to avoid bumping the hummock version during version log replay.
+    assert_eq!(
+        CHECKPOINT_FREQ_FOR_REPLAY,
+        config.system.checkpoint_frequency.unwrap()
+    );
     assert!(
         config.meta.enable_compaction_deterministic,
         "enable_compaction_deterministic should be set"
     );
 
-    // We set a large checkpoint frequency to prevent the embedded meta node
-    // to commit new epochs to avoid bumping the hummock version during version log replay.
-    assert_eq!(
-        CHECKPOINT_FREQ_FOR_REPLAY,
-        config.streaming.checkpoint_frequency
-    );
     risingwave_meta::start(meta_opts).await
 }
 
 async fn start_compactor_node(
     meta_rpc_endpoint: String,
     advertise_addr: String,
-    state_store: String,
     config_path: String,
 ) {
     let opts = risingwave_compactor::CompactorOpts::parse_from([
         "compactor-node",
-        "--host",
+        "--listen-addr",
         "127.0.0.1:5550",
         "--advertise-addr",
         &advertise_addr,
         "--meta-address",
         &meta_rpc_endpoint,
-        "--state-store",
-        &state_store,
         "--config-path",
         &config_path,
     ]);
@@ -177,7 +181,6 @@ async fn start_compactor_node(
 pub fn start_compactor_thread(
     meta_endpoint: String,
     advertise_addr: String,
-    state_store: String,
     config_path: String,
 ) -> (JoinHandle<()>, std::sync::mpsc::Sender<()>) {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -189,7 +192,7 @@ pub fn start_compactor_thread(
         runtime.block_on(async {
             tokio::spawn(async {
                 tracing::info!("Starting compactor node");
-                start_compactor_node(meta_endpoint, advertise_addr, state_store, config_path).await
+                start_compactor_node(meta_endpoint, advertise_addr, config_path).await
             });
             rx.recv().unwrap();
         });
@@ -229,13 +232,14 @@ async fn init_metadata_for_replay(
     // filter key manager will fail to acquire a key extractor.
     tokio::time::sleep(Duration::from_secs(2)).await;
 
+    let meta_config = MetaConfig::default();
     let meta_client: MetaClient;
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
             (meta_client, _) = ret.unwrap();
         },
     }
@@ -245,8 +249,14 @@ async fn init_metadata_for_replay(
 
     let tables = meta_client.risectl_list_state_tables().await?;
 
-    let (new_meta_client, _) =
-        MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0).await?;
+    let (new_meta_client, _) = MetaClient::register_new(
+        new_meta_endpoint,
+        WorkerType::RiseCtl,
+        advertise_addr,
+        Default::default(),
+        &meta_config,
+    )
+    .await?;
     new_meta_client.activate(advertise_addr).await.unwrap();
     if ci_mode {
         let table_to_check = tables.iter().find(|t| t.name == "nexmark_q7").unwrap();
@@ -275,19 +285,16 @@ async fn pull_version_deltas(
         cluster_meta_endpoint,
         WorkerType::RiseCtl,
         advertise_addr,
-        0,
+        Default::default(),
+        &MetaConfig::default(),
     )
     .await?;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned pull worker id {}", worker_id);
     meta_client.activate(advertise_addr).await.unwrap();
 
-    let (handle, shutdown_tx) = MetaClient::start_heartbeat_loop(
-        meta_client.clone(),
-        Duration::from_millis(1000),
-        Duration::from_secs(600),
-        vec![],
-    );
+    let (handle, shutdown_tx) =
+        MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000), vec![]);
     let res = meta_client
         .list_version_deltas(0, u32::MAX, u64::MAX)
         .await
@@ -324,9 +331,14 @@ async fn start_replay(
 
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let (meta_client, system_params) =
-        MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &advertise_addr, 0)
-            .await?;
+    let (meta_client, system_params) = MetaClient::register_new(
+        &opts.meta_address,
+        WorkerType::RiseCtl,
+        &advertise_addr,
+        Default::default(),
+        &config.meta,
+    )
+    .await?;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned replay worker id {}", worker_id);
     meta_client.activate(&advertise_addr).await.unwrap();
@@ -334,7 +346,6 @@ async fn start_replay(
     let sub_tasks = vec![MetaClient::start_heartbeat_loop(
         meta_client.clone(),
         Duration::from_millis(1000),
-        Duration::from_secs(600),
         vec![],
     )];
 
@@ -350,7 +361,12 @@ async fn start_replay(
     }
 
     // Creates a hummock state store *after* we reset the hummock version
-    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
+    let storage_memory_config = extract_storage_memory_config(&config);
+    let storage_opts = Arc::new(StorageOpts::from((
+        &config,
+        &system_params,
+        &storage_memory_config,
+    )));
     let hummock = create_hummock_store_with_metrics(&meta_client, storage_opts, &opts).await?;
 
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
@@ -604,11 +620,12 @@ async fn open_hummock_iters(
     // the `ReadOptions` will not be used to filter kv pairs
     let mut buf = BytesMut::with_capacity(5);
     buf.put_u32(table_id);
+    let b = buf.freeze();
     let range = (
-        Bound::Included(buf.to_vec()),
-        Bound::Excluded(risingwave_hummock_sdk::key::next_key(
-            buf.to_vec().as_slice(),
-        )),
+        Bound::Included(b.clone()),
+        Bound::Excluded(Bytes::from(risingwave_hummock_sdk::key::next_key(
+            b.as_ref(),
+        ))),
     );
 
     for &epoch in snapshots.iter() {
@@ -622,6 +639,8 @@ async fn open_hummock_iters(
                     retention_seconds: None,
                     ignore_range_tombstone: false,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await?;
@@ -700,7 +719,6 @@ pub async fn create_hummock_store_with_metrics(
         metrics.state_store_metrics.clone(),
         metrics.object_store_metrics.clone(),
         TieredCacheMetricsBuilder::unused(),
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
         metrics.storage_metrics.clone(),
         metrics.compactor_metrics.clone(),
     )

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
-
 use either::Either;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::HostAddress;
@@ -43,11 +41,14 @@ impl MetaMemberService for MetaMemberServiceImpl {
         &self,
         _request: Request<MembersRequest>,
     ) -> Result<Response<MembersResponse>, Status> {
-        let members = match self.election_client_or_self.borrow() {
+        let members = match &self.election_client_or_self {
             Either::Left(election_client) => {
                 let mut members = vec![];
                 for member in election_client.get_members().await? {
-                    let host_addr = member.id.parse::<HostAddr>()?;
+                    let host_addr = member
+                        .id
+                        .parse::<HostAddr>()
+                        .map_err(|err| Status::from_error(err.into()))?;
                     members.push(MetaMember {
                         address: Some(HostAddress {
                             host: host_addr.host,
@@ -60,7 +61,10 @@ impl MetaMemberService for MetaMemberServiceImpl {
                 members
             }
             Either::Right(self_as_leader) => {
-                let host_addr = self_as_leader.advertise_addr.parse::<HostAddr>()?;
+                let host_addr = self_as_leader
+                    .advertise_addr
+                    .parse::<HostAddr>()
+                    .map_err(|err| Status::from_error(err.into()))?;
                 vec![MetaMember {
                     address: Some(HostAddress {
                         host: host_addr.host,

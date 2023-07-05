@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
@@ -25,11 +25,12 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
+use crate::mem_table::MemtableLocalStateStore;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_local_state_store_associated_type, define_state_store_associated_type,
-    define_state_store_read_associated_type, define_state_store_write_associated_type,
+    define_state_store_associated_type, define_state_store_read_associated_type,
+    define_state_store_write_associated_type,
 };
 
 pub type BytesFullKey = FullKey<Bytes>;
@@ -505,7 +506,7 @@ impl MemoryStateStore {
 impl<R: RangeKv> RangeKvStateStore<R> {
     fn scan(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         table_id: TableId,
         limit: Option<usize>,
@@ -541,14 +542,9 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
-            let range_bounds = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
+            let range_bounds = (Bound::Included(key.clone()), Bound::Included(key));
             // We do not really care about vnodes here, so we just use the default value.
             let res = self.scan(range_bounds, epoch, read_options.table_id, Some(1))?;
 
@@ -562,7 +558,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
 
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
@@ -584,12 +580,33 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
 
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        _delete_ranges: Vec<(Bytes, Bytes)>,
+        mut kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
+
+            let mut delete_keys = BTreeSet::new();
+            for del_range in delete_ranges {
+                for (key, _) in self.inner.range(
+                    (
+                        del_range.0.map(|table_key| {
+                            FullKey::new(write_options.table_id, TableKey(table_key), epoch)
+                        }),
+                        del_range.1.map(|table_key| {
+                            FullKey::new(write_options.table_id, TableKey(table_key), epoch)
+                        }),
+                    ),
+                    None,
+                )? {
+                    delete_keys.insert(key.user_key.table_key.0);
+                }
+            }
+            for key in delete_keys {
+                kv_pairs.push((key, StorageValue::new_delete()));
+            }
+
             let mut size = 0;
             self.inner
                 .ingest_batch(kv_pairs.into_iter().map(|(key, value)| {
@@ -604,20 +621,8 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
     }
 }
 
-impl<R: RangeKv> LocalStateStore for RangeKvStateStore<R> {
-    define_local_state_store_associated_type!();
-
-    fn may_exist(
-        &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        _read_options: ReadOptions,
-    ) -> Self::MayExistFuture<'_> {
-        async move { Ok(true) }
-    }
-}
-
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
-    type Local = Self;
+    type Local = MemtableLocalStateStore<Self>;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
@@ -634,9 +639,7 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         async move {
             self.inner.flush()?;
             // memory backend doesn't need to push to S3, so this is a no-op
-            Ok(SyncResult {
-                ..Default::default()
-            })
+            Ok(SyncResult::default())
         }
     }
 
@@ -646,8 +649,8 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         async move { Ok(()) }
     }
 
-    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async { self.clone() }
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+        async move { MemtableLocalStateStore::new(self.clone(), option) }
     }
 
     fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
@@ -769,8 +772,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(b"a".to_vec()),
-                        Bound::Included(b"b".to_vec()),
+                        Bound::Included(Bytes::from("a")),
+                        Bound::Included(Bytes::from("b")),
                     ),
                     0,
                     TableId::default(),
@@ -779,13 +782,13 @@ mod tests {
                 .unwrap(),
             vec![
                 (
-                    FullKey::for_test(Default::default(), b"a".to_vec(), 0)
+                    FullKey::for_test(Default::default(), Bytes::from("a"), 0)
                         .encode()
                         .into(),
                     b"v1".to_vec().into()
                 ),
                 (
-                    FullKey::for_test(Default::default(), b"b".to_vec(), 0)
+                    FullKey::for_test(Default::default(), Bytes::from("b"), 0)
                         .encode()
                         .into(),
                     b"v1".to_vec().into()
@@ -796,8 +799,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(b"a".to_vec()),
-                        Bound::Included(b"b".to_vec()),
+                        Bound::Included(Bytes::from("a")),
+                        Bound::Included(Bytes::from("b")),
                     ),
                     0,
                     TableId::default(),
@@ -815,8 +818,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(b"a".to_vec()),
-                        Bound::Included(b"b".to_vec()),
+                        Bound::Included(Bytes::from("a")),
+                        Bound::Included(Bytes::from("b")),
                     ),
                     1,
                     TableId::default(),
@@ -832,42 +835,42 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .get(b"a", 0, ReadOptions::default(),)
+                .get(Bytes::from("a"), 0, ReadOptions::default(),)
+                .await
+                .unwrap(),
+            Some(Bytes::from("v1"))
+        );
+        assert_eq!(
+            state_store
+                .get(Bytes::copy_from_slice(b"b"), 0, ReadOptions::default(),)
                 .await
                 .unwrap(),
             Some(b"v1".to_vec().into())
         );
         assert_eq!(
             state_store
-                .get(b"b", 0, ReadOptions::default(),)
-                .await
-                .unwrap(),
-            Some(b"v1".to_vec().into())
-        );
-        assert_eq!(
-            state_store
-                .get(b"c", 0, ReadOptions::default(),)
+                .get(Bytes::copy_from_slice(b"c"), 0, ReadOptions::default(),)
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(b"a", 1, ReadOptions::default(),)
+                .get(Bytes::copy_from_slice(b"a"), 1, ReadOptions::default(),)
                 .await
                 .unwrap(),
             Some(b"v2".to_vec().into())
         );
         assert_eq!(
             state_store
-                .get(b"b", 1, ReadOptions::default(),)
+                .get(Bytes::from("b"), 1, ReadOptions::default(),)
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(b"c", 1, ReadOptions::default())
+                .get(Bytes::from("c"), 1, ReadOptions::default())
                 .await
                 .unwrap(),
             None

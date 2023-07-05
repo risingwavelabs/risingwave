@@ -10,8 +10,8 @@ if ! [[ "$DIR" =~ ^/ebs.* ]] ; then
 fi
 
 cd "$DIR/../.."
-cargo build -p risingwave_cmd_all --release --features "static-link static-log-level"
-objcopy --compress-debug-sections=zlib-gnu target/release/risingwave "$DIR/risingwave"
+cargo build -p risingwave_cmd_all --release --features "rw-static-link"
+cp target/release/risingwave "$DIR/risingwave"
 
 cd "$DIR"
 docker build -t "${RW_REGISTRY}:latest" .

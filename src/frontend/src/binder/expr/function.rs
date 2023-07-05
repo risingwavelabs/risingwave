@@ -21,23 +21,39 @@ use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_expr::expr::AggKind;
-use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
+use risingwave_expr::agg::AggKind;
+use risingwave_expr::function::window::{
+    Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
+};
+use risingwave_sqlparser::ast::{
+    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameExclusion,
+    WindowFrameUnits, WindowSpec,
+};
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, Subquery, SubqueryKind,
-    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction, WindowFunctionType,
+    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, Now, OrderBy, Subquery, SubqueryKind,
+    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
+// Defines system functions that without args, ref: https://www.postgresql.org/docs/current/functions-info.html
+pub const SYS_FUNCTION_WITHOUT_ARGS: &[&str] = &[
+    "session_user",
+    "user",
+    "current_user",
+    "current_role",
+    "current_schema",
+    "current_timestamp",
+];
+
 impl Binder {
-    pub(super) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
+    pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
         let function_name = match f.name.0.as_slice() {
             [name] => name.real_value(),
             [schema, name] => {
@@ -62,14 +78,7 @@ impl Binder {
         };
 
         // agg calls
-        if let Ok(kind) = function_name.parse() {
-            if f.over.is_some() {
-                return Err(ErrorCode::NotImplemented(
-                    format!("aggregate function as over window function: {}", kind),
-                    4978.into(),
-                )
-                .into());
-            }
+        if f.over.is_none() && let Ok(kind) = function_name.parse() {
             return self.bind_agg(f, kind);
         }
 
@@ -89,45 +98,98 @@ impl Binder {
             .try_collect()?;
 
         // window function
-        if let Some(window_spec) = f.over {
-            return self.bind_window_function(window_spec, function_name, inputs);
+        let window_func_kind = WindowFuncKind::from_str(function_name.as_str());
+        if let Ok(kind) = window_func_kind {
+            if let Some(window_spec) = f.over {
+                return self.bind_window_function(kind, inputs, window_spec);
+            }
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Window function `{}` must have OVER clause",
+                function_name
+            ))
+            .into());
+        } else if f.over.is_some() {
+            return Err(ErrorCode::NotImplemented(
+                format!("Unrecognized window function: {}", function_name),
+                8961.into(),
+            )
+            .into());
         }
 
         // table function
-        let table_function_type = TableFunctionType::from_str(function_name.as_str());
-        if let Ok(function_type) = table_function_type {
+        if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
             self.ensure_table_function_allowed()?;
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
 
         // user defined function
         // TODO: resolve schema name
-        if let Some(func) = self
-            .catalog
-            .first_valid_schema(
-                &self.db_name,
-                &self.search_path,
-                &self.auth_context.user_name,
-            )?
-            .get_function_by_name_args(
-                &function_name,
-                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-            )
-        {
-            return Ok(UserDefinedFunction::new(func.clone(), inputs).into());
+        if let Some(func) = self.first_valid_schema()?.get_function_by_name_args(
+            &function_name,
+            &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
+        ) {
+            use crate::catalog::function_catalog::FunctionKind::*;
+            match &func.kind {
+                Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
+                Table { .. } => {
+                    self.ensure_table_function_allowed()?;
+                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+                }
+                Aggregate => todo!("support UDAF"),
+            }
         }
 
         self.bind_builtin_scalar_function(function_name.as_str(), inputs)
     }
 
     pub(super) fn bind_agg(&mut self, mut f: Function, kind: AggKind) -> Result<ExprImpl> {
+        if matches!(
+            kind,
+            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
+        ) {
+            if f.within_group.is_none() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "within group is expected for the {}",
+                    kind
+                ))
+                .into());
+            }
+        } else if f.within_group.is_some() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "within group is disallowed for the {}",
+                kind
+            ))
+            .into());
+        }
+        if kind == AggKind::Mode && !f.args.is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "no arguments are expected in mode agg".to_string(),
+            )
+            .into());
+        }
         self.ensure_aggregate_allowed()?;
-        let inputs: Vec<ExprImpl> = f
-            .args
-            .into_iter()
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
+        let mut inputs: Vec<ExprImpl> = if f.within_group.is_some() {
+            f.within_group
+                .iter()
+                .map(|x| self.bind_function_expr_arg(FunctionArgExpr::Expr(x.expr.clone())))
+                .flatten_ok()
+                .try_collect()?
+        } else {
+            f.args
+                .iter()
+                .map(|arg| self.bind_function_arg(arg.clone()))
+                .flatten_ok()
+                .try_collect()?
+        };
+        if kind == AggKind::PercentileCont {
+            inputs[0] = inputs
+                .iter()
+                .exactly_one()
+                .unwrap()
+                .clone()
+                .cast_implicit(DataType::Float64)?;
+        }
+
         if f.distinct {
             match &kind {
                 AggKind::Count if inputs.is_empty() => {
@@ -161,7 +223,7 @@ impl Binder {
                 let mut clause = Some(Clause::Filter);
                 std::mem::swap(&mut self.context.clause, &mut clause);
                 let expr = self
-                    .bind_expr(*filter)
+                    .bind_expr_inner(*filter)
                     .and_then(|expr| expr.enforce_bool_clause("FILTER"))?;
                 self.context.clause = clause;
                 if expr.has_subquery() {
@@ -198,48 +260,157 @@ impl Binder {
             )
             .into());
         }
-        let order_by = OrderBy::new(
-            f.order_by
-                .into_iter()
-                .map(|e| self.bind_order_by_expr(e))
-                .try_collect()?,
-        );
+        let order_by = if f.within_group.is_some() {
+            if !f.order_by.is_empty() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "order_by clause outside of within group is disallowed in {}",
+                    kind
+                ))
+                .into());
+            }
+            OrderBy::new(
+                f.within_group
+                    .iter()
+                    .map(|x| self.bind_order_by_expr(*x.clone()))
+                    .try_collect()?,
+            )
+        } else {
+            OrderBy::new(
+                f.order_by
+                    .into_iter()
+                    .map(|e| self.bind_order_by_expr(e))
+                    .try_collect()?,
+            )
+        };
+        let direct_args = if matches!(kind, AggKind::PercentileCont | AggKind::PercentileDisc) {
+            let args =
+                self.bind_function_arg(f.args.into_iter().exactly_one().map_err(|_| {
+                    ErrorCode::InvalidInputSyntax(format!("only one arg is expected in {}", kind))
+                })?)?;
+            if args.len() != 1 || args[0].clone().as_literal().is_none() {
+                Err(
+                    ErrorCode::InvalidInputSyntax(format!("arg in {} must be constant", kind))
+                        .into(),
+                )
+            } else if let Ok(casted) = args[0]
+                .clone()
+                .cast_implicit(DataType::Float64)?
+                .fold_const()
+            {
+                if casted
+                    .clone()
+                    .is_some_and(|x| !(0.0..=1.0).contains(&Into::<f64>::into(*x.as_float64())))
+                {
+                    Err(ErrorCode::InvalidInputSyntax(format!(
+                        "arg in {} must between 0 and 1",
+                        kind
+                    ))
+                    .into())
+                } else {
+                    Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
+                }
+            } else {
+                Err(
+                    ErrorCode::InvalidInputSyntax(format!("arg in {} must be float64", kind))
+                        .into(),
+                )
+            }
+        } else {
+            Ok(vec![])
+        }?;
         Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-            kind, inputs, f.distinct, order_by, filter,
+            kind,
+            inputs,
+            f.distinct,
+            order_by,
+            filter,
+            direct_args,
         )?)))
     }
 
     pub(super) fn bind_window_function(
         &mut self,
+        kind: WindowFuncKind,
+        inputs: Vec<ExprImpl>,
         WindowSpec {
             partition_by,
             order_by,
             window_frame,
         }: WindowSpec,
-        function_name: String,
-        inputs: Vec<ExprImpl>,
     ) -> Result<ExprImpl> {
         self.ensure_window_function_allowed()?;
-        if let Some(window_frame) = window_frame {
-            return Err(ErrorCode::NotImplemented(
-                format!("window frame: {}", window_frame),
-                None.into(),
-            )
-            .into());
-        }
-        let window_function_type = WindowFunctionType::from_str(&function_name)?;
         let partition_by = partition_by
             .into_iter()
-            .map(|arg| self.bind_expr(arg))
+            .map(|arg| self.bind_expr_inner(arg))
             .try_collect()?;
-
         let order_by = OrderBy::new(
             order_by
                 .into_iter()
                 .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
                 .collect::<Result<_>>()?,
         );
-        Ok(WindowFunction::new(window_function_type, partition_by, order_by, inputs)?.into())
+        let frame = if let Some(frame) = window_frame {
+            let exclusion = if let Some(exclusion) = frame.exclusion {
+                match exclusion {
+                    WindowFrameExclusion::CurrentRow => FrameExclusion::CurrentRow,
+                    WindowFrameExclusion::Group | WindowFrameExclusion::Ties => {
+                        return Err(ErrorCode::NotImplemented(
+                            format!(
+                                "window frame exclusion `{}` is not supported yet",
+                                exclusion
+                            ),
+                            9124.into(),
+                        )
+                        .into());
+                    }
+                    WindowFrameExclusion::NoOthers => FrameExclusion::NoOthers,
+                }
+            } else {
+                FrameExclusion::NoOthers
+            };
+            let bounds = match frame.units {
+                WindowFrameUnits::Rows => {
+                    let convert_bound = |bound| match bound {
+                        WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+                        WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+                        WindowFrameBound::Preceding(Some(offset)) => {
+                            FrameBound::Preceding(offset as usize)
+                        }
+                        WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+                        WindowFrameBound::Following(Some(offset)) => {
+                            FrameBound::Following(offset as usize)
+                        }
+                    };
+                    let start = convert_bound(frame.start_bound);
+                    let end = if let Some(end_bound) = frame.end_bound {
+                        convert_bound(end_bound)
+                    } else {
+                        FrameBound::CurrentRow
+                    };
+                    FrameBounds::Rows(start, end)
+                }
+                WindowFrameUnits::Range | WindowFrameUnits::Groups => {
+                    return Err(ErrorCode::NotImplemented(
+                        format!(
+                            "window frame in `{}` mode is not supported yet",
+                            frame.units
+                        ),
+                        9124.into(),
+                    )
+                    .into());
+                }
+            };
+            if !bounds.is_valid() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "window frame bounds `{bounds}` is not valid",
+                ))
+                .into());
+            }
+            Some(Frame { bounds, exclusion })
+        } else {
+            None
+        };
+        Ok(WindowFunction::new(kind, partition_by, order_by, inputs, frame)?.into())
     }
 
     fn bind_builtin_scalar_function(
@@ -292,17 +463,54 @@ impl Binder {
         fn raw_literal(literal: ExprImpl) -> Handle {
             Box::new(move |_binder, _inputs| Ok(literal.clone()))
         }
+
         fn now() -> Handle {
-            Box::new(move |binder, mut inputs| {
-                binder.ensure_now_function_allowed()?;
-                if !binder.in_create_mv {
-                    inputs.push(ExprImpl::from(Literal::new(
-                        Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
-                        DataType::Timestamptz,
-                    )));
-                }
-                raw_call(ExprType::Now)(binder, inputs)
+            guard_by_len(
+                0,
+                raw(move |binder, _inputs| {
+                    binder.ensure_now_function_allowed()?;
+                    // NOTE: this will be further transformed during optimization. See the
+                    // documentation of `Now`.
+                    Ok(Now.into())
+                }),
+            )
+        }
+
+        fn pi() -> Handle {
+            raw_literal(ExprImpl::literal_f64(std::f64::consts::PI))
+        }
+
+        fn proctime() -> Handle {
+            Box::new(move |binder, inputs| {
+                binder.ensure_proctime_function_allowed()?;
+                raw_call(ExprType::Proctime)(binder, inputs)
             })
+        }
+
+        // `SESSION_USER` is the user name of the user that is connected to the database.
+        fn session_user() -> Handle {
+            guard_by_len(
+                0,
+                raw(|binder, _inputs| {
+                    Ok(ExprImpl::literal_varchar(
+                        binder.auth_context.user_name.clone(),
+                    ))
+                }),
+            )
+        }
+
+        // `CURRENT_USER` is the user name of the user that is executing the command,
+        // `CURRENT_ROLE`, `USER` are synonyms for `CURRENT_USER`. Since we don't support
+        // `SET ROLE xxx` for now, they will all returns session user name.
+        fn current_user() -> Handle {
+            guard_by_len(
+                0,
+                raw(|binder, _inputs| {
+                    Ok(ExprImpl::literal_varchar(
+                        binder.auth_context.user_name.clone(),
+                    ))
+                }),
+            )
         }
 
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
@@ -328,10 +536,43 @@ impl Binder {
                     ]),
                 ),
                 ("pow", raw_call(ExprType::Pow)),
+                // "power" is the function name used in PG.
+                ("power", raw_call(ExprType::Pow)),
                 ("ceil", raw_call(ExprType::Ceil)),
+                ("ceiling", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
+                ("trunc", raw_call(ExprType::Trunc)),
                 ("abs", raw_call(ExprType::Abs)),
+                ("exp", raw_call(ExprType::Exp)),
+                ("ln", raw_call(ExprType::Ln)),
+                ("log", raw_call(ExprType::Log10)),
+                ("log10", raw_call(ExprType::Log10)),
                 ("mod", raw_call(ExprType::Modulus)),
+                ("sin", raw_call(ExprType::Sin)),
+                ("cos", raw_call(ExprType::Cos)),
+                ("tan", raw_call(ExprType::Tan)),
+                ("cot", raw_call(ExprType::Cot)),
+                ("asin", raw_call(ExprType::Asin)),
+                ("acos", raw_call(ExprType::Acos)),
+                ("atan", raw_call(ExprType::Atan)),
+                ("atan2", raw_call(ExprType::Atan2)),
+                ("sind", raw_call(ExprType::Sind)),
+                ("cosd", raw_call(ExprType::Cosd)),
+                ("cotd", raw_call(ExprType::Cotd)),
+                ("tand", raw_call(ExprType::Tand)),
+                ("sinh", raw_call(ExprType::Sinh)),
+                ("cosh", raw_call(ExprType::Cosh)), 
+                ("tanh", raw_call(ExprType::Tanh)), 
+                ("coth", raw_call(ExprType::Coth)), 
+                ("asinh", raw_call(ExprType::Asinh)), 
+                ("acosh", raw_call(ExprType::Acosh)), 
+                ("atanh", raw_call(ExprType::Atanh)), 
+                ("asind", raw_call(ExprType::Asind)),
+                ("degrees", raw_call(ExprType::Degrees)),
+                ("radians", raw_call(ExprType::Radians)),
+                ("sqrt", raw_call(ExprType::Sqrt)),
+                ("cbrt", raw_call(ExprType::Cbrt)),
+
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
@@ -340,6 +581,7 @@ impl Binder {
                     ]),
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
+                ("date_part", raw_call(ExprType::DatePart)),
                 // string
                 ("substr", raw_call(ExprType::Substr)),
                 ("length", raw_call(ExprType::Length)),
@@ -348,7 +590,7 @@ impl Binder {
                 ("trim", raw_call(ExprType::Trim)),
                 ("replace", raw_call(ExprType::Replace)),
                 ("overlay", raw_call(ExprType::Overlay)),
-                ("position", raw_call(ExprType::Position)),
+                ("btrim", raw_call(ExprType::Trim)),
                 ("ltrim", raw_call(ExprType::Ltrim)),
                 ("rtrim", raw_call(ExprType::Rtrim)),
                 ("md5", raw_call(ExprType::Md5)),
@@ -358,6 +600,7 @@ impl Binder {
                     rewrite(ExprType::ConcatWs, Binder::rewrite_concat_to_concat_ws),
                 ),
                 ("concat_ws", raw_call(ExprType::ConcatWs)),
+                ("translate", raw_call(ExprType::Translate)),
                 ("split_part", raw_call(ExprType::SplitPart)),
                 ("char_length", raw_call(ExprType::CharLength)),
                 ("character_length", raw_call(ExprType::CharLength)),
@@ -366,33 +609,102 @@ impl Binder {
                 ("octet_length", raw_call(ExprType::OctetLength)),
                 ("bit_length", raw_call(ExprType::BitLength)),
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
+                ("chr", raw_call(ExprType::Chr)),
+                ("starts_with", raw_call(ExprType::StartsWith)),
+                ("initcap", raw_call(ExprType::Initcap)),
+                ("lpad", raw_call(ExprType::Lpad)),
+                ("rpad", raw_call(ExprType::Rpad)),
+                ("reverse", raw_call(ExprType::Reverse)),
+                ("strpos", raw_call(ExprType::Position)),
+                ("to_ascii", raw_call(ExprType::ToAscii)),
+                ("to_hex", raw_call(ExprType::ToHex)),
+                ("quote_ident", raw_call(ExprType::QuoteIdent)),
+                ("string_to_array", raw_call(ExprType::StringToArray)),
+                ("encode", raw_call(ExprType::Encode)),
+                ("decode", raw_call(ExprType::Decode)),
+                ("sha1", raw_call(ExprType::Sha1)),
+                ("sha224", raw_call(ExprType::Sha224)),
+                ("sha256", raw_call(ExprType::Sha256)),
+                ("sha384", raw_call(ExprType::Sha384)),
+                ("sha512", raw_call(ExprType::Sha512)),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
+                ("array_join", raw_call(ExprType::ArrayToString)),
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
+                ("array_to_string", raw_call(ExprType::ArrayToString)),
+                ("array_distinct", raw_call(ExprType::ArrayDistinct)),
+                ("array_length", raw_call(ExprType::ArrayLength)),
+                ("cardinality", raw_call(ExprType::Cardinality)),
+                ("array_remove", raw_call(ExprType::ArrayRemove)),
+                ("array_replace", raw_call(ExprType::ArrayReplace)),
+                ("array_position", raw_call(ExprType::ArrayPosition)),
+                ("array_positions", raw_call(ExprType::ArrayPositions)),
+                ("trim_array", raw_call(ExprType::TrimArray)),
+                (
+                    "array_ndims",
+                    guard_by_len(1, raw(|_binder, inputs| {
+                        inputs[0].ensure_array_type()?;
+
+                        let n = inputs[0].return_type().array_ndims()
+                                .try_into().map_err(|_| ErrorCode::BindError("array_ndims integer overflow".into()))?;
+                        Ok(ExprImpl::literal_int(n))
+                    })),
+                ),
+                (
+                    "array_lower",
+                    guard_by_len(2, raw(|binder, inputs| {
+                        let (arg0, arg1) = inputs.into_iter().next_tuple().unwrap();
+                        // rewrite into `CASE WHEN 0 < arg1 AND arg1 <= array_ndims(arg0) THEN 1 END`
+                        let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0])?;
+                        let arg1 = arg1.cast_implicit(DataType::Int32)?;
+
+                        FunctionCall::new(
+                            ExprType::Case,
+                            vec![
+                                FunctionCall::new(
+                                    ExprType::And,
+                                    vec![
+                                        FunctionCall::new(ExprType::LessThan, vec![ExprImpl::literal_int(0), arg1.clone()])?.into(),
+                                        FunctionCall::new(ExprType::LessThanOrEqual, vec![arg1, ndims_expr])?.into(),
+                                    ],
+                                )?.into(),
+                                ExprImpl::literal_int(1),
+                            ],
+                        ).map(Into::into)
+                    })),
+                ),
+                ("array_upper", raw_call(ExprType::ArrayLength)), // `lower == 1` implies `upper == length`
+                ("array_dims", raw_call(ExprType::ArrayDims)),
+                // int256
+                ("hex_to_int256", raw_call(ExprType::HexToInt256)),
+                // jsonb
+                ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
+                ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
+                ("jsonb_object_field_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
+                ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
+                // Functions that return a constant value
+                ("pi", pi()),
                 // System information operations.
                 (
                     "pg_typeof",
-                    raw(|_binder, inputs| {
+                    guard_by_len(1, raw(|_binder, inputs| {
                         let input = &inputs[0];
-                        let v = match input.is_unknown() {
+                        let v = match input.is_untyped() {
                             true => "unknown".into(),
                             false => input.return_type().to_string(),
                         };
                         Ok(ExprImpl::literal_varchar(v))
-                    }),
+                    })),
                 ),
                 ("current_database", guard_by_len(0, raw(|binder, _inputs| {
                     Ok(ExprImpl::literal_varchar(binder.db_name.clone()))
                 }))),
                 ("current_schema", guard_by_len(0, raw(|binder, _inputs| {
                     return Ok(binder
-                        .catalog
-                        .first_valid_schema(
-                            &binder.db_name,
-                            &binder.search_path,
-                            &binder.auth_context.user_name,
-                        )
+                        .first_valid_schema()
                         .map(|schema| ExprImpl::literal_varchar(schema.name()))
                         .unwrap_or_else(|_| ExprImpl::literal_null(DataType::Varchar)));
                 }))),
@@ -417,9 +729,7 @@ impl Binder {
                     };
 
                     let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
-                        return Ok(ExprImpl::literal_null(DataType::List {
-                            datatype: Box::new(DataType::Varchar),
-                        }));
+                        return Ok(ExprImpl::literal_null(DataType::List(Box::new(DataType::Varchar))));
                     };
 
                     let paths = if bool {
@@ -449,14 +759,45 @@ impl Binder {
                         DataType::Varchar,
                     ))
                 })),
-                ("session_user", guard_by_len(0, raw(|binder, _inputs| {
-                    Ok(ExprImpl::literal_varchar(
-                        binder.auth_context.user_name.clone(),
-                    ))
-                }))),
+                ("session_user", session_user()),
+                ("current_role", current_user()),
+                ("current_user", current_user()),
+                ("user", current_user()),
                 ("pg_get_userbyid", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
                         let bound_query = binder.bind_get_user_by_id_select(input)?;
+                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                            BoundQuery {
+                                body: BoundSetExpr::Select(Box::new(bound_query)),
+                                order: vec![],
+                                limit: None,
+                                offset: None,
+                                with_ties: false,
+                                extra_order_exprs: vec![],
+                            },
+                            SubqueryKind::Scalar,
+                        ))))
+                    }
+                ))),
+                ("pg_table_size", guard_by_len(1, raw(|binder, inputs|{
+                        let input = &inputs[0];
+                        let bound_query = binder.bind_get_table_size_select("pg_table_size", input)?;
+                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                            BoundQuery {
+                                body: BoundSetExpr::Select(Box::new(bound_query)),
+                                order: vec![],
+                                limit: None,
+                                offset: None,
+                                with_ties: false,
+                                extra_order_exprs: vec![],
+                            },
+                            SubqueryKind::Scalar,
+                        ))))
+                    }
+                ))),
+                ("pg_indexes_size", guard_by_len(1, raw(|binder, inputs|{
+                        let input = &inputs[0];
+                        let bound_query = binder.bind_get_indexes_size_select(input)?;
                         Ok(ExprImpl::Subquery(Box::new(Subquery::new(
                             BoundQuery {
                                 body: BoundSetExpr::Select(Box::new(bound_query)),
@@ -481,6 +822,25 @@ impl Binder {
                         .into())
                     }
                 })),
+                ("current_setting", guard_by_len(1, raw(|binder, inputs| {
+                    let input = &inputs[0];
+                    let ExprImpl::Literal(literal) = input else {
+                        return Err(ErrorCode::ExprError(
+                            "Only literal is supported in `current_setting`.".into(),
+                        )
+                        .into());
+                    };
+                    let Some(ScalarImpl::Utf8(input)) = literal.get_data() else {
+                        return Err(ErrorCode::ExprError(
+                            "Only string literal is supported in `current_setting`.".into(),
+                        )
+                        .into());
+                    };
+                    match binder.session_config.get(input.as_ref()) {
+                        Some(setting) => Ok(ExprImpl::literal_varchar(setting.into())),
+                        None => Err(ErrorCode::UnrecognizedConfigurationParameter(input.to_string()).into()),
+                    }
+                }))),
                 ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
@@ -498,17 +858,19 @@ impl Binder {
                         // workaround.
                         Ok(ExprImpl::literal_bool(false))
                 }))),
+                ("pg_tablespace_location", guard_by_len(1, raw_literal(ExprImpl::literal_null(DataType::Varchar)))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 13.9-RisingWave-{} ({})",
+                    "PostgreSQL 8.3-RisingWave-{} ({})",
                     RW_VERSION,
                     GIT_SHA
                 )))),
                 // non-deterministic
                 ("now", now()),
-                ("current_timestamp", now())
+                ("current_timestamp", now()),
+                ("proctime", proctime())
             ]
             .into_iter()
             .collect()
@@ -601,7 +963,10 @@ impl Binder {
                 | Clause::Values
                 | Clause::GroupBy
                 | Clause::Having
-                | Clause::Filter => {
+                | Clause::Filter
+                | Clause::GeneratedColumn
+                | Clause::From
+                | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
                         clause
@@ -614,16 +979,33 @@ impl Binder {
     }
 
     fn ensure_now_function_allowed(&self) -> Result<()> {
-        if self.in_create_mv
+        if self.is_for_stream()
             && !matches!(
                 self.context.clause,
-                Some(Clause::Where) | Some(Clause::Having)
+                Some(Clause::Where) | Some(Clause::Having) | Some(Clause::JoinOn)
             )
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
+                "For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: {:?}. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information",
                 self.context.clause
             ))
+            .into());
+        }
+        if matches!(self.context.clause, Some(Clause::GeneratedColumn)) {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Cannot use `NOW()` function in generated columns. Do you want `PROCTIME()`?"
+                    .to_string(),
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    fn ensure_proctime_function_allowed(&self) -> Result<()> {
+        if !self.is_for_ddl() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_string(),
+            )
             .into());
         }
         Ok(())
@@ -632,7 +1014,11 @@ impl Binder {
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values => {
+                Clause::Where
+                | Clause::Values
+                | Clause::From
+                | Clause::GeneratedColumn
+                | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
                         clause
@@ -648,14 +1034,18 @@ impl Binder {
     fn ensure_table_function_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values => {
+                Clause::Where | Clause::Values | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",
                         clause
                     ))
                     .into());
                 }
-                Clause::GroupBy | Clause::Having | Clause::Filter => {}
+                Clause::JoinOn
+                | Clause::GroupBy
+                | Clause::Having
+                | Clause::Filter
+                | Clause::From => {}
             }
         }
         Ok(())
@@ -666,10 +1056,11 @@ impl Binder {
         arg_expr: FunctionArgExpr,
     ) -> Result<Vec<ExprImpl>> {
         match arg_expr {
-            FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr(expr)?]),
+            FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr)?]),
             FunctionArgExpr::QualifiedWildcard(_) => todo!(),
             FunctionArgExpr::ExprQualifiedWildcard(_, _) => todo!(),
-            FunctionArgExpr::Wildcard => Ok(vec![]),
+            FunctionArgExpr::WildcardOrWithExcept(None) => Ok(vec![]),
+            FunctionArgExpr::WildcardOrWithExcept(Some(_)) => unreachable!(),
         }
     }
 

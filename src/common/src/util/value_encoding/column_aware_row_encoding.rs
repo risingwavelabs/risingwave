@@ -19,7 +19,10 @@
 //! We have a `Serializer` and a `Deserializer` for each schema of `Row`, which can be reused
 //! until schema changes
 
+#![expect(clippy::disallowed_methods, reason = "used by bitflags!")]
+
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use bitflags::bitflags;
 
@@ -37,6 +40,7 @@ use crate::row::Row;
 // }
 
 bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct Flag: u8 {
         const EMPTY = 0b_1000_0000;
         const OFFSET8 = 0b01;
@@ -74,13 +78,13 @@ impl RowEncoding {
                 self.flag |= Flag::OFFSET16;
                 usize_offsets
                     .iter()
-                    .for_each(|m| self.offsets.put_u16(*m as u16));
+                    .for_each(|m| self.offsets.put_u16_le(*m as u16));
             }
             _n @ ..=const { u32::MAX as usize } => {
                 self.flag |= Flag::OFFSET32;
                 usize_offsets
                     .iter()
-                    .for_each(|m| self.offsets.put_u32(*m as u32));
+                    .for_each(|m| self.offsets.put_u32_le(*m as u32));
             }
             _ => unreachable!("encoding length exceeds u32"),
         }
@@ -107,6 +111,7 @@ impl RowEncoding {
 
 /// Column-Aware `Serializer` holds schema related information, and shall be
 /// created again once the schema changes
+#[derive(Clone)]
 pub struct Serializer {
     encoded_column_ids: Vec<u8>,
     datum_num: u32,
@@ -127,19 +132,11 @@ impl Serializer {
         }
     }
 
-    /// Serialize a row under the schema of the Serializer
-    pub fn serialize_row_column_aware(&self, row: impl Row) -> Vec<u8> {
-        assert_eq!(row.len(), self.datum_num as usize);
-        let mut encoding = RowEncoding::new();
-        encoding.encode(row.iter());
-        self.serialize(encoding)
-    }
-
-    fn serialize(&self, encoding: RowEncoding) -> Vec<u8> {
+    fn serialize_inner(&self, encoding: RowEncoding) -> Vec<u8> {
         let mut row_bytes = Vec::with_capacity(
             5 + self.encoded_column_ids.len() + encoding.offsets.len() + encoding.buf.len(), /* 5 comes from u8+u32 */
         );
-        row_bytes.put_u8(encoding.flag.bits);
+        row_bytes.put_u8(encoding.flag.bits());
         row_bytes.put_u32_le(self.datum_num);
         row_bytes.extend(&self.encoded_column_ids);
         row_bytes.extend(&encoding.offsets);
@@ -149,15 +146,26 @@ impl Serializer {
     }
 }
 
-/// Column-Aware `Deserializer` holds needed `ColumnIds` and their corresponding schema
-/// Should non-null default values be specified, a new field could be added to Deserializer
-pub struct Deserializer<'a> {
-    needed_column_ids: BTreeMap<i32, usize>,
-    schema: &'a [DataType],
+impl ValueRowSerializer for Serializer {
+    /// Serialize a row under the schema of the Serializer
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        assert_eq!(row.len(), self.datum_num as usize);
+        let mut encoding = RowEncoding::new();
+        encoding.encode(row.iter());
+        self.serialize_inner(encoding)
+    }
 }
 
-impl<'a> Deserializer<'a> {
-    pub fn new(column_ids: &'a [ColumnId], schema: &'a [DataType]) -> Self {
+/// Column-Aware `Deserializer` holds needed `ColumnIds` and their corresponding schema
+/// Should non-null default values be specified, a new field could be added to Deserializer
+#[derive(Clone)]
+pub struct Deserializer {
+    needed_column_ids: BTreeMap<i32, usize>,
+    schema: Arc<[DataType]>,
+}
+
+impl Deserializer {
+    pub fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self {
         assert_eq!(column_ids.len(), schema.len());
         Self {
             needed_column_ids: column_ids
@@ -168,14 +176,16 @@ impl<'a> Deserializer<'a> {
             schema,
         }
     }
+}
 
-    pub fn decode(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+impl ValueRowDeserializer for Deserializer {
+    fn deserialize(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         let flag = Flag::from_bits(encoded_bytes.get_u8()).expect("should be a valid flag");
         let offset_bytes = match flag - Flag::EMPTY {
             Flag::OFFSET8 => 1,
             Flag::OFFSET16 => 2,
             Flag::OFFSET32 => 4,
-            _ => return Err(ValueEncodingError::InvalidFlag(flag.bits)),
+            _ => return Err(ValueEncodingError::InvalidFlag(flag.bits())),
         };
         let datum_num = encoded_bytes.get_u32_le() as usize;
         let offsets_start_idx = 4 * datum_num;
@@ -228,6 +238,50 @@ fn deserialize_width(len: usize, data: &mut impl Buf) -> usize {
     }
 }
 
+/// Combined column-aware `Serializer` and `Deserializer` given the same
+/// `column_ids` and `schema`
+#[derive(Clone)]
+pub struct ColumnAwareSerde {
+    serializer: Serializer,
+    deserializer: Deserializer,
+}
+
+impl ValueRowSerdeNew for ColumnAwareSerde {
+    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> ColumnAwareSerde {
+        if cfg!(debug_assertions) {
+            let duplicates = column_ids.iter().duplicates().collect_vec();
+            if !duplicates.is_empty() {
+                panic!("duplicated column ids: {duplicates:?}");
+            }
+        }
+
+        let serializer = Serializer::new(column_ids);
+        let deserializer = Deserializer::new(column_ids, schema);
+        ColumnAwareSerde {
+            serializer,
+            deserializer,
+        }
+    }
+}
+
+impl ValueRowSerializer for ColumnAwareSerde {
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        self.serializer.serialize(row)
+    }
+}
+
+impl ValueRowDeserializer for ColumnAwareSerde {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        self.deserializer.deserialize(encoded_bytes)
+    }
+}
+
+impl ValueRowSerde for ColumnAwareSerde {
+    fn kind(&self) -> ValueRowSerdeKind {
+        ValueRowSerdeKind::ColumnAware
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use column_aware_row_encoding;
@@ -247,7 +301,7 @@ mod tests {
         let mut array = vec![];
         let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
         for row in &rows {
-            let row_bytes = serializer.serialize_row_column_aware(row);
+            let row_bytes = serializer.serialize(row);
             array.push(row_bytes);
         }
         let zero_le_bytes = 0_i32.to_le_bytes();
@@ -288,14 +342,55 @@ mod tests {
         let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
         let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
         let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
-        let row_bytes = serializer.serialize_row_column_aware(row1);
+        let row_bytes = serializer.serialize(row1);
         let data_types = vec![DataType::Int16, DataType::Varchar];
-        let deserializer =
-            column_aware_row_encoding::Deserializer::new(&column_ids[..], &data_types[..]);
-        let decoded = deserializer.decode(&row_bytes[..]);
+        let deserializer = column_aware_row_encoding::Deserializer::new(
+            &column_ids[..],
+            Arc::from(data_types.into_boxed_slice()),
+        );
+        let decoded = deserializer.deserialize(&row_bytes[..]);
         assert_eq!(
             decoded.unwrap(),
             vec![Some(Int16(5)), Some(Utf8("abc".into()))]
         );
+    }
+    #[test]
+    fn test_row_hard1() {
+        let column_ids = (0..20000).map(ColumnId::new).collect_vec();
+        let row = OwnedRow::new(vec![Some(Int16(233)); 20000]);
+        let data_types = vec![DataType::Int16; 20000];
+        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let encoded_bytes = serde.serialize(row);
+        let decoded_row = serde.deserialize(&encoded_bytes);
+        assert_eq!(decoded_row.unwrap(), vec![Some(Int16(233)); 20000]);
+    }
+    #[test]
+    fn test_row_hard2() {
+        let column_ids = (0..20000).map(ColumnId::new).collect_vec();
+        let mut data = vec![Some(Int16(233)); 5000];
+        data.extend(vec![None; 5000]);
+        data.extend(vec![Some(Utf8("risingwave risingwave".into())); 5000]);
+        data.extend(vec![None; 5000]);
+        let row = OwnedRow::new(data.clone());
+        let mut data_types = vec![DataType::Int16; 10000];
+        data_types.extend(vec![DataType::Varchar; 10000]);
+        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let encoded_bytes = serde.serialize(row);
+        let decoded_row = serde.deserialize(&encoded_bytes);
+        assert_eq!(decoded_row.unwrap(), data);
+    }
+    #[test]
+    fn test_row_hard3() {
+        let column_ids = (0..1000000).map(ColumnId::new).collect_vec();
+        let mut data = vec![Some(Int64(233)); 500000];
+        data.extend(vec![None; 250000]);
+        data.extend(vec![Some(Utf8("risingwave risingwave".into())); 250000]);
+        let row = OwnedRow::new(data.clone());
+        let mut data_types = vec![DataType::Int64; 500000];
+        data_types.extend(vec![DataType::Varchar; 500000]);
+        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let encoded_bytes = serde.serialize(row);
+        let decoded_row = serde.deserialize(&encoded_bytes);
+        assert_eq!(decoded_row.unwrap(), data);
     }
 }

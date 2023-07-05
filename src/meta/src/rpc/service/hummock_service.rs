@@ -23,9 +23,7 @@ use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
-use crate::hummock::{
-    CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef, VacuumManagerRef,
-};
+use crate::hummock::{HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
@@ -35,7 +33,6 @@ where
     S: MetaStore,
 {
     hummock_manager: HummockManagerRef<S>,
-    compactor_manager: CompactorManagerRef,
     vacuum_manager: VacuumManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -46,13 +43,11 @@ where
 {
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
-        compactor_manager: CompactorManagerRef,
         vacuum_trigger: VacuumManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
-            compactor_manager,
             vacuum_manager: vacuum_trigger,
             fragment_manager,
         }
@@ -156,6 +151,7 @@ where
                         Some(req.table_stats_change),
                     )
                     .await?;
+
                 Ok(Response::new(ReportCompactionTasksResponse {
                     status: None,
                 }))
@@ -239,30 +235,38 @@ where
                 format!("invalid hummock context {}", context_id),
             ));
         }
-        let rx = self
-            .compactor_manager
-            .add_compactor(context_id, req.max_concurrent_task_number);
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+        let max_compactor_task_multiplier =
+            self.hummock_manager.env.opts.max_compactor_task_multiplier;
+
+        let rx: tokio::sync::mpsc::Receiver<
+            Result<SubscribeCompactTasksResponse, crate::MetaError>,
+        > = compactor_manager.add_compactor(
+            context_id,
+            (req.cpu_core_num * max_compactor_task_multiplier) as u64,
+            req.cpu_core_num,
+        );
+
         // Trigger compaction on all compaction groups.
         for cg_id in self.hummock_manager.compaction_group_ids().await {
             self.hummock_manager
                 .try_send_compaction_request(cg_id, compact_task::TaskType::Dynamic);
         }
-        self.hummock_manager
-            .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
     // TODO: convert this into a stream.
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
-        request: Request<ReportCompactionTaskProgressRequest>,
-    ) -> Result<Response<ReportCompactionTaskProgressResponse>, Status> {
+        request: Request<CompactorHeartbeatRequest>,
+    ) -> Result<Response<CompactorHeartbeatResponse>, Status> {
         let req = request.into_inner();
-        self.compactor_manager
-            .update_task_heartbeats(req.context_id, &req.progress);
-        Ok(Response::new(ReportCompactionTaskProgressResponse {
-            status: None,
-        }))
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+
+        compactor_manager.update_task_heartbeats(req.context_id, &req.progress);
+        compactor_manager.update_compactor_state(req.context_id, req.workload.unwrap());
+
+        Ok(Response::new(CompactorHeartbeatResponse { status: None }))
     }
 
     async fn report_vacuum_task(
@@ -295,9 +299,7 @@ where
             }
 
             None => {
-                option.key_range = KeyRange {
-                    ..Default::default()
-                }
+                option.key_range = KeyRange::default();
             }
         }
 
@@ -354,7 +356,7 @@ where
         // RPC immediately.
         tokio::spawn(async move {
             match vacuum_manager
-                .complete_full_gc(request.into_inner().sst_ids)
+                .complete_full_gc(request.into_inner().object_ids)
                 .await
             {
                 Ok(number) => {
@@ -473,16 +475,6 @@ where
         Ok(Response::new(InitMetadataForReplayResponse {}))
     }
 
-    async fn set_compactor_runtime_config(
-        &self,
-        request: Request<SetCompactorRuntimeConfigRequest>,
-    ) -> Result<Response<SetCompactorRuntimeConfigResponse>, Status> {
-        let request = request.into_inner();
-        self.compactor_manager
-            .set_compactor_config(request.context_id, request.config.unwrap().into());
-        Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
-    }
-
     async fn pin_version(
         &self,
         request: Request<PinVersionRequest>,
@@ -497,5 +489,57 @@ where
                 unreachable!("pin_version should not return version delta")
             }
         }
+    }
+
+    async fn split_compaction_group(
+        &self,
+        request: Request<SplitCompactionGroupRequest>,
+    ) -> Result<Response<SplitCompactionGroupResponse>, Status> {
+        let req = request.into_inner();
+        let new_group_id = self
+            .hummock_manager
+            .split_compaction_group(req.group_id, &req.table_ids)
+            .await?;
+        Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
+    }
+
+    async fn rise_ctl_pause_version_checkpoint(
+        &self,
+        _request: Request<RiseCtlPauseVersionCheckpointRequest>,
+    ) -> Result<Response<RiseCtlPauseVersionCheckpointResponse>, Status> {
+        self.hummock_manager.pause_version_checkpoint();
+        Ok(Response::new(RiseCtlPauseVersionCheckpointResponse {}))
+    }
+
+    async fn rise_ctl_resume_version_checkpoint(
+        &self,
+        _request: Request<RiseCtlResumeVersionCheckpointRequest>,
+    ) -> Result<Response<RiseCtlResumeVersionCheckpointResponse>, Status> {
+        self.hummock_manager.resume_version_checkpoint();
+        Ok(Response::new(RiseCtlResumeVersionCheckpointResponse {}))
+    }
+
+    async fn rise_ctl_get_checkpoint_version(
+        &self,
+        _request: Request<RiseCtlGetCheckpointVersionRequest>,
+    ) -> Result<Response<RiseCtlGetCheckpointVersionResponse>, Status> {
+        let checkpoint_version = self.hummock_manager.get_checkpoint_version().await;
+        Ok(Response::new(RiseCtlGetCheckpointVersionResponse {
+            checkpoint_version: Some(checkpoint_version),
+        }))
+    }
+
+    async fn rise_ctl_list_compaction_status(
+        &self,
+        _request: Request<RiseCtlListCompactionStatusRequest>,
+    ) -> Result<Response<RiseCtlListCompactionStatusResponse>, Status> {
+        let (compaction_statuses, task_assignment) =
+            self.hummock_manager.list_compaction_status().await;
+        let task_progress = self.hummock_manager.compactor_manager.get_progress();
+        Ok(Response::new(RiseCtlListCompactionStatusResponse {
+            compaction_statuses,
+            task_assignment,
+            task_progress,
+        }))
     }
 }

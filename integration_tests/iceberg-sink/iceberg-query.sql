@@ -1,0 +1,1 @@
+select user_id, count(*) from iceberg.demo_db.demo_table group by user_id

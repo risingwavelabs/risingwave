@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
 while getopts 'p:' opt; do
     case ${opt} in
@@ -21,47 +21,33 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+download_and_prepare_rw "$profile" common
+
 echo "--- Download artifacts"
-mkdir -p target/debug
-buildkite-agent artifact download risingwave-"$profile" target/debug/
-buildkite-agent artifact download risedev-dev-"$profile" target/debug/
-buildkite-agent artifact download "e2e_test/generated/*" ./
-mv target/debug/risingwave-"$profile" target/debug/risingwave
-mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
-
-echo "--- Adjust permission"
-chmod +x ./target/debug/risingwave
-chmod +x ./target/debug/risedev-dev
-
-echo "--- Generate RiseDev CI config"
-cp ci/risedev-components.ci.env risedev-components.user.env
-
-echo "--- Prepare RiseDev dev cluster"
-cargo make pre-start-dev
-cargo make link-all-in-one-binaries
+download-and-decompress-artifact e2e_test_generated ./
 
 host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
 
-echo "--- e2e, ci-3cn-3fe, streaming"
+echo "--- e2e, ci-3streaming-2serving-3fe, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3cn-3fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest ${host_args} -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill
 
-echo "--- e2e, ci-3cn-3fe, batch"
+echo "--- e2e, ci-3streaming-2serving-3fe, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3cn-3fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest ${host_args} -d dev './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
-sqllogictest ${host_args} -d dev './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-batch-${profile}"
+sqllogictest ${host_args} -d dev './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-batch-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill
 
-echo "--- e2e, ci-3cn-3fe, generated"
+echo "--- e2e, ci-3streaming-2serving-3fe, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3cn-3fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest ${host_args} -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}"
 
 echo "--- Kill cluster"

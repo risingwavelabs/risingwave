@@ -62,6 +62,7 @@ pub enum BinaryOperator {
     Divide,
     Modulo,
     Concat,
+    Prefix,
     Gt,
     Lt,
     GtEq,
@@ -86,6 +87,10 @@ pub enum BinaryOperator {
     PGRegexIMatch,
     PGRegexNotMatch,
     PGRegexNotIMatch,
+    Arrow,
+    LongArrow,
+    HashArrow,
+    HashLongArrow,
 }
 
 impl fmt::Display for BinaryOperator {
@@ -97,6 +102,7 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Divide => "/",
             BinaryOperator::Modulo => "%",
             BinaryOperator::Concat => "||",
+            BinaryOperator::Prefix => "^@",
             BinaryOperator::Gt => ">",
             BinaryOperator::Lt => "<",
             BinaryOperator::GtEq => ">=",
@@ -121,6 +127,10 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::PGRegexIMatch => "~*",
             BinaryOperator::PGRegexNotMatch => "!~",
             BinaryOperator::PGRegexNotIMatch => "!~*",
+            BinaryOperator::Arrow => "->",
+            BinaryOperator::LongArrow => "->>",
+            BinaryOperator::HashArrow => "#>",
+            BinaryOperator::HashLongArrow => "#>>",
         })
     }
 }

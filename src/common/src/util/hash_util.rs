@@ -31,3 +31,14 @@ impl BuildHasher for Crc32FastBuilder {
         crc32fast::Hasher::new()
     }
 }
+
+#[derive(Clone, Copy)]
+pub struct XxHash64Builder;
+
+impl BuildHasher for XxHash64Builder {
+    type Hasher = twox_hash::XxHash64;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        twox_hash::XxHash64::with_seed(0x20210401)
+    }
+}

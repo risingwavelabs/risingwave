@@ -16,6 +16,7 @@ mod barrier;
 mod catalog;
 mod cluster;
 mod error;
+mod migration_plan;
 mod notification;
 mod stream;
 mod user;
@@ -30,6 +31,7 @@ pub use barrier::*;
 pub use catalog::*;
 pub use cluster::*;
 pub use error::*;
+pub use migration_plan::*;
 pub use notification::*;
 use prost::Message;
 pub use stream::*;
@@ -51,11 +53,18 @@ pub trait Transactional {
     fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()>;
 }
 
+mod private {
+    /// A marker trait helps to collect all implementors of `MetadataModel` in
+    /// `for_all_metadata_models`. The trait should only be implemented by adding item in
+    /// `for_all_metadata_models`.
+    pub trait MetadataModelMarker {}
+}
+
 /// `MetadataModel` defines basic model operations in CRUD.
 #[async_trait]
-pub trait MetadataModel: std::fmt::Debug + Sized {
+pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker {
     /// Serialized prost message type.
-    type ProstType: Message + Default;
+    type PbType: Message + Default;
     /// Serialized key type.
     type KeyType: Message;
 
@@ -63,7 +72,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
     fn cf_name() -> String;
 
     /// Serialize to protobuf.
-    fn to_protobuf(&self) -> Self::ProstType;
+    fn to_protobuf(&self) -> Self::PbType;
 
     /// Serialize to protobuf encoded byte vector.
     fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
@@ -71,7 +80,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
     }
 
     /// Deserialize from protobuf.
-    fn from_protobuf(prost: Self::ProstType) -> Self;
+    fn from_protobuf(prost: Self::PbType) -> Self;
 
     /// Current record key.
     fn key(&self) -> MetadataModelResult<Self::KeyType>;
@@ -85,7 +94,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
         bytes_vec
             .iter()
             .map(|(_k, v)| {
-                Self::ProstType::decode(v.as_slice())
+                Self::PbType::decode(v.as_slice())
                     .map(Self::from_protobuf)
                     .map_err(Into::into)
             })
@@ -100,7 +109,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
         bytes_vec
             .iter()
             .map(|(_k, v)| {
-                Self::ProstType::decode(v.as_slice())
+                Self::PbType::decode(v.as_slice())
                     .map(Self::from_protobuf)
                     .map_err(Into::into)
             })
@@ -147,10 +156,50 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
                 return Ok(None);
             }
         };
-        let model = Self::from_protobuf(Self::ProstType::decode(byte_vec.as_slice())?);
+        let model = Self::from_protobuf(Self::PbType::decode(byte_vec.as_slice())?);
         Ok(Some(model))
     }
 }
+
+macro_rules! for_all_metadata_models {
+    ($macro:ident) => {
+        $macro! {
+            // These items should be included in a meta snapshot.
+            // So be sure to update meta backup/restore when adding new items.
+            { risingwave_pb::hummock::HummockVersion },
+            { risingwave_pb::hummock::HummockVersionStats },
+            { crate::hummock::model::CompactionGroup },
+            { risingwave_pb::catalog::Database },
+            { risingwave_pb::catalog::Schema },
+            { risingwave_pb::catalog::Table },
+            { risingwave_pb::catalog::Index },
+            { risingwave_pb::catalog::Sink },
+            { risingwave_pb::catalog::Source },
+            { risingwave_pb::catalog::View },
+            { crate::model::stream::TableFragments },
+            { risingwave_pb::user::UserInfo },
+            { risingwave_pb::catalog::Function },
+            { risingwave_pb::catalog::Connection },
+            // These items need not be included in a meta snapshot.
+            { crate::model::cluster::Worker },
+            { risingwave_pb::hummock::CompactTaskAssignment },
+            { crate::hummock::compaction::CompactStatus },
+            { risingwave_pb::hummock::HummockVersionDelta },
+            { risingwave_pb::hummock::HummockPinnedSnapshot },
+            { risingwave_pb::hummock::HummockPinnedVersion },
+        }
+    };
+}
+
+macro_rules! impl_metadata_model_marker {
+    ($({ $target_type:ty },)*) => {
+        $(
+            impl private::MetadataModelMarker for $target_type {}
+        )*
+    }
+}
+
+for_all_metadata_models!(impl_metadata_model_marker);
 
 /// `Transactional` defines operations supported in a transaction.
 /// Read operations can be supported if necessary.

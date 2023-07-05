@@ -18,29 +18,30 @@ use std::mem::swap;
 use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
-use risingwave_common::error::Result;
+use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::{build_from_prost, new_unary_expr, BoxedExpression, LiteralExpression};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::expr::expr_node::Type;
-use risingwave_pb::plan_common::OrderType as ProstOrderType;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
+use tokio::sync::watch::Receiver;
 
 use crate::executor::join::JoinType;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
     ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
 };
-use crate::task::BatchTaskContext;
+use crate::task::{BatchTaskContext, ShutdownMsg};
 
 /// Distributed Lookup Join Executor.
 /// High level Execution flow:
@@ -168,7 +169,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
 
         let null_safe = distributed_lookup_join_node.get_null_safe().to_vec();
 
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = source.context.get_config().developer.chunk_size;
 
         let table_id = TableId {
             table_id: table_desc.table_id,
@@ -187,20 +188,22 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
         let order_types: Vec<OrderType> = table_desc
             .pk
             .iter()
-            .map(|order| {
-                OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
-            })
+            .map(|order| OrderType::from_protobuf(order.get_order_type().unwrap()))
             .collect();
 
-        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
 
-        let dist_key_indices = table_desc
-            .dist_key_indices
+        let dist_key_in_pk_indices = table_desc
+            .dist_key_in_pk_indices
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
         // Lookup Join always contains distribution key, so we don't need vnode bitmap
-        let distribution = Distribution::all_vnodes(dist_key_indices);
+        let distribution = Distribution::all_vnodes(dist_key_in_pk_indices);
         let table_option = TableOption {
             retention_seconds: if table_desc.retention_seconds > 0 {
                 Some(table_desc.retention_seconds)
@@ -214,6 +217,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .map(|&k| k as usize)
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        let versioned = table_desc.versioned;
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(
                 state_store,
@@ -226,6 +230,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 table_option,
                 value_indices,
                 prefix_hint_len,
+                versioned,
             );
 
             let inner_side_builder = InnerSideExecutorBuilder::new(
@@ -237,6 +242,8 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 table,
                 chunk_size,
             );
+
+            let identity = source.plan_node().get_identity().clone();
 
             Ok(DistributedLookupJoinExecutorArgs {
                 join_type,
@@ -253,7 +260,9 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 schema: actual_schema,
                 output_indices,
                 chunk_size,
-                identity: source.plan_node().get_identity().clone(),
+                identity: identity.clone(),
+                shutdown_rx: Some(source.shutdown_rx.clone()),
+                mem_ctx: source.context.create_executor_mem_context(&identity),
             }
             .dispatch())
         })
@@ -276,6 +285,8 @@ struct DistributedLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    mem_ctx: MemoryContext,
 }
 
 impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
@@ -299,6 +310,8 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
                 output_indices: self.output_indices,
                 chunk_size: self.chunk_size,
                 identity: self.identity,
+                shutdown_rx: self.shutdown_rx,
+                mem_ctx: self.mem_ctx,
                 _phantom: PhantomData,
             },
         ))
@@ -368,13 +381,9 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
             let datum = if inner_type == outer_type {
                 datum
             } else {
-                let cast_expr = new_unary_expr(
-                    Type::Cast,
-                    inner_type.clone(),
-                    Box::new(LiteralExpression::new(outer_type.clone(), datum.clone())),
-                )?;
-
-                cast_expr.eval_row(&OwnedRow::empty())?
+                return Err(internal_error(format!(
+                    "Join key types are not aligned: LHS: {outer_type:?}, RHS: {inner_type:?}"
+                )));
             };
 
             scan_range.eq_conds.push(datum);
@@ -394,7 +403,13 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         } else {
             let iter = self
                 .table
-                .batch_iter_with_pk_bounds(self.epoch.clone().into(), &pk_prefix, .., false)
+                .batch_iter_with_pk_bounds(
+                    self.epoch.clone().into(),
+                    &pk_prefix,
+                    ..,
+                    false,
+                    PrefetchOptions::new_for_exhaust_iter(),
+                )
                 .await?;
 
             pin_mut!(iter);

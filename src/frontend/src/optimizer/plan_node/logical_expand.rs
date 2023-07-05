@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
-use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::error::Result;
 
-use super::generic::GenericPlanNode;
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
@@ -26,7 +23,6 @@ use super::{
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// [`LogicalExpand`] expands one row multiple times according to `column_subsets` and also keeps
@@ -37,7 +33,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// Aggregates use expanded columns as their arguments and original columns for their filter. `flag`
 /// is used to distinguish between different `subset`s in `column_subsets`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalExpand {
     pub base: PlanBase,
     core: generic::Expand<PlanRef>,
@@ -53,29 +49,7 @@ impl LogicalExpand {
             column_subsets,
             input,
         };
-
-        let ctx = core.ctx();
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-
-        // TODO(Wenzhuo): change fd according to expand's new definition.
-        let flag_index = schema.len() - 1; // assume that `flag` is the last column
-        let functional_dependency = {
-            let input_fd = core
-                .input
-                .functional_dependency()
-                .clone()
-                .into_dependencies();
-            let mut current_fd = FunctionalDependencySet::new(schema.len());
-            for mut fd in input_fd {
-                fd.grow(schema.len());
-                fd.set_from(flag_index, true);
-                current_fd.add_functional_dependency(fd);
-            }
-            current_fd
-        };
-
-        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+        let base = PlanBase::new_logical_with_core(&core);
 
         LogicalExpand { base, core }
     }
@@ -86,19 +60,6 @@ impl LogicalExpand {
 
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         &self.core.column_subsets
-    }
-
-    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
-        self.core.column_subsets_display()
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ column_subsets: {:?} }}",
-            name,
-            self.column_subsets_display()
-        )
     }
 }
 
@@ -144,12 +105,7 @@ impl PlanTreeNodeUnary for LogicalExpand {
 }
 
 impl_plan_tree_node_for_unary! {LogicalExpand}
-
-impl fmt::Display for LogicalExpand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalExpand")
-    }
-}
+impl_distill_by_unit!(LogicalExpand, core, "LogicalExpand");
 
 impl ColPrunable for LogicalExpand {
     fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
@@ -177,7 +133,8 @@ impl PredicatePushdown for LogicalExpand {
 impl ToBatch for LogicalExpand {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(BatchExpand::new(new_logical).into())
     }
 }
@@ -194,7 +151,8 @@ impl ToStream for LogicalExpand {
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let new_input = self.input().to_stream(ctx)?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(StreamExpand::new(new_logical).into())
     }
 }

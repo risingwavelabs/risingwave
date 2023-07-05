@@ -26,6 +26,7 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::HummockResult;
 use crate::store::SyncResult;
 
+mod cache_refill_policy;
 pub mod hummock_event_handler;
 pub mod uploader;
 
@@ -75,6 +76,7 @@ pub enum HummockEvent {
         table_id: TableId,
         new_read_version_sender:
             oneshot::Sender<(Arc<RwLock<HummockReadVersion>>, LocalInstanceGuard)>,
+        is_replicated: bool,
     },
 
     DestroyReadVersion {
@@ -101,7 +103,9 @@ impl HummockEvent {
                 format!("VersionUpdate {:?}", version_update_payload)
             }
 
-            HummockEvent::ImmToUploader(imm) => format!("ImmToUploader {:?}", imm),
+            HummockEvent::ImmToUploader(imm) => {
+                format!("ImmToUploader {:?}", imm)
+            }
 
             HummockEvent::SealEpoch {
                 epoch,
@@ -113,7 +117,11 @@ impl HummockEvent {
             HummockEvent::RegisterReadVersion {
                 table_id,
                 new_read_version_sender: _,
-            } => format!("RegisterReadVersion table_id {:?}", table_id,),
+                is_replicated,
+            } => format!(
+                "RegisterReadVersion table_id {:?}, is_replicated: {:?}",
+                table_id, is_replicated
+            ),
 
             HummockEvent::DestroyReadVersion {
                 table_id,

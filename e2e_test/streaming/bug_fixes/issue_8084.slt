@@ -1,0 +1,24 @@
+# https://github.com/risingwavelabs/risingwave/issues/8084
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (a int primary key);
+
+statement ok
+create materialized view mv as select t1.* from t as t1 full join t as t2 on t1.a = t2.a;
+
+statement ok
+insert into t values(null);
+
+# TODO: https://github.com/risingwavelabs/risingwave/issues/8084 
+query I
+select * from mv;
+----
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;

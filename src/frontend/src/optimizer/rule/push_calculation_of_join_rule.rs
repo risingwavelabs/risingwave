@@ -157,15 +157,15 @@ impl PushCalculationOfJoinRule {
             )
         };
         for (index, expr) in exprs.iter().enumerate() {
-            let ExprImpl::FunctionCall(func) = expr else {continue};
-            if !is_comparison_type(func.get_expr_type()) {
+            let ExprImpl::FunctionCall(func) = expr else { continue };
+            if !is_comparison_type(func.func_type()) {
                 continue;
             }
             // Do not decompose the comparison if it contains `now()`
             if expr.count_nows() > 0 {
                 continue;
             }
-            let (ty, left, right) = func.clone().decompose_as_binary();
+            let (mut ty, left, right) = func.clone().decompose_as_binary();
             // we just cast the return types of inputs of binary predicates for `HashJoin` and
             // `DynamicFilter`.
             let left_input_bits = left.collect_input_refs(left_col_num + right_col_num);
@@ -177,6 +177,7 @@ impl PushCalculationOfJoinRule {
             } else if left_input_bits.is_subset(&right_bit_map)
                 && right_input_bits.is_subset(&left_bit_map)
             {
+                ty = ExprImpl::reverse_comparison(ty);
                 (right, left)
             } else {
                 continue;

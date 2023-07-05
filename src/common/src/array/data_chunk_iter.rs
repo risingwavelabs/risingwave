@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::TrustedLen;
+use std::iter::{FusedIterator, TrustedLen};
 
-use super::column::Column;
+use super::ArrayRef;
 use crate::array::DataChunk;
 use crate::row::Row;
 use crate::types::DatumRef;
@@ -64,7 +64,25 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
             }
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if let Some(idx) = self.idx {
+            (
+                // if all following rows are invisible
+                0,
+                // if all following rows are visible
+                Some(std::cmp::min(
+                    self.chunk.capacity() - idx,
+                    self.chunk.cardinality(),
+                )),
+            )
+        } else {
+            (0, Some(0))
+        }
+    }
 }
+
+impl<'a> FusedIterator for DataChunkRefIter<'a> {}
 
 pub struct DataChunkRefIterWithHoles<'a> {
     chunk: &'a DataChunk,
@@ -92,7 +110,15 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
             ret
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.chunk.capacity() - self.idx;
+        (size, Some(size))
+    }
 }
+
+impl ExactSizeIterator for DataChunkRefIterWithHoles<'_> {}
+unsafe impl TrustedLen for DataChunkRefIterWithHoles<'_> {}
 
 #[derive(Clone, Copy)]
 pub struct RowRef<'a> {
@@ -127,30 +153,11 @@ impl PartialEq for RowRef<'_> {
 }
 impl Eq for RowRef<'_> {}
 
-impl PartialOrd for RowRef<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.iter().partial_cmp(other.iter())
-    }
-}
-impl Ord for RowRef<'_> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.iter().cmp(other.iter())
-    }
-}
-
 impl Row for RowRef<'_> {
-    type Iter<'a> = RowRefIter<'a>
-    where
-        Self: 'a;
-
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         debug_assert!(self.idx < self.chunk.capacity());
         // for `RowRef`, the index is always in bound.
-        unsafe {
-            self.chunk.columns()[index]
-                .array_ref()
-                .value_at_unchecked(self.idx)
-        }
+        unsafe { self.chunk.columns()[index].value_at_unchecked(self.idx) }
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
@@ -159,7 +166,6 @@ impl Row for RowRef<'_> {
         self.chunk
             .columns()
             .get_unchecked(index)
-            .array_ref()
             .value_at_unchecked(self.idx)
     }
 
@@ -167,7 +173,7 @@ impl Row for RowRef<'_> {
         self.chunk.columns().len()
     }
 
-    fn iter(&self) -> Self::Iter<'_> {
+    fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
         debug_assert!(self.idx < self.chunk.capacity());
         RowRefIter {
             columns: self.chunk.columns().iter(),
@@ -178,7 +184,7 @@ impl Row for RowRef<'_> {
 
 #[derive(Clone)]
 pub struct RowRefIter<'a> {
-    columns: std::slice::Iter<'a, Column>,
+    columns: std::slice::Iter<'a, ArrayRef>,
     row_idx: usize,
 }
 
@@ -190,7 +196,7 @@ impl<'a> Iterator for RowRefIter<'a> {
         unsafe {
             self.columns
                 .next()
-                .map(|col| col.array_ref().value_at_unchecked(self.row_idx))
+                .map(|col| col.value_at_unchecked(self.row_idx))
         }
     }
 
@@ -199,10 +205,5 @@ impl<'a> Iterator for RowRefIter<'a> {
     }
 }
 
+impl ExactSizeIterator for RowRefIter<'_> {}
 unsafe impl TrustedLen for RowRefIter<'_> {}
-
-impl ExactSizeIterator for RowRefIter<'_> {
-    fn len(&self) -> usize {
-        self.columns.len()
-    }
-}

@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet};
 use paste::paste;
 
 use super::*;
-pub use crate::expr::CollectInputRef;
 use crate::optimizer::plan_visitor::ShareParentCounter;
 use crate::optimizer::PlanVisitor;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
@@ -78,7 +77,7 @@ pub struct ColumnPruningContext {
 impl ColumnPruningContext {
     pub fn new(root: PlanRef) -> Self {
         let mut share_parent_counter = ShareParentCounter::default();
-        share_parent_counter.visit(root.clone());
+        share_parent_counter.visit(root);
         Self {
             share_required_cols_map: Default::default(),
             share_parent_counter,

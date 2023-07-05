@@ -27,8 +27,6 @@ impl<'a, A: Array> ArrayIterator<'a, A> {
     }
 }
 
-unsafe impl<'a, A: Array> TrustedLen for ArrayIterator<'a, A> {}
-
 impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
     type Item = Option<A::RefItem<'a>>;
 
@@ -36,7 +34,8 @@ impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
         if self.pos >= self.data.len() {
             None
         } else {
-            let item = self.data.value_at(self.pos);
+            // SAFETY: bounds check is done by `self.pos < self.data.len()`.
+            let item = unsafe { self.data.value_at_unchecked(self.pos) };
             self.pos += 1;
             Some(item)
         }
@@ -47,6 +46,9 @@ impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
         (size, Some(size))
     }
 }
+
+impl<'a, A: Array> ExactSizeIterator for ArrayIterator<'a, A> {}
+unsafe impl<'a, A: Array> TrustedLen for ArrayIterator<'a, A> {}
 
 #[cfg(test)]
 mod tests {

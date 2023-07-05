@@ -43,7 +43,6 @@ if ! psql -h localhost -p 4566 -d dev -U root -c "show materialized views;" | gr
   exit 1
 fi
 echo "restore snapshot ${job_id_2} succeeded"
-wait_cluster_ready
 query_mvs
 # any other ops in the restored cluster
 drop_mvs

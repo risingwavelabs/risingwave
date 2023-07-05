@@ -143,7 +143,7 @@ mod tests {
         for parallel_unit_num in simulated_parallel_unit_nums(None, None) {
             let (actor_mapping, _) = generate_actor_mapping(parallel_unit_num);
 
-            let actor_to_parallel_unit_map = (0..parallel_unit_num)
+            let actor_to_parallel_unit_map: HashMap<_, _> = (0..parallel_unit_num)
                 .map(|i| (i as ActorId, i as ParallelUnitId))
                 .collect();
             let parallel_unit_mapping = actor_mapping.to_parallel_unit(&actor_to_parallel_unit_map);

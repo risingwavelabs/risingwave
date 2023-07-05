@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <artifactId>java-parent</artifactId>
+        <groupId>com.risingwave.java</groupId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>java-binding</artifactId>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <module.version>1.0-SNAPSHOT</module.version>
+        <jni.loader.version>1.0.0</jni.loader.version>
+        <java.binding.release>false</java.binding.release>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.questdb</groupId>
+            <artifactId>jar-jni</artifactId>
+            <version>${jni.loader.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>proto</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>common-utils</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.1</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <profiles>
+        <profile>
+            <id>no-build-jni-rust</id>
+            <activation>
+                <property>
+                    <name>no-build-rust</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.questdb</groupId>
+                        <artifactId>rust-maven-plugin</artifactId>
+                        <version>${jni.loader.version}</version>
+                        <executions>
+                            <execution>
+                                <id>build-jni-rust</id>
+                                <!--disable the plugin-->
+                                <phase>none</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.questdb</groupId>
+                <artifactId>rust-maven-plugin</artifactId>
+                <version>${jni.loader.version}</version>
+                <executions>
+                    <execution>
+                        <id>build-jni-rust</id>
+                        <goals>
+                            <goal>build</goal>
+                        </goals>
+                        <configuration>
+                            <path>../../src/java_binding</path>
+                            <release>${java.binding.release}</release>
+                            <copyTo>${project.build.directory}/classes/risingwave/jni</copyTo>
+                            <copyWithPlatformDir>true</copyWithPlatformDir>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

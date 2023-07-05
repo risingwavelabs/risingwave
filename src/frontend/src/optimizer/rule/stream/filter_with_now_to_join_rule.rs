@@ -55,12 +55,12 @@ impl Rule for FilterWithNowToJoinRule {
         // We want to put `input_expr >/>= now_expr` before `input_expr </<= now_expr` as the former
         // will introduce a watermark that can reduce state (since `now_expr` is monotonically
         // increasing)
-        now_filters.sort_by_key(|l| rank_cmp(l.get_expr_type()));
+        now_filters.sort_by_key(|l| rank_cmp(l.func_type()));
 
         // Ignore no now filter & forbid now filters that do not create a watermark
         if now_filters.is_empty()
             || !matches!(
-                now_filters[0].get_expr_type(),
+                now_filters[0].func_type(),
                 Type::GreaterThan | Type::GreaterThanOrEqual
             )
         {
@@ -112,20 +112,12 @@ struct NowAsInputRef {
     index: usize,
 }
 impl ExprRewriter for NowAsInputRef {
-    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> crate::expr::ExprImpl {
-        let (func_type, inputs, ret) = func_call.decompose();
-        let inputs = inputs
-            .into_iter()
-            .map(|expr| self.rewrite_expr(expr))
-            .collect();
-        match func_type {
-            Type::Now => InputRef {
-                index: self.index,
-                data_type: DataType::Timestamptz,
-            }
-            .into(),
-            _ => FunctionCall::new_unchecked(func_type, inputs, ret).into(),
+    fn rewrite_now(&mut self, _: crate::expr::Now) -> crate::expr::ExprImpl {
+        InputRef {
+            index: self.index,
+            data_type: DataType::Timestamptz,
         }
+        .into()
     }
 }
 

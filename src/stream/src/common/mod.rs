@@ -14,9 +14,11 @@
 
 pub use builder::*;
 pub use column_mapping::*;
-pub use infallible_expr::*;
 
+// t
 mod builder;
+pub mod cache;
 mod column_mapping;
-mod infallible_expr;
+pub mod log_store;
+pub mod metrics;
 pub mod table;

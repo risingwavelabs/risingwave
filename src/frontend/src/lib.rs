@@ -25,9 +25,15 @@
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![feature(macro_metavar_expr)]
+#![feature(slice_internals)]
+#![feature(min_specialization)]
+#![feature(extend_one)]
+#![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
+#![feature(async_fn_in_trait)]
 #![recursion_limit = "256"]
 
 #[macro_use]
@@ -39,15 +45,14 @@ pub mod expr;
 pub mod handler;
 pub use handler::PgResponseStream;
 mod observer;
-mod optimizer;
-pub use optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+pub mod optimizer;
+pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
-#[expect(dead_code)]
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
-use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_common::config::OverrideConfig;
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -57,6 +62,8 @@ mod user;
 
 pub mod health_service;
 mod monitor;
+
+mod telemetry;
 
 use std::ffi::OsString;
 use std::iter;
@@ -68,23 +75,22 @@ use session::SessionManagerImpl;
 
 /// Command-line arguments for frontend-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The stateless proxy that parses SQL queries and performs planning and optimizations of query jobs"
+)]
 pub struct FrontendOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(
-        long,
-        alias = "host",
-        env = "RW_LISTEN_ADDR",
-        default_value = "127.0.0.1:4566"
-    )]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:4566")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long, env = "RW_ADVERTISE_ADDR", alias = "client-address")]
+    #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
     // TODO: This is currently unused.
@@ -131,6 +137,10 @@ struct OverrideConfigOpts {
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,
+
+    #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
+    #[override_opts(path = batch.enable_barrier_read)]
+    pub enable_barrier_read: Option<bool>,
 }
 
 impl Default for FrontendOpts {

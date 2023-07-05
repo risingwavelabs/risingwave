@@ -17,7 +17,7 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    DataType as AstDataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
+    DataType as AstDataType, FunctionArg, ObjectName, TableAlias, TableFactor,
 };
 
 use crate::sql_gen::utils::{create_args, create_table_alias};
@@ -25,7 +25,7 @@ use crate::sql_gen::{Column, Expr, SqlGenerator, Table};
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates time window functions.
-    pub(crate) fn gen_time_window_func(&mut self) -> (TableWithJoins, Vec<Table>) {
+    pub(crate) fn gen_time_window_func(&mut self) -> (TableFactor, Table) {
         match self.flip_coin() {
             true => self.gen_hop(),
             false => self.gen_tumble(),
@@ -34,7 +34,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Generates `TUMBLE`.
     /// TUMBLE(data: TABLE, timecol: COLUMN, size: INTERVAL, offset?: INTERVAL)
-    fn gen_tumble(&mut self) -> (TableWithJoins, Vec<Table>) {
+    fn gen_tumble(&mut self) -> (TableFactor, Table) {
         let tables = find_tables_with_timestamp_cols(self.tables.clone());
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
@@ -51,12 +51,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let table = Table::new(table_name, schema.clone());
 
-        (relation, vec![table])
+        (relation, table)
     }
 
     /// Generates `HOP`.
     /// HOP(data: TABLE, timecol: COLUMN, slide: INTERVAL, size: INTERVAL, offset?: INTERVAL)
-    fn gen_hop(&mut self) -> (TableWithJoins, Vec<Table>) {
+    fn gen_hop(&mut self) -> (TableFactor, Table) {
         let tables = find_tables_with_timestamp_cols(self.tables.clone());
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
@@ -77,20 +77,24 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let table = Table::new(table_name, schema.clone());
 
-        (relation, vec![table])
+        (relation, table)
     }
 
-    /// Both window slide, window size must be positive.
     fn gen_secs(&mut self) -> u64 {
-        let rand_secs = self.rng.gen_range(1..1000000) as u64;
-        let minute = 60;
-        let hour = 60 * minute;
-        let day = 24 * hour;
-        let week = 7 * day;
-        let choices = [1, minute, hour, day, week, rand_secs];
-        let secs = choices.choose(&mut self.rng).unwrap();
-        *secs
+        self.rng.gen_range(1..100)
     }
+
+    // TODO(kwannoel): Disable for now, otherwise time window may take forever
+    // fn gen_secs(&mut self) -> u64 {
+    //     let minute = 60;
+    //     let hour = 60 * minute;
+    //     let day = 24 * hour;
+    //     let week = 7 * day;
+    //     let rand_secs = self.rng.gen_range(1..week);
+    //     let choices = [1, minute, hour, day, week, rand_secs];
+    //     let secs = choices.choose(&mut self.rng).unwrap();
+    //     *secs
+    // }
 
     fn secs_to_interval_expr(i: u64) -> Expr {
         Expr::TypedString {
@@ -100,27 +104,28 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_slide(&mut self) -> (u64, Expr) {
-        let secs = self.gen_secs();
-        let expr = Self::secs_to_interval_expr(secs);
-        (secs, expr)
+        let slide_secs = self.gen_secs();
+        let expr = Self::secs_to_interval_expr(slide_secs);
+        (slide_secs, expr)
     }
 
-    fn gen_size(&mut self, denominator: u64) -> Expr {
-        let secs = self.gen_secs() * denominator;
-        Self::secs_to_interval_expr(secs)
+    /// Size must be divisible by slide.
+    /// i.e.
+    /// `size_secs` = k * `slide_secs`.
+    /// k cannot be too large, to avoid overflow.
+    fn gen_size(&mut self, slide_secs: u64) -> Expr {
+        let k = self.rng.gen_range(1..20);
+        let size_secs = k * slide_secs;
+        Self::secs_to_interval_expr(size_secs)
     }
 }
 
 /// Create a table view function.
-fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWithJoins {
-    let factor = TableFactor::TableFunction {
+fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableFactor {
+    TableFactor::TableFunction {
         name: ObjectName(vec![name.into()]),
         alias: Some(alias),
         args,
-    };
-    TableWithJoins {
-        relation: factor,
-        joins: vec![],
     }
 }
 

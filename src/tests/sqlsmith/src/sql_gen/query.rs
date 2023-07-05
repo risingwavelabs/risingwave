@@ -34,7 +34,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates query expression and returns its
     /// query schema as well.
     pub(crate) fn gen_query(&mut self) -> (Query, Vec<Column>) {
-        if self.can_recurse() {
+        if self.rng.gen_bool(0.3) {
             self.gen_complex_query()
         } else {
             self.gen_simple_query()
@@ -62,7 +62,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         )
     }
 
-    /// Generates a simple query which will not recurse.
+    /// This query can still recurse, but it is "simpler"
+    /// does not have "with" clause, "order by".
+    /// Which makes it more unlikely to recurse.
     fn gen_simple_query(&mut self) -> (Query, Vec<Column>) {
         let num_select_items = self.rng.gen_range(1..=4);
         let with_tables = vec![];
@@ -72,7 +74,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 with: None,
                 body: query,
                 order_by: vec![],
-                limit: None,
+                limit: self.gen_limit(false),
                 offset: None,
                 fetch: None,
             },
@@ -116,7 +118,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_with(&mut self) -> (Option<With>, Vec<Table>) {
-        match self.rng.gen_bool(0.4) {
+        match self.can_recurse() {
             true => (None, vec![]),
             false => {
                 let (with, tables) = self.gen_with_inner();
@@ -135,10 +137,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             from,
         };
 
-        let with_tables = vec![Table {
-            name: alias.name.real_value(),
-            columns: query_schema,
-        }];
+        let with_tables = vec![Table::new(alias.name.real_value(), query_schema)];
         (
             With {
                 recursive: false,
@@ -164,7 +163,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_limit(&mut self, has_order_by: bool) -> Option<String> {
-        if (!self.is_mview || has_order_by) && self.rng.gen_bool(0.2) {
+        if (!self.is_mview || has_order_by) && self.flip_coin() {
             Some(self.rng.gen_range(0..=100).to_string())
         } else {
             None
@@ -209,7 +208,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (
             SelectItem::ExprWithAlias {
                 expr,
-                alias: Ident::new(alias.clone()),
+                alias: Ident::new_unchecked(alias.clone()),
             },
             Column {
                 name: alias,
@@ -231,20 +230,18 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
 
         // We short-circuit here for mview to avoid streaming nested loop join,
-        // since CROSS JOIN below maybe correlated.
+        // since CROSS JOIN below could be correlated.
         if self.is_mview {
             assert!(!self.tables.is_empty());
             return from;
         }
 
-        // Generate CROSS JOIN
+        // Generate one cross join at most.
         let mut lateral_contexts = vec![];
-        for _ in 0..usize::min(self.tables.len(), 5) {
-            if self.flip_coin() {
-                let (table_with_join, mut table) = self.gen_from_relation();
-                from.push(table_with_join);
-                lateral_contexts.append(&mut table);
-            }
+        if self.rng.gen_bool(0.1) {
+            let (table_with_join, mut table) = self.gen_from_relation();
+            from.push(table_with_join);
+            lateral_contexts.append(&mut table);
         }
         self.add_relations_to_context(lateral_contexts);
         from
@@ -270,7 +267,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             self.bound_columns = group_by_cols.clone();
             group_by_cols
                 .into_iter()
-                .map(|c| Expr::Identifier(Ident::new(c.name)))
+                .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))
                 .collect_vec()
         } else {
             vec![]

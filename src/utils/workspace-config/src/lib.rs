@@ -14,12 +14,15 @@
 
 //! This crate includes dependencies that need to be statically-linked.
 #[cfg(all(
-    not(debug_assertions),
+    not(debug_assertions), // if release build...
     any(
-        not(feature = "enable-static-link"),
-        not(feature = "enable-static-log-level"),
+        // ...and enabled below features
+        feature = "rw-dynamic-link",
+        // ...and not enabled below features
+        not(feature = "rw-static-link"),
+        // add more features here
     ),
 ))]
 compile_error!(
-    "must enable `static-link` and `static-log-level` in release build with `--features \"static-link static-log-level\"`"
+    "must enable `rw-static-link` in release build with `--features \"rw-static-link\"`"
 );

@@ -11,7 +11,7 @@ create table products ( id INT,
  port = '3306',
  username = 'root',
  password = '123456',
- database.name = 'mydb',
+ database.name = 'my@db',
  table.name = 'products',
  server.id = '5085'
 );
@@ -34,7 +34,7 @@ create table orders (
  port = '3306',
  username = 'root',
  password = '123456',
- database.name = 'mydb',
+ database.name = 'my@db',
  table.name = 'orders',
  server.id = '5086'
 );
@@ -57,7 +57,6 @@ create table shipments (
  username = 'postgres',
  password = 'postgres',
  database.name = 'cdc_test',
- schema.name = 'public',
  table.name = 'shipments',
  slot.name = 'shipments'
 );
@@ -84,7 +83,43 @@ create table mytable (
  port = '3306',
  username = 'root',
  password = '123456',
- database.name = 'mydb',
+ database.name = 'my@db',
  table.name = 'mytable',
  server.id = '5087'
+);
+
+# Some columns missing and reordered (mysql-cdc)
+statement ok
+create table orders_2 (
+   order_id int,
+   price decimal,
+   customer_name string,
+   PRIMARY KEY (order_id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ table.name = 'orders',
+ server.id = '5088'
+);
+
+# Some columns missing and reordered (postgres-cdc)
+statement ok
+create table shipments_2 (
+  origin STRING,
+  destination STRING,
+  shipment_id INTEGER,
+  order_id INTEGER,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ table.name = 'shipments'
 );

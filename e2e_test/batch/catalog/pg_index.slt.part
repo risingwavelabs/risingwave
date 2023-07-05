@@ -10,7 +10,7 @@ select ix.indnatts, ix.indkey from pg_catalog.pg_class t
     join pg_catalog.pg_class i on i.oid = ix.indexrelid
     where t.relname = 'tmp' and i.relname = 'tmp_id2_idx';
 ----
-1 {2}
+2 {2,3}
 
 statement ok
 create index tmp_id2_idx_include_id1 on tmp(id2) include(id1);
@@ -21,7 +21,7 @@ select ix.indnatts, ix.indkey from pg_catalog.pg_class t
     join pg_catalog.pg_class i on i.oid = ix.indexrelid
     where t.relname = 'tmp' and i.relname = 'tmp_id2_idx_include_id1';
 ----
-2 {2,1}
+3 {2,3,4}
 
 statement ok
 create index tmp_id1_id2_idx on tmp(id1, id2);
@@ -32,7 +32,7 @@ select ix.indnatts, ix.indkey from pg_catalog.pg_class t
     join pg_catalog.pg_class i on i.oid = ix.indexrelid
     where t.relname = 'tmp' and i.relname = 'tmp_id1_id2_idx';
 ----
-2 {1,2}
+3 {2,3,4}
 
 statement ok
 drop table tmp;

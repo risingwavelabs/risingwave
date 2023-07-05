@@ -17,11 +17,12 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Index;
 
-use derivative::Derivative;
+use educe::Educe;
 use itertools::Itertools;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto};
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
+use super::bitmap::VnodeBitmapExt;
 use super::vnode::{ParallelUnitId, VirtualNode};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::util::compress::compress_data;
@@ -47,8 +48,8 @@ pub type ExpandedMapping<T> = Vec<<T as VnodeMappingItem>::Item>;
 ///
 /// The representation is compressed as described in [`compress_data`], which is optimized for the
 /// mapping with a small number of items and good locality.
-#[derive(Derivative)]
-#[derivative(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Educe)]
+#[educe(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VnodeMapping<T: VnodeMappingItem> {
     original_indices: Vec<u32>,
     data: Vec<T::Item>,
@@ -122,9 +123,9 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     /// Returns `None` if the no virtual node is set in the bitmap.
     pub fn get_matched(&self, bitmap: &Bitmap) -> Option<T::Item> {
         bitmap
-            .iter_ones()
+            .iter_vnodes()
             .next() // only need to check the first one
-            .map(|i| self.get(VirtualNode::from_index(i)))
+            .map(|v| self.get(v))
     }
 
     /// Iterate over all items in this mapping, in the order of vnodes.
@@ -216,10 +217,11 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
 
     /// Transform this vnode mapping to another type of vnode mapping, with the given mapping from
     /// items of this mapping to items of the other mapping.
-    pub fn transform<T2: VnodeMappingItem>(
-        &self,
-        to_map: &HashMap<T::Item, T2::Item>,
-    ) -> VnodeMapping<T2> {
+    pub fn transform<T2, M>(&self, to_map: &M) -> VnodeMapping<T2>
+    where
+        T2: VnodeMappingItem,
+        M: for<'a> Index<&'a T::Item, Output = T2::Item>,
+    {
         VnodeMapping {
             original_indices: self.original_indices.clone(),
             data: self.data.iter().map(|item| to_map[item]).collect(),
@@ -266,10 +268,10 @@ pub type ExpandedParallelUnitMapping = ExpandedMapping<marker::ParallelUnit>;
 
 impl ActorMapping {
     /// Transform this actor mapping to a parallel unit mapping, essentially `transform`.
-    pub fn to_parallel_unit(
-        &self,
-        to_map: &HashMap<ActorId, ParallelUnitId>,
-    ) -> ParallelUnitMapping {
+    pub fn to_parallel_unit<M>(&self, to_map: &M) -> ParallelUnitMapping
+    where
+        M: for<'a> Index<&'a ActorId, Output = ParallelUnitId>,
+    {
         self.transform(to_map)
     }
 

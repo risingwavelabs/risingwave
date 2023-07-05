@@ -16,28 +16,28 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::row::OwnedRow;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::Datum;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::agg::{AggCall, AggKind};
 use risingwave_storage::StateStore;
 
 use super::agg_impl::AppendOnlyStreamingApproxCountDistinct;
-use super::AggCall;
+use super::GroupKey;
 use crate::common::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
 #[async_trait::async_trait]
-pub trait TableStateImpl<S: StateStore>: Send + Sync + 'static {
+pub trait TableStateImpl<S: StateStore>: EstimateSize + Send + Sync + 'static {
     async fn update_from_state_table(
         &mut self,
         state_table: &StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<()>;
 
     async fn flush_state_if_needed(
         &self,
         state_table: &mut StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<()>;
 
     fn apply_batch(
@@ -57,6 +57,7 @@ pub trait TableStateImpl<S: StateStore>: Send + Sync + 'static {
 /// For example, in `single_phase_append_only_approx_count_distinct_agg`, 65536 buckets are stored
 /// according to hash value, and the aggregation result is calculated from buckets when need to get
 /// output.
+#[derive(EstimateSize)]
 pub struct TableState<S: StateStore> {
     /// Upstream column indices of agg arguments.
     arg_indices: Vec<usize>,
@@ -70,7 +71,7 @@ impl<S: StateStore> TableState<S> {
     pub async fn new(
         agg_call: &AggCall,
         state_table: &StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<Self> {
         let mut this = Self {
             arg_indices: agg_call.args.val_indices().to_vec(),
@@ -109,7 +110,7 @@ impl<S: StateStore> TableState<S> {
     pub async fn flush_state_if_needed(
         &self,
         state_table: &mut StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<()> {
         self.inner
             .flush_state_if_needed(state_table, group_key)

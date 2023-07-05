@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::compute::config_service_client::ConfigServiceClient;
@@ -30,8 +31,9 @@ use risingwave_pb::monitor_service::{
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
-    AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataRequest,
-    GetDataResponse, GetStreamRequest, GetStreamResponse, TaskInfoResponse,
+    permits, CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest,
+    GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
+    TaskInfoResponse,
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -93,7 +95,10 @@ impl ComputeClient {
         down_actor_id: u32,
         up_fragment_id: u32,
         down_fragment_id: u32,
-    ) -> Result<(Streaming<GetStreamResponse>, mpsc::UnboundedSender<u32>)> {
+    ) -> Result<(
+        Streaming<GetStreamResponse>,
+        mpsc::UnboundedSender<permits::Value>,
+    )> {
         use risingwave_pb::task_service::get_stream_request::*;
 
         // Create channel used for the downstream to add back the permits to the upstream.
@@ -113,7 +118,9 @@ impl ComputeClient {
         .chain(
             // `AddPermits` as the followings.
             UnboundedReceiverStream::new(permits_rx).map(|permits| GetStreamRequest {
-                value: Some(Value::AddPermits(AddPermits { permits })),
+                value: Some(Value::AddPermits(PbPermits {
+                    value: Some(permits),
+                })),
             }),
         );
 
@@ -148,6 +155,7 @@ impl ComputeClient {
                 task_id: Some(task_id),
                 plan: Some(plan),
                 epoch: Some(epoch),
+                tracing_context: TracingContext::from_current_span().to_protobuf(),
             })
             .await?
             .into_inner())
@@ -157,11 +165,11 @@ impl ComputeClient {
         Ok(self.task_client.to_owned().execute(req).await?.into_inner())
     }
 
-    pub async fn abort(&self, req: AbortTaskRequest) -> Result<AbortTaskResponse> {
+    pub async fn cancel(&self, req: CancelTaskRequest) -> Result<CancelTaskResponse> {
         Ok(self
             .task_client
             .to_owned()
-            .abort_task(req)
+            .cancel_task(req)
             .await?
             .into_inner())
     }

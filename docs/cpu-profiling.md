@@ -6,13 +6,13 @@ Share an easy-to-use profiler and flamegraph tool: https://github.com/koute/not-
 Record samples:
 
 ```shell
-nperf record -p `pidof compute-node` -o perf.data`
+nperf record -p `pidof compute-node` -o perf.data
 ```
 
 Generate flamegraph: 
 
 ```shell
-nperf flamegraph perf.data > perf.svg
+nperf flamegraph --merge-threads perf.data > perf.svg
 ```
 
 ## Profiling remote compute nodes

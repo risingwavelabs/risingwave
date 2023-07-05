@@ -20,8 +20,8 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{
-    CollectInputRef, CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType,
-    ExprVisitor, FunctionCall, InputRef,
+    CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall,
+    InputRef,
 };
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNodeBinary};
 use crate::optimizer::plan_visitor::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
@@ -112,13 +112,18 @@ impl Rule for ApplyJoinTransposeRule {
 
         // Shortcut
         // Check whether correlated_input_ref with same correlated_id exists below apply.
-        // If no, bail out and leave for ApplyScan rule to deal with.
+        // If no, bail out and leave for `ApplyEliminateRule` to deal with.
         if !join_cond_has_correlated_id
             && !join_left_has_correlated_id
             && !join_right_has_correlated_id
         {
             return None;
         }
+
+        assert!(
+            join.is_full_out(),
+            "ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule"
+        );
 
         let (push_left, push_right) = match join.join_type() {
             // `LeftSemi`, `LeftAnti`, `LeftOuter` can only push to left side if it's right side has
@@ -213,7 +218,8 @@ impl ApplyJoinTransposeRule {
                     .map(Some)
                     .collect_vec(),
             )
-            .inverse(),
+            .inverse()
+            .expect("must be invertible"),
             correlated_id,
         };
 
@@ -239,12 +245,9 @@ impl ApplyJoinTransposeRule {
                 let mut d_t1_bit_set = FixedBitSet::with_capacity(apply_len);
                 d_t1_bit_set.set_range(0..apply_left_len + join_left_len, true);
 
-                let (left, other): (Vec<_>, Vec<_>) = apply_on.into_iter().partition(|expr| {
-                    let mut visitor = CollectInputRef::with_capacity(apply_len);
-                    visitor.visit_expr(expr);
-                    let collect_bit_set = FixedBitSet::from(visitor);
-                    collect_bit_set.is_subset(&d_t1_bit_set)
-                });
+                let (left, other): (Vec<_>, Vec<_>) = apply_on
+                    .into_iter()
+                    .partition(|expr| expr.collect_input_refs(apply_len).is_subset(&d_t1_bit_set));
                 left_apply_condition.extend(left);
                 other_condition.extend(other);
             }
@@ -252,8 +255,8 @@ impl ApplyJoinTransposeRule {
         }
 
         let new_join_left = LogicalApply::create(
-            apply_left.clone(),
-            join.left().clone(),
+            apply_left,
+            join.left(),
             apply_join_type,
             Condition {
                 conjunctions: left_apply_condition,
@@ -264,8 +267,8 @@ impl ApplyJoinTransposeRule {
         );
 
         let new_join = LogicalJoin::new(
-            new_join_left.clone(),
-            join.right().clone(),
+            new_join_left,
+            join.right(),
             join.join_type(),
             new_join_condition,
         );
@@ -301,7 +304,8 @@ impl ApplyJoinTransposeRule {
                     .map(Some)
                     .collect_vec(),
             )
-            .inverse(),
+            .inverse()
+            .expect("must be invertible"),
             correlated_id,
         };
 
@@ -328,12 +332,9 @@ impl ApplyJoinTransposeRule {
                 d_t2_bit_set.set_range(0..apply_left_len, true);
                 d_t2_bit_set.set_range(apply_left_len + join_left_len..apply_len, true);
 
-                let (right, other): (Vec<_>, Vec<_>) = apply_on.into_iter().partition(|expr| {
-                    let mut visitor = CollectInputRef::with_capacity(apply_len);
-                    visitor.visit_expr(expr);
-                    let collected = FixedBitSet::from(visitor);
-                    collected.is_subset(&d_t2_bit_set)
-                });
+                let (right, other): (Vec<_>, Vec<_>) = apply_on
+                    .into_iter()
+                    .partition(|expr| expr.collect_input_refs(apply_len).is_subset(&d_t2_bit_set));
                 right_apply_condition.extend(right);
                 other_condition.extend(other);
 
@@ -355,8 +356,8 @@ impl ApplyJoinTransposeRule {
         }
 
         let new_join_right = LogicalApply::create(
-            apply_left.clone(),
-            join.right().clone(),
+            apply_left,
+            join.right(),
             apply_join_type,
             Condition {
                 conjunctions: right_apply_condition,
@@ -386,8 +387,8 @@ impl ApplyJoinTransposeRule {
         let mut output_indices_mapping =
             ColIndexMapping::new(output_indices.iter().map(|x| Some(*x)).collect());
         let new_join = LogicalJoin::new(
-            join.left().clone(),
-            new_join_right.clone(),
+            join.left(),
+            new_join_right,
             join.join_type(),
             new_join_condition,
         )
@@ -425,7 +426,8 @@ impl ApplyJoinTransposeRule {
                     .map(Some)
                     .collect_vec(),
             )
-            .inverse(),
+            .inverse()
+            .expect("must be invertible"),
             correlated_id,
         };
 
@@ -474,9 +476,7 @@ impl ApplyJoinTransposeRule {
                 d_t2_bit_set.set_range(apply_left_len + join_left_len..apply_len, true);
 
                 for (key, group) in &apply_on.into_iter().group_by(|expr| {
-                    let mut visitor = CollectInputRef::with_capacity(apply_len);
-                    visitor.visit_expr(expr);
-                    let collect_bit_set = FixedBitSet::from(visitor);
+                    let collect_bit_set = expr.collect_input_refs(apply_len);
                     if collect_bit_set.is_subset(&d_t1_bit_set) {
                         0
                     } else if collect_bit_set.is_subset(&d_t2_bit_set) {
@@ -523,7 +523,7 @@ impl ApplyJoinTransposeRule {
             false,
         );
         let new_join_right = LogicalApply::create(
-            apply_left.clone(),
+            apply_left,
             join.right(),
             apply_join_type,
             Condition {
@@ -552,8 +552,8 @@ impl ApplyJoinTransposeRule {
             }
         };
         let new_join = LogicalJoin::new(
-            new_join_left.clone(),
-            new_join_right.clone(),
+            new_join_left,
+            new_join_right,
             join.join_type(),
             new_join_condition,
         )

@@ -22,3 +22,52 @@ query T
 select to_timestamp('2022/12/25 15', 'YYYY/MM/DD HH24');
 ----
 2022-12-25 15:00:00
+
+query T
+select to_timestamp('2001-04-17 00:00:00.900006', 'YYYY-MM-DD HH24:MI:SS.US');
+----
+2001-04-17 00:00:00.900006
+
+query T
+select to_timestamp('2001-04-17 00:00:00.000000', 'YYYY-MM-DD HH24:MI:SS.US');
+----
+2001-04-17 00:00:00
+
+query T
+select to_timestamp('2001-04-17 00:00:00.906', 'YYYY-MM-DD HH24:MI:SS.MS');
+----
+2001-04-17 00:00:00.906
+
+query T
+select to_timestamp('2001-04-17 00:00:00.000', 'YYYY-MM-DD HH24:MI:SS.MS');
+----
+2001-04-17 00:00:00
+
+# FIXME: false positive cases, but hard to handle in chrono.
+
+statement error
+select to_timestamp('2001-04-17 00:00:00.9', 'YYYY-MM-DD HH24:MI:SS.MS');
+
+statement error
+select to_timestamp('2001-04-17 00:00:00.9999', 'YYYY-MM-DD HH24:MI:SS.US');
+
+# Timezone
+# FIXME: We should return timestamptz here.
+
+query T
+SELECT to_timestamp('2021/12/30 14:52:49 +03:30', 'YYYY/MM/DD HH24:MI:SS TZH:TZM');
+----
+2021-12-30 11:22:49
+
+query T
+SELECT to_timestamp('2021/12/30 14:52:49 +0330', 'YYYY/MM/DD HH24:MI:SS TZHTZM');
+----
+2021-12-30 11:22:49
+
+statement error
+SELECT to_timestamp('2021/12/30 14:52:49 +330', 'YYYY/MM/DD HH24:MI:SS TZHTZM');
+
+query T
+SELECT to_timestamp('2021/12/30 14:52:49 +03', 'YYYY/MM/DD HH24:MI:SS TZH');
+----
+2021-12-30 11:52:49

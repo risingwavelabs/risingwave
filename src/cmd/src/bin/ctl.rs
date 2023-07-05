@@ -14,25 +14,4 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
-use anyhow::Result;
-use risingwave_common::enable_jemalloc_on_linux;
-
-enable_jemalloc_on_linux!();
-
-#[cfg_attr(coverage, no_coverage)]
-fn main() -> Result<()> {
-    use clap::StructOpt;
-
-    let opts = risingwave_ctl::CliOpts::parse();
-
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
-
-    // Note: Use a simple current thread runtime for ctl.
-    // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need
-    // further investigation.
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(risingwave_ctl::start(opts))
-}
+risingwave_cmd::main!(ctl);

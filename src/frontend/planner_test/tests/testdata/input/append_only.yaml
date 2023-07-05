@@ -1,0 +1,21 @@
+- sql: |
+    create table t1 (v1 int, v2 int) append only;
+    select v1, max(v2) as mx2 from t1 group by v1;
+  expected_outputs:
+  - stream_plan
+- sql: |
+    create table t1 (v1 int, v2 int) append only;
+    create table t2 (v1 int, v3 int) append only;
+    select t1.v1 as id, v2, v3 from t1 join t2 on t1.v1=t2.v1;
+  expected_outputs:
+  - stream_plan
+- sql: |
+    create table t1 (v1 int, v2 int) append only;
+    select v1 from t1 order by v1 limit 3 offset 3;
+  expected_outputs:
+  - stream_plan
+- sql: |
+    create table t1 (v1 int, v2 int) append only;
+    select max(v1) as max_v1 from t1;
+  expected_outputs:
+  - stream_plan

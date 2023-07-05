@@ -71,18 +71,18 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
 
 impl MetadataModel for CompactionGroup {
     type KeyType = CompactionGroupId;
-    type ProstType = risingwave_pb::hummock::CompactionGroup;
+    type PbType = risingwave_pb::hummock::CompactionGroup;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME)
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.borrow().into()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
-        prost.borrow().into()
+    fn from_protobuf(prost: Self::PbType) -> Self {
+        (&prost).into()
     }
 
     fn key(&self) -> MetadataModelResult<Self::KeyType> {

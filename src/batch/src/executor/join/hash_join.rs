@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::iter;
 use std::iter::empty;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use fixedbitset::FixedBitSet;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
@@ -26,18 +24,23 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
+use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use tokio::sync::watch::Receiver;
 
 use super::{ChunkedData, JoinType, RowId};
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    check_shutdown, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder,
 };
-use crate::task::BatchTaskContext;
+use crate::risingwave_common::estimate_size::EstimateSize;
+use crate::risingwave_common::hash::NullBitmap;
+use crate::task::{BatchTaskContext, ShutdownMsg};
 
 /// Hash Join Executor
 ///
@@ -72,6 +75,10 @@ pub struct HashJoinExecutor<K> {
     null_matched: Vec<bool>,
     identity: String,
     chunk_size: usize,
+
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+
+    mem_ctx: MemoryContext,
     _phantom: PhantomData<K>,
 }
 
@@ -121,7 +128,8 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
 ///
 /// This can be seen as an implicit linked list. For convenience, we use `RowIdIter` to iterate all
 /// build side row ids with the given key.
-pub type JoinHashMap<K> = HashMap<K, RowId, PrecomputedBuildHasher>;
+pub type JoinHashMap<K> =
+    hashbrown::HashMap<K, RowId, PrecomputedBuildHasher, MonitoredGlobalAlloc>;
 
 struct RowIdIter<'a> {
     current_row_id: Option<RowId>,
@@ -152,12 +160,13 @@ pub struct EquiJoinParams<K> {
     probe_side: BoxedExecutor,
     probe_data_types: Vec<DataType>,
     probe_key_idxs: Vec<usize>,
-    build_side: Vec<DataChunk>,
+    build_side: Vec<DataChunk, MonitoredGlobalAlloc>,
     build_data_types: Vec<DataType>,
     full_data_types: Vec<DataType>,
     hash_map: JoinHashMap<K>,
     next_build_row_with_same_key: ChunkedData<Option<RowId>>,
     chunk_size: usize,
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
 }
 
 impl<K> EquiJoinParams<K> {
@@ -166,12 +175,13 @@ impl<K> EquiJoinParams<K> {
         probe_side: BoxedExecutor,
         probe_data_types: Vec<DataType>,
         probe_key_idxs: Vec<usize>,
-        build_side: Vec<DataChunk>,
+        build_side: Vec<DataChunk, MonitoredGlobalAlloc>,
         build_data_types: Vec<DataType>,
         full_data_types: Vec<DataType>,
         hash_map: JoinHashMap<K>,
         next_build_row_with_same_key: ChunkedData<Option<RowId>>,
         chunk_size: usize,
+        shutdown_rx: Option<Receiver<ShutdownMsg>>,
     ) -> Self {
         Self {
             probe_side,
@@ -183,6 +193,7 @@ impl<K> EquiJoinParams<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
         }
     }
 }
@@ -218,52 +229,54 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let build_data_types = self.build_side_source.schema().data_types();
         let full_data_types = [probe_data_types.clone(), build_data_types.clone()].concat();
 
-        let mut build_side = Vec::new();
+        let mut build_side = Vec::new_in(self.mem_ctx.global_allocator());
         let mut build_row_count = 0;
         #[for_await]
         for build_chunk in self.build_side_source.execute() {
-            let build_chunk = build_chunk?;
+            let build_chunk = build_chunk?.compact();
             if build_chunk.cardinality() > 0 {
                 build_row_count += build_chunk.cardinality();
-                build_side.push(build_chunk.compact())
+                self.mem_ctx.add(build_chunk.estimated_heap_size() as i64);
+                build_side.push(build_chunk);
             }
         }
-        let mut hash_map =
-            JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
+        let mut hash_map = JoinHashMap::with_capacity_and_hasher_in(
+            build_row_count,
+            PrecomputedBuildHasher,
+            self.mem_ctx.global_allocator(),
+        );
         let mut next_build_row_with_same_key =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
-        let null_matched = {
-            let mut null_matched = FixedBitSet::with_capacity(self.null_matched.len());
-            for (idx, col_null_matched) in self.null_matched.into_iter().enumerate() {
-                null_matched.set(idx, col_null_matched);
-            }
-            null_matched
-        };
+
+        let null_matched = K::Bitmap::from_bool_vec(self.null_matched);
 
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
             let build_keys = K::build(&self.build_key_idxs, build_chunk)?;
 
             for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
+                check_shutdown(&self.shutdown_rx)?;
                 // Only insert key to hash map if it is consistent with the null safe restriction.
                 if build_key.null_bitmap().is_subset(&null_matched) {
                     let row_id = RowId::new(build_chunk_id, build_row_id);
+                    self.mem_ctx.add(build_key.estimated_heap_size() as i64);
                     next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
                 }
             }
         }
 
-        let params = EquiJoinParams {
-            probe_side: self.probe_side_source,
+        let params = EquiJoinParams::new(
+            self.probe_side_source,
             probe_data_types,
-            probe_key_idxs: self.probe_key_idxs,
+            self.probe_key_idxs,
             build_side,
             build_data_types,
             full_data_types,
             hash_map,
             next_build_row_with_same_key,
-            chunk_size: self.chunk_size,
-        };
+            self.chunk_size,
+            self.shutdown_rx.clone(),
+        );
 
         if let Some(cond) = self.cond.as_ref() {
             let stream = match self.join_type {
@@ -328,6 +341,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
     ) {
@@ -340,6 +354,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
+                    check_shutdown(&shutdown_rx)?;
                     let build_chunk = &build_side[build_row_id.chunk_id()];
                     if let Some(spilled) = Self::append_one_row(
                         &mut chunk_builder,
@@ -366,7 +381,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for chunk in Self::do_inner_join(params) {
             let mut chunk = chunk?;
-            chunk.set_visibility(cond.eval(&chunk)?.as_bool().iter().collect());
+            chunk.set_visibility(cond.eval(&chunk).await?.as_bool().iter().collect());
             yield chunk
         }
     }
@@ -382,6 +397,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
     ) {
@@ -395,6 +411,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
                     {
+                        check_shutdown(&shutdown_rx)?;
                         let build_chunk = &build_side[build_row_id.chunk_id()];
                         if let Some(spilled) = Self::append_one_row(
                             &mut chunk_builder,
@@ -407,6 +424,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         }
                     }
                 } else {
+                    check_shutdown(&shutdown_rx)?;
                     let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
                     if let Some(spilled) = Self::append_one_row_with_null_build_side(
                         &mut chunk_builder,
@@ -435,6 +453,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
         cond: &BoxedExpression,
@@ -459,6 +478,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         .row_id_iter(Some(*first_matched_build_row_id))
                         .peekable();
                     while let Some(build_row_id) = build_row_id_iter.next() {
+                        check_shutdown(&shutdown_rx)?;
                         let build_chunk = &build_side[build_row_id.chunk_id()];
                         if let Some(spilled) = Self::append_one_row(
                             &mut chunk_builder,
@@ -473,16 +493,19 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 spilled,
                                 cond.as_ref(),
                                 &mut non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 } else {
+                    check_shutdown(&shutdown_rx)?;
                     let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
                     if let Some(spilled) = Self::append_one_row_with_null_build_side(
                         &mut chunk_builder,
                         probe_row,
                         build_data_types.len(),
                     ) {
+                        non_equi_state.first_output_row_id.clear();
                         yield spilled
                     }
                 }
@@ -494,7 +517,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
     }
 
@@ -506,6 +530,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             probe_key_idxs,
             hash_map,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
     ) {
@@ -515,6 +540,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+                check_shutdown(&shutdown_rx)?;
                 if !ANTI_JOIN {
                     if hash_map.get(probe_key).is_some() {
                         if let Some(spilled) = Self::append_one_probe_row(
@@ -558,6 +584,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
         cond: &'a BoxedExpression,
@@ -578,6 +605,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
                     {
+                        check_shutdown(&shutdown_rx)?;
                         if non_equi_state.found_matched {
                             break;
                         }
@@ -593,7 +621,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 spilled,
                                 cond.as_ref(),
                                 &mut non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 }
@@ -606,7 +635,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
     }
 
@@ -621,6 +651,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
         cond: &BoxedExpression,
@@ -643,6 +674,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         .row_id_iter(Some(*first_matched_build_row_id))
                         .peekable();
                     while let Some(build_row_id) = build_row_id_iter.next() {
+                        check_shutdown(&shutdown_rx)?;
                         let build_chunk = &build_side[build_row_id.chunk_id()];
                         if let Some(spilled) = Self::append_one_row(
                             &mut chunk_builder,
@@ -657,7 +689,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 spilled,
                                 cond.as_ref(),
                                 &mut non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 } else if let Some(spilled) = Self::append_one_probe_row(
@@ -675,7 +708,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
         if let Some(spilled) = remaining_chunk_builder.consume_all() {
             yield spilled
@@ -693,6 +727,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
     ) {
@@ -708,6 +743,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
+                    check_shutdown(&shutdown_rx)?;
                     build_row_matched[build_row_id] = true;
                     let build_chunk = &build_side[build_row_id.chunk_id()];
                     if let Some(spilled) = Self::append_one_row(
@@ -744,6 +780,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
         cond: &BoxedExpression,
@@ -764,6 +801,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
+                    check_shutdown(&shutdown_rx)?;
                     non_equi_state.build_row_ids.push(build_row_id);
                     let build_chunk = &build_side[build_row_id.chunk_id()];
                     if let Some(spilled) = Self::append_one_row(
@@ -777,7 +815,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             spilled,
                             cond.as_ref(),
                             &mut non_equi_state,
-                        )?
+                        )
+                        .await?
                     }
                 }
             }
@@ -787,7 +826,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
         #[for_await]
         for spilled in Self::handle_remaining_build_rows_for_right_outer_join(
@@ -810,6 +850,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
     ) {
@@ -825,6 +866,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
+                    check_shutdown(&shutdown_rx)?;
                     build_row_matched[build_row_id] = true;
                 }
             }
@@ -850,6 +892,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
         cond: &BoxedExpression,
@@ -871,6 +914,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
+                    check_shutdown(&shutdown_rx)?;
                     non_equi_state.build_row_ids.push(build_row_id);
                     let build_chunk = &build_side[build_row_id.chunk_id()];
                     if let Some(spilled) = Self::append_one_row(
@@ -884,7 +928,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             spilled,
                             cond.as_ref(),
                             &mut non_equi_state,
-                        )?
+                        )
+                        .await?
                     }
                 }
             }
@@ -894,7 +939,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
         #[for_await]
         for spilled in Self::handle_remaining_build_rows_for_right_semi_anti_join::<ANTI_JOIN>(
@@ -918,6 +964,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
     ) {
@@ -934,6 +981,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
                     {
+                        check_shutdown(&shutdown_rx)?;
                         build_row_matched[build_row_id] = true;
                         let build_chunk = &build_side[build_row_id.chunk_id()];
                         if let Some(spilled) = Self::append_one_row(
@@ -981,6 +1029,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             hash_map,
             next_build_row_with_same_key,
             chunk_size,
+            shutdown_rx,
             ..
         }: EquiJoinParams<K>,
         cond: &BoxedExpression,
@@ -1012,6 +1061,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         .row_id_iter(Some(*first_matched_build_row_id))
                         .peekable();
                     while let Some(build_row_id) = build_row_id_iter.next() {
+                        check_shutdown(&shutdown_rx)?;
                         right_non_equi_state.build_row_ids.push(build_row_id);
                         let build_chunk = &build_side[build_row_id.chunk_id()];
                         if let Some(spilled) = Self::append_one_row(
@@ -1028,10 +1078,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 cond.as_ref(),
                                 &mut left_non_equi_state,
                                 &mut right_non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 } else {
+                    check_shutdown(&shutdown_rx)?;
                     let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
                     if let Some(spilled) = Self::append_one_row_with_null_build_side(
                         &mut remaining_chunk_builder,
@@ -1050,7 +1102,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 cond.as_ref(),
                 &mut left_non_equi_state,
                 &mut right_non_equi_state,
-            )?
+            )
+            .await?
         }
         #[for_await]
         for spilled in Self::handle_remaining_build_rows_for_right_outer_join(
@@ -1199,7 +1252,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     ///
     /// For more information about how `process_*_join_non_equi_condition` work, see their unit
     /// tests.
-    fn process_left_outer_join_non_equi_condition(
+    async fn process_left_outer_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         LeftNonEquiJoinState {
@@ -1209,7 +1262,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             found_matched,
         }: &mut LeftNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .nullify_build_side_for_non_equi_condition(&filter, *probe_column_count)
             .remove_duplicate_rows_for_left_outer_join(
@@ -1223,7 +1276,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
     /// Filters for candidate rows which satisfy `non_equi` predicate.
     /// Removes duplicate rows.
-    fn process_left_semi_anti_join_non_equi_condition<const ANTI_JOIN: bool>(
+    async fn process_left_semi_anti_join_non_equi_condition<const ANTI_JOIN: bool>(
         chunk: DataChunk,
         cond: &dyn Expression,
         LeftNonEquiJoinState {
@@ -1233,7 +1286,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             ..
         }: &mut LeftNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .remove_duplicate_rows_for_left_semi_anti_join::<ANTI_JOIN>(
                 &filter,
@@ -1244,7 +1297,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             .take())
     }
 
-    fn process_right_outer_join_non_equi_condition(
+    async fn process_right_outer_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         RightNonEquiJoinState {
@@ -1252,13 +1305,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_row_matched,
         }: &mut RightNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .remove_duplicate_rows_for_right_outer_join(&filter, build_row_ids, build_row_matched)
             .take())
     }
 
-    fn process_right_semi_anti_join_non_equi_condition(
+    async fn process_right_semi_anti_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         RightNonEquiJoinState {
@@ -1266,7 +1319,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_row_matched,
         }: &mut RightNonEquiJoinState,
     ) -> Result<()> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         DataChunkMutator(chunk).remove_duplicate_rows_for_right_semi_anti_join(
             &filter,
             build_row_ids,
@@ -1275,13 +1328,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
         Ok(())
     }
 
-    fn process_full_outer_join_non_equi_condition(
+    async fn process_full_outer_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         left_non_equi_state: &mut LeftNonEquiJoinState,
         right_non_equi_state: &mut RightNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .nullify_build_side_for_non_equi_condition(
                 &filter,
@@ -1355,9 +1408,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
         build_row_id: usize,
     ) -> Option<DataChunk> {
         chunk_builder.append_one_row_from_array_elements(
-            probe_chunk.columns().iter().map(|c| c.array_ref()),
+            probe_chunk.columns().iter().map(|c| c.as_ref()),
             probe_row_id,
-            build_chunk.columns().iter().map(|c| c.array_ref()),
+            build_chunk.columns().iter().map(|c| c.as_ref()),
             build_row_id,
         )
     }
@@ -1368,7 +1421,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         probe_row_id: usize,
     ) -> Option<DataChunk> {
         chunk_builder.append_one_row_from_array_elements(
-            probe_chunk.columns().iter().map(|c| c.array_ref()),
+            probe_chunk.columns().iter().map(|c| c.as_ref()),
             probe_row_id,
             empty(),
             0,
@@ -1383,7 +1436,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         chunk_builder.append_one_row_from_array_elements(
             empty(),
             0,
-            build_chunk.columns().iter().map(|c| c.array_ref()),
+            build_chunk.columns().iter().map(|c| c.as_ref()),
             build_row_id,
         )
     }
@@ -1419,7 +1472,7 @@ impl DataChunkMutator {
 
         for build_column in columns.split_off(probe_column_count) {
             // Is it really safe to use Arc::try_unwrap here?
-            let mut array = Arc::try_unwrap(build_column.into_inner()).unwrap();
+            let mut array = Arc::try_unwrap(build_column).unwrap();
             array.set_bitmap(filter.clone());
             columns.push(array.into());
         }
@@ -1530,7 +1583,7 @@ impl DataChunkMutator {
     ) -> Self {
         let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
         for (output_row_id, (output_row_non_null, &build_row_id)) in
-            filter.iter().zip_eq_debug(build_row_ids.iter()).enumerate()
+            filter.iter().zip_eq_fast(build_row_ids.iter()).enumerate()
         {
             if output_row_non_null {
                 build_row_matched[build_row_id] = true;
@@ -1550,7 +1603,7 @@ impl DataChunkMutator {
         build_row_ids: &mut Vec<RowId>,
         build_row_matched: &mut ChunkedData<bool>,
     ) {
-        for (output_row_non_null, &build_row_id) in filter.iter().zip_eq_debug(build_row_ids.iter())
+        for (output_row_non_null, &build_row_id) in filter.iter().zip_eq_fast(build_row_ids.iter())
         {
             if output_row_non_null {
                 build_row_matched[build_row_id] = true;
@@ -1607,7 +1660,7 @@ impl DataChunkMutator {
         first_output_row_id.clear();
 
         for (output_row_id, (output_row_non_null, &build_row_id)) in
-            filter.iter().zip_eq_debug(build_row_ids.iter()).enumerate()
+            filter.iter().zip_eq_fast(build_row_ids.iter()).enumerate()
         {
             if output_row_non_null {
                 build_row_matched[build_row_id] = true;
@@ -1671,6 +1724,8 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             .map(|&x| x as usize)
             .collect();
 
+        let identity = context.plan_node().get_identity().clone();
+
         Ok(HashJoinExecutorArgs {
             join_type,
             output_indices,
@@ -1680,9 +1735,11 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             build_key_idxs: right_key_idxs,
             null_matched: hash_join_node.get_null_safe().clone(),
             cond,
-            identity: context.plan_node().get_identity().clone(),
+            identity: identity.clone(),
             right_key_types,
-            chunk_size: context.context.get_config().developer.batch_chunk_size,
+            chunk_size: context.context.get_config().developer.chunk_size,
+            shutdown_rx: Some(context.shutdown_rx.clone()),
+            mem_ctx: context.context.create_executor_mem_context(&identity),
         }
         .dispatch())
     }
@@ -1700,6 +1757,8 @@ struct HashJoinExecutorArgs {
     identity: String,
     right_key_types: Vec<DataType>,
     chunk_size: usize,
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    mem_ctx: MemoryContext,
 }
 
 impl HashKeyDispatcher for HashJoinExecutorArgs {
@@ -1717,6 +1776,8 @@ impl HashKeyDispatcher for HashJoinExecutorArgs {
             self.cond,
             self.identity,
             self.chunk_size,
+            self.shutdown_rx,
+            self.mem_ctx,
         ))
     }
 
@@ -1738,6 +1799,8 @@ impl<K> HashJoinExecutor<K> {
         cond: Option<BoxedExpression>,
         identity: String,
         chunk_size: usize,
+        shutdown_rx: Option<Receiver<ShutdownMsg>>,
+        mem_ctx: MemoryContext,
     ) -> Self {
         assert_eq!(probe_key_idxs.len(), build_key_idxs.len());
         assert_eq!(probe_key_idxs.len(), null_matched.len());
@@ -1771,6 +1834,8 @@ impl<K> HashJoinExecutor<K> {
             cond,
             identity,
             chunk_size,
+            shutdown_rx,
+            mem_ctx,
             _phantom: PhantomData,
         }
     }
@@ -1778,23 +1843,26 @@ impl<K> HashJoinExecutor<K> {
 
 #[cfg(test)]
 mod tests {
-
     use futures::StreamExt;
+    use futures_async_stream::for_await;
+    use prometheus::IntGauge;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
     use risingwave_common::hash::Key32;
+    use risingwave_common::memory::MemoryContext;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_expr::expr::{new_binary_expr, BoxedExpression, InputRefExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::{build_from_pretty, BoxedExpression};
+    use tokio::sync::watch::Receiver;
 
     use super::{
         ChunkedData, HashJoinExecutor, JoinType, LeftNonEquiJoinState, RightNonEquiJoinState, RowId,
     };
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::BoxedExecutor;
+    use crate::task::ShutdownMsg;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -1821,7 +1889,7 @@ mod tests {
         fn append(&mut self, data_chunk: &DataChunk) -> Result<()> {
             ensure!(self.array_builders.len() == data_chunk.dimension());
             for idx in 0..self.array_builders.len() {
-                self.array_builders[idx].append_array(data_chunk.column_at(idx).array_ref());
+                self.array_builders[idx].append_array(data_chunk.column_at(idx));
             }
             self.array_len += data_chunk.capacity();
 
@@ -1973,15 +2041,7 @@ mod tests {
         }
 
         fn create_cond() -> BoxedExpression {
-            let left_expr = InputRefExpression::new(DataType::Float32, 1);
-            let right_expr = InputRefExpression::new(DataType::Float64, 3);
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(left_expr),
-                Box::new(right_expr),
-            )
-            .unwrap()
+            build_from_pretty("(less_than:boolean $1:float4 $3:float8)")
         }
 
         fn create_join_executor_with_chunk_size_and_executors(
@@ -1991,6 +2051,8 @@ mod tests {
             chunk_size: usize,
             left_child: BoxedExecutor,
             right_child: BoxedExecutor,
+            shutdown_rx: Option<Receiver<ShutdownMsg>>,
+            parent_mem_ctx: Option<MemoryContext>,
         ) -> BoxedExecutor {
             let join_type = self.join_type;
 
@@ -2007,6 +2069,8 @@ mod tests {
                 None
             };
 
+            let mem_ctx =
+                MemoryContext::new(parent_mem_ctx, IntGauge::new("memory_usage", " ").unwrap());
             Box::new(HashJoinExecutor::<Key32>::new(
                 join_type,
                 output_indices,
@@ -2018,6 +2082,8 @@ mod tests {
                 cond,
                 "HashJoinExecutor".to_string(),
                 chunk_size,
+                shutdown_rx,
+                mem_ctx,
             ))
         }
 
@@ -2044,44 +2110,97 @@ mod tests {
             left_executor: BoxedExecutor,
             right_executor: BoxedExecutor,
         ) {
+            let parent_mem_context =
+                MemoryContext::root(IntGauge::new("total_memory_usage", " ").unwrap());
+
+            {
+                let join_executor = self.create_join_executor_with_chunk_size_and_executors(
+                    has_non_equi_cond,
+                    null_safe,
+                    chunk_size,
+                    left_executor,
+                    right_executor,
+                    None,
+                    Some(parent_mem_context.clone()),
+                );
+
+                let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
+
+                let fields = &join_executor.schema().fields;
+
+                if self.join_type.keep_all() {
+                    assert_eq!(fields[1].data_type, DataType::Float32);
+                    assert_eq!(fields[3].data_type, DataType::Float64);
+                } else if self.join_type.keep_left() {
+                    assert_eq!(fields[1].data_type, DataType::Float32);
+                } else if self.join_type.keep_right() {
+                    assert_eq!(fields[1].data_type, DataType::Float64)
+                } else {
+                    unreachable!()
+                }
+
+                let mut stream = join_executor.execute();
+
+                while let Some(data_chunk) = stream.next().await {
+                    let data_chunk = data_chunk.unwrap();
+                    let data_chunk = data_chunk.compact();
+                    data_chunk_merger.append(&data_chunk).unwrap();
+                }
+
+                let result_chunk = data_chunk_merger.finish().unwrap();
+                println!("expected: {:?}", expected);
+                println!("result: {:?}", result_chunk);
+
+                // TODO: Replace this with unsorted comparison
+                // assert_eq!(expected, result_chunk);
+                assert!(is_data_chunk_eq(&expected, &result_chunk));
+            }
+
+            assert_eq!(0, parent_mem_context.get_bytes_used());
+        }
+
+        async fn do_test_shutdown(&self, has_non_equi_cond: bool) {
+            // Test `ShutdownMsg::Cancel`
+            let left_executor = self.create_left_executor();
+            let right_executor = self.create_right_executor();
+            let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
             let join_executor = self.create_join_executor_with_chunk_size_and_executors(
                 has_non_equi_cond,
-                null_safe,
-                chunk_size,
+                false,
+                self::CHUNK_SIZE,
                 left_executor,
                 right_executor,
+                Some(shutdown_rx),
+                None,
             );
-
-            let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
-
-            let fields = &join_executor.schema().fields;
-
-            if self.join_type.keep_all() {
-                assert_eq!(fields[1].data_type, DataType::Float32);
-                assert_eq!(fields[3].data_type, DataType::Float64);
-            } else if self.join_type.keep_left() {
-                assert_eq!(fields[1].data_type, DataType::Float32);
-            } else if self.join_type.keep_right() {
-                assert_eq!(fields[1].data_type, DataType::Float64)
-            } else {
-                unreachable!()
+            shutdown_tx.send(ShutdownMsg::Cancel).unwrap();
+            #[for_await]
+            for chunk in join_executor.execute() {
+                assert!(chunk.is_err());
+                break;
             }
 
-            let mut stream = join_executor.execute();
-
-            while let Some(data_chunk) = stream.next().await {
-                let data_chunk = data_chunk.unwrap();
-                let data_chunk = data_chunk.compact();
-                data_chunk_merger.append(&data_chunk).unwrap();
+            // Test `ShutdownMsg::Abort`
+            let left_executor = self.create_left_executor();
+            let right_executor = self.create_right_executor();
+            let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
+            let join_executor = self.create_join_executor_with_chunk_size_and_executors(
+                has_non_equi_cond,
+                false,
+                self::CHUNK_SIZE,
+                left_executor,
+                right_executor,
+                Some(shutdown_rx),
+                None,
+            );
+            shutdown_tx
+                .send(ShutdownMsg::Abort("Test".to_string()))
+                .unwrap();
+            #[for_await]
+            for chunk in join_executor.execute() {
+                assert!(chunk.is_err());
+                break;
             }
-
-            let result_chunk = data_chunk_merger.finish().unwrap();
-            println!("expected: {:?}", expected);
-            println!("result: {:?}", result_chunk);
-
-            // TODO: Replace this with unsorted comparison
-            // assert_eq!(expected, result_chunk);
-            assert!(is_data_chunk_eq(&expected, &result_chunk));
         }
     }
 
@@ -2609,6 +2728,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2638,6 +2758,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2667,6 +2788,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2706,6 +2828,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2732,6 +2855,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2758,6 +2882,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2799,6 +2924,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2827,6 +2953,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2855,6 +2982,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2918,6 +3046,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2958,6 +3087,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -3010,6 +3140,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .is_ok()
         );
         assert_eq!(state.build_row_ids, Vec::new());
@@ -3044,6 +3175,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .is_ok()
         );
         assert_eq!(state.build_row_ids, Vec::new());
@@ -3105,6 +3237,7 @@ mod tests {
                 &mut left_state,
                 &mut right_state,
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -3152,6 +3285,7 @@ mod tests {
                 &mut left_state,
                 &mut right_state,
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -3170,5 +3304,40 @@ mod tests {
             }])
             .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn test_shutdown() {
+        let test_fixture = TestFixture::with_join_type(JoinType::Inner);
+        test_fixture.do_test_shutdown(false).await;
+        test_fixture.do_test_shutdown(true).await;
+
+        let test_fixture = TestFixture::with_join_type(JoinType::FullOuter);
+        test_fixture.do_test_shutdown(false).await;
+        test_fixture.do_test_shutdown(true).await;
+
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftAnti);
+        test_fixture.do_test_shutdown(false).await;
+        test_fixture.do_test_shutdown(true).await;
+
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
+        test_fixture.do_test_shutdown(false).await;
+        test_fixture.do_test_shutdown(true).await;
+
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
+        test_fixture.do_test_shutdown(false).await;
+        test_fixture.do_test_shutdown(true).await;
+
+        let test_fixture = TestFixture::with_join_type(JoinType::RightAnti);
+        test_fixture.do_test_shutdown(false).await;
+        test_fixture.do_test_shutdown(true).await;
+
+        let test_fixture = TestFixture::with_join_type(JoinType::RightOuter);
+        test_fixture.do_test_shutdown(false).await;
+        test_fixture.do_test_shutdown(true).await;
+
+        let test_fixture = TestFixture::with_join_type(JoinType::RightSemi);
+        test_fixture.do_test_shutdown(false).await;
+        test_fixture.do_test_shutdown(true).await;
     }
 }

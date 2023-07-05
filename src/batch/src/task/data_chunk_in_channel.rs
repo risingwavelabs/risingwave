@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::DataChunk;
-use risingwave_pb::data::DataChunk as ProstDataChunk;
+use risingwave_pb::data::PbDataChunk;
 use tokio::sync::OnceCell;
 
 #[derive(Debug, Clone)]
@@ -21,7 +21,7 @@ pub(super) struct DataChunkInChannel {
     data_chunk: DataChunk,
     /// If the data chunk is only needed to transfer locally,
     /// this field should not be initialized.
-    prost_data_chunk: OnceCell<ProstDataChunk>,
+    prost_data_chunk: OnceCell<PbDataChunk>,
 }
 
 impl DataChunkInChannel {
@@ -32,7 +32,7 @@ impl DataChunkInChannel {
         }
     }
 
-    pub async fn to_protobuf(&self) -> ProstDataChunk {
+    pub async fn to_protobuf(&self) -> PbDataChunk {
         let prost_data_chunk = self
             .prost_data_chunk
             .get_or_init(|| async {

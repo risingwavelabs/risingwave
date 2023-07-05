@@ -140,10 +140,41 @@ fn get_cmd_envs(cmd: &Command) -> Result<BTreeMap<String, String>> {
 fn health_check_port(port: u16) -> HealthCheck {
     HealthCheck {
         test: vec![
+            "CMD-SHELL".into(),
+            format!(
+                "bash -c 'printf \"GET / HTTP/1.1\\n\\n\" > /dev/tcp/127.0.0.1/{}; exit $?;'",
+                port
+            ),
+        ],
+        interval: "1s".to_string(),
+        timeout: "5s".to_string(),
+        retries: 5,
+    }
+}
+
+fn health_check_port_etcd(port: u16) -> HealthCheck {
+    HealthCheck {
+        test: vec![
             "CMD".into(),
-            "printf".into(),
-            "".into(),
-            format!("/dev/tcp/127.0.0.1/{}", port),
+            "etcdctl".into(),
+            format!("--endpoints=http://localhost:{port}"),
+            "endpoint".into(),
+            "health".into(),
+        ],
+        interval: "1s".to_string(),
+        timeout: "5s".to_string(),
+        retries: 5,
+    }
+}
+
+fn health_check_port_prometheus(port: u16) -> HealthCheck {
+    HealthCheck {
+        test: vec![
+            "CMD-SHELL".into(),
+            format!(
+                "sh -c 'printf \"GET /-/healthy HTTP/1.0\\n\\n\" | nc localhost {}; exit $?;'",
+                port
+            ),
         ],
         interval: "1s".to_string(),
         timeout: "5s".to_string(),
@@ -154,18 +185,14 @@ fn health_check_port(port: u16) -> HealthCheck {
 impl Compose for ComputeNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compute-node");
-        ComputeNodeService::apply_command_args(
-            &mut command,
-            self,
-            HummockInMemoryStrategy::Disallowed,
-        )?;
+        ComputeNodeService::apply_command_args(&mut command, self)?;
         if self.enable_tiered_cache {
             command.arg("--file-cache-dir").arg("/filecache");
         }
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
-            std::fs::copy(c, target)?;
+            fs_err::copy(c, target)?;
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
@@ -201,11 +228,15 @@ impl Compose for ComputeNodeConfig {
 impl Compose for MetaNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("meta-node");
-        MetaNodeService::apply_command_args(&mut command, self)?;
+        MetaNodeService::apply_command_args(
+            &mut command,
+            self,
+            HummockInMemoryStrategy::Disallowed,
+        )?;
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
-            std::fs::copy(c, target)?;
+            fs_err::copy(c, target)?;
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
@@ -238,7 +269,7 @@ impl Compose for FrontendConfig {
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
-            std::fs::copy(c, target)?;
+            fs_err::copy(c, target)?;
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
@@ -264,15 +295,11 @@ impl Compose for FrontendConfig {
 impl Compose for CompactorConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compactor-node");
-        CompactorService::apply_command_args(
-            &mut command,
-            self,
-            HummockInMemoryStrategy::Disallowed,
-        )?;
+        CompactorService::apply_command_args(&mut command, self)?;
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
-            std::fs::copy(c, target)?;
+            fs_err::copy(c, target)?;
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
@@ -404,11 +431,11 @@ impl Compose for PrometheusConfig {
             expose: vec![self.port.to_string()],
             ports: vec![format!("{}:{}", self.port, self.port)],
             volumes: vec![format!("{}:/prometheus", self.id)],
-            healthcheck: Some(health_check_port(self.port)),
+            healthcheck: Some(health_check_port_prometheus(self.port)),
             ..Default::default()
         };
 
-        std::fs::write(
+        fs_err::write(
             Path::new(&config.config_directory).join("prometheus.yaml"),
             prometheus_config,
         )?;
@@ -423,17 +450,17 @@ impl Compose for PrometheusConfig {
 impl Compose for GrafanaConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let config_root = Path::new(&config.config_directory);
-        std::fs::write(
+        fs_err::write(
             config_root.join("grafana.ini"),
             GrafanaGen.gen_custom_ini(self),
         )?;
 
-        std::fs::write(
+        fs_err::write(
             config_root.join("grafana-risedev-datasource.yml"),
-            GrafanaGen.gen_datasource_yml(self)?,
+            GrafanaGen.gen_prometheus_datasource_yml(self)?,
         )?;
 
-        std::fs::write(
+        fs_err::write(
             config_root.join("grafana-risedev-dashboard.yml"),
             GrafanaGen.gen_dashboard_yml(self, config_root, "/")?,
         )?;
@@ -472,7 +499,7 @@ impl Compose for EtcdConfig {
                 format!("{}:{}", self.peer_port, self.peer_port),
             ],
             volumes: vec![format!("{}:/etcd-data", self.id)],
-            healthcheck: Some(health_check_port(self.port)),
+            healthcheck: Some(health_check_port_etcd(self.port)),
             ..Default::default()
         };
 

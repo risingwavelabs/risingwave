@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::catalog::Field;
-use risingwave_pb::catalog::View as ProstView;
+use risingwave_pb::catalog::PbView;
 
-use super::{RelationCatalog, ViewId};
+use super::{OwnedByUserCatalog, ViewId};
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -30,8 +30,8 @@ pub struct ViewCatalog {
     pub columns: Vec<Field>,
 }
 
-impl From<&ProstView> for ViewCatalog {
-    fn from(view: &ProstView) -> Self {
+impl From<&PbView> for ViewCatalog {
+    fn from(view: &PbView) -> Self {
         ViewCatalog {
             id: view.id,
             name: view.name.clone(),
@@ -54,7 +54,7 @@ impl ViewCatalog {
     }
 }
 
-impl RelationCatalog for ViewCatalog {
+impl OwnedByUserCatalog for ViewCatalog {
     fn owner(&self) -> UserId {
         self.owner
     }

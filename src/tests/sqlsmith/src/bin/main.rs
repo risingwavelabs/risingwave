@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use clap::Parser as ClapParser;
 use risingwave_sqlsmith::print_function_table;
-use risingwave_sqlsmith::runner::run;
+use risingwave_sqlsmith::runner::{generate, run, run_differential_testing};
 use tokio_postgres::NoTls;
 
 #[derive(ClapParser, Debug, Clone)]
@@ -56,6 +56,15 @@ struct TestOptions {
     /// The number of test cases to generate.
     #[clap(long, default_value = "100")]
     count: usize,
+
+    /// Output directory - only applicable if we are generating
+    /// query while testing.
+    #[clap(long)]
+    generate: Option<String>,
+
+    /// Whether to run differential testing mode.
+    #[clap(long)]
+    differential_testing: bool,
 }
 
 #[derive(clap::Subcommand, Clone, Debug)]
@@ -73,7 +82,8 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let opt = Opt::parse();
-    let opt = match opt.command {
+    let command = opt.command;
+    let opt = match command {
         Commands::PrintFunctionTable => {
             println!("{}", print_function_table());
             return;
@@ -95,5 +105,14 @@ async fn main() {
             tracing::error!("Postgres connection error: {:?}", e);
         }
     });
-    run(&client, &opt.testdata, opt.count).await;
+    if opt.differential_testing {
+        return run_differential_testing(&client, &opt.testdata, opt.count, None)
+            .await
+            .unwrap();
+    }
+    if let Some(outdir) = opt.generate {
+        generate(&client, &opt.testdata, opt.count, &outdir, None).await;
+    } else {
+        run(&client, &opt.testdata, opt.count, None).await;
+    }
 }

@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::ColumnDesc;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{ColumnDesc, INITIAL_TABLE_VERSION_ID};
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDml {
     pub base: PlanBase,
     input: PlanRef,
@@ -37,6 +37,7 @@ impl StreamDml {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             append_only,
+            false,                                            // TODO(rc): decide EOWC property
             FixedBitSet::with_capacity(input.schema().len()), // no watermark if dml is allowed
         );
 
@@ -47,21 +48,23 @@ impl StreamDml {
         }
     }
 
-    fn column_names(&self) -> Vec<String> {
+    fn column_names(&self) -> Vec<&str> {
         self.column_descs
             .iter()
-            .map(|column_desc| column_desc.name.clone())
+            .map(|column_desc| column_desc.name.as_str())
             .collect()
     }
 }
 
-impl fmt::Display for StreamDml {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamDml {{ columns: {} }}",
-            format_args!("[{}]", &self.column_names().join(", "))
-        )
+impl Distill for StreamDml {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let col = self
+            .column_names()
+            .iter()
+            .map(|n| Pretty::from(n.to_string()))
+            .collect();
+        let col = Pretty::Array(col);
+        childless_record("StreamDml", vec![("columns", col)])
     }
 }
 
@@ -78,12 +81,12 @@ impl PlanTreeNodeUnary for StreamDml {
 impl_plan_tree_node_for_unary! {StreamDml}
 
 impl StreamNode for StreamDml {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::Dml(DmlNode {
-            // Meta will fill this table id.
-            table_id: 0,
+        PbNodeBody::Dml(DmlNode {
+            table_id: 0,                                // Meta will fill this table id.
+            table_version_id: INITIAL_TABLE_VERSION_ID, // Meta will fill this version id.
             column_descs: self.column_descs.iter().map(Into::into).collect(),
         })
     }

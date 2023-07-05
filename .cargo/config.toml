@@ -1,4 +1,8 @@
 # RisingWave cannot compile without SIMD. #7259
+#
+# For some targets, there's an SIMD feature enabled by default.
+# For other targets, we need to enable the feature manually.
+# See `rustc --print=cfg --target=<triple>` for details.
 
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-Ctarget-feature=+avx2"]
@@ -14,11 +18,15 @@ rustflags = [
 ]
 
 [target.x86_64-apple-darwin]
-rustflags = ["-Ctarget-feature=+avx2"]
+rustflags = [
+    "-Ctarget-feature=+sse4.2",                             # use a generally available feature, since it's not for production
+    "-Clink-arg=-fuse-ld=/usr/local/opt/llvm/bin/ld64.lld",
+]
 
 [target.aarch64-apple-darwin]
 rustflags = [
-    "-Clink-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld"
+    # neon is enabled by default
+    "-Clink-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld",
 ]
 
 # Flags for all targets.
@@ -26,6 +34,9 @@ rustflags = [
 rustflags = [
     "--cfg",
     "tokio_unstable",
+    # uncomment the following two lines to enable `TaskLocalAlloc`
+    # "--cfg",
+    # "enable_task_local_alloc",
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
     "-Funused_must_use",

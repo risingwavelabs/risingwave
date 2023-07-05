@@ -38,8 +38,7 @@ function App({ Component, pageProps }: AppProps) {
   return (
     <ChakraProvider>
       <Layout>
-        <Component {...pageProps} />
-        {isLoading && <SpinnerOverlay />}
+        {isLoading ? <SpinnerOverlay /> : <Component {...pageProps} />}
       </Layout>
     </ChakraProvider>
   )

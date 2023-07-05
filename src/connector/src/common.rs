@@ -12,20 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+use std::collections::HashMap;
+
 use aws_sdk_kinesis::Client as KinesisClient;
-use http::Uri;
 use rdkafka::ClientConfig;
 use serde_derive::{Deserialize, Serialize};
+use serde_with::json::JsonString;
+use serde_with::serde_as;
 
-use crate::source::kinesis::config::AwsConfigInfo;
+use crate::aws_auth::AwsAuthProps;
 
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AwsPrivateLinkItem {
+    pub az_id: Option<String>,
+    pub port: u16,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
+
+    #[serde(rename = "broker.rewrite.endpoints")]
+    #[serde_as(as = "Option<JsonString>")]
+    pub broker_rewrite_map: Option<HashMap<String, String>>,
 
     #[serde(rename = "topic", alias = "kafka.topic")]
     pub topic: String,
@@ -188,14 +203,29 @@ pub struct KinesisCommon {
 
 impl KinesisCommon {
     pub(crate) async fn build_client(&self) -> anyhow::Result<KinesisClient> {
-        let config = AwsConfigInfo::build(self.clone())?;
-        let aws_config = config.load().await?;
+        let config = AwsAuthProps {
+            region: Some(self.stream_region.clone()),
+            endpoint: self.endpoint.clone(),
+            access_key: self.credentials_access_key.clone(),
+            secret_key: self.credentials_secret_access_key.clone(),
+            session_token: self.session_token.clone(),
+            arn: self.assume_role_arn.clone(),
+            external_id: self.assume_role_external_id.clone(),
+            profile: Default::default(),
+        };
+        let aws_config = config.build_config().await?;
         let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
         if let Some(endpoint) = &config.endpoint {
-            let uri = endpoint.clone().parse::<Uri>().unwrap();
-            builder =
-                builder.endpoint_resolver(aws_smithy_http::endpoint::Endpoint::immutable(uri));
+            builder = builder.endpoint_url(endpoint);
         }
         Ok(KinesisClient::from_conf(builder.build()))
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpsertMessage<'a> {
+    #[serde(borrow)]
+    pub primary_key: Cow<'a, [u8]>,
+    #[serde(borrow)]
+    pub record: Cow<'a, [u8]>,
 }

@@ -12,19 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Statement;
 
 use super::delete::BoundDelete;
 use super::update::BoundUpdate;
 use crate::binder::{Binder, BoundInsert, BoundQuery};
+use crate::expr::ExprRewriter;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BoundStatement {
     Insert(Box<BoundInsert>),
     Delete(Box<BoundDelete>),
     Update(Box<BoundUpdate>),
     Query(Box<BoundQuery>),
+}
+
+impl BoundStatement {
+    pub fn output_fields(&self) -> Vec<Field> {
+        match self {
+            BoundStatement::Insert(i) => i.returning_schema.as_ref().map_or(
+                vec![Field::unnamed(risingwave_common::types::DataType::Int64)],
+                |s| s.fields().into(),
+            ),
+            BoundStatement::Delete(d) => d.returning_schema.as_ref().map_or(
+                vec![Field::unnamed(risingwave_common::types::DataType::Int64)],
+                |s| s.fields().into(),
+            ),
+            BoundStatement::Update(u) => u.returning_schema.as_ref().map_or(
+                vec![Field::unnamed(risingwave_common::types::DataType::Int64)],
+                |s| s.fields().into(),
+            ),
+            BoundStatement::Query(q) => q.schema().fields().into(),
+        }
+    }
 }
 
 impl Binder {
@@ -65,6 +87,21 @@ impl Binder {
                 None.into(),
             )
             .into()),
+        }
+    }
+}
+
+pub(crate) trait RewriteExprsRecursive {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl ExprRewriter);
+}
+
+impl RewriteExprsRecursive for BoundStatement {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl ExprRewriter) {
+        match self {
+            BoundStatement::Insert(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundStatement::Delete(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundStatement::Update(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundStatement::Query(inner) => inner.rewrite_exprs_recursive(rewriter),
         }
     }
 }

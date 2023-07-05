@@ -21,25 +21,32 @@ use crate::error::{Result, RwError};
 
 pub mod addr;
 pub mod chunk_coalesce;
+pub mod column_index_mapping;
 pub mod compress;
-pub mod encoding_for_comparison;
+pub mod deployment;
 pub mod env_var;
 pub mod epoch;
 mod future_utils;
 pub mod hash_util;
 pub mod iter_util;
-pub mod ordered;
+pub mod memcmp_encoding;
+pub mod panic;
+pub mod pretty_bytes;
 pub mod prost;
 pub mod resource_util;
+pub mod row_id;
+pub mod row_serde;
+pub mod runtime;
 pub mod scan_range;
 pub mod schema_check;
 pub mod sort_util;
 pub mod stream_cancel;
+pub mod stream_graph_visitor;
+pub mod tracing;
 pub mod value_encoding;
 pub mod worker_util;
 
 pub use future_utils::select_all;
-
 #[macro_use]
 pub mod match_util;
 

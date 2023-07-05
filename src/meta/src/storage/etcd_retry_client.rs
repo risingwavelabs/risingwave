@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::{Map, Take};
 use std::time::Duration;
 
 use etcd_client::{
@@ -40,7 +39,7 @@ impl EtcdRetryClient {
     }
 
     #[inline(always)]
-    fn get_retry_strategy() -> Map<Take<ExponentialBackoff>, fn(Duration) -> Duration> {
+    fn get_retry_strategy() -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(DEFAULT_RETRY_INTERVAL)
             .max_delay(DEFAULT_RETRY_MAX_DELAY)
             .take(DEFAULT_RETRY_MAX_ATTEMPTS)

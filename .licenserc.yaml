@@ -8,10 +8,13 @@ header:
     - "dashboard/**/*.js"
     - "dashboard/**/*.ts"
     - "src/**/*.html"
+    - "java/**/*.java"
+    - "java/**/*.py"
 
   paths-ignore:
     - "**/gen/**"
     - "**/*.d.ts"
     - "src/sqlparser/**/*.rs"
+    - "java/connector-node/risingwave-source-cdc/src/main/java/com/risingwave/connector/cdc/debezium/internal/*.java"
 
   comment: on-failure

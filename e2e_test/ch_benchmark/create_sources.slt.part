@@ -26,7 +26,7 @@ CREATE TABLE customer (
 ) with (
     connector = 'kafka',
     topic = 'customer',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
@@ -47,7 +47,7 @@ CREATE TABLE district (
 ) with (
     connector = 'kafka',
     topic = 'district',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
@@ -65,7 +65,7 @@ CREATE TABLE history (
 ) with (
     connector = 'kafka',
     topic = 'history',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
@@ -80,7 +80,7 @@ CREATE TABLE item (
 ) with (
     connector = 'kafka',
     topic = 'item',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
@@ -93,7 +93,7 @@ CREATE TABLE neworder (
 ) with (
     connector = 'kafka',
     topic = 'neworder',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
@@ -113,7 +113,7 @@ CREATE TABLE orderline (
 ) with (
     connector = 'kafka',
     topic = 'orderline',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
@@ -131,7 +131,7 @@ CREATE TABLE orders (
 ) with (
     connector = 'kafka',
     topic = 'orders',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
@@ -159,7 +159,7 @@ CREATE TABLE stock (
 ) with (
     connector = 'kafka',
     topic = 'stock',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
@@ -178,7 +178,7 @@ CREATE TABLE warehouse (
 ) with (
     connector = 'kafka',
     topic = 'warehouse',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
@@ -195,7 +195,7 @@ CREATE TABLE supplier (
 ) with (
     connector = 'kafka',
     topic = 'supplier',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
@@ -208,7 +208,7 @@ CREATE TABLE region (
 ) with (
      connector = 'kafka',
      topic = 'region',
-     properties.bootstrap.server = '127.0.0.1:29092',
+     properties.bootstrap.server = 'message_queue:29092',
      scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;
 
@@ -222,6 +222,6 @@ CREATE TABLE nation (
 ) with (
      connector = 'kafka',
      topic = 'nation',
-     properties.bootstrap.server = '127.0.0.1:29092',
+     properties.bootstrap.server = 'message_queue:29092',
      scan.startup.mode = 'earliest'
 ) ROW FORMAT DEBEZIUM_JSON;

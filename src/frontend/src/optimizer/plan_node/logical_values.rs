@@ -13,16 +13,20 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::{fmt, vec};
+use std::vec;
 
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::Result;
+use risingwave_common::types::{DataType, ScalarImpl};
 
+use super::utils::{childless_record, Distill};
 use super::{
     BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
-    ToBatch, ToStream,
+    StreamValues, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -31,7 +35,7 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalValues` builds rows according to a list of expressions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalValues {
     pub base: PlanBase,
     rows: Arc<[Vec<ExprImpl>]>,
@@ -53,6 +57,26 @@ impl LogicalValues {
         }
     }
 
+    /// Used only by `LogicalValues.rewrite_logical_for_stream`, set the `_row_id` column as pk
+    fn new_with_pk(
+        rows: Vec<Vec<ExprImpl>>,
+        schema: Schema,
+        ctx: OptimizerContextRef,
+        pk_index: usize,
+    ) -> Self {
+        for exprs in &rows {
+            for (i, expr) in exprs.iter().enumerate() {
+                assert_eq!(schema.fields()[i].data_type(), expr.return_type())
+            }
+        }
+        let functional_dependency = FunctionalDependencySet::new(schema.len());
+        let base = PlanBase::new_logical(ctx, schema, vec![pk_index], functional_dependency);
+        Self {
+            rows: rows.into(),
+            base,
+        }
+    }
+
     /// Create a [`LogicalValues`] node. Used by planner.
     pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: OptimizerContextRef) -> PlanRef {
         // No additional checks after binder.
@@ -63,16 +87,26 @@ impl LogicalValues {
     pub fn rows(&self) -> &[Vec<ExprImpl>] {
         self.rows.as_ref()
     }
+
+    pub(super) fn rows_pretty<'a>(&self) -> Pretty<'a> {
+        let data = self
+            .rows()
+            .iter()
+            .map(|row| {
+                let collect = row.iter().map(Pretty::debug).collect();
+                Pretty::Array(collect)
+            })
+            .collect();
+        Pretty::Array(data)
+    }
 }
 
 impl_plan_tree_node_for_leaf! { LogicalValues }
-
-impl fmt::Display for LogicalValues {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LogicalValues")
-            .field("rows", &self.rows)
-            .field("schema", &self.schema())
-            .finish()
+impl Distill for LogicalValues {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = self.rows_pretty();
+        let fields = vec![("rows", data), ("schema", Pretty::debug(&self.schema()))];
+        childless_record("LogicalValues", fields)
     }
 }
 
@@ -132,20 +166,31 @@ impl ToBatch for LogicalValues {
 
 impl ToStream for LogicalValues {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "Stream values executor is unimplemented!".to_string(),
-            None.into(),
-        )))
+        Ok(StreamValues::new(self.clone()).into())
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "Stream values executor is unimplemented!".to_string(),
-            None.into(),
-        )))
+        let row_id_index = self.schema().len();
+        let col_index_mapping = ColIndexMapping::identity_or_none(row_id_index, row_id_index + 1);
+        let ctx = self.ctx();
+        let mut schema = self.schema().clone();
+        schema
+            .fields
+            .push(Field::with_name(DataType::Int64, "_row_id"));
+        let rows = self.rows().to_owned();
+        let row_with_id = rows
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut r)| {
+                r.push(Literal::new(Some(ScalarImpl::Int64(i as i64)), DataType::Int64).into());
+                r
+            })
+            .collect_vec();
+        let logical_values = Self::new_with_pk(row_with_id, schema, ctx, row_id_index);
+        Ok((logical_values.into(), col_index_mapping))
     }
 }
 

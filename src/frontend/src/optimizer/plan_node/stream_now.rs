@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -23,13 +21,14 @@ use risingwave_pb::stream_plan::NowNode;
 
 use super::generic::GenericPlanRef;
 use super::stream::StreamPlanRef;
-use super::utils::{IndicesDisplay, TableCatalogBuilder};
+use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, LogicalNow, PlanBase, StreamNode};
+use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::OptimizerContextRef;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamNow {
     pub base: PlanBase,
 }
@@ -51,29 +50,22 @@ impl StreamNow {
             FunctionalDependencySet::default(),
             Distribution::Single,
             false,
+            false, // TODO(rc): derive EOWC property from input
             watermark_columns,
         );
         Self { base }
     }
 }
 
-impl fmt::Display for StreamNow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("StreamNow");
+impl Distill for StreamNow {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let vec = if self.base.ctx.is_explain_verbose() {
+            vec![("output", column_names_pretty(self.schema()))]
+        } else {
+            vec![]
+        };
 
-        if verbose {
-            // For now, output all columns from the left side. Make it explicit here.
-            builder.field(
-                "output",
-                &IndicesDisplay {
-                    indices: &(0..self.schema().fields.len()).collect_vec(),
-                    input_schema: self.schema(),
-                },
-            );
-        }
-
-        builder.finish()
+        childless_record("StreamNow", vec)
     }
 }
 
@@ -90,7 +82,7 @@ impl StreamNode for StreamNow {
         });
 
         let table_catalog = internal_table_catalog_builder
-            .build(dist_keys)
+            .build(dist_keys, 0)
             .with_id(state.gen_table_id_wrapped());
         NodeBody::Now(NowNode {
             state_table: Some(table_catalog.to_internal_table_prost()),

@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
-
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamRowIdGen {
     pub base: PlanBase,
     input: PlanRef,
@@ -28,13 +30,21 @@ pub struct StreamRowIdGen {
 
 impl StreamRowIdGen {
     pub fn new(input: PlanRef, row_id_index: usize) -> Self {
+        let distribution = if input.append_only() {
+            // remove exchange for append only source
+            Distribution::HashShard(vec![row_id_index])
+        } else {
+            input.distribution().clone()
+        };
+
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             input.logical_pk().to_vec(),
             input.functional_dependency().clone(),
-            input.distribution().clone(),
+            distribution,
             input.append_only(),
+            input.emit_on_window_close(),
             input.watermark_columns().clone(),
         );
         Self {
@@ -45,13 +55,10 @@ impl StreamRowIdGen {
     }
 }
 
-impl fmt::Display for StreamRowIdGen {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamRowIdGen {{ row_id_index: {} }}",
-            self.row_id_index
-        )
+impl Distill for StreamRowIdGen {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let fields = vec![("row_id_index", Pretty::debug(&self.row_id_index))];
+        childless_record("StreamRowIdGen", fields)
     }
 }
 
@@ -68,10 +75,10 @@ impl PlanTreeNodeUnary for StreamRowIdGen {
 impl_plan_tree_node_for_unary! {StreamRowIdGen}
 
 impl StreamNode for StreamRowIdGen {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::RowIdGen(RowIdGenNode {
+        PbNodeBody::RowIdGen(RowIdGenNode {
             row_id_index: self.row_id_index as _,
         })
     }

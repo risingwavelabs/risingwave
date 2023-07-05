@@ -1,0 +1,37 @@
+query T
+select array_join(array[1, 2, 3, NULL, 5], ',')
+----
+1,2,3,5
+
+query T
+select array_join(array[1, 2, 3, NULL, 5], ',', '*')
+----
+1,2,3,*,5
+
+query T
+select array_join(array[null,'foo',null], ',', '*');
+----
+*,foo,*
+
+query T
+select array_join(array['2023-02-20 17:35:25'::timestamp, null,'2023-02-19 13:01:30'::timestamp], ',', '*');
+----
+2023-02-20 17:35:25,*,2023-02-19 13:01:30
+
+query T
+with t as (
+  select array[1,null,2,3] as arr, ',' as d union all
+  select array[4,5,6,null,7] as arr, '|')
+select array_join(arr, d) from t;
+----
+1,2,3
+4|5|6|7
+
+# `array` or `delimiter` are required. Otherwise, returns null.
+query T
+select array_join(array[1,2], NULL);
+----
+NULL
+
+query error polymorphic type
+select array_join(null, ',');

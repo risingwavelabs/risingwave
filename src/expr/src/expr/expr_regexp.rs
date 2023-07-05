@@ -18,12 +18,11 @@ use std::sync::Arc;
 use itertools::Itertools;
 use regex::{Regex, RegexBuilder};
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue,
-    Utf8Array,
+    Array, ArrayBuilder, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue, Utf8Array,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -42,6 +41,29 @@ impl RegexpContext {
                 .case_insensitive(options.case_insensitive)
                 .build()?,
         ))
+    }
+
+    pub fn from_pattern(pattern: Datum) -> Result<Self> {
+        let pattern = match &pattern {
+            None => NULL_PATTERN,
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        Self::new(pattern, "")
+    }
+
+    pub fn from_pattern_flags(pattern: Datum, flags: Datum) -> Result<Self> {
+        let pattern = match (&pattern, &flags) {
+            (None, _) | (_, None) => NULL_PATTERN,
+            (Some(ScalarImpl::Utf8(s)), _) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        let flags = match &flags {
+            None => "",
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid flags: {flags:?}"),
+        };
+        Self::new(pattern, flags)
     }
 }
 
@@ -92,7 +114,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::RegexpMatch);
+        ensure!(prost.get_function_type().unwrap() == Type::RegexpMatch);
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
             bail!("Expected RexNode::FuncCall");
         };
@@ -104,21 +126,21 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
         let Some(pattern_node) = children.next() else {
             bail!("Expected argument pattern");
         };
-        let mut pattern = match &pattern_node.rex_node {
-            Some(RexNode::Constant(pattern_value)) => {
-                let pattern_scalar = deserialize_datum(
+        let mut pattern = match &pattern_node.get_rex_node()? {
+            RexNode::Constant(pattern_value) => {
+                let pattern_datum = deserialize_datum(
                     pattern_value.get_body().as_slice(),
                     &DataType::from(pattern_node.get_return_type().unwrap()),
                 )
-                .map_err(|e| ExprError::Internal(e.into()))?
-                .unwrap();
-                let ScalarImpl::Utf8(pattern) = pattern_scalar else {
-                    bail!("Expected pattern to be an String");
-                };
-                pattern.to_string()
+                .map_err(|e| ExprError::Internal(e.into()))?;
+
+                match pattern_datum {
+                    Some(ScalarImpl::Utf8(pattern)) => pattern.to_string(),
+                    // NULL pattern
+                    None => NULL_PATTERN.to_string(),
+                    _ => bail!("Expected pattern to be an String"),
+                }
             }
-            // NULL pattern
-            None => NULL_PATTERN.to_string(),
             _ => {
                 return Err(ExprError::UnsupportedFunction(
                     "non-constant pattern in regexp_match".to_string(),
@@ -127,23 +149,23 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
         };
 
         let flags = if let Some(flags_node) = children.next() {
-            match &flags_node.rex_node {
-                Some(RexNode::Constant(flags_value)) => {
-                    let flags_scalar = deserialize_datum(
+            match &flags_node.get_rex_node()? {
+                RexNode::Constant(flags_value) => {
+                    let flags_datum = deserialize_datum(
                         flags_value.get_body().as_slice(),
                         &DataType::from(flags_node.get_return_type().unwrap()),
                     )
-                    .map_err(|e| ExprError::Internal(e.into()))?
-                    .unwrap();
-                    let ScalarImpl::Utf8(flags) = flags_scalar else {
-                        bail!("Expected flags to be an String");
-                    };
-                    flags.to_string()
-                }
-                // NULL flag
-                None => {
-                    pattern = NULL_PATTERN.to_string();
-                    "".to_string()
+                    .map_err(|e| ExprError::Internal(e.into()))?;
+
+                    match flags_datum {
+                        Some(ScalarImpl::Utf8(flags)) => flags.to_string(),
+                        // NULL flag
+                        None => {
+                            pattern = NULL_PATTERN.to_string();
+                            "".to_string()
+                        }
+                        _ => bail!("Expected flags to be an String"),
+                    }
                 }
                 _ => {
                     return Err(ExprError::UnsupportedFunction(
@@ -189,24 +211,21 @@ impl RegexpMatchExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for RegexpMatchExpression {
     fn return_type(&self) -> DataType {
-        DataType::List {
-            datatype: Box::new(DataType::Varchar),
-        }
+        DataType::List(Box::new(DataType::Varchar))
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let text_arr = self.child.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let text_arr = self.child.eval_checked(input).await?;
         let text_arr: &Utf8Array = text_arr.as_ref().into();
-        let mut output = ListArrayBuilder::with_meta(
+        let mut output = ListArrayBuilder::with_type(
             input.capacity(),
-            ArrayMeta::List {
-                datatype: Box::new(DataType::Varchar),
-            },
+            DataType::List(Box::new(DataType::Varchar)),
         );
 
-        for (text, vis) in text_arr.iter().zip_eq_debug(input.vis().iter()) {
+        for (text, vis) in text_arr.iter().zip_eq_fast(input.vis().iter()) {
             if !vis {
                 output.append_null();
             } else if let Some(list) = self.match_one(text) {
@@ -220,8 +239,8 @@ impl Expression for RegexpMatchExpression {
         Ok(Arc::new(output.finish().into()))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let text = self.child.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let text = self.child.eval_row(input).await?;
         Ok(if let Some(ScalarImpl::Utf8(text)) = text {
             self.match_one(Some(&text)).map(Into::into)
         } else {

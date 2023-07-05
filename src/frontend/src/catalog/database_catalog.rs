@@ -16,15 +16,14 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
+use risingwave_pb::catalog::{PbDatabase, PbSchema};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{DatabaseId, SchemaId};
+use crate::catalog::{DatabaseId, SchemaId, TableId};
 
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
-    #[expect(dead_code)]
     name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
@@ -32,7 +31,7 @@ pub struct DatabaseCatalog {
 }
 
 impl DatabaseCatalog {
-    pub fn create_schema(&mut self, proto: &ProstSchema) {
+    pub fn create_schema(&mut self, proto: &PbSchema) {
         let name = proto.name.clone();
         let id = proto.id;
         let schema = proto.into();
@@ -51,11 +50,17 @@ impl DatabaseCatalog {
         self.schema_by_name.keys().cloned().collect_vec()
     }
 
-    pub fn get_all_schema_info(&self) -> Vec<ProstSchema> {
+    pub fn iter_all_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
+        self.schema_by_name
+            .values()
+            .flat_map(|schema| schema.iter_all().map(|t| t.id()))
+    }
+
+    pub fn get_all_schema_info(&self) -> Vec<PbSchema> {
         self.schema_by_name
             .values()
             .cloned()
-            .map(|schema| ProstSchema {
+            .map(|schema| PbSchema {
                 id: schema.id(),
                 database_id: self.id,
                 name: schema.name(),
@@ -82,6 +87,12 @@ impl DatabaseCatalog {
         self.schema_by_name.get_mut(name)
     }
 
+    pub fn find_schema_containing_table_id(&self, table_id: &TableId) -> Option<&SchemaCatalog> {
+        self.schema_by_name
+            .values()
+            .find(|schema| schema.get_table_by_id(table_id).is_some())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.schema_by_name.len() == 1 && self.schema_by_name.contains_key(PG_CATALOG_SCHEMA_NAME)
     }
@@ -90,12 +101,16 @@ impl DatabaseCatalog {
         self.id
     }
 
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn owner(&self) -> u32 {
         self.owner
     }
 }
-impl From<&ProstDatabase> for DatabaseCatalog {
-    fn from(db: &ProstDatabase) -> Self {
+impl From<&PbDatabase> for DatabaseCatalog {
+    fn from(db: &PbDatabase) -> Self {
         Self {
             id: db.id,
             name: db.name.clone(),

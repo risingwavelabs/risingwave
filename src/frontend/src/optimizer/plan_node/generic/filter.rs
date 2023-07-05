@@ -12,23 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 
-use super::{GenericPlanNode, GenericPlanRef};
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::utils::Condition;
+use crate::optimizer::plan_node::utils::childless_record;
+use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::{Condition, ConditionDisplay};
 
 /// [`Filter`] iterates over its input and returns elements for which `predicate` evaluates to
 /// true, filtering out the others.
 ///
 /// If the condition allows nulls, then a null value is treated the same as false.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Filter<PlanRef> {
     pub predicate: Condition,
     pub input: PlanRef,
 }
 
+impl<PlanRef: GenericPlanRef> DistillUnit for Filter<PlanRef> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
+        let input_schema = self.input.schema();
+        let predicate = ConditionDisplay {
+            condition: &self.predicate,
+            input_schema,
+        };
+        childless_record(name, vec![("predicate", Pretty::display(&predicate))])
+    }
+}
+
+impl<PlanRef: GenericPlanRef> Filter<PlanRef> {
+    pub fn new(predicate: Condition, input: PlanRef) -> Self {
+        Filter { predicate, input }
+    }
+}
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
     fn schema(&self) -> Schema {
         self.input.schema().clone()
@@ -40,6 +59,21 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let mut functional_dependency = self.input.functional_dependency().clone();
+        for i in &self.predicate.conjunctions {
+            if let Some((col, _)) = i.as_eq_const() {
+                functional_dependency.add_constant_columns(&[col.index()])
+            } else if let Some((left, right)) = i.as_eq_cond() {
+                functional_dependency
+                    .add_functional_dependency_by_column_indices(&[left.index()], &[right.index()]);
+                functional_dependency
+                    .add_functional_dependency_by_column_indices(&[right.index()], &[left.index()]);
+            }
+        }
+        functional_dependency
     }
 }
 

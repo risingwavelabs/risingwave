@@ -6,7 +6,9 @@ on:
     - main
     - "forks/*"
   pull_request:
-    branches: [main]
+    branches: 
+    - main
+    - "v*.*.*-rc"
   merge_group:
     types: [checks_requested]
 jobs:
@@ -16,4 +18,4 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Check License Header
-      uses: apache/skywalking-eyes/header@main
+      uses: apache/skywalking-eyes@775fe1ffda59b7e100aa144d0ef8d7beae17f97d

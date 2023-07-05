@@ -6,39 +6,35 @@ set -eo pipefail
 [ -n "${BACKUP_TEST_RW_ALL_IN_ONE}" ]
 
 function stop_cluster() {
-  cargo make k 1>/dev/null 2>&1 || true
+  cargo make --allow-private k 1>/dev/null 2>&1 || true
 }
 
 function clean_all_data {
-  cargo make clean-data 1>/dev/null 2>&1
+  cargo make --allow-private clean-data 1>/dev/null 2>&1
 }
 
 function clean_etcd_data() {
-  cargo make clean-etcd-data
+  cargo make --allow-private clean-etcd-data 1>/dev/null 2>&1
 }
 
 function start_cluster() {
-  cargo make d ci-meta-backup-test
-}
-
-function wait_cluster_ready() {
-  # TODO #6482: wait cluster to finish actor migration and other recovery stuff deterministically.
+  cargo make d ci-meta-backup-test 1>/dev/null 2>&1
   sleep 5
 }
 
 function full_gc_sst() {
-  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-full-gc -s 0
+  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-full-gc -s 0 1>/dev/null 2>&1
   # TODO #6482: wait full gc finish deterministically.
   # Currently have to wait long enough.
   sleep 30
 }
 
 function manual_compaction() {
-  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-manual-compaction "$@"
+  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-manual-compaction "$@" 1>/dev/null 2>&1
 }
 
 function start_etcd_minio() {
-  cargo make d ci-meta-backup-test-restore
+  cargo make d ci-meta-backup-test-restore 1>/dev/null 2>&1
 }
 
 function create_mvs() {
@@ -77,24 +73,38 @@ function restore() {
   --meta-store-type etcd \
   --meta-snapshot-id "${job_id}" \
   --etcd-endpoints 127.0.0.1:2388 \
-  --storage-directory backup \
-  --storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
+  --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  --hummock-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  1>/dev/null
 }
 
 function execute_sql() {
   local sql
   sql=$1
-  echo "execute sql ${sql}"
-  echo "SET QUERY_MODE=distributed;${sql}" | psql -h localhost -p 4566 -d dev -U root 2>&1
+  echo "${sql}" | psql -h localhost -p 4566 -d dev -U root 2>&1
+}
+
+function execute_sql_and_expect() {
+  local sql
+  sql=$1
+  local expected
+  expected=$2
+
+  echo "execute SQL ${sql}"
+  echo "expected string in result: ${expected}"
+  query_result=$(execute_sql "${sql}")
+  printf "actual result:\n%s\n" "${query_result}"
+  result=$(echo "${query_result}" | grep "${expected}")
+  [ -n "${result}" ]
 }
 
 function get_max_committed_epoch() {
-  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
+  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
   echo "${mce}"
 }
 
 function get_safe_epoch() {
-  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
+  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
   echo "${safe_epoch}"
 }
 

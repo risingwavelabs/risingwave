@@ -23,6 +23,7 @@ SELECT * FROM TEXT_TBL;
  hi de ho neighbor
 (2 rows)
 
+DROP TABLE TEXT_TBL;
 -- As of 8.3 we have removed most implicit casts to text, so that for example
 -- this no longer works:
 select length(42);

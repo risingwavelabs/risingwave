@@ -18,12 +18,10 @@
 #![feature(lint_reasons)]
 #![feature(map_many_mut)]
 #![feature(bound_map)]
+#![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 
 mod key_cmp;
-
-#[macro_use]
-extern crate num_derive;
-
 use std::cmp::Ordering;
 
 pub use key_cmp::*;
@@ -31,18 +29,17 @@ use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
-use crate::key::user_key;
 use crate::key_range::KeyRangeCommon;
-use crate::table_stats::{to_prost_table_stats_map, ProstTableStatsMap, TableStatsMap};
+use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMap};
 
 pub mod compact;
 pub mod compaction_group;
-pub mod filter_key_extractor;
 pub mod key;
 pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
 
+pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;
 pub type HummockRefCount = u64;
 pub type HummockVersionId = u64;
@@ -52,6 +49,9 @@ pub type HummockCompactionTaskId = u64;
 pub type CompactionGroupId = u64;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
+pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
+pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
+pub const OBJECT_SUFFIX: &str = "data";
 
 #[macro_export]
 /// This is wrapper for `info` log.
@@ -131,14 +131,14 @@ impl LocalSstableInfo {
 pub struct ExtendedSstableInfo {
     pub compaction_group_id: CompactionGroupId,
     pub sst_info: SstableInfo,
-    pub table_stats: ProstTableStatsMap,
+    pub table_stats: PbTableStatsMap,
 }
 
 impl ExtendedSstableInfo {
     pub fn new(
         compaction_group_id: CompactionGroupId,
         sst_info: SstableInfo,
-        table_stats: ProstTableStatsMap,
+        table_stats: PbTableStatsMap,
     ) -> Self {
         Self {
             compaction_group_id,
@@ -151,7 +151,7 @@ impl ExtendedSstableInfo {
         compaction_group_id: CompactionGroupId,
         sst_info: SstableInfo,
     ) -> Self {
-        Self::new(compaction_group_id, sst_info, ProstTableStatsMap::default())
+        Self::new(compaction_group_id, sst_info, PbTableStatsMap::default())
     }
 }
 
@@ -172,7 +172,7 @@ impl PartialEq for LocalSstableInfo {
 }
 
 /// Package read epoch of hummock, it be used for `wait_epoch`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum HummockReadEpoch {
     /// We need to wait the `max_committed_epoch`
     Committed(HummockEpoch),
@@ -210,19 +210,19 @@ impl HummockReadEpoch {
         }
     }
 }
-pub struct SstIdRange {
+pub struct SstObjectIdRange {
     // inclusive
-    pub start_id: HummockSstableId,
+    pub start_id: HummockSstableObjectId,
     // exclusive
-    pub end_id: HummockSstableId,
+    pub end_id: HummockSstableObjectId,
 }
 
-impl SstIdRange {
-    pub fn new(start_id: HummockSstableId, end_id: HummockSstableId) -> Self {
+impl SstObjectIdRange {
+    pub fn new(start_id: HummockSstableObjectId, end_id: HummockSstableObjectId) -> Self {
         Self { start_id, end_id }
     }
 
-    pub fn peek_next_sst_id(&self) -> Option<HummockSstableId> {
+    pub fn peek_next_sst_object_id(&self) -> Option<HummockSstableObjectId> {
         if self.start_id < self.end_id {
             return Some(self.start_id);
         }
@@ -230,8 +230,8 @@ impl SstIdRange {
     }
 
     /// Pops and returns next SST id.
-    pub fn get_next_sst_id(&mut self) -> Option<HummockSstableId> {
-        let next_id = self.peek_next_sst_id();
+    pub fn get_next_sst_object_id(&mut self) -> Option<HummockSstableObjectId> {
+        let next_id = self.peek_next_sst_object_id();
         self.start_id += 1;
         next_id
     }
@@ -239,16 +239,27 @@ impl SstIdRange {
 
 pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     let len = ssts.len();
-    for i in 0..len - 1 {
-        if ssts[i]
+    for i in 1..len {
+        if ssts[i - 1]
             .key_range
             .as_ref()
             .unwrap()
-            .compare_right_with(&ssts[i + 1].key_range.as_ref().unwrap().left)
+            .compare_right_with(&ssts[i].key_range.as_ref().unwrap().left)
             != Ordering::Less
         {
             return false;
         }
     }
     true
+}
+
+const CHECKPOINT_DIR: &str = "checkpoint";
+const CHECKPOINT_NAME: &str = "0";
+
+pub fn version_checkpoint_path(root_dir: &str) -> String {
+    format!("{}/{}/{}", root_dir, CHECKPOINT_DIR, CHECKPOINT_NAME)
+}
+
+pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
+    checkpoint_path.trim_end_matches(|c| c != '/').to_string()
 }

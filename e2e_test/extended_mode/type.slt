@@ -1,0 +1,28 @@
+# Test binary format of different type. (sqllogitest return binary format in extended mode)
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# RisingWave can't support list and struct now so we skip them.
+# include ../batch/types/array.slt.part
+# include ../batch/types/struct.slt.part
+# include ../batch/types/list.slt.part
+
+# Sqllogitest can't support binary format bytea type so we skip it.
+# include ../batch/types/bytea.slt.part
+
+# Can't support inf,-inf binary format now so we skip it.
+# include ../batch/types/decimal.slt.part
+
+# Sqllogitest can't support binary format jsonb type so we skip it.
+# include ../batch/types/jsonb_ord.slt.part
+# include ../batch/types/jsonb.slt.part
+
+include ../batch/types/boolean.slt.part
+include ../batch/types/cast.slt.part
+include ../batch/types/date.slt
+include ../batch/types/intercal.slt.part
+include ../batch/types/number_arithmetic.slt.part
+include ../batch/types/temporal_arithmetic.slt.part
+include ../batch/types/time.slt.part
+include ../batch/types/timestamptz_utc.slt.part

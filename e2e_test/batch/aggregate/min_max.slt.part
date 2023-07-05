@@ -2,7 +2,7 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t(v1 smallint, v2 bigint, v3 real, v4 varchar)
+create table t(v1 smallint primary key, v2 bigint, v3 real, v4 varchar)
 
 statement ok
 insert into t values (3, 4, 1.5, 'bar'), (2, 5, 2.5, 'ba')
@@ -16,6 +16,22 @@ query IIRT
 select max(v1), max(v2), max(v3), max(v4) from t
 ----
 3 5 2.5 bar
+
+query I
+select min(v1) from t
+----
+2
+
+statement ok
+create index idx on t(v2 desc)
+
+statement ok
+insert into t values (1, null, 3.5, 'null v2')
+
+query I
+select max(v2) from t
+----
+5
 
 statement ok
 drop table t

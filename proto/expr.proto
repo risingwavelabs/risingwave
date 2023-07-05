@@ -2,20 +2,24 @@ syntax = "proto3";
 
 package expr;
 
+import "common.proto";
 import "data.proto";
-import "plan_common.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
-  // a "pure function" will be defined as having `1 < expr_node as i32 <= 600`.
-  // Please modify this definition if adding a pure function that does not belong
-  // to this range.
+  message NowRexNode {}
+  // TODO: move this into `FunctionCall`.
   enum Type {
+    // `InputRef`, `Constant`, and `UserDefinedFunction` are indicated by the viriant of `rex_node`.
+    // Their types are therefore deprecated and should be `UNSPECIFIED` instead.
+    reserved 1, 2, 3000;
+    reserved "INPUT_REF", "CONSTANT_VALUE", "UDF";
+
+    // Used for `InputRef`, `Constant`, and `UserDefinedFunction`.
     UNSPECIFIED = 0;
-    INPUT_REF = 1;
-    CONSTANT_VALUE = 2;
+
     // arithmetics operators
     ADD = 3;
     SUBTRACT = 4;
@@ -45,6 +49,7 @@ message ExprNode {
     BITWISE_SHIFT_RIGHT = 36;
     // date functions
     EXTRACT = 101;
+    DATE_PART = 102;
     TUMBLE_START = 103;
     // From f64 to timestamp.
     // e.g. `select to_timestamp(1672044740.0)`
@@ -56,6 +61,8 @@ message ExprNode {
     TO_TIMESTAMP1 = 107;
     // Performs a cast with additional timezone information.
     CAST_WITH_TIME_ZONE = 108;
+    ADD_WITH_TIME_ZONE = 109;
+    SUBTRACT_WITH_TIME_ZONE = 110;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -94,6 +101,45 @@ message ExprNode {
     OVERLAY = 231;
     REGEXP_MATCH = 232;
     POW = 233;
+    EXP = 234;
+    CHR = 235;
+    STARTS_WITH = 236;
+    INITCAP = 237;
+    LPAD = 238;
+    RPAD = 239;
+    REVERSE = 240;
+    STRPOS = 241 [deprecated = true]; // duplicated with POSITION
+    TO_ASCII = 242;
+    TO_HEX = 243;
+    QUOTE_IDENT = 244;
+    SIN = 245;
+    COS = 246;
+    TAN = 247;
+    COT = 248;
+    ASIN = 249;
+    ACOS = 250;
+    ATAN = 251;
+    ATAN2 = 252;
+    SIND = 253;
+    COSD = 254;
+    COTD = 255;
+    TAND = 256;
+    ASIND = 257;
+    SQRT = 258;
+    DEGREES = 259;
+    RADIANS = 260;
+    COSH = 261;
+    TANH = 262;
+    COTH = 263;
+    ASINH = 264;
+    ACOSH = 265;
+    ATANH = 266;
+    SINH = 267;
+    // skips 268,269,270 so that acosd, atand, atan2d are close to others
+    TRUNC = 271;
+    LN = 272;
+    LOG10 = 273;
+    CBRT = 274;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -104,6 +150,16 @@ message ExprNode {
     IS_NOT_NULL = 306;
     IS_DISTINCT_FROM = 307;
     IS_NOT_DISTINCT_FROM = 308;
+
+    // string/bytea expressions
+    ENCODE = 310;
+    DECODE = 311;
+    SHA1 = 312;
+    SHA224 = 313;
+    SHA256 = 314;
+    SHA384 = 315;
+    SHA512 = 316;
+
     // Unary operators
     NEG = 401;
     // Nested selection operators
@@ -112,46 +168,86 @@ message ExprNode {
     ARRAY = 521;
     ARRAY_ACCESS = 522;
     ROW = 523;
+    ARRAY_TO_STRING = 524;
+    ARRAY_RANGE_ACCESS = 525;
     // Array functions
     ARRAY_CAT = 531;
     ARRAY_APPEND = 532;
     ARRAY_PREPEND = 533;
     FORMAT_TYPE = 534;
+    ARRAY_DISTINCT = 535;
+    ARRAY_LENGTH = 536;
+    CARDINALITY = 537;
+    ARRAY_REMOVE = 538;
+    ARRAY_POSITIONS = 539;
+    TRIM_ARRAY = 540;
+    STRING_TO_ARRAY = 541;
+    ARRAY_POSITION = 542;
+    ARRAY_REPLACE = 543;
+    ARRAY_DIMS = 544;
 
-    // Non-pure functions below (> 600)
+    // Int256 functions
+    HEX_TO_INT256 = 560;
+
+    // Jsonb functions
+
+    // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
+    JSONB_ACCESS_INNER = 600;
+    // jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text
+    JSONB_ACCESS_STR = 601;
+    JSONB_TYPEOF = 602;
+    JSONB_ARRAY_LENGTH = 603;
+
+    // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions
     VNODE = 1101;
     // Non-deterministic functions
-    NOW = 2022;
-    // User defined functions
-    UDF = 3000;
+    PROCTIME = 2023;
   }
-  Type expr_type = 1;
+  Type function_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
-    InputRefExpr input_ref = 4;
+    uint32 input_ref = 4;
     data.Datum constant = 5;
     FunctionCall func_call = 6;
     UserDefinedFunction udf = 7;
+    NowRexNode now = 8;
   }
 }
 
 message TableFunction {
   enum Type {
     UNSPECIFIED = 0;
-    GENERATE = 1;
+    GENERATE_SERIES = 1;
     UNNEST = 2;
     REGEXP_MATCHES = 3;
     RANGE = 4;
+    // Jsonb functions
+    JSONB_ARRAY_ELEMENTS = 10;
+    JSONB_ARRAY_ELEMENTS_TEXT = 11;
+    JSONB_EACH = 12;
+    JSONB_EACH_TEXT = 13;
+    JSONB_OBJECT_KEYS = 14;
+    // User defined table function
+    UDTF = 100;
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;
   data.DataType return_type = 3;
+  // optional. only used when the type is UDTF.
+  UserDefinedTableFunction udtf = 4;
 }
 
-message InputRefExpr {
-  int32 column_idx = 1;
+// Reference to an upstream column, containing its index and data type.
+message InputRef {
+  uint32 index = 1;
+  data.DataType type = 2;
+}
+
+message Constant {
+  data.Datum datum = 1;
+  data.DataType type = 2;
 }
 
 // The items which can occur in the select list of `ProjectSet` operator.
@@ -205,23 +301,86 @@ message AggCall {
     ARRAY_AGG = 8;
     FIRST_VALUE = 9;
     SUM0 = 10;
-  }
-  message Arg {
-    InputRefExpr input = 1;
-    data.DataType type = 2;
+    VAR_POP = 11;
+    VAR_SAMP = 12;
+    STDDEV_POP = 13;
+    STDDEV_SAMP = 14;
+    BIT_AND = 15;
+    BIT_OR = 16;
+    BIT_XOR = 17;
+    BOOL_AND = 18;
+    BOOL_OR = 19;
+    JSONB_AGG = 20;
+    JSONB_OBJECT_AGG = 21;
+    PERCENTILE_CONT = 22;
+    PERCENTILE_DISC = 23;
+    MODE = 24;
   }
   Type type = 1;
-  repeated Arg args = 2;
+  repeated InputRef args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
-  message OrderByField {
-    InputRefExpr input = 1;
-    data.DataType type = 2;
-    plan_common.OrderType direction = 3;
-    bool nulls_first = 4;
-  }
-  repeated OrderByField order_by_fields = 5;
+  repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
+  repeated Constant direct_args = 7;
+}
+
+message WindowFrame {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    // RANGE = 1;
+    TYPE_ROWS = 2;
+    // GROUPS = 3;
+  }
+  enum BoundType {
+    BOUND_TYPE_UNSPECIFIED = 0;
+    BOUND_TYPE_UNBOUNDED_PRECEDING = 1;
+    BOUND_TYPE_PRECEDING = 2;
+    BOUND_TYPE_CURRENT_ROW = 3;
+    BOUND_TYPE_FOLLOWING = 4;
+    BOUND_TYPE_UNBOUNDED_FOLLOWING = 5;
+  }
+  message Bound {
+    BoundType type = 1;
+    oneof offset {
+      uint64 integer = 2;
+      data.Datum datum = 3;
+    }
+  }
+  enum Exclusion {
+    EXCLUSION_UNSPECIFIED = 0;
+    EXCLUSION_CURRENT_ROW = 1;
+    // EXCLUSION_GROUP = 2;
+    // EXCLUSION_TIES = 3;
+    EXCLUSION_NO_OTHERS = 4;
+  }
+
+  Type type = 1;
+  Bound start = 2;
+  Bound end = 3;
+  Exclusion exclusion = 4;
+}
+
+message WindowFunction {
+  enum GeneralType {
+    UNSPECIFIED = 0;
+    ROW_NUMBER = 1;
+    RANK = 2;
+    DENSE_RANK = 3;
+    // PERCENT_RANK = 4;
+    // CUME_DIST = 5;
+    // NTILE = 6;
+    LAG = 7;
+    LEAD = 8;
+  }
+
+  oneof type {
+    GeneralType general = 1;
+    AggCall.Type aggregate = 2;
+  }
+  repeated InputRef args = 3;
+  data.DataType return_type = 4;
+  WindowFrame frame = 5;
 }
 
 message UserDefinedFunction {
@@ -229,5 +388,13 @@ message UserDefinedFunction {
   string name = 2;
   repeated data.DataType arg_types = 3;
   string language = 4;
-  string path = 5;
+  string link = 5;
+  string identifier = 6;
+}
+
+message UserDefinedTableFunction {
+  repeated data.DataType arg_types = 3;
+  string language = 4;
+  string link = 5;
+  string identifier = 6;
 }
