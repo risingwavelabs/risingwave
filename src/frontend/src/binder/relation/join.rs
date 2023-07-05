@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{
 
 use crate::binder::bind_context::BindContext;
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
+use crate::binder::{Binder, Clause, Relation, COLUMN_GROUP_PREFIX};
 use crate::expr::ExprImpl;
 
 #[derive(Debug, Clone)]
@@ -206,9 +206,12 @@ impl Binder {
                 (expr, Some(relation))
             }
             JoinConstraint::On(expr) => {
-                let bound_expr = self
+                let clause = self.context.clause;
+                self.context.clause = Some(Clause::JoinOn);
+                let bound_expr: ExprImpl = self
                     .bind_expr(expr)
                     .and_then(|expr| expr.enforce_bool_clause("JOIN ON"))?;
+                self.context.clause = clause;
                 (bound_expr, None)
             }
         })

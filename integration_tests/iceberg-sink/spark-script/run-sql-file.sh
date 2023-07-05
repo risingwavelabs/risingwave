@@ -1,6 +1,7 @@
 set -ex
 
-/opt/spark/bin/spark-sql --packages org.apache.iceberg:iceberg-spark-runtime-3.2_2.12:1.1.0,org.apache.hadoop:hadoop-aws:3.3.2\
+spark-sql --packages org.apache.iceberg:iceberg-spark-runtime-3.2_2.12:1.1.0,org.apache.hadoop:hadoop-aws:3.3.2\
+    --master spark://spark:7077 \
     --conf spark.jars.ivy=${HOME}/work-dir/.ivy2 \
     --conf spark.sql.catalog.demo=org.apache.iceberg.spark.SparkCatalog \
     --conf spark.sql.catalog.demo.type=hadoop \

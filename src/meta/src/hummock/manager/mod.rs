@@ -1293,6 +1293,7 @@ where
 
                 trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
+                self.notify_stats(&versioning.version_stats);
 
                 if !deterministic_mode {
                     self.notify_last_version_delta(versioning);
@@ -1615,6 +1616,7 @@ where
 
         self.notify_last_version_delta(versioning);
         trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
+        self.notify_stats(&versioning.version_stats);
         let mut table_groups = HashMap::<u32, usize>::default();
         for group in versioning.current_version.levels.values() {
             for table_id in &group.member_table_ids {
@@ -2054,6 +2056,12 @@ where
             );
     }
 
+    fn notify_stats(&self, stats: &HummockVersionStats) {
+        self.env
+            .notification_manager()
+            .notify_frontend_without_version(Operation::Update, Info::HummockStats(stats.clone()));
+    }
+
     #[named]
     pub async fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         use futures::{FutureExt, StreamExt};
@@ -2289,7 +2297,7 @@ where
             for group_id in slowdown_groups.keys() {
                 if let Some(status) = compaction_guard.compaction_statuses.get(group_id) {
                     for (idx, level_handler) in status.level_handlers.iter().enumerate() {
-                        let tasks = level_handler.get_pending_tasks();
+                        let tasks = level_handler.get_pending_tasks().to_vec();
                         if tasks.is_empty() {
                             continue;
                         }

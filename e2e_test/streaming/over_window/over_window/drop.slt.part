@@ -1,0 +1,23 @@
+statement ok
+drop materialized view mv_a;
+
+statement ok
+drop materialized view mv_b;
+
+statement ok
+drop materialized view mv_c;
+
+statement ok
+drop materialized view mv_a_b;
+
+statement ok
+drop materialized view mv_b_c;
+
+statement ok
+drop materialized view mv_a_c;
+
+statement ok
+drop materialized view mv_a_b_c;
+
+statement ok
+drop table t;
