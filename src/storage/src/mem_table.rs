@@ -22,7 +22,6 @@ use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::util::value_encoding::ValueRowSerde;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
@@ -31,6 +30,7 @@ use crate::hummock::utils::{
     cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
     do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
 };
+use crate::row_serde::value_serde::ValueRowSerde;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 
