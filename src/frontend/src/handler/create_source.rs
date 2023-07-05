@@ -92,7 +92,7 @@ async fn extract_upsert_avro_table_schema(
         use_schema_registry: schema.use_schema_registry,
         ..Default::default()
     };
-    let parser_config = ParserProperties::new(SourceFormat::Avro, with_properties, &info)?;
+    let parser_config = ParserProperties::new(SourceFormat::UpsertAvro, with_properties, &info)?;
     let conf = AvroParserConfig::new(parser_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
 
