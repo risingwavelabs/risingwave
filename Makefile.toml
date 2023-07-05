@@ -33,6 +33,7 @@ is_hdfs_backend = get_env ENABLE_HDFS
 is_release = get_env ENABLE_RELEASE_PROFILE
 is_not_release = not ${is_release}
 is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
+is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -59,6 +60,12 @@ if ${is_not_release} and ${is_dynamic_linking}
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
 else
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
+end
+
+if ${is_hummock_trace}
+  set_env BUILD_HUMMOCK_TRACE_CMD "-p risingwave_storage --features hm-trace"
+else
+  set_env BUILD_HUMMOCK_TRACE_CMD ""
 end
 
 ''',
@@ -348,6 +355,7 @@ echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build 
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
 cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
+${BUILD_HUMMOCK_TRACE_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
             ${RISINGWAVE_FEATURE_FLAGS} \
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
@@ -1044,7 +1052,7 @@ description = "Kill cluster, dump logs and check logs"
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { min_version = "0.1.13", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.14.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ] }
 command = "sqllogictest"

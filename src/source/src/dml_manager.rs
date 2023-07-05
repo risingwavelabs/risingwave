@@ -44,14 +44,21 @@ pub struct TableReader {
 pub struct DmlManager {
     pub table_readers: RwLock<HashMap<TableId, TableReader>>,
     txn_id_generator: TxnIdGenerator,
+    dml_channel_initial_permits: usize,
 }
 
 impl DmlManager {
-    pub fn new(worker_node_id: WorkerNodeId) -> Self {
+    pub fn new(worker_node_id: WorkerNodeId, dml_channel_initial_permits: usize) -> Self {
         Self {
             table_readers: RwLock::new(HashMap::new()),
             txn_id_generator: TxnIdGenerator::new(worker_node_id),
+            dml_channel_initial_permits,
         }
+    }
+
+    pub fn for_test() -> Self {
+        const TEST_DML_CHANNEL_INIT_PERMITS: usize = 32768;
+        Self::new(WorkerNodeId::default(), TEST_DML_CHANNEL_INIT_PERMITS)
     }
 
     /// Register a new DML reader for a table. If the reader for this version of the table already
@@ -63,13 +70,15 @@ impl DmlManager {
         column_descs: &[ColumnDesc],
     ) -> Result<TableDmlHandleRef> {
         let mut table_readers = self.table_readers.write();
-
         // Clear invalid table readers.
         table_readers.drain_filter(|_, r| r.handle.strong_count() == 0);
 
         macro_rules! new_handle {
             ($entry:ident) => {{
-                let handle = Arc::new(TableDmlHandle::new(column_descs.to_vec()));
+                let handle = Arc::new(TableDmlHandle::new(
+                    column_descs.to_vec(),
+                    self.dml_channel_initial_permits,
+                ));
                 $entry.insert(TableReader {
                     version_id: table_version_id,
                     handle: Arc::downgrade(&handle),
@@ -174,7 +183,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_and_drop() {
-        let dml_manager = DmlManager::new(WorkerNodeId::default());
+        let dml_manager = DmlManager::for_test();
         let table_id = TableId::new(1);
         let table_version_id = INITIAL_TABLE_VERSION_ID;
         let column_descs = vec![ColumnDesc::unnamed(100.into(), DataType::Float64)];
@@ -222,7 +231,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_versioned() {
-        let dml_manager = DmlManager::new(WorkerNodeId::default());
+        let dml_manager = DmlManager::for_test();
         let table_id = TableId::new(1);
 
         let old_version_id = INITIAL_TABLE_VERSION_ID;
@@ -277,7 +286,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_bad_schema() {
-        let dml_manager = DmlManager::new(WorkerNodeId::default());
+        let dml_manager = DmlManager::for_test();
         let table_id = TableId::new(1);
         let table_version_id = INITIAL_TABLE_VERSION_ID;
 

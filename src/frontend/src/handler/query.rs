@@ -384,7 +384,7 @@ async fn execute(
                     i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
                         .unwrap()
                         .try_into()
-                        .expect("affected rows count large than i32"),
+                        .expect("affected rows count large than i64"),
                 )
             } else {
                 Some(

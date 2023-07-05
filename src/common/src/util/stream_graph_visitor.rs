@@ -173,6 +173,10 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "EowcOverWindow");
             }
 
+            NodeBody::OverWindow(node) => {
+                always!(node.state_table, "OverWindow");
+            }
+
             // Sort
             NodeBody::Sort(node) => {
                 always!(node.state_table, "Sort");

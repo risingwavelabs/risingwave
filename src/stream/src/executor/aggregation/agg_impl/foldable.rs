@@ -452,6 +452,7 @@ impl_fold_agg! { I64Array, Int64, IntervalArray }
 impl_fold_agg! { I64Array, Int64, TimeArray }
 impl_fold_agg! { I64Array, Int64, DateArray }
 impl_fold_agg! { I64Array, Int64, TimestampArray }
+impl_fold_agg! { I64Array, Int64, TimestamptzArray }
 // max/min
 impl_fold_agg! { I16Array, Int16, I16Array }
 impl_fold_agg! { I32Array, Int32, I32Array }
@@ -465,6 +466,7 @@ impl_fold_agg! { IntervalArray, Interval, IntervalArray }
 impl_fold_agg! { TimeArray, Time, TimeArray }
 impl_fold_agg! { DateArray, Date, DateArray }
 impl_fold_agg! { TimestampArray, Timestamp, TimestampArray }
+impl_fold_agg! { TimestamptzArray, Timestamptz, TimestamptzArray }
 // sum
 impl_fold_agg! { DecimalArray, Decimal, I64Array }
 // avg

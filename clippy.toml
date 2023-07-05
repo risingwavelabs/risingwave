@@ -12,6 +12,9 @@ disallowed-types = [
     { path = "num_traits::ToPrimitive", reason = "Please use `From` or `TryFrom` with `OrderedFloat` instead." },
     { path = "num_traits::NumCast", reason = "Please use `From` or `TryFrom` with `OrderedFloat` instead." },
 ]
+disallowed-macros = [
+    { path = "lazy_static::lazy_static", reason = "Please use `std::sync::LazyLock` instead." },
+]
 doc-valid-idents = [
     "RisingWave",
     "MinIO",

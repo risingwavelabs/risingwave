@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono::{Datelike, NaiveTime, Timelike};
-use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, F64};
+use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, Timestamptz, F64};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
@@ -102,9 +102,9 @@ pub fn extract_from_timestamp(unit: &str, timestamp: Timestamp) -> Result<Decima
 }
 
 #[function("extract(varchar, timestamptz) -> decimal")]
-pub fn extract_from_timestamptz(unit: &str, usecs: i64) -> Result<Decimal> {
+pub fn extract_from_timestamptz(unit: &str, tz: Timestamptz) -> Result<Decimal> {
     match unit {
-        "EPOCH" => Ok(Decimal::from_i128_with_scale(usecs as i128, 6)),
+        "EPOCH" => Ok(Decimal::from_i128_with_scale(tz.timestamp_micros() as _, 6)),
         // TODO(#5826): all other units depend on implicit session TimeZone
         _ => Err(invalid_unit("timestamp with time zone units", unit)),
     }

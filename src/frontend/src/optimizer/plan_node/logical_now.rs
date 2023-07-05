@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::XmlNode;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
@@ -59,24 +57,9 @@ impl Distill for LogicalNow {
         childless_record("LogicalNow", vec)
     }
 }
-impl fmt::Display for LogicalNow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("LogicalNow");
-
-        if verbose {
-            // For now, output all columns from the left side. Make it explicit here.
-            builder.field("output", &self.schema().names_str());
-        }
-
-        builder.finish()
-    }
-}
 
 impl_plan_tree_node_for_leaf! { LogicalNow }
-
 impl ExprRewritable for LogicalNow {}
-
 impl PredicatePushdown for LogicalNow {
     fn predicate_pushdown(
         &self,

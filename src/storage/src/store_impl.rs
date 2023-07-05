@@ -576,12 +576,18 @@ impl StateStoreImpl {
 
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let object_store = parse_remote_object_store(
+                let mut object_store = parse_remote_object_store(
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
                 )
                 .await;
+                object_store.set_opts(
+                    opts.object_store_streaming_read_timeout_ms,
+                    opts.object_store_streaming_upload_timeout_ms,
+                    opts.object_store_read_timeout_ms,
+                    opts.object_store_upload_timeout_ms,
+                );
 
                 let sstable_store = Arc::new(SstableStore::new(
                     Arc::new(object_store),
