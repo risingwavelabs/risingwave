@@ -54,6 +54,7 @@ pub struct SourceManager<S: MetaStore> {
 }
 
 const MAX_FAIL_CNT: u32 = 10;
+const DEFAULT_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct SharedSplitMap {
     splits: Option<BTreeMap<SplitId, SplitImpl>>,
@@ -706,7 +707,18 @@ where
         // failure.
         if force_tick {
             // if fail to fetch meta info, will refuse to create source
-            worker.tick().await?;
+
+            // todo: make the timeout configurable, longer than `properties.sync.call.timeout` in
+            // kafka
+            tokio::time::timeout(DEFAULT_TICK_TIMEOUT, worker.tick())
+                .await
+                .map_err(|_e| {
+                    anyhow!(
+                        "failed to fetch meta info for source {}, error: timeout {}",
+                        source.id,
+                        DEFAULT_TICK_TIMEOUT.as_secs()
+                    )
+                })??;
         }
 
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
