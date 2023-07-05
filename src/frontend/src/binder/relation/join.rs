@@ -141,7 +141,7 @@ impl Binder {
                     .context
                     .indices_of
                     .iter()
-                    .filter(|(s, _)| *s != "_row_id") // filter out `_row_id`
+                    .filter(|(_, idxs)| idxs.iter().all(|i| !self.context.columns[*i].is_hidden))
                     .map(|(s, idxes)| (Ident::new_unchecked(s.to_owned()), idxes))
                     .collect::<Vec<_>>();
                 columns.sort_by(|a, b| a.0.real_value().cmp(&b.0.real_value()));
