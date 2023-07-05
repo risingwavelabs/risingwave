@@ -26,6 +26,9 @@ import org.apache.commons.io.IOUtils;
 import org.apache.commons.text.StringSubstitutor;
 
 public class DbzConnectorConfig {
+    /* Debezium private configs */
+    public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
+            "debezium.embedded.shutdown.pause.before.interrupt.ms";
 
     /* Common configs */
     public static final String HOST = "hostname";
