@@ -61,6 +61,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     connector_params: params.env.connector_params(),
                     executor_id: params.executor_id,
                     vnode_bitmap: params.vnode_bitmap,
+                    meta_addr: params.env.meta_addr(),
                 },
                 columns,
                 pk_indices,

@@ -343,6 +343,7 @@ pub async fn compute_node_serve(
         dml_mgr,
         system_params_manager.clone(),
         source_metrics,
+        opts.meta_address.clone(),
     );
 
     // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if

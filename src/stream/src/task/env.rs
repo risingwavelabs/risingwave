@@ -57,6 +57,8 @@ pub struct StreamEnvironment {
 
     /// Total memory usage in stream.
     total_mem_val: Arc<TrAdder<i64>>,
+
+    meta_addr: String,
 }
 
 impl StreamEnvironment {
@@ -70,6 +72,7 @@ impl StreamEnvironment {
         dml_manager: DmlManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
         source_metrics: Arc<SourceMetrics>,
+        meta_addr: String,
     ) -> Self {
         StreamEnvironment {
             server_addr,
@@ -81,6 +84,7 @@ impl StreamEnvironment {
             system_params_manager,
             source_metrics,
             total_mem_val: Arc::new(TrAdder::new()),
+            meta_addr,
         }
     }
 
@@ -102,6 +106,7 @@ impl StreamEnvironment {
             system_params_manager: Arc::new(LocalSystemParamsManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
             total_mem_val: Arc::new(TrAdder::new()),
+            meta_addr: "127.0.0.1:5690".to_string(),
         }
     }
 
@@ -139,5 +144,9 @@ impl StreamEnvironment {
 
     pub fn total_mem_usage(&self) -> Arc<TrAdder<i64>> {
         self.total_mem_val.clone()
+    }
+
+    pub fn meta_addr(&self) -> String {
+        self.meta_addr.clone()
     }
 }

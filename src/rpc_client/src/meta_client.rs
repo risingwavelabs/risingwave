@@ -44,7 +44,6 @@ use risingwave_pb::catalog::{
     Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
@@ -1209,7 +1208,6 @@ struct GrpcMetaClientCore {
     telemetry_client: TelemetryInfoServiceClient<Channel>,
     system_params_client: SystemParamsServiceClient<Channel>,
     serving_client: ServingServiceClient<Channel>,
-    _sink_coordination_client: SinkCoordinationServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1226,8 +1224,7 @@ impl GrpcMetaClientCore {
         let backup_client = BackupServiceClient::new(channel.clone());
         let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
-        let serving_client = ServingServiceClient::new(channel.clone());
-        let sink_coordination_client = SinkCoordinationServiceClient::new(channel);
+        let serving_client = ServingServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1243,7 +1240,6 @@ impl GrpcMetaClientCore {
             telemetry_client,
             system_params_client,
             serving_client,
-            _sink_coordination_client: sink_coordination_client,
         }
     }
 }

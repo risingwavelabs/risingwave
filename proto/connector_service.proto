@@ -191,8 +191,6 @@ message SinkWriterToCoordinatorMsg {
 
 message SinkCoordinatorToWriterMsg {
   message StartCoordinationResponse {
-    bool is_success = 1;
-    string err_msg = 2;
   }
 
   message CommitResponse {

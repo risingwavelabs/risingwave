@@ -19,7 +19,7 @@ use std::iter::once;
 use std::pin::pin;
 
 use bytes::Bytes;
-use futures::future::{join_all, select, BoxFuture, Either};
+use futures::future::{select, try_join_all, BoxFuture, Either};
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use risingwave_common::buffer::Bitmap;
@@ -29,7 +29,9 @@ use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::{
     build_sink, BuildSinkParam, Sink, SinkCommitCoordinator, SinkConfig, SinkError, SinkImpl,
 };
-use risingwave_pb::connector_service::sink_coordinator_to_writer_msg::CommitResponse;
+use risingwave_pb::connector_service::sink_coordinator_to_writer_msg::{
+    CommitResponse, StartCoordinationResponse,
+};
 use risingwave_pb::connector_service::sink_writer_to_coordinator_msg::{CommitRequest, Msg};
 use risingwave_pb::connector_service::{
     sink_coordinator_to_writer_msg, sink_writer_to_coordinator_msg, SinkCoordinatorToWriterMsg,
@@ -44,9 +46,9 @@ use tracing::log::warn;
 use tracing::{error, info};
 
 macro_rules! send_with_err_check {
-    ($tx:expr, $msg:expr, $loc:expr) => {
+    ($tx:expr, $msg:expr) => {
         if $tx.send($msg).is_err() {
-            error!("unable to send msg when {:?}", $loc);
+            error!("unable to send msg");
         }
     };
 }
@@ -63,6 +65,7 @@ struct NewSinkWriterRequest {
 
 enum SinkManagerRequest {
     NewSinkWriter(NewSinkWriterRequest),
+    // TODO: support stop a specific sink coordinator during drop sink.
     Reset(Sender<()>),
 }
 
@@ -129,11 +132,7 @@ impl SinkManager {
     pub(crate) async fn reset(&self) {
         let (tx, rx) = channel();
         let request_tx = &self.request_tx;
-        send_with_err_check!(
-            request_tx,
-            SinkManagerRequest::Reset(tx),
-            "sending reset to sink manager worker"
-        );
+        send_with_err_check!(request_tx, SinkManagerRequest::Reset(tx));
         if rx.await.is_err() {
             error!("fail to wait for resetting sink manager worker");
         }
@@ -175,7 +174,7 @@ impl SinkManagerWorker {
                     }
                     SinkManagerRequest::Reset(tx) => {
                         self.clean_up().await;
-                        send_with_err_check!(tx, (), "send reset response");
+                        send_with_err_check!(tx, ());
                     }
                 },
                 SinkManagerWorkerEvent::CoordinatorWorkerFinished {
@@ -223,7 +222,7 @@ impl SinkManagerWorker {
     async fn clean_up(&mut self) {
         info!("sink manager worker start cleaning up");
         for sender in self.running_coordinator_worker.values() {
-            send_with_err_check!(sender, SinkCoordinatorWorkerRequest::Stop, "send clean up");
+            send_with_err_check!(sender, SinkCoordinatorWorkerRequest::Stop);
         }
         while let Some((sink_id, join_result)) =
             self.running_coordinator_worker_join_handles.next().await
@@ -261,14 +260,7 @@ impl SinkManagerWorker {
         match self.running_coordinator_worker.entry(param.sink_id) {
             Entry::Occupied(entry) => {
                 let sender = entry.into_mut();
-                send_with_err_check!(
-                    sender,
-                    SinkCoordinatorWorkerRequest::NewWriter(request),
-                    format!(
-                        "failed to send new writer request to coordinator worker of {}",
-                        sink_id.sink_id
-                    )
-                );
+                send_with_err_check!(sender, SinkCoordinatorWorkerRequest::NewWriter(request));
             }
             Entry::Vacant(entry) => {
                 let (request_tx, request_rx) = unbounded_channel();
@@ -297,6 +289,7 @@ enum SinkCoordinatorWorkerRequest {
 
 struct SinkCoordinatorWorker {
     sink: Option<SinkImpl>,
+    param: BuildSinkParam,
     request_streams: Vec<SinkWriterInputStream>,
     response_response_senders: Vec<SinkCoordinatorResponseSender>,
     _request_rx: UnboundedReceiver<SinkCoordinatorWorkerRequest>,
@@ -325,8 +318,7 @@ impl SinkCoordinatorWorker {
                     error!("failed to build sink with param {:?}: {:?}", param, e);
                     send_with_err_check!(
                         first_writer_request.response_tx,
-                        Err(Status::invalid_argument("failed to build sink")),
-                        "err in build sink"
+                        Err(Status::invalid_argument("failed to build sink"))
                     );
                     return None;
                 }
@@ -360,8 +352,7 @@ impl SinkCoordinatorWorker {
                                 {
                                     send_with_err_check!(
                                         sender,
-                                        Err(Status::cancelled("overlapped vnode")),
-                                        "send overlapped vnode error"
+                                        Err(Status::cancelled("overlapped vnode"))
                                     );
                                 }
                                 return None;
@@ -380,8 +371,7 @@ impl SinkCoordinatorWorker {
                         for sender in pending_response_senders {
                             send_with_err_check!(
                                 sender,
-                                Err(Status::cancelled("reset while initialization")),
-                                "send reset while initialization"
+                                Err(Status::cancelled("reset while initialization"))
                             );
                         }
                         return None;
@@ -392,8 +382,19 @@ impl SinkCoordinatorWorker {
                 return None;
             }
         }
+        for sender in &pending_response_senders {
+            send_with_err_check!(
+                sender,
+                Ok(SinkCoordinatorToWriterMsg {
+                    msg: Some(sink_coordinator_to_writer_msg::Msg::StartResponse(
+                        StartCoordinationResponse {},
+                    )),
+                })
+            );
+        }
         Some(Self {
             sink: Some(sink),
+            param,
             request_streams: pending_request_streams,
             response_response_senders: pending_response_senders,
             _request_rx: request_rx,
@@ -407,57 +408,89 @@ impl SinkCoordinatorWorker {
             let mut coordinator = match sink.new_coordinator(None).await {
                 Ok(coordinator) => coordinator,
                 Err(e) => {
-                    error!("unable to create coordinator: {:?}", e);
+                    error!(
+                        "unable to create coordinator with param {:?}: {:?}",
+                        self.param, e
+                    );
                     for sender in self.response_response_senders {
                         send_with_err_check!(
                             sender,
-                            Err(Status::unavailable("unable to create coordinator")),
-                            "send coordinator create failure"
+                            Err(Status::unavailable("unable to create coordinator"))
                         );
                     }
                     return;
                 }
             };
-            // TODO: return on error
-            coordinator.init().await.unwrap();
+            if let Err(e) = coordinator.init().await {
+                error!(
+                    "failed to init coordinator with param {:?}, {:?}",
+                    self.param, e
+                );
+                return;
+            }
+            // TODO: poll request_tx for stop request
             self.execute_inner(coordinator).await;
         })
     }
 
     async fn execute_inner(mut self, mut coordinator: impl SinkCommitCoordinator) {
-        loop {
-            // TODO: check epoch
-            // TODO: poll request_tx for stop request
-            // TODO: ensure type
-            let commit_infos: Vec<(Vec<u8>, u64)> =
-                join_all(self.request_streams.iter_mut().map(|stream| {
-                    stream
-                        .next()
-                        .map(|event| match event.unwrap().unwrap().msg.unwrap() {
-                            Msg::CommitRequest(CommitRequest { metadata, epoch }) => {
-                                (metadata, epoch)
-                            }
-                            _ => unreachable!("should be commit"),
+        let result: Result<(), Status> = try {
+            loop {
+                let commit_infos: Vec<(Vec<u8>, u64)> =
+                    try_join_all(self.request_streams.iter_mut().map(|stream| {
+                        stream.next().map(|event| {
+                            event
+                                .ok_or(Status::aborted("end of input"))
+                                .and_then(|r| {
+                                    r.inspect_err(|e| {
+                                        error!(
+                                            "failed to poll new request from sink writer: {:?}",
+                                            e
+                                        )
+                                    })
+                                })
+                                .and_then(|msg| match msg.msg {
+                                    Some(Msg::CommitRequest(CommitRequest { metadata, epoch })) => {
+                                        Ok((metadata, epoch))
+                                    }
+                                    msg => Err(Status::invalid_argument(format!(
+                                        "expect CommitRequest, get {:?}",
+                                        msg
+                                    ))),
+                                })
                         })
-                }))
-                .await;
-            let epoch = commit_infos[0].1;
-            let mut metadatas = Vec::with_capacity(commit_infos.len());
-            for (metadata, other_epoch) in commit_infos {
-                metadatas.push(Bytes::from(metadata));
-                assert_eq!(epoch, other_epoch);
-            }
-            // TODO: return on error
-            coordinator.commit(epoch, metadatas).await.unwrap();
-            for sender in &self.response_response_senders {
-                // TODO: return on error
-                sender
-                    .send(Ok(SinkCoordinatorToWriterMsg {
-                        msg: Some(sink_coordinator_to_writer_msg::Msg::CommitResponse(
-                            CommitResponse { epoch },
-                        )),
                     }))
-                    .unwrap();
+                    .await?;
+                let epoch = commit_infos[0].1;
+                let mut metadatas = Vec::with_capacity(commit_infos.len());
+                for (metadata, other_epoch) in commit_infos {
+                    metadatas.push(Bytes::from(metadata));
+                    // TODO: may return error
+                    if other_epoch != epoch {
+                        warn!("unaligned epoch {} {}", other_epoch, epoch);
+                    }
+                }
+                if let Err(e) = coordinator.commit(epoch, metadatas).await {
+                    error!(
+                        "failed to commit on coordinator with param {:?}: {:?}",
+                        self.param, e
+                    );
+                }
+                for sender in &self.response_response_senders {
+                    send_with_err_check!(
+                        sender,
+                        Ok(SinkCoordinatorToWriterMsg {
+                            msg: Some(sink_coordinator_to_writer_msg::Msg::CommitResponse(
+                                CommitResponse { epoch },
+                            )),
+                        })
+                    );
+                }
+            }
+        };
+        if let Err(e) = result {
+            for sender in self.response_response_senders {
+                send_with_err_check!(sender, Err(e.clone()));
             }
         }
     }
