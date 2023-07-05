@@ -16,15 +16,12 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::TryStreamExt;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::DataType;
 use risingwave_common::util::select_all;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{
-    BasicSerde, EitherSerde, ValueRowDeserializer, ValueRowSerdeNew,
-};
+use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range, TableKeyRange};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -36,6 +33,7 @@ use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::{CachePolicy, SstableStore, TieredCache};
 use risingwave_storage::monitor::HummockStateStoreMetrics;
+use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -121,23 +119,24 @@ impl HummockJavaBindingIterator {
 
         let table = read_plan.table_catalog.unwrap();
         let versioned = table.version.is_some();
-        let (column_ids, schema): (Vec<_>, Vec<_>) = table
+        let table_columns = table
             .columns
             .into_iter()
-            .map(|c| c.column_desc.unwrap())
-            .map(|c| {
-                (
-                    ColumnId::new(c.column_id),
-                    DataType::from(&c.column_type.unwrap()),
-                )
-            })
-            .unzip();
+            .map(|c| ColumnDesc::from(c.column_desc.unwrap()));
 
         // Decide which serializer to use based on whether the table is versioned or not.
         let row_serde = if versioned {
-            ColumnAwareSerde::new(&column_ids, schema.into()).into()
+            ColumnAwareSerde::new(
+                Arc::from_iter(0..table_columns.len()),
+                Arc::from_iter(table_columns),
+            )
+            .into()
         } else {
-            BasicSerde::new(&column_ids, schema.into()).into()
+            BasicSerde::new(
+                Arc::from_iter(0..table_columns.len()),
+                Arc::from_iter(table_columns),
+            )
+            .into()
         };
 
         Ok(Self {
