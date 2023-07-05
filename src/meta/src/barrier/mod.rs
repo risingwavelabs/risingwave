@@ -598,7 +598,21 @@ where
                 }
                 // Checkpoint frequency changes.
                 notification = local_notification_rx.recv() => {
-                    self.handle_local_notification(notification.unwrap());
+                    let notification = notification.unwrap();
+                    // Handle barrier interval changes
+                    // min_interval.
+                    if let LocalNotification::SystemParamsChange(p) = &notification {
+                        let new_interval = Duration::from_millis(p.barrier_interval_ms() as u64);
+                        if new_interval != min_interval.period() {
+                            min_interval = tokio::time::interval(new_interval);
+                            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                        }
+                        self.scheduled_barriers
+                            .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
+                    }
+
+                    // Handle other changes
+                    self.handle_local_notification(notification);
                 }
                 // Barrier completes.
                 completion = barrier_complete_rx.recv() => {

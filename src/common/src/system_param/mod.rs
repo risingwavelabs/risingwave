@@ -36,7 +36,7 @@ macro_rules! for_all_undeprecated_params {
         // Hack: match trailing fields to implement `for_all_params`
         $(, { $field:ident, $type:ty, $default:expr, $is_mutable:expr })*) => {
         $macro! {
-            { barrier_interval_ms, u32, Some(1000_u32), false },
+            { barrier_interval_ms, u32, Some(1000_u32), true },
             { checkpoint_frequency, u64, Some(1_u64), true },
             { sstable_size_mb, u32, Some(256_u32), false },
             { block_size_kb, u32, Some(64_u32), false },
@@ -310,6 +310,10 @@ for_all_undeprecated_params!(impl_system_params_for_test);
 
 struct OverrideValidateOnSet;
 impl ValidateOnSet for OverrideValidateOnSet {
+    fn barrier_interval_ms(v: &u32) -> Result<()> {
+        Self::expect_range(*v, 100..)
+    }
+
     fn checkpoint_frequency(v: &u64) -> Result<()> {
         Self::expect_range(*v, 1..)
     }
