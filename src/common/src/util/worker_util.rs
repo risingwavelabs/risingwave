@@ -18,6 +18,8 @@ use risingwave_pb::common::WorkerNode;
 
 use crate::hash::ParallelUnitId;
 
+pub type WorkerNodeId = u32;
+
 pub fn get_pu_to_worker_mapping(nodes: &[WorkerNode]) -> HashMap<ParallelUnitId, WorkerNode> {
     let mut pu_to_worker = HashMap::new();
 

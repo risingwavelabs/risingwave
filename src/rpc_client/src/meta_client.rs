@@ -53,18 +53,22 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_c
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
-use risingwave_pb::meta::reschedule_request::PbReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::serving_service_client::ServingServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
-use risingwave_pb::meta::*;
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
+use risingwave_pb::meta::{PbReschedule, *};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -75,11 +79,12 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::Endpoint;
 use tonic::{Code, Streaming};
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
+use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
 type ConnectionId = u32;
@@ -220,6 +225,9 @@ impl MetaClient {
             true,
         );
 
+        if property.is_unschedulable {
+            tracing::warn!("worker {:?} registered as unschedulable", addr.clone());
+        }
         let init_result: Result<_> = tokio_retry::Retry::spawn(retry_strategy, || async {
             let grpc_meta_client = GrpcMetaClient::new(&addr_strategy, meta_config.clone()).await?;
 
@@ -230,6 +238,11 @@ impl MetaClient {
                     property: Some(property.clone()),
                 })
                 .await?;
+            if let Some(status) = &add_worker_resp.status
+                && status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+                tracing::error!("invalid worker: {}", status.message);
+                std::process::exit(1);
+            }
 
             let system_params_resp = grpc_meta_client
                 .get_system_params(GetSystemParamsRequest {})
@@ -571,6 +584,22 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn update_schedulability(
+        &self,
+        worker_ids: &[u32],
+        schedulability: Schedulability,
+    ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
+        let request = UpdateWorkerNodeSchedulabilityRequest {
+            worker_ids: worker_ids.to_vec(),
+            schedulability: schedulability.into(),
+        };
+        let resp = self
+            .inner
+            .update_worker_node_schedulability(request)
+            .await?;
+        Ok(resp)
+    }
+
     pub async fn list_worker_nodes(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
         let request = ListAllNodesRequest {
             worker_type: worker_type as _,
@@ -660,6 +689,30 @@ impl MetaClient {
         Ok(resp.table_fragments)
     }
 
+    pub async fn list_table_fragment_states(&self) -> Result<Vec<TableFragmentState>> {
+        let resp = self
+            .inner
+            .list_table_fragment_states(ListTableFragmentStatesRequest {})
+            .await?;
+        Ok(resp.states)
+    }
+
+    pub async fn list_fragment_distributions(&self) -> Result<Vec<FragmentDistribution>> {
+        let resp = self
+            .inner
+            .list_fragment_distribution(ListFragmentDistributionRequest {})
+            .await?;
+        Ok(resp.distributions)
+    }
+
+    pub async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
+        let resp = self
+            .inner
+            .list_actor_states(ListActorStatesRequest {})
+            .await?;
+        Ok(resp.states)
+    }
+
     pub async fn pause(&self) -> Result<()> {
         let request = PauseRequest {};
         let _resp = self.inner.pause(request).await?;
@@ -689,6 +742,19 @@ impl MetaClient {
         };
         let resp = self.inner.reschedule(request).await?;
         Ok((resp.success, resp.revision))
+    }
+
+    pub async fn get_reschedule_plan(
+        &self,
+        policy: PbPolicy,
+        revision: u64,
+    ) -> Result<GetReschedulePlanResponse> {
+        let request = GetReschedulePlanRequest {
+            revision,
+            policy: Some(policy),
+        };
+        let resp = self.inner.get_reschedule_plan(request).await?;
+        Ok(resp)
     }
 
     pub async fn risectl_get_pinned_versions_summary(
@@ -930,6 +996,31 @@ impl MetaClient {
             })
             .collect();
         Ok(mappings)
+    }
+
+    pub async fn risectl_list_compaction_status(
+        &self,
+    ) -> Result<(
+        Vec<CompactStatus>,
+        Vec<CompactTaskAssignment>,
+        Vec<CompactTaskProgress>,
+    )> {
+        let req = RiseCtlListCompactionStatusRequest {};
+        let resp = self.inner.rise_ctl_list_compaction_status(req).await?;
+        Ok((
+            resp.compaction_statuses,
+            resp.task_assignment,
+            resp.task_progress,
+        ))
+    }
+
+    pub async fn delete_worker_node(&self, worker: HostAddress) -> Result<()> {
+        let _resp = self
+            .inner
+            .delete_worker_node(DeleteWorkerNodeRequest { host: Some(worker) })
+            .await?;
+
+        Ok(())
     }
 }
 
@@ -1452,13 +1543,16 @@ impl GrpcMetaClient {
     }
 
     async fn connect_to_endpoint(endpoint: Endpoint) -> Result<Channel> {
-        endpoint
+        let channel = endpoint
             .http2_keep_alive_interval(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
             .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await
-            .map_err(RpcError::TransportError)
+            .map_err(RpcError::TransportError)?
+            .tracing_injected();
+
+        Ok(channel)
     }
 
     pub(crate) fn retry_strategy_to_bound(
@@ -1489,11 +1583,16 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
+            ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
+            //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
+            ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
+            ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
+            ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
@@ -1549,6 +1648,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_resume_version_checkpoint, RiseCtlResumeVersionCheckpointRequest, RiseCtlResumeVersionCheckpointResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
+            ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
@@ -1558,6 +1658,7 @@ macro_rules! for_all_meta_rpc {
             ,{ scale_client, resume, ResumeRequest, ResumeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
+            ,{ scale_client, get_reschedule_plan, GetReschedulePlanRequest, GetReschedulePlanResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
             ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }

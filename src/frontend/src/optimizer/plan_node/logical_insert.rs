@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use pretty_xmlish::Pretty;
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
@@ -100,14 +98,9 @@ impl PlanTreeNodeUnary for LogicalInsert {
 impl_plan_tree_node_for_unary! {LogicalInsert}
 
 impl Distill for LogicalInsert {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let vec = self.core.fields_pretty(self.base.ctx.is_explain_verbose());
-        Pretty::childless_record("LogicalInsert", vec)
-    }
-}
-impl fmt::Display for LogicalInsert {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalInsert")
+        childless_record("LogicalInsert", vec)
     }
 }
 

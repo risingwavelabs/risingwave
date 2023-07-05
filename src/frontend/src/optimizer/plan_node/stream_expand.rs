@@ -32,7 +32,6 @@ pub struct StreamExpand {
 impl StreamExpand {
     pub fn new(logical: generic::Expand<PlanRef>) -> Self {
         let input = logical.input.clone();
-        let schema = input.schema();
 
         let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
@@ -42,7 +41,7 @@ impl StreamExpand {
             Distribution::Broadcast => unreachable!(),
         };
 
-        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+        let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
         watermark_columns.extend(
             input
                 .watermark_columns()
@@ -65,8 +64,6 @@ impl StreamExpand {
     }
 }
 
-impl_distill_by_unit!(StreamExpand, logical, "StreamExpand");
-
 impl PlanTreeNodeUnary for StreamExpand {
     fn input(&self) -> PlanRef {
         self.logical.input.clone()
@@ -80,6 +77,7 @@ impl PlanTreeNodeUnary for StreamExpand {
 }
 
 impl_plan_tree_node_for_unary! { StreamExpand }
+impl_distill_by_unit!(StreamExpand, logical, "StreamExpand");
 
 impl StreamNode for StreamExpand {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {

@@ -19,10 +19,9 @@ use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{
     i64_to_timestamp, i64_to_timestamptz, str_to_bytea, str_to_date, str_to_time, str_to_timestamp,
-    str_with_time_zone_to_timestamptz,
 };
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time,
+    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use simd_json::{BorrowedValue, TryTypeError, ValueAccess, ValueType};
@@ -107,7 +106,7 @@ impl JsonParseOptions {
             string_parsing: false,
             string_integer_parsing: false,
         },
-        ignoring_keycase: false,
+        ignoring_keycase: true,
     };
     pub const DEFAULT: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
@@ -342,11 +341,12 @@ impl JsonParseOptions {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Timestamptz -----
-            (Some(DataType::Timestamptz), ValueType::String) => {
-                str_with_time_zone_to_timestamptz(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into()
-            }
+            (Some(DataType::Timestamptz), ValueType::String) => value
+                .as_str()
+                .unwrap()
+                .parse::<Timestamptz>()
+                .map_err(|_| create_error())?
+                .into(),
             (
                 Some(DataType::Timestamptz),
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,

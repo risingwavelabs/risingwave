@@ -36,10 +36,13 @@ impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
 pub struct CdcSplitReader {
     source_id: u64,
     start_offset: Option<String>,
+    // host address of worker node for a Citus cluster
     server_addr: Option<String>,
     conn_props: CdcProperties,
 
     split_id: SplitId,
+    // whether the full snapshot phase is done
+    snapshot_done: bool,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 }
@@ -56,25 +59,27 @@ impl SplitReader for CdcSplitReader {
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        assert!(splits.len() == 1);
+        assert_eq!(splits.len(), 1);
         let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
         match split {
             SplitImpl::MySqlCdc(split) | SplitImpl::PostgresCdc(split) => Ok(Self {
-                source_id: split.split_id as u64,
-                start_offset: split.start_offset,
+                source_id: split.split_id() as u64,
+                start_offset: split.start_offset().clone(),
                 server_addr: None,
                 conn_props,
                 split_id,
+                snapshot_done: split.snapshot_done(),
                 parser_config,
                 source_ctx,
             }),
             SplitImpl::CitusCdc(split) => Ok(Self {
-                source_id: split.split_id as u64,
-                start_offset: split.start_offset,
-                server_addr: split.server_addr,
+                source_id: split.split_id() as u64,
+                start_offset: split.start_offset().clone(),
+                server_addr: split.server_addr().clone(),
                 conn_props,
                 split_id,
+                snapshot_done: split.snapshot_done(),
                 parser_config,
                 source_ctx,
             }),
@@ -99,6 +104,8 @@ impl CdcSplitReader {
 
         // rewrite the hostname and port for the split
         let mut properties = self.conn_props.props.clone();
+
+        // For citus, we need to rewrite the table.name to capture sharding tables
         if self.server_addr.is_some() {
             let addr = self.server_addr.unwrap();
             let host_addr = HostAddr::from_str(&addr)
@@ -113,13 +120,13 @@ impl CdcSplitReader {
             properties.insert("table.name".into(), table_name);
         }
 
-        tracing::info!("cdc properties: {:?}", properties);
         let cdc_stream = cdc_client
             .start_source_stream(
                 self.source_id,
-                self.conn_props.get_source_type()?,
+                self.conn_props.get_source_type_pb()?,
                 self.start_offset,
                 properties,
+                self.snapshot_done,
             )
             .await
             .inspect_err(|err| tracing::error!("connector node start stream error: {}", err))?;

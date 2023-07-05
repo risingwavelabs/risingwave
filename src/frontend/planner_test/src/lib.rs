@@ -300,7 +300,7 @@ impl TestCase {
         format!(
             r#"CREATE {} {}
     WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
+    ROW FORMAT {} (message = '.test.TestRecord', schema.location = 'file://"#,
             object_to_create, connector_name, connector_row_format
         )
     }
@@ -316,7 +316,7 @@ impl TestCase {
                         Self::create_connector_sql(true, connector.name, connector.row_format);
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
-                        &(sql + temp_file.path().to_str().unwrap() + "'"),
+                        &(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
@@ -342,7 +342,7 @@ impl TestCase {
                     let sql = Self::create_connector_sql(false, source.name, source.row_format);
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
-                        &(sql + temp_file.path().to_str().unwrap() + "'"),
+                        &(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
@@ -758,6 +758,7 @@ impl TestCase {
                     sink_name.to_string(),
                     format!("CREATE SINK {sink_name} AS {}", stmt),
                     options,
+                    false,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
@@ -776,7 +777,7 @@ impl TestCase {
 }
 
 fn explain_plan(plan: &PlanRef) -> String {
-    plan.explain_to_string().expect("failed to explain")
+    plan.explain_to_string()
 }
 
 /// Checks that the result matches `test_case.expected_outputs`.

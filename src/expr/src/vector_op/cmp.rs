@@ -33,6 +33,7 @@ use risingwave_expr_macro::function;
 #[function("equal(time, interval) -> boolean")]
 #[function("equal(interval, time) -> boolean")]
 #[function("equal(varchar, varchar) -> boolean")]
+#[function("equal(bytea, bytea) -> boolean")]
 #[function("equal(list, list) -> boolean")]
 #[function("equal(struct, struct) -> boolean")]
 pub fn general_eq<T1, T2, T3>(l: T1, r: T2) -> bool
@@ -59,6 +60,7 @@ where
 #[function("not_equal(time, interval) -> boolean")]
 #[function("not_equal(interval, time) -> boolean")]
 #[function("not_equal(varchar, varchar) -> boolean")]
+#[function("not_equal(bytea, bytea) -> boolean")]
 #[function("not_equal(list, list) -> boolean")]
 #[function("not_equal(struct, struct) -> boolean")]
 pub fn general_ne<T1, T2, T3>(l: T1, r: T2) -> bool
@@ -85,6 +87,7 @@ where
 #[function("greater_than_or_equal(time, interval) -> boolean")]
 #[function("greater_than_or_equal(interval, time) -> boolean")]
 #[function("greater_than_or_equal(varchar, varchar) -> boolean")]
+#[function("greater_than_or_equal(bytea, bytea) -> boolean")]
 #[function("greater_than_or_equal(list, list) -> boolean")]
 #[function("greater_than_or_equal(struct, struct) -> boolean")]
 pub fn general_ge<T1, T2, T3>(l: T1, r: T2) -> bool
@@ -111,6 +114,7 @@ where
 #[function("greater_than(time, interval) -> boolean")]
 #[function("greater_than(interval, time) -> boolean")]
 #[function("greater_than(varchar, varchar) -> boolean")]
+#[function("greater_than(bytea, bytea) -> boolean")]
 #[function("greater_than(list, list) -> boolean")]
 #[function("greater_than(struct, struct) -> boolean")]
 pub fn general_gt<T1, T2, T3>(l: T1, r: T2) -> bool
@@ -137,6 +141,7 @@ where
 #[function("less_than_or_equal(time, interval) -> boolean")]
 #[function("less_than_or_equal(interval, time) -> boolean")]
 #[function("less_than_or_equal(varchar, varchar) -> boolean")]
+#[function("less_than_or_equal(bytea, bytea) -> boolean")]
 #[function("less_than_or_equal(list, list) -> boolean")]
 #[function("less_than_or_equal(struct, struct) -> boolean")]
 pub fn general_le<T1, T2, T3>(l: T1, r: T2) -> bool
@@ -163,6 +168,7 @@ where
 #[function("less_than(time, interval) -> boolean")]
 #[function("less_than(interval, time) -> boolean")]
 #[function("less_than(varchar, varchar) -> boolean")]
+#[function("less_than(bytea, bytea) -> boolean")]
 #[function("less_than(list, list) -> boolean")]
 #[function("less_than(struct, struct) -> boolean")]
 pub fn general_lt<T1, T2, T3>(l: T1, r: T2) -> bool
@@ -189,6 +195,7 @@ where
 #[function("is_distinct_from(time, interval) -> boolean")]
 #[function("is_distinct_from(interval, time) -> boolean")]
 #[function("is_distinct_from(varchar, varchar) -> boolean")]
+#[function("is_distinct_from(bytea, bytea) -> boolean")]
 #[function("is_distinct_from(list, list) -> boolean")]
 #[function("is_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
@@ -215,6 +222,7 @@ where
 #[function("is_not_distinct_from(time, interval) -> boolean")]
 #[function("is_not_distinct_from(interval, time) -> boolean")]
 #[function("is_not_distinct_from(varchar, varchar) -> boolean")]
+#[function("is_not_distinct_from(bytea, bytea) -> boolean")]
 #[function("is_not_distinct_from(list, list) -> boolean")]
 #[function("is_not_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_not_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool

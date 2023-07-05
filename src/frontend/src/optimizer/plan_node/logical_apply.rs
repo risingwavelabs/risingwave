@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::fmt;
 
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::generic::{self, push_down_into_join, push_down_join_condition, GenericPlanNode};
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
@@ -54,7 +53,7 @@ pub struct LogicalApply {
 }
 
 impl Distill for LogicalApply {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let mut vec = Vec::with_capacity(if self.max_one_row { 4 } else { 3 });
         vec.push(("type", Pretty::debug(&self.join_type)));
 
@@ -70,29 +69,7 @@ impl Distill for LogicalApply {
             vec.push(("max_one_row", Pretty::debug(&true)));
         }
 
-        Pretty::childless_record("LogicalApply", vec)
-    }
-}
-impl fmt::Display for LogicalApply {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("LogicalApply");
-
-        builder.field("type", &self.join_type);
-
-        let concat_schema = self.concat_schema();
-        let condition_display = ConditionDisplay {
-            condition: &self.on,
-            input_schema: &concat_schema,
-        };
-        builder.field("on", &condition_display);
-
-        builder.field("correlated_id", &self.correlated_id);
-
-        if self.max_one_row {
-            builder.field("max_one_row", &true);
-        }
-
-        builder.finish()
+        childless_record("LogicalApply", vec)
     }
 }
 

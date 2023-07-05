@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use std::cmp::{max, min};
-use std::fmt;
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
@@ -27,7 +26,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 
 use super::stream_watermark_filter::StreamWatermarkFilter;
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject,
     PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource, ToBatch,
@@ -231,25 +230,8 @@ impl LogicalSource {
 }
 
 impl_plan_tree_node_for_leaf! {LogicalSource}
-
-impl fmt::Display for LogicalSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: show generated columns
-        if let Some(catalog) = self.source_catalog() {
-            write!(
-                f,
-                "LogicalSource {{ source: {}, columns: [{}], time_range: [{:?}] }}",
-                catalog.name,
-                self.schema().names_str().join(", "),
-                self.core.kafka_timestamp_range,
-            )
-        } else {
-            write!(f, "LogicalSource")
-        }
-    }
-}
 impl Distill for LogicalSource {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = if let Some(catalog) = self.source_catalog() {
             let src = Pretty::from(catalog.name.clone());
             let time = Pretty::debug(&self.core.kafka_timestamp_range);
@@ -261,7 +243,7 @@ impl Distill for LogicalSource {
         } else {
             vec![]
         };
-        Pretty::childless_record("LogicalSource", fields)
+        childless_record("LogicalSource", fields)
     }
 }
 
@@ -369,7 +351,7 @@ fn expr_to_kafka_timestamp_range(
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            datum.unwrap().into_int64() / 1000,
+                            datum.unwrap().into_timestamptz().timestamp_millis(),
                             false,
                         )))
                     }
@@ -380,7 +362,7 @@ fn expr_to_kafka_timestamp_range(
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            datum.unwrap().into_int64() / 1000,
+                            datum.unwrap().into_timestamptz().timestamp_millis(),
                             true,
                         )))
                     }

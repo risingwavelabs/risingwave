@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono::{Datelike, NaiveTime, Timelike};
-use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, F64};
+use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, Timestamptz, F64};
 use risingwave_expr_macro::function;
 
 use super::timestamptz::timestamptz_at_time_zone;
@@ -104,9 +104,9 @@ pub fn extract_from_timestamp(unit: &str, timestamp: Timestamp) -> Result<Decima
 }
 
 #[function("extract(varchar, timestamptz) -> decimal")]
-pub fn extract_from_timestamptz(unit: &str, usecs: i64) -> Result<Decimal> {
+pub fn extract_from_timestamptz(unit: &str, tz: Timestamptz) -> Result<Decimal> {
     if unit.eq_ignore_ascii_case("epoch") {
-        Ok(Decimal::from_i128_with_scale(usecs as i128, 6))
+        Ok(Decimal::from_i128_with_scale(tz.timestamp_micros() as _, 6))
     } else {
         // TODO(#5826): all other units depend on implicit session TimeZone
         Err(invalid_unit("timestamp with time zone units", unit))
@@ -116,27 +116,30 @@ pub fn extract_from_timestamptz(unit: &str, usecs: i64) -> Result<Decimal> {
 #[function("extract(varchar, timestamptz, varchar) -> decimal")]
 pub fn extract_from_timestamptz_at_timezone(
     unit: &str,
-    usecs: i64,
+    input: Timestamptz,
     timezone: &str,
 ) -> Result<Decimal> {
     use chrono::Offset as _;
 
     if unit.eq_ignore_ascii_case("epoch") {
-        Ok(Decimal::from_i128_with_scale(usecs as i128, 6))
+        Ok(Decimal::from_i128_with_scale(
+            input.timestamp_micros() as _,
+            6,
+        ))
     } else if unit.eq_ignore_ascii_case("timezone") {
-        let instant_local = timestamptz_view(usecs, timezone)?;
+        let instant_local = timestamptz_view(input, timezone)?;
         let east_secs = instant_local.offset().fix().local_minus_utc();
         Ok(east_secs.into())
     } else if unit.eq_ignore_ascii_case("timezone_hour") {
-        let instant_local = timestamptz_view(usecs, timezone)?;
+        let instant_local = timestamptz_view(input, timezone)?;
         let east_secs = instant_local.offset().fix().local_minus_utc();
         Ok((east_secs / 3600).into())
     } else if unit.eq_ignore_ascii_case("timezone_minute") {
-        let instant_local = timestamptz_view(usecs, timezone)?;
+        let instant_local = timestamptz_view(input, timezone)?;
         let east_secs = instant_local.offset().fix().local_minus_utc();
         Ok((east_secs % 3600 / 60).into())
     } else {
-        let timestamp = timestamptz_at_time_zone(usecs, timezone)?;
+        let timestamp = timestamptz_at_time_zone(input, timezone)?;
         extract_from_timestamp(unit, timestamp)
     }
 }
@@ -191,8 +194,8 @@ pub fn date_part_from_time(unit: &str, time: Time) -> Result<F64> {
 }
 
 #[function("date_part(varchar, timestamptz) -> float64")]
-pub fn date_part_from_timestamptz(unit: &str, usecs: i64) -> Result<F64> {
-    extract_from_timestamptz(unit, usecs)?
+pub fn date_part_from_timestamptz(unit: &str, input: Timestamptz) -> Result<F64> {
+    extract_from_timestamptz(unit, input)?
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)
 }
@@ -200,10 +203,10 @@ pub fn date_part_from_timestamptz(unit: &str, usecs: i64) -> Result<F64> {
 #[function("date_part(varchar, timestamptz, varchar) -> float64")]
 pub fn date_part_from_timestamptz_at_timezone(
     unit: &str,
-    usecs: i64,
+    input: Timestamptz,
     timezone: &str,
 ) -> Result<F64> {
-    extract_from_timestamptz_at_timezone(unit, usecs, timezone)?
+    extract_from_timestamptz_at_timezone(unit, input, timezone)?
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)
 }

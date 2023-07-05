@@ -867,7 +867,6 @@ impl PlanTreeNodeUnary for LogicalAgg {
 }
 
 impl_plan_tree_node_for_unary! {LogicalAgg}
-
 impl_distill_by_unit!(LogicalAgg, core, "LogicalAgg");
 
 impl ExprRewritable for LogicalAgg {

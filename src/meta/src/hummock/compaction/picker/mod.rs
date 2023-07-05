@@ -45,12 +45,25 @@ pub struct CompactionInput {
 
 impl CompactionInput {
     pub fn add_pending_task(&self, task_id: u64, level_handlers: &mut [LevelHandler]) {
+        let mut has_l0 = false;
         for level in &self.input_levels {
-            level_handlers[level.level_idx as usize].add_pending_task(
-                task_id,
-                self.target_level,
-                &level.table_infos,
-            );
+            if level.level_idx != 0 {
+                level_handlers[level.level_idx as usize].add_pending_task(
+                    task_id,
+                    self.target_level,
+                    &level.table_infos,
+                );
+            } else {
+                has_l0 = true;
+            }
+        }
+        if has_l0 {
+            let table_infos = self
+                .input_levels
+                .iter()
+                .filter(|level| level.level_idx == 0)
+                .flat_map(|level| level.table_infos.iter());
+            level_handlers[0].add_pending_task(task_id, self.target_level, table_infos);
         }
     }
 }

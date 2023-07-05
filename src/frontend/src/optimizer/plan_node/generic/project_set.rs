@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
@@ -22,6 +20,7 @@ use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
@@ -51,18 +50,12 @@ impl<PlanRef> ProjectSet<PlanRef> {
     pub(crate) fn output_len(&self) -> usize {
         self.select_list.len() + 1
     }
-
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field("select_list", &self.select_list);
-        builder.finish()
-    }
 }
 
 impl<PlanRef> DistillUnit for ProjectSet<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let fields = vec![("select_list", Pretty::debug(&self.select_list))];
-        Pretty::childless_record(name, fields)
+        childless_record(name, fields)
     }
 }
 

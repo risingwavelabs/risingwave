@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::{fmt, vec};
+use std::vec;
 
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{
     BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
     StreamValues, ToBatch, ToStream,
@@ -87,20 +87,8 @@ impl LogicalValues {
     pub fn rows(&self) -> &[Vec<ExprImpl>] {
         self.rows.as_ref()
     }
-}
 
-impl_plan_tree_node_for_leaf! { LogicalValues }
-
-impl fmt::Display for LogicalValues {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("LogicalValues")
-            .field("rows", &self.rows)
-            .field("schema", &self.schema())
-            .finish()
-    }
-}
-impl Distill for LogicalValues {
-    fn distill<'a>(&self) -> Pretty<'a> {
+    pub(super) fn rows_pretty<'a>(&self) -> Pretty<'a> {
         let data = self
             .rows()
             .iter()
@@ -109,9 +97,16 @@ impl Distill for LogicalValues {
                 Pretty::Array(collect)
             })
             .collect();
-        let data = Pretty::Array(data);
+        Pretty::Array(data)
+    }
+}
+
+impl_plan_tree_node_for_leaf! { LogicalValues }
+impl Distill for LogicalValues {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = self.rows_pretty();
         let fields = vec![("rows", data), ("schema", Pretty::debug(&self.schema()))];
-        Pretty::childless_record("BatchValues", fields)
+        childless_record("LogicalValues", fields)
     }
 }
 
