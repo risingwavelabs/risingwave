@@ -28,7 +28,7 @@ x-spark-common:
   &spark-air
   build: 
     context: .
-    target: airflow   
+    target: spark   
 
 services:
   spark:
