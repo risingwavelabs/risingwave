@@ -40,6 +40,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
@@ -121,7 +122,7 @@ pub struct FrontendEnv {
 
     /// Runtime for compute intensive tasks in frontend, e.g. executors in local mode,
     /// root stage in mpp mode.
-    compute_runtime: Arc<Runtime>,
+    compute_runtime: Arc<BackgroundShutdownRuntime>,
 }
 
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
@@ -167,7 +168,7 @@ impl FrontendEnv {
             meta_config: MetaConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
-            compute_runtime: Arc::new(Runtime::new().unwrap()),
+            compute_runtime: Arc::new(Runtime::new().unwrap().into()),
         }
     }
 
@@ -320,13 +321,13 @@ impl FrontendEnv {
             Arc::new(StreamingJobTracker::new(frontend_meta_client.clone()));
 
         // TODO: Make this configurable.
-        let compute_runtime = Arc::new(
+        let compute_runtime = Arc::new(BackgroundShutdownRuntime::from(
             Builder::new_multi_thread()
                 .worker_threads(4)
                 .thread_name("frontend-compute-threads")
                 .build()
                 .unwrap(),
-        );
+        ));
 
         Ok((
             Self {
@@ -421,7 +422,7 @@ impl FrontendEnv {
         &self.creating_streaming_job_tracker
     }
 
-    pub fn compute_runtime(&self) -> Arc<Runtime> {
+    pub fn compute_runtime(&self) -> Arc<BackgroundShutdownRuntime> {
         self.compute_runtime.clone()
     }
 }
