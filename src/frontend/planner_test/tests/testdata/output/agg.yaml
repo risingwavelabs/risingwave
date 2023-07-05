@@ -1489,6 +1489,10 @@
   planner_error: 'Invalid input syntax: Aggregation function first_value requires ORDER BY clause'
 - sql: |
     create table t (x int, y int);
+    select last_value(x) from t;
+  planner_error: 'Invalid input syntax: Aggregation function last_value requires ORDER BY clause'
+- sql: |
+    create table t (x int, y int);
     select first_value(x order by y asc) from t;
   batch_plan: |-
     BatchSimpleAgg { aggs: [first_value(t.x order_by(t.y ASC))] }

@@ -858,6 +858,11 @@
   - planner_error
 - sql: |
     create table t (x int, y int);
+    select last_value(x) from t;
+  expected_outputs:
+  - planner_error
+- sql: |
+    create table t (x int, y int);
     select first_value(x order by y asc) from t;
   expected_outputs:
   - batch_plan
