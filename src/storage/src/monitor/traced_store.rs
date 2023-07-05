@@ -115,7 +115,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
-        async move { self.inner.may_exist(key_range, read_options).await }
+        self.inner.may_exist(key_range, read_options)
     }
 
     fn get(
@@ -169,18 +169,16 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         res
     }
 
-    fn flush(
+    async fn flush(
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-    ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
-        async move {
-            let span = TraceSpan::new_flush_span(delete_ranges.clone(), self.storage_type);
-            let res = self.inner.flush(delete_ranges).await;
-            span.may_send_result(OperationResult::Flush(
-                res.as_ref().map(|o: &usize| *o).into(),
-            ));
-            res
-        }
+    ) -> StorageResult<usize> {
+        let span = TraceSpan::new_flush_span(delete_ranges.clone(), self.storage_type);
+        let res = self.inner.flush(delete_ranges).await;
+        span.may_send_result(OperationResult::Flush(
+            res.as_ref().map(|o: &usize| *o).into(),
+        ));
+        res
     }
 
     fn epoch(&self) -> u64 {
@@ -211,32 +209,25 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
 impl<S: StateStore> StateStore for TracedStateStore<S> {
     type Local = TracedStateStore<S::Local>;
 
-    fn try_wait_epoch(
-        &self,
-        epoch: HummockReadEpoch,
-    ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-        async move {
-            let span = TraceSpan::new_try_wait_epoch_span(epoch);
+    async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+        let span = TraceSpan::new_try_wait_epoch_span(epoch);
 
-            let res = self.inner.try_wait_epoch(epoch).await;
-            span.may_send_result(OperationResult::TryWaitEpoch(
-                res.as_ref().map(|o| *o).into(),
-            ));
-            res
-        }
+        let res = self.inner.try_wait_epoch(epoch).await;
+        span.may_send_result(OperationResult::TryWaitEpoch(
+            res.as_ref().map(|o| *o).into(),
+        ));
+        res
     }
 
-    fn sync(&self, epoch: u64) -> impl Future<Output = StorageResult<SyncResult>> + Send + '_ {
-        async move {
-            let span: MayTraceSpan = TraceSpan::new_sync_span(epoch, self.storage_type);
+    async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
+        let span: MayTraceSpan = TraceSpan::new_sync_span(epoch, self.storage_type);
 
-            let sync_result = self.inner.sync(epoch).await;
+        let sync_result = self.inner.sync(epoch).await;
 
-            span.may_send_result(OperationResult::Sync(
-                sync_result.as_ref().map(|res| res.sync_size).into(),
-            ));
-            sync_result
-        }
+        span.may_send_result(OperationResult::Sync(
+            sync_result.as_ref().map(|res| res.sync_size).into(),
+        ));
+        sync_result
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -244,19 +235,17 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         self.inner.seal_epoch(epoch, is_checkpoint);
     }
 
-    fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-        async move {
-            let span = TraceSpan::new_clear_shared_buffer_span();
-            let res = self.inner.clear_shared_buffer().await;
-            span.may_send_result(OperationResult::ClearSharedBuffer(
-                res.as_ref().map(|o| *o).into(),
-            ));
-            res
-        }
+    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+        let span = TraceSpan::new_clear_shared_buffer_span();
+        let res = self.inner.clear_shared_buffer().await;
+        span.may_send_result(OperationResult::ClearSharedBuffer(
+            res.as_ref().map(|o| *o).into(),
+        ));
+        res
     }
 
-    fn new_local(&self, options: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_ {
-        async move { TracedStateStore::new_local(self.inner.new_local(options.clone()).await, options) }
+    async fn new_local(&self, options: NewLocalOptions) -> Self::Local {
+        TracedStateStore::new_local(self.inner.new_local(options.clone()).await, options)
     }
 
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
