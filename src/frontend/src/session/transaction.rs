@@ -38,7 +38,7 @@ impl Id {
 }
 
 /// Transaction access mode.
-// TODO: WriteOnly, DdlOnly
+// TODO: WriteOnly, CreateDdlOnly
 pub enum AccessMode {
     /// Read-write transaction. All operations are permitted.
     ///
@@ -216,17 +216,11 @@ impl SessionImpl {
     /// Returns a [`WriteGuard`], or an error if write operations are not permitted in the current
     /// transaction.
     pub fn txn_write_guard(&self) -> Result<WriteGuard> {
-        let permitted = match self.txn_ctx().access_mode {
-            AccessMode::ReadWrite => true,
-            AccessMode::ReadOnly => false,
-        };
-
-        if permitted {
-            Ok(WriteGuard { _private: () })
-        } else {
-            Err(ErrorCode::PermissionDenied(
+        match self.txn_ctx().access_mode {
+            AccessMode::ReadWrite => Ok(WriteGuard { _private: () }),
+            AccessMode::ReadOnly => Err(ErrorCode::PermissionDenied(
                 "cannot execute in a read-only transaction".into(),
-            ))?
+            ))?,
         }
     }
 
