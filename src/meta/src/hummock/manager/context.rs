@@ -40,7 +40,6 @@ where
     /// Release resources pinned by these contexts, including:
     /// - Version
     /// - Snapshot
-    /// - Compaction task
     #[named]
     pub async fn release_contexts(
         &self,

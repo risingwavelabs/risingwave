@@ -211,9 +211,11 @@ where
         sched_channel: Arc<CompactionRequestChannel>,
         selector: &mut Box<dyn LevelSelector>,
     ) -> ScheduleStatus {
-        let mut result;
-        let mut send_task_count = 0;
-        loop {
+        let mut result = ScheduleStatus::Ok;
+
+        for (send_task_count, _) in
+            (0..compactor_pull_task_handle.pending_pull_task_count).enumerate()
+        {
             let compact_task = self
                 .hummock_manager
                 .get_compact_task(compaction_group, selector)
@@ -235,8 +237,7 @@ where
             };
 
             result = compactor_pull_task_handle.consume_task(&compact_task).await;
-            send_task_count += 1;
-            if result != ScheduleStatus::Ok || !compactor_pull_task_handle.valid() {
+            if result != ScheduleStatus::Ok {
                 break;
             }
         }

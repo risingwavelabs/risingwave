@@ -302,11 +302,13 @@ impl CompactorManagerInner {
         ret
     }
 
-    pub fn get_expired_tasks(&self) -> Vec<CompactTask> {
-        let now = SystemTime::now()
+    pub fn get_expired_tasks(&self, interval_sec: Option<u64>) -> Vec<CompactTask> {
+        let interval = interval_sec.unwrap_or(0);
+        let now: u64 = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
-            .as_secs();
+            .as_secs()
+            + interval;
         Self::get_heartbeat_expired_tasks(&self.task_heartbeats, now)
     }
 
@@ -433,6 +435,14 @@ impl CompactorManagerInner {
         check_exist: bool,
     ) {
         use std::collections::hash_map::Entry::{Occupied, Vacant};
+        // update_compactor_pending_task is called by two paths
+        // 1. compactor heartbeat will pass in pull_task_count, which is not processed when
+        // pull_task_count is None, and inserted into memory when it is not zero
+        // 2. `CompactorPullTaskHandle` returns the count when it is
+        // resolved, and we need to clean up the corresponding item when the count is 0
+        //
+        // The above restriction ensures that the selected `compactor_pending_io_count` must not be
+        // 0. This restriction is also reflected in the `CompactorPullTaskHandle`.
         if let Some(pull_task_count) = pull_task_count {
             if pull_task_count == 0 {
                 let _ = self.compactor_pending_io_counts.remove(&context_id);
@@ -441,8 +451,8 @@ impl CompactorManagerInner {
                     Occupied(mut value) => *value.get_mut() = pull_task_count,
                     Vacant(entry) => {
                         if !check_exist {
-                            // Avoid pull_task_handle incorrectly updating the state of a deprecated
-                            // compactor
+                            // Avoid `CompactorPullTaskHandle` incorrectly updating the state of a
+                            // deprecated compactor
                             entry.insert(pull_task_count);
                         }
                     }
@@ -491,6 +501,9 @@ impl CompactorManager {
     pub fn next_idle_compactor(&self) -> Option<CompactorPullTaskHandle> {
         if let Some((compactor, pending_pull_task_count)) = self.inner.read().next_idle_compactor()
         {
+            assert!(pending_pull_task_count > 0);
+            // `update_compactor_pending_task` ensures that the compactor that can be
+            // selected must exist and that the value of pending_pull_task_count is not 0.
             Some(CompactorPullTaskHandle {
                 compactor_manager: self.inner.clone(),
                 compactor,
@@ -539,8 +552,8 @@ impl CompactorManager {
             .check_tasks_status(tasks, slow_task_duration)
     }
 
-    pub fn get_expired_tasks(&self) -> Vec<CompactTask> {
-        self.inner.read().get_expired_tasks()
+    pub fn get_expired_tasks(&self, interval_sec: Option<u64>) -> Vec<CompactTask> {
+        self.inner.read().get_expired_tasks(interval_sec)
     }
 
     pub fn initiate_task_heartbeat(&self, task: CompactTask) {
@@ -588,7 +601,18 @@ pub struct CompactorPullTaskHandle {
 
 impl CompactorPullTaskHandle {
     pub async fn consume_task(&mut self, compact_task: &CompactTask) -> ScheduleStatus {
-        assert!(self.valid());
+        // By design, it is guaranteed that no `CompactorPullTaskHandle` with
+        // `pending_pull_task_count` < 1 will be constructed and that the
+        // `CompactorPullTaskHandle` will not be over-consumed on the usage side. This is a
+        // defensive logic, and when the `CompactorPullTaskHandle` is misused, we return an Error
+        // and rely on expire to recycle the task
+        if self.pending_pull_task_count < 1 {
+            tracing::warn!(
+                "WARN: CompactorPullTaskHandle is used incorrectly context_id {}",
+                self.compactor.context_id
+            );
+            return ScheduleStatus::SendFailure(Box::new(compact_task.clone()));
+        }
 
         // 2. Send the compaction task.
         if let Err(e) = self
@@ -617,14 +641,12 @@ impl CompactorPullTaskHandle {
         self.pending_pull_task_count -= 1;
         ScheduleStatus::Ok
     }
-
-    pub fn valid(&self) -> bool {
-        self.pending_pull_task_count > 0
-    }
 }
 
 impl Drop for CompactorPullTaskHandle {
     fn drop(&mut self) {
+        // When destructing the `CompactorPullTaskHandle`, we need to reclaim count. and remove the
+        // item when count is 0
         self.compactor_manager
             .write()
             .update_compactor_pending_task(
@@ -684,7 +706,7 @@ mod tests {
 
         // Ensure task is expired.
         tokio::time::sleep(Duration::from_secs(2)).await;
-        let expired = compactor_manager.get_expired_tasks();
+        let expired = compactor_manager.get_expired_tasks(None);
         assert_eq!(expired.len(), 1);
 
         // Mimic no-op compaction heartbeat
@@ -692,7 +714,7 @@ mod tests {
             task_id: expired[0].task_id,
             ..Default::default()
         }]);
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
+        assert_eq!(compactor_manager.get_expired_tasks(None).len(), 1);
 
         // Mimic compaction heartbeat with invalid task id
         compactor_manager.update_task_heartbeats(&vec![CompactTaskProgress {
@@ -702,7 +724,7 @@ mod tests {
             num_progress_key: 100,
             ..Default::default()
         }]);
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
+        assert_eq!(compactor_manager.get_expired_tasks(None).len(), 1);
 
         // Mimic effective compaction heartbeat
         compactor_manager.update_task_heartbeats(&vec![CompactTaskProgress {
@@ -712,7 +734,7 @@ mod tests {
             num_progress_key: 100,
             ..Default::default()
         }]);
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
+        assert_eq!(compactor_manager.get_expired_tasks(None).len(), 0);
 
         // Test add
         assert_eq!(compactor_manager.compactor_num(), 0);
