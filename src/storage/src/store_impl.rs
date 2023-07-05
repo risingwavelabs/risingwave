@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
@@ -27,8 +28,8 @@ use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore, TieredCache,
-    TieredCacheMetricsBuilder,
+    Admission, DeviceConfig, EvictionConfig, FileCache, FoyerStoreConfig, HummockError,
+    HummockStorage, MemoryLimiter, Reinsertion, SstableObjectIdManagerRef, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -545,31 +546,37 @@ impl StateStoreImpl {
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
-        tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
-        #[cfg(not(target_os = "linux"))]
-        let tiered_cache = TieredCache::none();
-
-        #[cfg(target_os = "linux")]
-        let tiered_cache = if opts.file_cache_dir.is_empty() {
-            TieredCache::none()
+        let file_cache = if opts.file_cache_dir.is_empty() {
+            FileCache::none()
         } else {
-            use crate::hummock::file_cache::cache::FileCacheOptions;
-            use crate::hummock::HummockError;
+            const MB: usize = 1024 * 1024;
+            let file_capacity = opts.file_cache_file_capacity_mb * MB;
+            let capacity = opts.file_cache_capacity_mb * MB;
+            let capacity = capacity - (capacity % file_capacity);
 
-            let options = FileCacheOptions {
-                dir: opts.file_cache_dir.to_string(),
-                capacity: opts.file_cache_capacity_mb * 1024 * 1024,
-                total_buffer_capacity: opts.file_cache_total_buffer_capacity_mb * 1024 * 1024,
-                cache_file_fallocate_unit: opts.file_cache_file_fallocate_unit_mb * 1024 * 1024,
-                cache_meta_fallocate_unit: opts.file_cache_meta_fallocate_unit_mb * 1024 * 1024,
-                cache_file_max_write_size: opts.file_cache_file_max_write_size_mb * 1024 * 1024,
-                flush_buffer_hooks: vec![],
+            let config = FoyerStoreConfig {
+                eviction_config: EvictionConfig {
+                    window_to_cache_size_ratio: opts.file_cache_lfu_window_to_cache_size_ratio,
+                    tiny_lru_capacity_ratio: opts.file_cache_lfu_tiny_lru_capacity_ratio,
+                },
+                device_config: DeviceConfig {
+                    dir: PathBuf::from(opts.file_cache_dir.clone()),
+                    capacity,
+                    file_capacity,
+                    align: opts.file_cache_device_align,
+                    io_size: opts.file_cache_device_io_size,
+                },
+                admission: Admission::default(),
+                reinsertion: Reinsertion::default(),
+                buffer_pool_size: opts.file_cache_buffer_pool_size_mb * MB,
+                flushers: opts.file_cache_flushers,
+                reclaimers: opts.file_cache_reclaimers,
+                recover_concurrency: opts.file_cache_recover_concurrency,
             };
-            let metrics = Arc::new(tiered_cache_metrics_builder.file());
-            TieredCache::file(options, metrics)
+            FileCache::foyer(config)
                 .await
                 .map_err(HummockError::tiered_cache)?
         };
@@ -595,7 +602,7 @@ impl StateStoreImpl {
                     opts.block_cache_capacity_mb * (1 << 20),
                     opts.meta_cache_capacity_mb * (1 << 20),
                     opts.high_priority_ratio,
-                    tiered_cache,
+                    file_cache,
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());

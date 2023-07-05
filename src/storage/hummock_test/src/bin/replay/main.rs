@@ -40,7 +40,7 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_storage::filter_key_extractor::{
     FakeRemoteTableAccessor, FilterKeyExtractorManager,
 };
-use risingwave_storage::hummock::{HummockStorage, SstableStore, TieredCache};
+use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
 use serde::{Deserialize, Serialize};
@@ -103,7 +103,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         parse_remote_object_store(&args.object_storage, object_store_stats, "Hummock").await;
 
     let sstable_store = {
-        let tiered_cache = TieredCache::none();
+        let tiered_cache = FileCache::none();
         Arc::new(SstableStore::new(
             Arc::new(object_store),
             storage_opts.data_directory.to_string(),

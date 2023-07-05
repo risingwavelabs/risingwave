@@ -47,9 +47,7 @@ use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{
-    HummockMemoryCollector, MemoryLimiter, TieredCacheMetricsBuilder,
-};
+use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
 use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
     MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -193,7 +191,6 @@ pub async fn compute_node_serve(
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
-        TieredCacheMetricsBuilder::new(registry.clone()),
         storage_metrics.clone(),
         compactor_metrics.clone(),
     )
@@ -468,7 +465,7 @@ fn total_storage_memory_limit_bytes(storage_memory_config: &StorageMemoryConfig)
     let total_storage_memory_mb = storage_memory_config.block_cache_capacity_mb
         + storage_memory_config.meta_cache_capacity_mb
         + storage_memory_config.shared_buffer_capacity_mb
-        + storage_memory_config.file_cache_total_buffer_capacity_mb
+        + storage_memory_config.file_cache_buffer_pool_size_mb
         + storage_memory_config.compactor_memory_limit_mb;
     total_storage_memory_mb << 20
 }
@@ -511,7 +508,7 @@ fn print_memory_config(
     );
     info!(
         ">         file_cache_total_buffer_capacity: {}",
-        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _)
+        convert((storage_memory_config.file_cache_buffer_pool_size_mb << 20) as _)
     );
     if embedded_compactor_enabled {
         info!(

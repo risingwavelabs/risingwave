@@ -38,8 +38,8 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompressionAlgorithm, SstableBuilder, SstableBuilderOptions, SstableIterator,
-    SstableStore, SstableWriterOptions, TieredCache, Xor16FilterBuilder,
+    CachePolicy, CompressionAlgorithm, FileCache, SstableBuilder, SstableBuilderOptions,
+    SstableIterator, SstableStore, SstableWriterOptions, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -53,7 +53,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         64 << 20,
         128 << 20,
         0,
-        TieredCache::none(),
+        FileCache::none(),
     ))
 }
 

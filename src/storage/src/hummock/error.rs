@@ -51,8 +51,8 @@ enum HummockErrorInner {
     ExpiredEpoch { safe_epoch: u64, epoch: u64 },
     #[error("CompactionExecutor error {0}.")]
     CompactionExecutor(String),
-    #[error("TieredCache error {0}.")]
-    TieredCache(String),
+    #[error("FileCache error {0}.")]
+    FileCache(String),
     #[error("SstObjectIdTracker error {0}.")]
     SstObjectIdTrackerError(String),
     #[error("CompactionGroup error {0}.")]
@@ -147,7 +147,7 @@ impl HummockError {
     }
 
     pub fn tiered_cache(error: impl ToString) -> HummockError {
-        HummockErrorInner::TieredCache(error.to_string()).into()
+        HummockErrorInner::FileCache(error.to_string()).into()
     }
 
     pub fn sstable_upload_error(error: impl ToString) -> HummockError {

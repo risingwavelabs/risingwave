@@ -16,10 +16,10 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
-use bytes::{Buf, BufMut, Bytes};
+use bytes::Bytes;
 use fail::fail_point;
 use itertools::Itertools;
-use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
+use risingwave_common::cache::{CachePriority, LookupResponse};
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
@@ -34,8 +34,8 @@ use zstd::zstd_safe::WriteBuf;
 
 use super::utils::MemoryTracker;
 use super::{
-    Block, BlockCache, BlockMeta, BlockResponse, Sstable, SstableMeta, SstableWriter, TieredCache,
-    TieredCacheKey, TieredCacheValue,
+    Block, BlockCache, BlockMeta, BlockResponse, FileCache, Sstable, SstableBlockIndex,
+    SstableMeta, SstableWriter,
 };
 use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::{
@@ -50,55 +50,6 @@ const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 pub type TableHolder = CacheableEntry<HummockSstableObjectId, Box<Sstable>>;
 
 // BEGIN section for tiered cache
-
-impl TieredCacheKey for (HummockSstableObjectId, u64) {
-    fn encoded_len() -> usize {
-        16
-    }
-
-    fn encode(&self, mut buf: &mut [u8]) {
-        buf.put_u64(self.0);
-        buf.put_u64(self.1);
-    }
-
-    fn decode(mut buf: &[u8]) -> Self {
-        let object_id = buf.get_u64();
-        let block_idx = buf.get_u64();
-        (object_id, block_idx)
-    }
-}
-
-impl TieredCacheValue for Box<Block> {
-    fn len(&self) -> usize {
-        self.raw_data().len()
-    }
-
-    fn encoded_len(&self) -> usize {
-        self.raw_data().len()
-    }
-
-    fn encode(&self, mut buf: &mut [u8]) {
-        buf.put_slice(self.raw_data());
-    }
-
-    fn decode(buf: Vec<u8>) -> Self {
-        Box::new(Block::decode_from_raw(Bytes::from(buf)))
-    }
-}
-
-pub struct BlockCacheEventListener {
-    tiered_cache: TieredCache<(HummockSstableObjectId, u64), Box<Block>>,
-}
-
-impl LruCacheEventListener for BlockCacheEventListener {
-    type K = (HummockSstableObjectId, u64);
-    type T = Box<Block>;
-
-    fn on_release(&self, key: Self::K, value: Self::T) {
-        // TODO(MrCroxx): handle error?
-        self.tiered_cache.insert(key, value).unwrap();
-    }
-}
 
 // END section for tiered cache
 
@@ -144,7 +95,7 @@ pub struct SstableStore {
     store: ObjectStoreRef,
     block_cache: BlockCache,
     meta_cache: Arc<LruCache<HummockSstableObjectId, Box<Sstable>>>,
-    tiered_cache: TieredCache<(HummockSstableObjectId, u64), Box<Block>>,
+    file_cache: FileCache,
 }
 
 impl SstableStore {
@@ -154,7 +105,7 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
         high_priority_ratio: usize,
-        tiered_cache: TieredCache<(HummockSstableObjectId, u64), Box<Block>>,
+        file_cache: FileCache,
     ) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
@@ -163,21 +114,17 @@ impl SstableStore {
             shard_bits -= 1;
         }
         let meta_cache = Arc::new(LruCache::new(shard_bits, meta_cache_capacity, 0));
-        let listener = Arc::new(BlockCacheEventListener {
-            tiered_cache: tiered_cache.clone(),
-        });
 
         Self {
             path,
             store,
-            block_cache: BlockCache::with_event_listener(
+            block_cache: BlockCache::new(
                 block_cache_capacity,
                 MAX_CACHE_SHARD_BITS,
                 high_priority_ratio,
-                listener,
             ),
             meta_cache,
-            tiered_cache,
+            file_cache,
         }
     }
 
@@ -190,13 +137,13 @@ impl SstableStore {
         meta_cache_capacity: usize,
     ) -> Self {
         let meta_cache = Arc::new(LruCache::new(0, meta_cache_capacity, 0));
-        let tiered_cache = TieredCache::none();
+        let file_cache = FileCache::none();
         Self {
             path,
             store,
             block_cache: BlockCache::new(block_cache_capacity, 0, 0),
             meta_cache,
-            tiered_cache,
+            file_cache,
         }
     }
 
@@ -258,26 +205,35 @@ impl SstableStore {
 
         stats.cache_data_block_total += 1;
         let mut fetch_block = || {
-            let tiered_cache = self.tiered_cache.clone();
+            let file_cache = self.file_cache.clone();
             stats.cache_data_block_miss += 1;
             let data_path = self.get_sst_data_path(object_id);
             let store = self.store.clone();
             let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
 
             async move {
+                let key = SstableBlockIndex {
+                    sst_id: object_id,
+                    block_idx: block_index as u64,
+                };
                 if use_tiered_cache
-                    && let Some(holder) = tiered_cache
-                        .get(&(object_id, block_index as u64))
+                    && let Some(block) = file_cache
+                        .lookup(&key)
                         .await
                         .map_err(HummockError::tiered_cache)?
                 {
-                    // TODO(MrCroxx): `into_owned()` may perform buffer copy, eliminate it later.
-                    return Ok(holder.into_owned());
+                    return Ok(block);
                 }
 
                 let block_data = store.read(&data_path, Some(block_loc)).await?;
-                let block = Block::decode(block_data, uncompressed_capacity)?;
-                Ok(Box::new(block))
+                let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
+
+                // try fill tiered cache
+                if use_tiered_cache && let CachePolicy::Fill(_) = policy {
+                    // TODO(MrCroxx): try eliminate copy
+                    file_cache.insert(key, block.clone()).await.map_err(HummockError::tiered_cache)?;
+                }
+                Ok(block)
             }
         };
 
@@ -301,20 +257,10 @@ impl SstableStore {
             )),
             CachePolicy::NotFill => match self.block_cache.get(object_id, block_index as u64) {
                 Some(block) => Ok(BlockResponse::Block(block)),
-                None => match self
-                    .tiered_cache
-                    .get(&(object_id, block_index as u64))
+                None => fetch_block()
                     .await
-                    .map_err(HummockError::tiered_cache)?
-                {
-                    Some(holder) => Ok(BlockResponse::Block(BlockHolder::from_tiered_cache(
-                        holder.into_inner(),
-                    ))),
-                    None => fetch_block()
-                        .await
-                        .map(BlockHolder::from_owned_block)
-                        .map(BlockResponse::Block),
-                },
+                    .map(BlockHolder::from_owned_block)
+                    .map(BlockResponse::Block),
             },
             CachePolicy::Disable => fetch_block()
                 .await

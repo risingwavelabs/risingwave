@@ -76,9 +76,15 @@ object_store_read_timeout_ms = 3600000
 [storage.file_cache]
 dir = ""
 capacity_mb = 1024
-cache_file_fallocate_unit_mb = 512
-cache_meta_fallocate_unit_mb = 16
-cache_file_max_write_size_mb = 4
+file_capacity_mb = 64
+# buffer_pool_size_mb = 1024
+device_align = 4096
+device_io_size = 16384
+flushers = 4
+reclaimers = 4
+recover_concurrency = 8
+lfu_window_to_cache_size_ratio = 1
+lfu_tiny_lru_capacity_ratio = 0.01
 
 [system]
 barrier_interval_ms = 1000
