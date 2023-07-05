@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::stream::BoxStream;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -41,8 +42,6 @@ use risingwave_pb::batch_plan::{
     TaskOutputId,
 };
 use risingwave_pb::common::WorkerNode;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use tracing_futures::Instrument;
 
@@ -55,7 +54,7 @@ use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{PinnedHummockSnapshot, SchedulerError, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
-pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
+pub type LocalQueryStream = BoxStream<'static, Result<DataChunk, BoxedError>>;
 
 pub struct LocalQueryExecution {
     sql: String,
@@ -128,7 +127,7 @@ impl LocalQueryExecution {
         }
     }
 
-    pub fn run(self) -> BoxedDataChunkStream {
+    fn run(self) -> BoxedDataChunkStream {
         let span = tracing::info_span!(
             "local_execute",
             query_id = self.query.query_id.id,
@@ -138,25 +137,10 @@ impl LocalQueryExecution {
     }
 
     pub fn stream_rows(mut self) -> LocalQueryStream {
-        let (sender, receiver) = mpsc::channel(10);
         let tripwire = self.cancel_flag.take().unwrap();
 
-        let mut data_stream = {
-            let s = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
-            Box::pin(cancellable_stream(s, tripwire))
-        };
-
-        let future = async move {
-            while let Some(r) = data_stream.next().await {
-                if (sender.send(r).await).is_err() {
-                    tracing::info!("Receiver closed.");
-                }
-            }
-        };
-
-        tokio::spawn(future);
-
-        ReceiverStream::new(receiver)
+        let s = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
+        Box::pin(cancellable_stream(s, tripwire))
     }
 
     /// Convert query to plan fragment.
