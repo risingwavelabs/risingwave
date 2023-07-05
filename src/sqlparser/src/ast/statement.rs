@@ -104,7 +104,7 @@ pub enum SourceSchema {
     Bytes,
 }
 
-#[deprecated(note = "foo was rarely used. Users should instead use bar")]
+/// will be deprecated and be replaced by Format and Encode
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum RowFormat {
@@ -122,7 +122,6 @@ pub enum RowFormat {
     Bytes,             // Keyword::BYTES
 }
 
-#[allow(deprecated)]
 impl RowFormat {
     pub fn from_keyword(s: &str) -> Result<Self, ParserError> {
         Ok(match s {
