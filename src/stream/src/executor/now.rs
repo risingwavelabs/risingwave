@@ -202,8 +202,8 @@ mod tests {
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
-                " I
-                + 1617235200001000"
+                " TZ
+                + 2021-04-01T00:00:00.001Z"
             )
         );
 
@@ -215,7 +215,7 @@ mod tests {
             Message::Watermark(Watermark::new(
                 0,
                 DataType::Timestamptz,
-                ScalarImpl::Int64(1617235200001000)
+                ScalarImpl::Timestamptz("2021-04-01T00:00:00.001Z".parse().unwrap())
             ))
         );
 
@@ -231,9 +231,9 @@ mod tests {
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
-                " I
-                - 1617235200001000
-                + 1617235200002000"
+                " TZ
+                - 2021-04-01T00:00:00.001Z
+                + 2021-04-01T00:00:00.002Z"
             )
         );
 
@@ -245,7 +245,7 @@ mod tests {
             Message::Watermark(Watermark::new(
                 0,
                 DataType::Timestamptz,
-                ScalarImpl::Int64(1617235200002000)
+                ScalarImpl::Timestamptz("2021-04-01T00:00:00.002Z".parse().unwrap())
             ))
         );
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Interval, Timestamp};
+use risingwave_common::types::{Interval, Timestamp, Timestamptz};
 use risingwave_expr_macro::function;
 
 use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
@@ -39,12 +39,16 @@ pub fn date_trunc_timestamp(field: &str, ts: Timestamp) -> Result<Timestamp> {
 }
 
 // #[function("date_trunc(varchar, timestamptz) -> timestamptz")]
-pub fn date_trunc_timestamptz(_field: &str, _ts: i64) -> Result<i64> {
+pub fn date_trunc_timestamptz(_field: &str, _ts: Timestamptz) -> Result<Timestamptz> {
     todo!("date_trunc_timestamptz")
 }
 
 #[function("date_trunc(varchar, timestamptz, varchar) -> timestamptz")]
-pub fn date_trunc_timestamptz_at_timezone(field: &str, ts: i64, timezone: &str) -> Result<i64> {
+pub fn date_trunc_timestamptz_at_timezone(
+    field: &str,
+    ts: Timestamptz,
+    timezone: &str,
+) -> Result<Timestamptz> {
     let timestamp = timestamptz_at_time_zone(ts, timezone)?;
     let truncated = date_trunc_timestamp(field, timestamp)?;
     timestamp_at_time_zone(truncated, timezone)

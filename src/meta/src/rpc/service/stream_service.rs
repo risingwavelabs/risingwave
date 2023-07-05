@@ -138,4 +138,77 @@ where
             table_fragments: info,
         }))
     }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn list_table_fragment_states(
+        &self,
+        _request: Request<ListTableFragmentStatesRequest>,
+    ) -> Result<Response<ListTableFragmentStatesResponse>, Status> {
+        let table_fragments = self.fragment_manager.list_table_fragments().await;
+
+        Ok(Response::new(ListTableFragmentStatesResponse {
+            states: table_fragments
+                .into_iter()
+                .map(
+                    |tf| list_table_fragment_states_response::TableFragmentState {
+                        table_id: tf.table_id().table_id,
+                        state: tf.state() as i32,
+                    },
+                )
+                .collect_vec(),
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn list_fragment_distribution(
+        &self,
+        _request: Request<ListFragmentDistributionRequest>,
+    ) -> Result<Response<ListFragmentDistributionResponse>, Status> {
+        let table_fragments = self.fragment_manager.list_table_fragments().await;
+
+        Ok(Response::new(ListFragmentDistributionResponse {
+            distributions: table_fragments
+                .into_iter()
+                .flat_map(|tf| {
+                    let table_id = tf.table_id().table_id;
+                    tf.fragments
+                        .into_iter()
+                        .map(move |(fragment_id, fragment)| {
+                            list_fragment_distribution_response::FragmentDistribution {
+                                fragment_id,
+                                table_id,
+                                distribution_type: fragment.distribution_type,
+                                state_table_ids: fragment.state_table_ids,
+                                upstream_fragment_ids: fragment.upstream_fragment_ids,
+                            }
+                        })
+                })
+                .collect_vec(),
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn list_actor_states(
+        &self,
+        _request: Request<ListActorStatesRequest>,
+    ) -> Result<Response<ListActorStatesResponse>, Status> {
+        let table_fragments = self.fragment_manager.list_table_fragments().await;
+
+        Ok(Response::new(ListActorStatesResponse {
+            states: table_fragments
+                .into_iter()
+                .flat_map(|tf| {
+                    let actor_to_fragment = tf.actor_fragment_mapping();
+                    tf.actor_status.into_iter().map(move |(actor_id, status)| {
+                        list_actor_states_response::ActorState {
+                            actor_id,
+                            fragment_id: actor_to_fragment[&actor_id],
+                            state: status.state,
+                            parallel_unit_id: status.parallel_unit.unwrap().id,
+                        }
+                    })
+                })
+                .collect_vec(),
+        }))
+    }
 }

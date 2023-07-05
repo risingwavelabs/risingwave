@@ -226,6 +226,11 @@ fn check_default_column_constraints(
         )
         .into());
     }
+    if expr.is_impure() {
+        return Err(
+            ErrorCode::BindError("impure default expr is not supported.".to_string()).into(),
+        );
+    }
     Ok(())
 }
 
