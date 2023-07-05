@@ -122,7 +122,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         &self,
         key: Bytes,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> {
+    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
         self.traced_get(
             key.clone(),
             None,
@@ -291,7 +291,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream>> {
+    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
         let span = TraceSpan::new_iter_span(
             key_range.clone(),
             Some(epoch),
