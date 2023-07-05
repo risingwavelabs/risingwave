@@ -496,17 +496,17 @@ pub enum SpecificParserConfig {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ParserClientConfigList {
+pub struct SchemaRegistryAuth {
     username: Option<String>,
     password: Option<String>,
 }
 
-impl From<&HashMap<String, String>> for ParserClientConfigList {
+impl From<&HashMap<String, String>> for SchemaRegistryAuth {
     fn from(props: &HashMap<String, String>) -> Self {
         const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
         const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
 
-        ParserClientConfigList {
+        SchemaRegistryAuth {
             username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
             password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
         }
@@ -518,7 +518,7 @@ pub struct AvroProperties {
     pub use_schema_registry: bool,
     pub row_schema_location: String,
     pub upsert_primary_key: String,
-    pub client_config: ParserClientConfigList,
+    pub client_config: SchemaRegistryAuth,
     pub aws_auth_props: Option<AwsAuthProps>,
     pub topic: String,
     pub enable_upsert: bool,
@@ -530,7 +530,7 @@ pub struct ProtobufProperties {
     pub use_schema_registry: bool,
     pub row_schema_location: String,
     pub aws_auth_props: Option<AwsAuthProps>,
-    pub client_config: ParserClientConfigList,
+    pub client_config: SchemaRegistryAuth,
     pub topic: String,
 }
 
@@ -545,6 +545,7 @@ pub enum EncodingProperties {
     Avro(AvroProperties),
     Protobuf(ProtobufProperties),
     Csv(CsvProperties),
+    Bytes,
     #[default]
     None,
 }
@@ -563,7 +564,7 @@ pub struct ParserProperties {
     pub protocol_config: ProtocolProperties,
 }
 
-/// Requirements of each parser
+/// Requirements of each parser currently
 /// 1. CSV: delimiter, has header
 /// 2. AVRO/AVRO UPSERT: row schema location, use schema registry
 ///    client info, topic, aws config, optional primary key
@@ -595,7 +596,7 @@ impl ParserProperties {
                 }
                 if info.use_schema_registry {
                     config.topic = get_kafka_topic(props)?.clone();
-                    config.client_config = ParserClientConfigList::from(props);
+                    config.client_config = SchemaRegistryAuth::from(props);
                 } else {
                     config.aws_auth_props = Some(AwsAuthProps::from_pairs(
                         props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
@@ -612,7 +613,7 @@ impl ParserProperties {
                 };
                 if info.use_schema_registry {
                     config.topic = get_kafka_topic(props)?.clone();
-                    config.client_config = ParserClientConfigList::from(props);
+                    config.client_config = SchemaRegistryAuth::from(props);
                 } else {
                     config.aws_auth_props = Some(AwsAuthProps::from_pairs(
                         props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
@@ -623,7 +624,7 @@ impl ParserProperties {
             SourceFormat::DebeziumAvro => EncodingProperties::Avro(AvroProperties {
                 row_schema_location: info.row_schema_location.clone(),
                 topic: get_kafka_topic(props).unwrap().clone(),
-                client_config: ParserClientConfigList::from(props),
+                client_config: SchemaRegistryAuth::from(props),
                 ..Default::default()
             }),
             _ => EncodingProperties::None,

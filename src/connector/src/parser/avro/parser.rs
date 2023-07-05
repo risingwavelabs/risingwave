@@ -20,6 +20,7 @@ use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Reader, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
@@ -56,14 +57,7 @@ pub struct AvroParserConfig {
 
 impl AvroParserConfig {
     pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let avro_config =
-            if let EncodingProperties::Avro(config) = parser_properties.encoding_config {
-                config
-            } else {
-                return Err(RwError::from(ProtocolError(
-                    "wrong parser config list for Avro".to_string(),
-                )));
-            };
+        let avro_config = try_match_expand!(parser_properties.encoding_config, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let enable_upsert = avro_config.enable_upsert;
         let url = Url::parse(schema_location).map_err(|e| {

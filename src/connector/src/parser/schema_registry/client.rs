@@ -20,7 +20,7 @@ use risingwave_common::error::{Result, RwError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::parser::ParserClientConfigList;
+use crate::parser::SchemaRegistryAuth;
 
 /// An client for communication with schema registry
 #[derive(Debug)]
@@ -32,7 +32,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub(crate) fn new(url: Url, client_config: &ParserClientConfigList) -> Result<Self> {
+    pub(crate) fn new(url: Url, client_config: &SchemaRegistryAuth) -> Result<Self> {
         if url.cannot_be_a_base() {
             return Err(RwError::from(ProtocolError(format!(
                 "{} cannot be a base url",
@@ -240,7 +240,7 @@ mod tests {
         let url = Url::parse("http://localhost:8081").unwrap();
         let client = Client::new(
             url,
-            &ParserClientConfigList {
+            &SchemaRegistryAuth {
                 username: None,
                 password: None,
             },

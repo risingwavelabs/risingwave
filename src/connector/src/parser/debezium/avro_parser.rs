@@ -19,6 +19,7 @@ use apache_avro::{from_avro_datum, Schema};
 use reqwest::Url;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::common::UpsertMessage;
@@ -59,14 +60,7 @@ pub struct DebeziumAvroParserConfig {
 
 impl DebeziumAvroParserConfig {
     pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let avro_config =
-            if let EncodingProperties::Avro(config) = parser_properties.encoding_config {
-                config
-            } else {
-                return Err(RwError::from(ProtocolError(
-                    "wrong parser config list for Avro".to_string(),
-                )));
-            };
+        let avro_config = try_match_expand!(parser_properties.encoding_config, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let client_config = &avro_config.client_config;
         let kafka_topic = &avro_config.topic;
