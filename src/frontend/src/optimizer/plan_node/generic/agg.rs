@@ -128,7 +128,8 @@ pub(crate) mod agg_kinds {
     /// [`AggKind`]s that are simply cannot 2-phased.
     macro_rules! simply_cannot_two_phase {
         () => {
-            AggKind::ApproxCountDistinct
+            AggKind::StringAgg
+                | AggKind::ApproxCountDistinct
                 | AggKind::ArrayAgg
                 | AggKind::JsonbAgg
                 | AggKind::JsonbObjectAgg
@@ -836,7 +837,6 @@ impl PlanAggCall {
             | AggKind::BoolOr
             | AggKind::Min
             | AggKind::Max
-            | AggKind::StringAgg
             | AggKind::FirstValue
             | AggKind::LastValue => self.agg_kind,
             AggKind::Sum => AggKind::Sum,
