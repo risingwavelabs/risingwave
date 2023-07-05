@@ -411,7 +411,10 @@ mod test {
                     );
                 }
                 Value::TimestampMillis(millis) => {
-                    assert_eq!(row[i], Some(Timestamptz::from_millis(millis).into()));
+                    assert_eq!(
+                        row[i],
+                        Some(Timestamptz::from_millis(millis).unwrap().into())
+                    );
                 }
                 Value::TimestampMicros(micros) => {
                     assert_eq!(row[i], Some(Timestamptz::from_micros(micros).into()));

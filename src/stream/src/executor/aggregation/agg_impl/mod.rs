@@ -172,6 +172,12 @@ pub fn create_streaming_agg_impl(
                     (Count, interval, int64, StreamingCountAgg::<IntervalArray>),
                     (Count, date, int64, StreamingCountAgg::<DateArray>),
                     (Count, timestamp, int64, StreamingCountAgg::<TimestampArray>),
+                    (
+                        Count,
+                        timestamptz,
+                        timestamptz,
+                        StreamingCountAgg::<TimestamptzArray>
+                    ),
                     (Count, time, int64, StreamingCountAgg::<TimeArray>),
                     (Count, struct_type, int64, StreamingCountAgg::<StructArray>),
                     (Count, list, int64, StreamingCountAgg::<ListArray>),

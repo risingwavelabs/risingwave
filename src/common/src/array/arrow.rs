@@ -165,7 +165,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Date => Self::Date32,
             DataType::Timestamp => Self::Timestamp(arrow_schema::TimeUnit::Microsecond, None),
             DataType::Timestamptz => {
-                Self::Timestamp(arrow_schema::TimeUnit::Microsecond, Some("".into()))
+                Self::Timestamp(arrow_schema::TimeUnit::Microsecond, Some("UTC".into()))
             }
             DataType::Time => Self::Time64(arrow_schema::TimeUnit::Microsecond),
             DataType::Interval => Self::Interval(arrow_schema::IntervalUnit::MonthDayNano),

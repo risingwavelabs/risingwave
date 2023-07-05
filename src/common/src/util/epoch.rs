@@ -86,7 +86,9 @@ impl Epoch {
 
     /// Returns the epoch in a Timestamptz scalar.
     pub fn as_scalar(&self) -> ScalarImpl {
-        Timestamptz::from_millis(self.as_unix_millis() as i64).into()
+        Timestamptz::from_millis(self.as_unix_millis() as i64)
+            .expect("epoch is out of range")
+            .into()
     }
 
     /// Returns the epoch in real system time.

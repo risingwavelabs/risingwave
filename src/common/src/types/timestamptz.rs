@@ -27,6 +27,7 @@ use crate::array::ArrayResult;
 use crate::error::Result;
 use crate::estimate_size::ZeroHeapSize;
 
+/// Timestamp with timezone.
 #[derive(
     Default, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
@@ -67,16 +68,20 @@ impl ToText for Timestamptz {
 impl Timestamptz {
     pub const MIN: Self = Self(i64::MIN);
 
-    pub fn from_secs(timestamp_secs: i64) -> Self {
-        Self(timestamp_secs * 1_000_000)
+    /// Creates a `Timestamptz` from seconds. Returns `None` if the given timestamp is out of range.
+    pub fn from_secs(timestamp_secs: i64) -> Option<Self> {
+        timestamp_secs.checked_mul(1_000_000).map(Self)
     }
 
+    /// Creates a `Timestamptz` from milliseconds. Returns `None` if the given timestamp is out of
+    /// range.
+    pub fn from_millis(timestamp_millis: i64) -> Option<Self> {
+        timestamp_millis.checked_mul(1000).map(Self)
+    }
+
+    /// Creates a `Timestamptz` from microseconds.
     pub fn from_micros(timestamp_micros: i64) -> Self {
         Self(timestamp_micros)
-    }
-
-    pub fn from_millis(timestamp_millis: i64) -> Self {
-        Self(timestamp_millis * 1000)
     }
 
     /// Returns the number of non-leap-microseconds since January 1, 1970 UTC.
@@ -101,8 +106,7 @@ impl Timestamptz {
     }
 
     pub fn to_datetime_utc(self) -> chrono::DateTime<Utc> {
-        Utc.timestamp_opt(self.timestamp(), self.timestamp_subsec_nanos())
-            .unwrap()
+        self.into()
     }
 
     pub fn from_protobuf(timestamp_micros: i64) -> ArrayResult<Self> {
@@ -117,6 +121,13 @@ impl Timestamptz {
 impl From<chrono::DateTime<Utc>> for Timestamptz {
     fn from(dt: chrono::DateTime<Utc>) -> Self {
         Self(dt.timestamp_micros())
+    }
+}
+
+impl From<Timestamptz> for chrono::DateTime<Utc> {
+    fn from(tz: Timestamptz) -> Self {
+        Utc.timestamp_opt(tz.timestamp(), tz.timestamp_subsec_nanos())
+            .unwrap()
     }
 }
 

@@ -108,7 +108,10 @@ pub fn timestamptz_at_time_zone(input: Timestamptz, time_zone: &str) -> Result<T
 /// This operation is zone agnostic.
 #[function("subtract(timestamptz, timestamptz) -> interval")]
 pub fn timestamptz_timestamptz_sub(l: Timestamptz, r: Timestamptz) -> Result<Interval> {
-    let usecs = l.timestamp_micros().checked_sub(r.timestamp_micros()).ok_or(ExprError::NumericOverflow)?;
+    let usecs = l
+        .timestamp_micros()
+        .checked_sub(r.timestamp_micros())
+        .ok_or(ExprError::NumericOverflow)?;
     let interval = Interval::from_month_day_usec(0, 0, usecs);
     // https://github.com/postgres/postgres/blob/REL_15_3/src/backend/utils/adt/timestamp.c#L2697
     let interval = interval.justify_hour().ok_or(ExprError::NumericOverflow)?;

@@ -86,7 +86,7 @@ pub fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
     }
 }
 
-/// Converts UNIX epoch time to timestamp in microseconds.
+/// Converts UNIX epoch time to timestamptz.
 ///
 /// The input UNIX epoch time is interpreted as follows:
 ///
@@ -102,10 +102,10 @@ pub fn i64_to_timestamptz(t: i64) -> Result<Timestamptz> {
     const E14: i64 = 100_000_000_000_000;
     const E17: i64 = 100_000_000_000_000_000;
     match t {
-        0..E11 => Ok(Timestamptz::from_secs(t)),         // s
-        E11..E14 => Ok(Timestamptz::from_millis(t)),     // ms
-        E14..E17 => Ok(Timestamptz::from_micros(t)),     // us
-        E17.. => Ok(Timestamptz::from_micros(t / 1000)), // ns
+        0..E11 => Ok(Timestamptz::from_secs(t).unwrap()), // s
+        E11..E14 => Ok(Timestamptz::from_millis(t).unwrap()), // ms
+        E14..E17 => Ok(Timestamptz::from_micros(t)),      // us
+        E17.. => Ok(Timestamptz::from_micros(t / 1000)),  // ns
         _ => Err(ERROR_INT_TO_TIMESTAMP.to_string()),
     }
 }

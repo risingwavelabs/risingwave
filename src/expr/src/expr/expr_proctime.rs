@@ -96,7 +96,11 @@ mod tests {
         for datum_ref in array.iter() {
             assert_eq!(
                 datum_ref,
-                Some(Timestamptz::from_millis(curr_epoch.as_unix_millis() as i64).into())
+                Some(
+                    Timestamptz::from_millis(curr_epoch.as_unix_millis() as i64)
+                        .unwrap()
+                        .into()
+                )
             );
         }
     }
