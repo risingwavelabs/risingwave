@@ -401,11 +401,13 @@ pub fn quote_ident(s: &str, writer: &mut dyn Write) {
 /// query T
 /// select left('RisingWave', 0)
 /// ----
+/// (empty)
 ///
 /// query T
 /// select left('RisingWave', -4)
 /// ----
 /// Rising
+/// ```
 #[function("left(varchar, int32) -> varchar")]
 pub fn left(s: &str, n: i32, writer: &mut dyn Write) {
     let n = if n >= 0 {
@@ -438,11 +440,13 @@ pub fn left(s: &str, n: i32, writer: &mut dyn Write) {
 /// query T
 /// select right('RisingWave', 0)
 /// ----
+/// (empty)
 ///
 /// query T
 /// select right('RisingWave', -6)
 /// ----
 /// Wave
+/// ```
 #[function("right(varchar, int32) -> varchar")]
 pub fn right(s: &str, n: i32, writer: &mut dyn Write) {
     let skip = if n >= 0 {
