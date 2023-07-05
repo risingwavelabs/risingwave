@@ -34,18 +34,74 @@ use crate::sink::utils::{
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
 use crate::sink::{
-    Result, Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SINK_TYPE_APPEND_ONLY,
+    SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
+use crate::ConnectorParams;
 
 pub const KINESIS_SINK: &str = "kinesis";
 
 #[derive(Clone, Debug)]
-pub struct KinesisSink<const APPEND_ONLY: bool> {
+pub struct KinesisSink {
     pub config: KinesisSinkConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
-    client: KinesisClient,
+    is_append_only: bool,
+}
+
+impl KinesisSink {
+    pub fn new(
+        config: KinesisSinkConfig,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+    ) -> Self {
+        Self {
+            config,
+            schema,
+            pk_indices,
+            is_append_only,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Sink for KinesisSink {
+    type Coordinator = DummySinkCommitCoordinator;
+    type Writer = KinesisSinkWriter;
+
+    async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {
+        // For upsert Kafka sink, the primary key must be defined.
+        if !self.is_append_only && self.pk_indices.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "primary key not defined for {} kafka sink (please define in `primary_key` field)",
+                self.config.r#type
+            )));
+        }
+
+        // check reachability
+        let client = self.config.common.build_client().await?;
+        client
+            .list_shards()
+            .stream_name(&self.config.common.stream_name)
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::warn!("failed to list shards: {}", DisplayErrorContext(&e));
+                SinkError::Kinesis(anyhow!("failed to list shards: {}", DisplayErrorContext(e)))
+            })?;
+        Ok(())
+    }
+
+    async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {
+        KinesisSinkWriter::new(
+            self.config.clone(),
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            self.is_append_only,
+        )
+        .await
+    }
 }
 
 #[serde_as]
@@ -78,11 +134,21 @@ impl KinesisSinkConfig {
     }
 }
 
-impl<const APPEND_ONLY: bool> KinesisSink<APPEND_ONLY> {
+#[derive(Debug)]
+pub struct KinesisSinkWriter {
+    pub config: KinesisSinkConfig,
+    schema: Schema,
+    pk_indices: Vec<usize>,
+    client: KinesisClient,
+    is_append_only: bool,
+}
+
+impl KinesisSinkWriter {
     pub async fn new(
         config: KinesisSinkConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
+        is_append_only: bool,
     ) -> Result<Self> {
         let client = config
             .common
@@ -94,30 +160,8 @@ impl<const APPEND_ONLY: bool> KinesisSink<APPEND_ONLY> {
             schema,
             pk_indices,
             client,
+            is_append_only,
         })
-    }
-
-    pub async fn validate(config: KinesisSinkConfig, pk_indices: Vec<usize>) -> Result<()> {
-        // For upsert Kafka sink, the primary key must be defined.
-        if !APPEND_ONLY && pk_indices.is_empty() {
-            return Err(SinkError::Config(anyhow!(
-                "primary key not defined for {} kafka sink (please define in `primary_key` field)",
-                config.r#type
-            )));
-        }
-
-        // check reachability
-        let client = config.common.build_client().await?;
-        client
-            .list_shards()
-            .stream_name(&config.common.stream_name)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::warn!("failed to list shards: {}", DisplayErrorContext(&e));
-                SinkError::Kinesis(anyhow!("failed to list shards: {}", DisplayErrorContext(e)))
-            })?;
-        Ok(())
     }
 
     async fn put_record(&self, key: &str, payload: Blob) -> Result<PutRecordOutput> {
@@ -189,9 +233,9 @@ impl<const APPEND_ONLY: bool> KinesisSink<APPEND_ONLY> {
 }
 
 #[async_trait::async_trait]
-impl<const APPEND_ONLY: bool> Sink for KinesisSink<APPEND_ONLY> {
+impl SinkWriter for KinesisSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if APPEND_ONLY {
+        if self.is_append_only {
             self.append_only(chunk).await
         } else if self.config.r#type == SINK_TYPE_DEBEZIUM {
             self.debezium_update(

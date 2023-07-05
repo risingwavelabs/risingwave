@@ -2297,7 +2297,7 @@ where
             for group_id in slowdown_groups.keys() {
                 if let Some(status) = compaction_guard.compaction_statuses.get(group_id) {
                     for (idx, level_handler) in status.level_handlers.iter().enumerate() {
-                        let tasks = level_handler.get_pending_tasks();
+                        let tasks = level_handler.get_pending_tasks().to_vec();
                         if tasks.is_empty() {
                             continue;
                         }

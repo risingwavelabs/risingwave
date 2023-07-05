@@ -82,7 +82,7 @@ cache_file_max_write_size_mb = 4
 
 [system]
 barrier_interval_ms = 1000
-checkpoint_frequency = 10
+checkpoint_frequency = 1
 sstable_size_mb = 256
 block_size_kb = 64
 bloom_false_positive = 0.001

@@ -26,7 +26,7 @@ use risingwave_pb::stream_service::{
     ForceStopActorsRequest, UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, warn};
+use tracing::{debug, warn, Instrument};
 use uuid::Uuid;
 
 use super::TracedEpoch;
@@ -123,94 +123,99 @@ where
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
         let recovery_timer = self.metrics.recovery_latency.start_timer();
-        let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let recovery_result: MetaResult<(TracedEpoch, Vec<BarrierCompleteResponse>)> = try {
-                let mut info = self.resolve_actor_info_for_recovery().await;
-                let mut new_epoch = prev_epoch.next();
+        let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || {
+            async {
+                let recovery_result: MetaResult<(TracedEpoch, Vec<BarrierCompleteResponse>)> = try {
+                    let mut info = self.resolve_actor_info_for_recovery().await;
+                    let mut new_epoch = prev_epoch.next();
 
-                // Migrate actors in expired CN to newly joined one.
-                let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
-                    warn!(err = ?err, "migrate actors failed");
-                })?;
-                if migrated {
-                    info = self.resolve_actor_info_for_recovery().await;
-                }
-
-                // Reset all compute nodes, stop and drop existing actors.
-                self.reset_compute_nodes(&info).await.inspect_err(|err| {
-                    warn!(err = ?err, "reset compute nodes failed");
-                })?;
-
-                // update and build all actors.
-                self.update_actors(&info).await.inspect_err(|err| {
-                    warn!(err = ?err, "update actors failed");
-                })?;
-                self.build_actors(&info).await.inspect_err(|err| {
-                    warn!(err = ?err, "build_actors failed");
-                })?;
-
-                // get split assignments for all actors
-                let source_split_assignments = self.source_manager.list_assignments().await;
-                let command = Command::Plain(Some(Mutation::Add(AddMutation {
-                    // Actors built during recovery is not treated as newly added actors.
-                    actor_dispatchers: Default::default(),
-                    added_actors: Default::default(),
-                    actor_splits: build_actor_connector_splits(&source_split_assignments),
-                })));
-
-                let prev_epoch = new_epoch;
-                new_epoch = prev_epoch.next();
-                // checkpoint, used as init barrier to initialize all executors.
-                let command_ctx = Arc::new(CommandContext::new(
-                    self.fragment_manager.clone(),
-                    self.env.stream_client_pool_ref(),
-                    info,
-                    prev_epoch,
-                    new_epoch.clone(),
-                    command,
-                    true,
-                    self.source_manager.clone(),
-                ));
-
-                #[cfg(not(all(test, feature = "failpoints")))]
-                {
-                    use risingwave_common::util::epoch::INVALID_EPOCH;
-
-                    let mce = self
-                        .hummock_manager
-                        .get_current_version()
-                        .await
-                        .max_committed_epoch;
-
-                    if mce != INVALID_EPOCH {
-                        command_ctx.wait_epoch_commit(mce).await?;
+                    // Migrate actors in expired CN to newly joined one.
+                    let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
+                        warn!(err = ?err, "migrate actors failed");
+                    })?;
+                    if migrated {
+                        info = self.resolve_actor_info_for_recovery().await;
                     }
-                }
 
-                let (barrier_complete_tx, mut barrier_complete_rx) =
-                    tokio::sync::mpsc::unbounded_channel();
-                self.inject_barrier(command_ctx.clone(), &barrier_complete_tx)
-                    .await;
-                let res = match barrier_complete_rx.recv().await.unwrap().result {
-                    Ok(response) => {
-                        if let Err(err) = command_ctx.post_collect().await {
-                            warn!(err = ?err, "post_collect failed");
-                            Err(err)
-                        } else {
-                            Ok((new_epoch, response))
+                    // Reset all compute nodes, stop and drop existing actors.
+                    self.reset_compute_nodes(&info).await.inspect_err(|err| {
+                        warn!(err = ?err, "reset compute nodes failed");
+                    })?;
+
+                    // update and build all actors.
+                    self.update_actors(&info).await.inspect_err(|err| {
+                        warn!(err = ?err, "update actors failed");
+                    })?;
+                    self.build_actors(&info).await.inspect_err(|err| {
+                        warn!(err = ?err, "build_actors failed");
+                    })?;
+
+                    // get split assignments for all actors
+                    let source_split_assignments = self.source_manager.list_assignments().await;
+                    let command = Command::Plain(Some(Mutation::Add(AddMutation {
+                        // Actors built during recovery is not treated as newly added actors.
+                        actor_dispatchers: Default::default(),
+                        added_actors: Default::default(),
+                        actor_splits: build_actor_connector_splits(&source_split_assignments),
+                    })));
+
+                    let prev_epoch = new_epoch;
+                    new_epoch = prev_epoch.next();
+
+                    // checkpoint, used as init barrier to initialize all executors.
+                    let command_ctx = Arc::new(CommandContext::new(
+                        self.fragment_manager.clone(),
+                        self.env.stream_client_pool_ref(),
+                        info,
+                        prev_epoch,
+                        new_epoch.clone(),
+                        command,
+                        true,
+                        self.source_manager.clone(),
+                        tracing::Span::current(), // recovery span
+                    ));
+
+                    #[cfg(not(all(test, feature = "failpoints")))]
+                    {
+                        use risingwave_common::util::epoch::INVALID_EPOCH;
+
+                        let mce = self
+                            .hummock_manager
+                            .get_current_version()
+                            .await
+                            .max_committed_epoch;
+
+                        if mce != INVALID_EPOCH {
+                            command_ctx.wait_epoch_commit(mce).await?;
                         }
                     }
-                    Err(err) => {
-                        warn!(err = ?err, "inject_barrier failed");
-                        Err(err)
-                    }
+
+                    let (barrier_complete_tx, mut barrier_complete_rx) =
+                        tokio::sync::mpsc::unbounded_channel();
+                    self.inject_barrier(command_ctx.clone(), &barrier_complete_tx)
+                        .await;
+                    let res = match barrier_complete_rx.recv().await.unwrap().result {
+                        Ok(response) => {
+                            if let Err(err) = command_ctx.post_collect().await {
+                                warn!(err = ?err, "post_collect failed");
+                                Err(err)
+                            } else {
+                                Ok((new_epoch, response))
+                            }
+                        }
+                        Err(err) => {
+                            warn!(err = ?err, "inject_barrier failed");
+                            Err(err)
+                        }
+                    };
+                    res?
                 };
-                res?
-            };
-            if recovery_result.is_err() {
-                self.metrics.recovery_failure_cnt.inc();
+                if recovery_result.is_err() {
+                    self.metrics.recovery_failure_cnt.inc();
+                }
+                recovery_result
             }
-            recovery_result
+            .instrument(tracing::info_span!("recovery_attempt"))
         })
         .await
         .expect("Retry until recovery success.");
