@@ -699,6 +699,20 @@ def section_streaming(panels):
                 )
             ]
         ),
+        panels.timeseries_count(
+            "Kafka Consumer Lag Size",
+            "Kafka Consumer Lag Size by source_id, partition and actor_id",
+            [
+                panels.target(
+                    f"rate({metric('high_watermark')}[$__rate_interval])",
+                    "source={{source_id}} partition={{partition}}"
+                ),
+                panels.target(
+                    f"rate({metric('latest_message_id')}[$__rate_interval])",
+                    "source={{source_id}} partition={{partition}} actor_id={{actor_id}}"
+                )
+            ]
+        ),
         panels.timeseries_rowsps(
             "Sink Throughput(rows/s)",
             "The figure shows the number of rows output by each sink executor actor per second.",
