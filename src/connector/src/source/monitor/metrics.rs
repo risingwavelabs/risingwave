@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{
-    AtomicI64, AtomicU64, GenericCounter, GenericCounterVec, GenericGauge, GenericGaugeVec,
-};
+use prometheus::core::{AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
-    register_gauge_vec_with_registry, register_gauge_with_registry,
-    register_int_counter_vec_with_registry, register_int_counter_with_registry,
-    register_int_gauge_vec_with_registry, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, Registry,
 };
 
 #[derive(Debug)]
