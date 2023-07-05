@@ -14,6 +14,7 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -44,7 +45,6 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use tracing_futures::Instrument;
-use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
 use crate::catalog::{FragmentId, TableId};
@@ -173,6 +173,7 @@ impl LocalQueryExecution {
     /// from the the root of the plan to the leaves. The first exchange operator contains
     /// the pushed-down plan fragment.
     fn create_plan_fragment(&self) -> SchedulerResult<PlanFragment> {
+        let next_executor_id = Arc::new(AtomicU32::new(0));
         let root_stage_id = self.query.root_stage_id();
         let root_stage = self.query.stage_graph.stages.get(&root_stage_id).unwrap();
         assert_eq!(root_stage.parallelism.unwrap(), 1);
@@ -180,14 +181,14 @@ impl LocalQueryExecution {
         let plan_node_prost = match second_stage_id {
             None => {
                 debug!("Local execution mode converts a plan with a single stage");
-                self.convert_plan_node(&root_stage.root, &mut None, None)?
+                self.convert_plan_node(&root_stage.root, &mut None, None, next_executor_id)?
             }
             Some(second_stage_ids) => {
                 debug!("Local execution mode converts a plan with two stages");
                 if second_stage_ids.is_empty() {
                     // This branch is defensive programming. The semantics should be the same as
                     // `None`.
-                    self.convert_plan_node(&root_stage.root, &mut None, None)?
+                    self.convert_plan_node(&root_stage.root, &mut None, None, next_executor_id)?
                 } else {
                     let mut second_stages = HashMap::new();
                     for second_stage_id in second_stage_ids {
@@ -196,8 +197,12 @@ impl LocalQueryExecution {
                         second_stages.insert(*second_stage_id, second_stage.clone());
                     }
                     let mut stage_id_to_plan = Some(second_stages);
-                    let res =
-                        self.convert_plan_node(&root_stage.root, &mut stage_id_to_plan, None)?;
+                    let res = self.convert_plan_node(
+                        &root_stage.root,
+                        &mut stage_id_to_plan,
+                        None,
+                        next_executor_id,
+                    )?;
                     assert!(
                         stage_id_to_plan.as_ref().unwrap().is_empty(),
                         "We expect that all the child stage plan fragments have been used"
@@ -221,7 +226,13 @@ impl LocalQueryExecution {
         execution_plan_node: &ExecutionPlanNode,
         second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
         partition: Option<PartitionInfo>,
+        next_executor_id: Arc<AtomicU32>,
     ) -> SchedulerResult<PlanNodePb> {
+        let identity = format!(
+            "{:?}-{}",
+            execution_plan_node.plan_node_type,
+            next_executor_id.fetch_add(1, Ordering::Relaxed)
+        );
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
                 let exchange_source_stage_id = execution_plan_node
@@ -265,6 +276,7 @@ impl LocalQueryExecution {
                             &second_stage.root,
                             &mut None,
                             Some(PartitionInfo::Table(partition)),
+                            next_executor_id.clone(),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {
                             root: Some(second_stage_plan_node),
@@ -298,6 +310,7 @@ impl LocalQueryExecution {
                             &second_stage.root,
                             &mut None,
                             Some(PartitionInfo::Source(split.clone())),
+                            next_executor_id.clone(),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {
                             root: Some(second_stage_plan_node),
@@ -329,7 +342,7 @@ impl LocalQueryExecution {
                     }
                 } else {
                     let second_stage_plan_node =
-                        self.convert_plan_node(&second_stage.root, &mut None, None)?;
+                        self.convert_plan_node(&second_stage.root, &mut None, None, next_executor_id)?;
                     let second_stage_plan_fragment = PlanFragment {
                         root: Some(second_stage_plan_node),
                         exchange_info: Some(ExchangeInfo {
@@ -370,7 +383,7 @@ impl LocalQueryExecution {
                     /// Since all the rest plan is embedded into the exchange node,
                     /// there is no children any more.
                     children: vec![],
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(node_body),
                 })
             }
@@ -392,8 +405,7 @@ impl LocalQueryExecution {
 
                 Ok(PlanNodePb {
                     children: vec![],
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(node_body),
                 })
             }
@@ -413,8 +425,7 @@ impl LocalQueryExecution {
 
                 Ok(PlanNodePb {
                     children: vec![],
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(node_body),
                 })
             }
@@ -441,11 +452,12 @@ impl LocalQueryExecution {
                     &execution_plan_node.children[0],
                     second_stages,
                     partition,
+                    next_executor_id,
                 )?;
 
                 Ok(PlanNodePb {
                     children: vec![left_child],
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(node_body),
                 })
             }
@@ -453,13 +465,19 @@ impl LocalQueryExecution {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, second_stages, partition.clone()))
+                    .map(|e| {
+                        self.convert_plan_node(
+                            e,
+                            second_stages,
+                            partition.clone(),
+                            next_executor_id.clone(),
+                        )
+                    })
                     .collect::<SchedulerResult<Vec<PlanNodePb>>>()?;
 
                 Ok(PlanNodePb {
                     children,
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(execution_plan_node.node.clone()),
                 })
             }

@@ -141,7 +141,12 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE: LazyLock<OptimizationStage> =
     LazyLock::new(|| {
         OptimizationStage::new(
             "General Unnesting(Translate Apply)",
-            vec![TranslateApplyRule::create(true)],
+            vec![
+                TranslateApplyRule::create(true),
+                // Separate the project from a join if necessary because `ApplyJoinTransposeRule`
+                // can't handle a join with `output_indices`.
+                ProjectJoinSeparateRule::create(),
+            ],
             ApplyOrder::BottomUp,
         )
     });
@@ -150,7 +155,12 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE: LazyLock<OptimizationStage> 
     LazyLock::new(|| {
         OptimizationStage::new(
             "General Unnesting(Translate Apply)",
-            vec![TranslateApplyRule::create(false)],
+            vec![
+                TranslateApplyRule::create(false),
+                // Separate the project from a join if necessary because `ApplyJoinTransposeRule`
+                // can't handle a join with `output_indices`.
+                ProjectJoinSeparateRule::create(),
+            ],
             ApplyOrder::BottomUp,
         )
     });
@@ -503,8 +513,14 @@ impl LogicalOptimizer {
         // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
         plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
+        let force_split_distinct_agg = ctx.session_ctx().config().get_force_split_distinct_agg();
+        // TODO: better naming of the OptimizationStage
         // Convert distinct aggregates.
-        plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM);
+        plan = if force_split_distinct_agg {
+            plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH)
+        } else {
+            plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM)
+        };
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
 

@@ -406,3 +406,12 @@
     select * from t2 where exists (select distinct on(a) a from t1 where b = d);
   expected_outputs:
   - optimized_logical_plan_for_batch
+- name: Separate the project from joins before pushing the apply operator down joins. https://github.com/risingwavelabs/risingwave/issues/10662
+  sql: |
+    create table t1 (a int, b int, other int);
+    create table t2 (c int, d int, other int);
+    create table t3 (e int, f int, other int);
+    select * from t1 where exists (select t2.d, t3.f from t2 join t3 on t2.c = t3.e and t1.a = t2.c and t1.b = t3.e);
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream

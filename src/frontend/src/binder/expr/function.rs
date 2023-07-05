@@ -627,6 +627,8 @@ impl Binder {
                 ("sha256", raw_call(ExprType::Sha256)),
                 ("sha384", raw_call(ExprType::Sha384)),
                 ("sha512", raw_call(ExprType::Sha512)),
+                ("left", raw_call(ExprType::Left)),
+                ("right", raw_call(ExprType::Right)),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
@@ -965,7 +967,8 @@ impl Binder {
                 | Clause::Having
                 | Clause::Filter
                 | Clause::GeneratedColumn
-                | Clause::From => {
+                | Clause::From
+                | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
                         clause
@@ -981,11 +984,11 @@ impl Binder {
         if self.is_for_stream()
             && !matches!(
                 self.context.clause,
-                Some(Clause::Where) | Some(Clause::Having)
+                Some(Clause::Where) | Some(Clause::Having) | Some(Clause::JoinOn)
             )
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
+                "For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: {:?}. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information",
                 self.context.clause
             ))
             .into());
@@ -1013,7 +1016,11 @@ impl Binder {
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::From | Clause::GeneratedColumn => {
+                Clause::Where
+                | Clause::Values
+                | Clause::From
+                | Clause::GeneratedColumn
+                | Clause::JoinOn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
                         clause
@@ -1036,7 +1043,11 @@ impl Binder {
                     ))
                     .into());
                 }
-                Clause::GroupBy | Clause::Having | Clause::Filter | Clause::From => {}
+                Clause::JoinOn
+                | Clause::GroupBy
+                | Clause::Having
+                | Clause::Filter
+                | Clause::From => {}
             }
         }
         Ok(())

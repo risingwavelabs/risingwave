@@ -159,6 +159,8 @@ message ExprNode {
     SHA256 = 314;
     SHA384 = 315;
     SHA512 = 316;
+    LEFT = 317;
+    RIGHT = 318;
 
     // Unary operators
     NEG = 401;

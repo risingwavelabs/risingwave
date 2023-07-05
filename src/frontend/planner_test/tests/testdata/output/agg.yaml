@@ -928,6 +928,13 @@
     └─LogicalAgg { aggs: [sum0(count(t.x)), sum(t.y)] }
       └─LogicalAgg { group_key: [t.y], aggs: [count(t.x)] }
         └─LogicalScan { table: t, columns: [t.x, t.y] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [sum0(count(t.x)), sum(t.y), sum(t.y)] }
+    └─LogicalAgg { aggs: [sum0(count(t.x)), sum(t.y)] }
+      └─LogicalAgg { group_key: [t.y], aggs: [count(t.x)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x int, y int);
     select count(y), sum(distinct y) from t;
@@ -935,6 +942,12 @@
     LogicalAgg { aggs: [sum0(count(t.y)), sum(t.y)] }
     └─LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
       └─LogicalScan { table: t, columns: [t.y] }
+  optimized_logical_plan_for_stream: |-
+    LogicalAgg { aggs: [sum0(count(t.y)), sum(t.y)] }
+    └─LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
+      └─LogicalScan { table: t, columns: [t.y] }
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x int, y int);
     select count(distinct x), sum(distinct y) from t;
@@ -943,6 +956,13 @@
     └─LogicalAgg { group_key: [t.x, t.y, flag], aggs: [] }
       └─LogicalExpand { column_subsets: [[t.x], [t.y]] }
         └─LogicalScan { table: t, columns: [t.x, t.y] }
+  optimized_logical_plan_for_stream: |-
+    LogicalAgg { aggs: [count(t.x) filter((flag = 0:Int64)), sum(t.y) filter((flag = 1:Int64))] }
+    └─LogicalAgg { group_key: [t.x, t.y, flag], aggs: [] }
+      └─LogicalExpand { column_subsets: [[t.x], [t.y]] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x varchar, y int);
     select string_agg(x, ','), count(distinct y) from t;
@@ -956,6 +976,11 @@
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [max(t.x), min(t.y)] }
     └─LogicalScan { table: t, columns: [t.x, t.y] }
+  optimized_logical_plan_for_stream: |-
+    LogicalAgg { aggs: [max(t.x), min(t.y)] }
+    └─LogicalScan { table: t, columns: [t.x, t.y] }
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - name: agg filter - subquery
   sql: |
     /* This case is valid in PostgreSQL */
