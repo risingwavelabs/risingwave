@@ -30,6 +30,9 @@ def section_actor_info(panels):
                           "Mapping from table id to actor id and table name",
                           [panels.table_target(f"{metric('table_info')}")], excluded_cols),
 
+        panels.table_info("MV Id Info",
+                          "Mapping from mv id to table ids",
+                          [panels.table_target(f"{metric('mv_info')}")], excluded_cols),
     ]
 
 

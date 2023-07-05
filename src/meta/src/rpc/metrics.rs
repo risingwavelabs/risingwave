@@ -153,8 +153,12 @@ pub struct MetaMetrics {
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
 
+    pub mv_info: IntGaugeVec,
+
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
+
+    pub mv_id_to_internal_tables: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -488,6 +492,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let mv_info = register_int_gauge_vec_with_registry!(
+            "mv_info",
+            "Mapping from mv table id to (internal table id, internal table name)",
+            &["mv_table_id", "internal_table_id"],
+            registry
+        )
+        .unwrap();
+
         let l0_compact_level_count = register_histogram_vec_with_registry!(
             "storage_l0_compact_level_count",
             "level_count of l0 compact task",
@@ -544,6 +556,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let mv_id_to_internal_tables = register_int_counter_vec_with_registry!(
+            "materialize_views_internal_tables",
+            "123",
+            &["mv_id", "internal_table_id"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             grpc_latency,
@@ -594,6 +614,7 @@ impl MetaMetrics {
             source_is_up,
             actor_info,
             table_info,
+            mv_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -601,6 +622,7 @@ impl MetaMetrics {
             move_state_table_count,
             state_table_count,
             branched_sst_count,
+            mv_id_to_internal_tables,
         }
     }
 

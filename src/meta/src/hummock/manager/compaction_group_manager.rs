@@ -103,9 +103,26 @@ impl<S: MetaStore> HummockManager<S> {
             == Some(true);
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
+            println!("mv_table = {:?}", mv_table);
+            println!("internal tables = {:?}", internal_tables);
+            for internal_table_id in &internal_tables {
+                self.metrics
+                    .mv_id_to_internal_tables
+                    .with_label_values(&[&mv_table.to_string(), &internal_table_id.to_string()])
+                    .inc();
+                self.metrics.mv_info
+                    .with_label_values(&[
+                        &mv_table.to_string(),
+                        &internal_table_id.to_string(),
+                    ])
+                    .set(1)
+            }
             if internal_tables.drain_filter(|t| *t == mv_table).count() > 0 {
                 tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
             }
+
+            // let mut mv_id_to_internal_table_ids: HashMap<u32, Vec<u32>> = HashMap::new();
+            // mv_id_to_internal_table_ids.insert(mv_table, internal_tables.clone());
             // materialized_view
             pairs.push((
                 mv_table,
