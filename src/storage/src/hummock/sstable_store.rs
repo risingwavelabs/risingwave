@@ -49,10 +49,6 @@ const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
 pub type TableHolder = CacheableEntry<HummockSstableObjectId, Box<Sstable>>;
 
-// BEGIN section for tiered cache
-
-// END section for tiered cache
-
 // TODO: Define policy based on use cases (read / compaction / ...).
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum CachePolicy {
@@ -209,18 +205,18 @@ impl SstableStore {
             stats.cache_data_block_miss += 1;
             let data_path = self.get_sst_data_path(object_id);
             let store = self.store.clone();
-            let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
+            let use_file_cache = !matches!(policy, CachePolicy::Disable);
 
             async move {
                 let key = SstableBlockIndex {
                     sst_id: object_id,
                     block_idx: block_index as u64,
                 };
-                if use_tiered_cache
+                if use_file_cache
                     && let Some(block) = file_cache
                         .lookup(&key)
                         .await
-                        .map_err(HummockError::tiered_cache)?
+                        .map_err(HummockError::file_cache)?
                 {
                     return Ok(block);
                 }
@@ -228,10 +224,10 @@ impl SstableStore {
                 let block_data = store.read(&data_path, Some(block_loc)).await?;
                 let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
 
-                // try fill tiered cache
-                if use_tiered_cache && let CachePolicy::Fill(_) = policy {
+                // try fill file cache
+                if use_file_cache && let CachePolicy::Fill(_) = policy {
                     // TODO(MrCroxx): try eliminate copy
-                    file_cache.insert(key, block.clone()).await.map_err(HummockError::tiered_cache)?;
+                    file_cache.insert(key, block.clone()).await.map_err(HummockError::file_cache)?;
                 }
                 Ok(block)
             }

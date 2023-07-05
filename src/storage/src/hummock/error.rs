@@ -146,7 +146,7 @@ impl HummockError {
         HummockErrorInner::CompactionGroupError(error.to_string()).into()
     }
 
-    pub fn tiered_cache(error: impl ToString) -> HummockError {
+    pub fn file_cache(error: impl ToString) -> HummockError {
         HummockErrorInner::FileCache(error.to_string()).into()
     }
 

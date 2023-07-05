@@ -578,7 +578,7 @@ impl StateStoreImpl {
             };
             FileCache::foyer(config)
                 .await
-                .map_err(HummockError::tiered_cache)?
+                .map_err(HummockError::file_cache)?
         };
 
         let store = match s {
