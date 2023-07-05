@@ -1651,13 +1651,12 @@
     │     │ └─BatchScan { table: auction, columns: [auction.id, auction.item_name], distribution: UpstreamHashShard(auction.id) }
     │     └─BatchExchange { order: [], dist: HashShard(bid.auction) }
     │       └─BatchScan { table: bid, columns: [bid.auction], distribution: SomeShard }
-    └─BatchProject { exprs: [(sum0(sum0(count)) / sum0(count(bid.auction))) as $expr1] }
-      └─BatchSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(bid.auction))] }
+    └─BatchProject { exprs: [(sum0(count) / count(bid.auction)) as $expr1] }
+      └─BatchSortAgg { aggs: [sum0(count), count(bid.auction)] }
         └─BatchExchange { order: [], dist: Single }
-          └─BatchSimpleAgg { aggs: [sum0(count), count(bid.auction)] }
-            └─BatchHashAgg { group_key: [bid.auction], aggs: [count] }
-              └─BatchExchange { order: [], dist: HashShard(bid.auction) }
-                └─BatchScan { table: bid, columns: [bid.auction], distribution: SomeShard }
+          └─BatchHashAgg { group_key: [bid.auction], aggs: [count] }
+            └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+              └─BatchScan { table: bid, columns: [bid.auction], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: NoCheck }
     └─StreamDynamicFilter { predicate: (count(bid.auction) >= $expr1), output: [auction.id, auction.item_name, count(bid.auction)] }
