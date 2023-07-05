@@ -308,7 +308,7 @@ impl CompactorManagerInner {
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
             .as_secs()
-            + interval;
+            - interval;
         Self::get_heartbeat_expired_tasks(&self.task_heartbeats, now)
     }
 

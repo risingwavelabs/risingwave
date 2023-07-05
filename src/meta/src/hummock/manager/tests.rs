@@ -916,7 +916,6 @@ async fn test_trigger_compaction_deterministic() {
 #[cfg(madsim)]
 #[tokio::test]
 async fn test_hummock_compaction_task_heartbeat() {
-    use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::CompactTaskProgress;
 
     use crate::hummock::compaction_scheduler::ScheduleStatus;
@@ -1004,7 +1003,6 @@ async fn test_hummock_compaction_task_heartbeat() {
 
     // Cancel the task immediately and succeed.
     compact_task.set_task_status(TaskStatus::ExecuteFailed);
-
     assert!(hummock_manager
         .report_compact_task(&mut compact_task, None)
         .await
@@ -1031,11 +1029,12 @@ async fn test_hummock_compaction_task_heartbeat() {
     );
     drop(compactor_pull_task_handle);
 
-    // do not send heartbeats to the task for 2.5 seconds (ttl = 1s, heartbeat check freq. = 1s)
-    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
-
     // Cancel the task after heartbeat has triggered and fail.
     compact_task.set_task_status(TaskStatus::ExecuteFailed);
+
+    // do not send heartbeats to the task for 30s seconds (ttl = 1s, heartbeat check freq. = 1s)
+    // default_interval = 30s
+    tokio::time::sleep(std::time::Duration::from_secs(32)).await;
 
     assert!(!hummock_manager
         .report_compact_task(&mut compact_task, None)

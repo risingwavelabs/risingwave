@@ -2066,7 +2066,7 @@ where
                                         hummock_manager.compactor_manager.clone();
 
                                     // TODO: add metrics to track expired tasks
-                                    const INTERVAL_SEC: u64 = 45;
+                                    const INTERVAL_SEC: u64 = 30;
                                     // The cancel task has two paths
                                     // 1. compactor heartbeat cancels the expired task based on task
                                     // progress (meta + compactor)
