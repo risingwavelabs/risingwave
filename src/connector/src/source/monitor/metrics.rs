@@ -12,18 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{AtomicU64, GenericCounterVec};
-use prometheus::{register_int_counter_vec_with_registry, Registry};
+use prometheus::core::{
+    AtomicI64, AtomicU64, GenericCounter, GenericCounterVec, GenericGauge, GenericGaugeVec,
+};
+use prometheus::{
+    register_gauge_vec_with_registry, register_gauge_with_registry,
+    register_int_counter_vec_with_registry, register_int_counter_with_registry,
+    register_int_gauge_vec_with_registry, Registry,
+};
 
 #[derive(Debug)]
 pub struct EnumeratorMetrics {
     pub registry: Registry,
-    pub high_watermark: GenericCounterVec<AtomicU64>,
+    pub high_watermark: GenericGaugeVec<AtomicI64>,
 }
 
 impl EnumeratorMetrics {
     pub fn new(registry: Registry) -> Self {
-        let high_watermark = register_int_counter_vec_with_registry!(
+        let high_watermark = register_int_gauge_vec_with_registry!(
             "high_watermark",
             "High watermark for a exec per partition",
             &["source_id", "partition"],
@@ -55,7 +61,7 @@ pub struct SourceMetrics {
     /// User error reporting
     pub user_source_error_count: GenericCounterVec<AtomicU64>,
     /// Report latest message id
-    pub latest_message_id: GenericCounterVec<AtomicU64>,
+    pub latest_message_id: GenericGaugeVec<AtomicI64>,
 }
 
 impl SourceMetrics {
@@ -87,7 +93,7 @@ impl SourceMetrics {
             registry,
         )
         .unwrap();
-        let latest_message_id = register_int_counter_vec_with_registry!(
+        let latest_message_id = register_int_gauge_vec_with_registry!(
             "latest_message_id",
             "Latest message id for a exec per partition",
             &["source_id", "actor_id", "partition"],

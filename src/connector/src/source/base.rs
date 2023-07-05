@@ -106,7 +106,13 @@ impl Default for SourceCtrlOpts {
 
 #[derive(Debug, Default)]
 pub struct SourceEnumeratorContext {
+    pub info: SourceEnumeratorInfo,
     pub metrics: Arc<EnumeratorMetrics>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SourceEnumeratorInfo {
+    pub source_id: u32,
 }
 
 #[derive(Debug, Default)]

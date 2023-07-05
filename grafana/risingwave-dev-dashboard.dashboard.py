@@ -704,11 +704,11 @@ def section_streaming(panels):
             "Kafka Consumer Lag Size by source_id, partition and actor_id",
             [
                 panels.target(
-                    f"rate({metric('high_watermark')}[$__rate_interval])",
+                    f"{metric('high_watermark')}",
                     "source={{source_id}} partition={{partition}}"
                 ),
                 panels.target(
-                    f"rate({metric('latest_message_id')}[$__rate_interval])",
+                    f"{metric('latest_message_id')}",
                     "source={{source_id}} partition={{partition}} actor_id={{actor_id}}"
                 )
             ]

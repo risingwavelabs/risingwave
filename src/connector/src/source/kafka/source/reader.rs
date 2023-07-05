@@ -150,7 +150,7 @@ impl SplitReader for KafkaSplitReader {
 }
 
 impl KafkaSplitReader {
-    fn report_latest_message_id(&self, offset: u64) {
+    fn report_latest_message_id(&self, offset: i64) {
         self.source_ctx
             .metrics
             .latest_message_id
@@ -160,7 +160,7 @@ impl KafkaSplitReader {
                 &self.source_ctx.source_info.actor_id.to_string(),
                 &self.split_id,
             ])
-            .inc_by(offset);
+            .set(offset);
     }
 
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
@@ -191,7 +191,7 @@ impl KafkaSplitReader {
                     }
                 }
                 None => continue,
-            } as u64);
+            });
             for msg in msgs {
                 let msg: BorrowedMessage<'_> = msg?;
                 let cur_offset = msg.offset();

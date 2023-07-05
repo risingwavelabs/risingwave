@@ -141,7 +141,7 @@ impl KafkaSplitEnumerator {
                 .client
                 .fetch_watermarks(self.topic.as_str(), *partition, self.sync_call_timeout)
                 .await?;
-            self.report_high_watermark(*partition, high as u64);
+            self.report_high_watermark(*partition, high);
             map.insert(*partition, (low, high));
         }
         Ok(map)
@@ -329,12 +329,15 @@ impl KafkaSplitEnumerator {
     }
 
     #[inline]
-    fn report_high_watermark(&self, partition: i32, offset: u64) {
+    fn report_high_watermark(&self, partition: i32, offset: i64) {
         self.context
             .metrics
             .high_watermark
-            .with_label_values(&[&self.topic, &partition.to_string()])
-            .inc_by(offset);
+            .with_label_values(&[
+                &self.context.info.source_id.to_string(),
+                &partition.to_string(),
+            ])
+            .set(offset);
     }
 
     async fn fetch_topic_partition(&self) -> anyhow::Result<Vec<i32>> {

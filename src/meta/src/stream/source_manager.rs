@@ -23,8 +23,8 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SplitEnumeratorImpl, SplitId, SplitImpl,
-    SplitMetaData,
+    ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SplitEnumeratorImpl,
+    SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::Source;
 use risingwave_pb::connector_service::table_schema::Column;
@@ -79,6 +79,9 @@ impl ConnectorSourceWorker {
             self.connector_properties.clone(),
             Arc::new(SourceEnumeratorContext {
                 metrics: self.metrics.source_enumerator_metrics.clone(),
+                info: SourceEnumeratorInfo {
+                    source_id: self.source_id,
+                },
             }),
         )
         .await?;
@@ -104,6 +107,9 @@ impl ConnectorSourceWorker {
             properties.clone(),
             Arc::new(SourceEnumeratorContext {
                 metrics: metrics.source_enumerator_metrics.clone(),
+                info: SourceEnumeratorInfo {
+                    source_id: source.id,
+                },
             }),
         )
         .await?;
