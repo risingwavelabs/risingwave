@@ -53,6 +53,7 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use tokio::runtime::{Builder, Runtime};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -117,6 +118,10 @@ pub struct FrontendEnv {
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
     creating_streaming_job_tracker: StreamingJobTrackerRef,
+
+    /// Runtime for compute intensive tasks in frontend, e.g. executors in local mode,
+    /// root stage in mpp mode.
+    compute_runtime: Arc<Runtime>,
 }
 
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
@@ -162,6 +167,7 @@ impl FrontendEnv {
             meta_config: MetaConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
+            compute_runtime: Arc::new(Runtime::new().unwrap()),
         }
     }
 
@@ -313,6 +319,15 @@ impl FrontendEnv {
         let creating_streaming_job_tracker =
             Arc::new(StreamingJobTracker::new(frontend_meta_client.clone()));
 
+        // TODO: Make this configurable.
+        let compute_runtime = Arc::new(
+            Builder::new_multi_thread()
+                .worker_threads(4)
+                .thread_name("frontend-compute-threads")
+                .build()
+                .unwrap(),
+        );
+
         Ok((
             Self {
                 catalog_reader,
@@ -331,6 +346,7 @@ impl FrontendEnv {
                 meta_config,
                 source_metrics,
                 creating_streaming_job_tracker,
+                compute_runtime,
             },
             join_handles,
             shutdown_senders,
@@ -403,6 +419,10 @@ impl FrontendEnv {
 
     pub fn creating_streaming_job_tracker(&self) -> &StreamingJobTrackerRef {
         &self.creating_streaming_job_tracker
+    }
+
+    pub fn compute_runtime(&self) -> Arc<Runtime> {
+        self.compute_runtime.clone()
     }
 }
 
