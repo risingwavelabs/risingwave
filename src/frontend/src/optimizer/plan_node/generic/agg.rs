@@ -128,7 +128,8 @@ pub(crate) mod agg_kinds {
     /// [`AggKind`]s that are simply cannot 2-phased.
     macro_rules! simply_cannot_two_phase {
         () => {
-            AggKind::ArrayAgg
+            AggKind::ApproxCountDistinct
+                | AggKind::ArrayAgg
                 | AggKind::JsonbAgg
                 | AggKind::JsonbObjectAgg
                 | AggKind::PercentileCont
@@ -211,14 +212,13 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         self.two_phase_agg_enabled()
             && !self.agg_calls.is_empty()
             && self.agg_calls.iter().all(|call| {
+                let agg_kind_ok = !matches!(call.agg_kind, agg_kinds::simply_cannot_two_phase!());
                 let order_ok = matches!(call.agg_kind, agg_kinds::result_unaffected_by_order_by!())
                     || call.order_by.is_empty();
                 let distinct_ok =
                     matches!(call.agg_kind, agg_kinds::result_unaffected_by_distinct!())
                         || !call.distinct;
-                order_ok
-                    && distinct_ok
-                    && !matches!(call.agg_kind, agg_kinds::simply_cannot_two_phase!())
+                agg_kind_ok && order_ok && distinct_ok
             })
     }
 
@@ -840,7 +840,7 @@ impl PlanAggCall {
             | AggKind::FirstValue
             | AggKind::LastValue => self.agg_kind,
             AggKind::Sum => AggKind::Sum,
-            AggKind::Sum0 | AggKind::Count | AggKind::ApproxCountDistinct => AggKind::Sum0,
+            AggKind::Sum0 | AggKind::Count => AggKind::Sum0,
             agg_kinds::simply_cannot_two_phase!() => {
                 unreachable!(
                     "{} aggregation cannot be converted to 2-phase",
