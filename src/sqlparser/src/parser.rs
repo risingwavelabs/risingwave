@@ -2242,24 +2242,26 @@ impl Parser {
         // default row format for datagen source is native
         let source_schema = if let Some(connector) = connector {
             if connector.contains("-cdc") {
-                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                if (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
+                    || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
                 {
                     return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
                 }
                 Some(SourceSchema::DebeziumJson)
             } else if connector.contains("nexmark") {
-                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                if (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
+                    || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
                 {
                     return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to internal native format".to_string()));
                 }
                 Some(SourceSchema::Native)
             } else if connector.contains("datagen") {
-                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                if (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
+                    || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
                 {
-                    self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
                     let schema = SourceSchemaV2::parse_to(self)?;
                     let (schema, mut row_format_options) = schema.into_source_schema()?;
                     with_options.append(&mut row_format_options);
@@ -2268,8 +2270,6 @@ impl Parser {
                     Some(SourceSchema::Native)
                 }
             } else {
-                // other connectors
-                self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
                 let schema = SourceSchemaV2::parse_to(self)?;
                 let (schema, mut row_format_options) = schema.into_source_schema()?;
                 with_options.append(&mut row_format_options);
