@@ -244,6 +244,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Timestamp(v) => {
             serialize_timestamp(v.0.timestamp(), v.0.timestamp_subsec_nanos(), buf)
         }
+        ScalarRefImpl::Timestamptz(v) => buf.put_i64_le(v.timestamp_micros()),
         ScalarRefImpl::Time(v) => {
             serialize_time(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
@@ -269,6 +270,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Interval(_) => estimate_serialize_interval_size(),
         ScalarRefImpl::Date(_) => estimate_serialize_date_size(),
         ScalarRefImpl::Timestamp(_) => estimate_serialize_timestamp_size(),
+        ScalarRefImpl::Timestamptz(_) => 8,
         ScalarRefImpl::Time(_) => estimate_serialize_time_size(),
         ScalarRefImpl::Jsonb(_) => 8,
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
@@ -365,7 +367,9 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Interval => ScalarImpl::Interval(deserialize_interval(data)?),
         DataType::Time => ScalarImpl::Time(deserialize_time(data)?),
         DataType::Timestamp => ScalarImpl::Timestamp(deserialize_timestamp(data)?),
-        DataType::Timestamptz => ScalarImpl::Int64(data.get_i64_le()),
+        DataType::Timestamptz => {
+            ScalarImpl::Timestamptz(Timestamptz::from_micros(data.get_i64_le()))
+        }
         DataType::Date => ScalarImpl::Date(deserialize_date(data)?),
         DataType::Jsonb => ScalarImpl::Jsonb(
             JsonbVal::value_deserialize(&deserialize_bytea(data))
