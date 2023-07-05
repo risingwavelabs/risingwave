@@ -152,7 +152,7 @@ pub(crate) mod agg_kinds {
     /// input is append-only.
     macro_rules! single_value_state_iff_in_append_only {
         () => {
-            AggKind::Max | AggKind::Min | AggKind::ApproxCountDistinct
+            AggKind::Max | AggKind::Min
         };
     }
     pub(crate) use single_value_state_iff_in_append_only;
@@ -595,13 +595,20 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     AggCallState::MaterializedInput(Box::new(state))
                 }
                 AggKind::ApproxCountDistinct => {
-                    let state = gen_table_state(vec![Field {
-                        data_type: DataType::List(Box::new(DataType::Int64)),
-                        name: String::from("registers"),
-                        sub_fields: vec![],
-                        type_name: String::default(),
-                    }]);
-                    AggCallState::Table(Box::new(state))
+                    // NOTE(rc): This is quite confusing, in that the append-only version has table
+                    // state while updatable version has value state. The latter one may be
+                    // incorrect.
+                    if in_append_only {
+                        let state = gen_table_state(vec![Field {
+                            data_type: DataType::List(Box::new(DataType::Int64)),
+                            name: String::from("registers"),
+                            sub_fields: vec![],
+                            type_name: String::default(),
+                        }]);
+                        AggCallState::Table(Box::new(state))
+                    } else {
+                        AggCallState::ResultValue
+                    }
                 }
                 agg_kinds::rewritten!() => {
                     unreachable!("should have been rewritten")
