@@ -163,7 +163,8 @@ impl TestCase {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct CreateConnector {
-    row_format: String,
+    format: String,
+    encode: String,
     name: String,
     file: Option<String>,
     is_table: Option<bool>,
@@ -294,14 +295,15 @@ impl TestCase {
     fn create_connector_sql(
         is_table: bool,
         connector_name: String,
-        connector_row_format: String,
+        connector_format: String,
+        connector_encode: String,
     ) -> String {
         let object_to_create = if is_table { "TABLE" } else { "SOURCE" };
         format!(
             r#"CREATE {} {}
     WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT {} (message = '.test.TestRecord', schema.location = 'file://"#,
-            object_to_create, connector_name, connector_row_format
+    FORMAT {} ENCODE {} (message = '.test.TestRecord', schema.location = 'file://"#,
+            object_to_create, connector_name, connector_format, connector_encode
         )
     }
 
@@ -312,8 +314,12 @@ impl TestCase {
         match self.create_table_with_connector().clone() {
             Some(connector) => {
                 if let Some(content) = connector.file {
-                    let sql =
-                        Self::create_connector_sql(true, connector.name, connector.row_format);
+                    let sql = Self::create_connector_sql(
+                        true,
+                        connector.name,
+                        connector.format,
+                        connector.encode,
+                    );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
                         &(sql + temp_file.path().to_str().unwrap() + "')"),
@@ -339,7 +345,12 @@ impl TestCase {
         match self.create_source().clone() {
             Some(source) => {
                 if let Some(content) = source.file {
-                    let sql = Self::create_connector_sql(false, source.name, source.row_format);
+                    let sql = Self::create_connector_sql(
+                        false,
+                        source.name,
+                        source.format,
+                        source.encode,
+                    );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
                         &(sql + temp_file.path().to_str().unwrap() + "')"),

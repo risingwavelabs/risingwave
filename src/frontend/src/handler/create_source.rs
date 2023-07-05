@@ -208,7 +208,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::Protobuf(protobuf_schema) => {
             if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string())));
+                    "User-defined schema is not allowed with FORMAT PLAIN ENCODE PROTOBUF. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string())));
             };
             (
                 Some(
@@ -227,7 +227,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::Avro(avro_schema) => {
             if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
+                    "User-defined schema is not allowed with FORMAT PLAIN ENCODE AVRO. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
             (
                 Some(extract_avro_table_schema(avro_schema, with_properties).await?),
@@ -340,7 +340,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::UpsertJson => {
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format upsert_json."
+                    "Primary key must be specified when creating source with FORMAT UPSERT ENCODE JSON."
                         .to_string(),
                 )));
             }
@@ -356,7 +356,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::Maxwell => {
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format maxwell."
+                    "Primary key must be specified when creating source with FORMAT MAXWELL ENCODE JSON."
                         .to_string(),
                 )));
             }
@@ -847,7 +847,7 @@ pub mod tests {
         let sql = format!(
             r#"CREATE SOURCE t
     WITH (connector = 'kinesis')
-    ROW FORMAT PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
+    FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;

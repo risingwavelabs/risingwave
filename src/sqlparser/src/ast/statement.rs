@@ -290,7 +290,6 @@ pub struct SourceSchemaV2 {
 impl ParseTo for SourceSchemaV2 {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         if p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
-            p.next_token();
             p.expect_keyword(Keyword::FORMAT)?;
             let id = p.parse_identifier()?;
             let s = id.value.to_ascii_uppercase();
