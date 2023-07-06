@@ -306,7 +306,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         }
                     }
                     if (publicationCoversTable) {
-                        LOG.info("The publication covers the table '{}'.", schemaName + "." + tableName);
+                        LOG.info(
+                                "The publication covers the table '{}'.",
+                                schemaName + "." + tableName);
                         break;
                     }
                 }
