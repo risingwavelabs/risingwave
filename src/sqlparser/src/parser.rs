@@ -520,6 +520,10 @@ impl Parser {
                     self.expect_token(&Token::LBracket)?;
                     self.parse_array_expr(true)
                 }
+                // `LEFT` and `RIGHT` are reserved as identifier but okay as function
+                Keyword::LEFT | Keyword::RIGHT => {
+                    self.parse_function(ObjectName(vec![w.to_ident()?]))
+                }
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
                     parser_err!(format!("syntax error at or near \"{w}\""))
                 }
