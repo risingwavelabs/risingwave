@@ -37,7 +37,6 @@ use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_pb::catalog::PbSinkType;
-use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::connector_service::sink_writer_to_coordinator_msg::{
     CommitRequest, StartCoordinationRequest,
 };
@@ -46,12 +45,12 @@ use risingwave_pb::connector_service::{
     SinkWriterToCoordinatorMsg,
 };
 use risingwave_rpc_client::error::RpcError;
+use risingwave_rpc_client::{MetaClient, SinkCoordinationRpcClient};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
-use tonic::transport::{Channel, Endpoint};
 use tonic::{Request, Streaming};
 pub use tracing;
 use tracing::info;
@@ -71,11 +70,12 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
+#[derive(Default)]
 pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
-    pub meta_addr: String,
+    pub meta_client: Option<MetaClient>,
 }
 
 #[async_trait]
@@ -387,12 +387,11 @@ impl Sink for CoordinatorTestSink {
             .iter_vnodes()
             .collect();
         info!("vnodes: {}, {:?}", vnodes.len(), vnodes);
-        let channel = Endpoint::from_shared(writer_param.meta_addr)
-            .unwrap()
-            .connect()
-            .await
-            .unwrap();
-        let mut client = SinkCoordinationServiceClient::new(channel);
+        let mut client = writer_param
+            .meta_client
+            .expect("should have meta client at runtime")
+            .sink_coordinate_client()
+            .await;
         let (tx, rx) = unbounded_channel();
         tx.send(SinkWriterToCoordinatorMsg {
             msg: Some(sink_writer_to_coordinator_msg::Msg::StartRequest(
@@ -427,7 +426,7 @@ impl Sink for CoordinatorTestSink {
 
 pub struct CoordinatorTestSinkWriter {
     epoch: u64,
-    client: SinkCoordinationServiceClient<Channel>,
+    client: SinkCoordinationRpcClient,
     request_sender: UnboundedSender<SinkWriterToCoordinatorMsg>,
     response_stream: Streaming<SinkCoordinatorToWriterMsg>,
 }

@@ -60,7 +60,7 @@ pub use compactor_client::CompactorClient;
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::ConnectorClient;
 pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
-pub use meta_client::MetaClient;
+pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
 #[async_trait]
