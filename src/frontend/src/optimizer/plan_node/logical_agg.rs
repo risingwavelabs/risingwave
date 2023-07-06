@@ -233,8 +233,8 @@ impl LogicalAgg {
         // with input distributed by dist_key.
         match input_dist {
             Distribution::HashShard(dist_key) | Distribution::UpstreamHashShard(dist_key, _)
-                if (!self.core.hash_agg_dist_satisfied_by_input_dist(input_dist)
-                    || self.group_key().is_clear()) =>
+                if (self.group_key().is_clear()
+                    || !self.core.hash_agg_dist_satisfied_by_input_dist(input_dist)) =>
             {
                 let dist_key = dist_key.clone();
                 return self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dist_key);
