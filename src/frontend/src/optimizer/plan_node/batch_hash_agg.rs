@@ -37,6 +37,7 @@ pub struct BatchHashAgg {
 
 impl BatchHashAgg {
     pub fn new(logical: generic::Agg<PlanRef>) -> Self {
+        assert!(!logical.group_key.is_clear());
         let input = logical.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {

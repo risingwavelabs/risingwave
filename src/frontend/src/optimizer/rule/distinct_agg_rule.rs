@@ -22,7 +22,7 @@ use risingwave_expr::agg::AggKind;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{CollectInputRef, ExprType, FunctionCall, InputRef, Literal};
-use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode};
 use crate::optimizer::plan_node::{LogicalAgg, LogicalExpand, LogicalProject, PlanAggCall};
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
@@ -37,19 +37,29 @@ impl Rule for DistinctAggRule {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (mut agg_calls, mut agg_group_keys, input) = agg.clone().decompose();
 
-        if self.for_stream && agg_group_keys.count_ones(..) != 0 {
+        if self.for_stream && !agg_group_keys.is_clear() {
             // Due to performance issue, we don't do 2-phase agg for stream distinct agg with group
             // by. See https://github.com/risingwavelabs/risingwave/issues/7271 for more.
             return None;
         }
 
-        let original_group_keys_len = agg_group_keys.count_ones(..);
         let (node, flag_values, has_expand) =
             Self::build_expand(input, &mut agg_group_keys, &mut agg_calls)?;
-        let mid_agg = Self::build_middle_agg(node, agg_group_keys, agg_calls.clone(), has_expand);
+        let mid_agg =
+            Self::build_middle_agg(node, agg_group_keys.clone(), agg_calls.clone(), has_expand);
+
+        // The middle agg will extend some fields for `agg_group_keys` and `agg_group_keys` is a
+        // FixedBitSet, so we need to find out the original group key for the final agg.
+        let mut final_agg_group_keys = FixedBitSet::with_capacity(mid_agg.schema().len());
+        for (i, v) in mid_agg.group_key.ones().enumerate() {
+            if agg_group_keys.contains(v) {
+                final_agg_group_keys.put(i);
+            }
+        }
+
         Some(Self::build_final_agg(
             mid_agg,
-            original_group_keys_len,
+            final_agg_group_keys,
             agg_calls,
             flag_values,
             has_expand,
@@ -213,7 +223,7 @@ impl DistinctAggRule {
 
     fn build_final_agg(
         mid_agg: Agg<PlanRef>,
-        original_group_keys_len: usize,
+        final_agg_group_keys: FixedBitSet,
         mut agg_calls: Vec<PlanAggCall>,
         flag_values: Vec<usize>,
         has_expand: bool,
@@ -325,11 +335,6 @@ impl DistinctAggRule {
             }
         });
 
-        Agg::new(
-            agg_calls,
-            (0..original_group_keys_len).collect(),
-            mid_agg.into(),
-        )
-        .into()
+        Agg::new(agg_calls, final_agg_group_keys, mid_agg.into()).into()
     }
 }
