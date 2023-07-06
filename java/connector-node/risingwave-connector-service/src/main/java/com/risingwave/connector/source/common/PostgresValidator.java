@@ -285,6 +285,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                             ValidatorUtils.getSql("postgres.publication_attnames"))) {
                 stmt.setString(1, schemaName);
                 stmt.setString(2, tableName);
+                stmt.setString(3, pubName);
                 var res = stmt.executeQuery();
                 while (res.next()) {
                     String[] columnsPub = (String[]) res.getArray("attnames").getArray();
@@ -315,6 +316,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                             ValidatorUtils.getSql("postgres.publication_has_table"))) {
                 stmt.setString(1, schemaName);
                 stmt.setString(2, tableName);
+                stmt.setString(3, pubName);
                 var res = stmt.executeQuery();
                 if (res.next()) {
                     publicationCoversTable = res.getBoolean(1);
@@ -408,12 +410,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void alterPublicationIfNeeded() throws SQLException {
-        try (var stmt =
-                jdbcConnection.prepareStatement(
-                        ValidatorUtils.getSql("postgres.publication_alter"))) {
-            stmt.setString(1, this.tableName);
-            stmt.executeQuery();
+        String alterPublicationSql =
+                String.format(
+                        "ALTER PUBLICATION %s ADD TABLE %s", pubName, schemaName + "." + tableName);
+        try (var stmt = jdbcConnection.createStatement()) {
             LOG.info("Altered publication with statement: {}", stmt);
+            stmt.execute(alterPublicationSql);
         }
     }
 
