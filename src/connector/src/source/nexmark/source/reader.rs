@@ -182,7 +182,7 @@ mod tests {
 
     use super::*;
     use crate::source::nexmark::{NexmarkPropertiesInner, NexmarkSplitEnumerator};
-    use crate::source::{SplitEnumerator, SplitImpl};
+    use crate::source::{SourceEnumeratorContext, SplitEnumerator, SplitImpl};
 
     #[tokio::test]
     async fn test_nexmark_split_reader() -> Result<()> {
@@ -194,7 +194,9 @@ mod tests {
             ..Default::default()
         });
 
-        let mut enumerator = NexmarkSplitEnumerator::new(props.clone()).await?;
+        let mut enumerator =
+            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+                .await?;
         let list_splits_resp: Vec<SplitImpl> = enumerator
             .list_splits()
             .await?
