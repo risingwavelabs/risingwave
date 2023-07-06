@@ -37,6 +37,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             input,
             pk_indices,
             executor_id,
+            env,
             ..
         } = params;
 
@@ -84,6 +85,8 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         let window_slide = node.get_window_slide()?.into();
         let window_size = node.get_window_size()?.into();
 
+        let chunk_size = env.config().developer.chunk_size;
+
         Ok(HopWindowExecutor::new(
             actor_context,
             input,
@@ -94,6 +97,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             window_start_exprs,
             window_end_exprs,
             output_indices,
+            chunk_size,
         )
         .boxed())
     }

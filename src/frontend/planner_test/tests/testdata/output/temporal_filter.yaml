@@ -116,3 +116,87 @@
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
 
+- name: Temporal filter in on clause for inner join's left side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 join t2 on a = b AND ta < now() - interval '1 hour' and ta >= now() - interval '2 hour';
+  stream_plan: |-
+    StreamMaterialize { columns: [a, ta, b, tb, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, a], pk_columns: [t1._row_id, t2._row_id, a], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: Inner, predicate: t1.a = t2.b, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
+      ├─StreamExchange { dist: HashShard(t1.a) }
+      │ └─StreamDynamicFilter { predicate: (t1.ta < $expr2), output: [t1.a, t1.ta, t1._row_id] }
+      │   ├─StreamDynamicFilter { predicate: (t1.ta >= $expr1), output_watermarks: [t1.ta], output: [t1.a, t1.ta, t1._row_id] }
+      │   │ ├─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      │   │ └─StreamExchange { dist: Broadcast }
+      │   │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+      │   │     └─StreamNow { output: [now] }
+      │   └─StreamExchange { dist: Broadcast }
+      │     └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+      │       └─StreamNow { output: [now] }
+      └─StreamExchange { dist: HashShard(t2.b) }
+        └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: Temporal filter in on clause for left join's left side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 left join t2 on a = b AND ta < now() - interval '1 hour' and ta >= now() - interval '2 hour';
+  stream_error: |-
+    Not supported: optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?
+    HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+- name: Temporal filter in on clause for right join's left side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 right join t2 on a = b AND ta < now() - interval '1 hour' and ta >= now() - interval '2 hour';
+  stream_plan: |-
+    StreamMaterialize { columns: [a, ta, b, tb, t2._row_id(hidden), t1._row_id(hidden)], stream_key: [t2._row_id, t1._row_id, b], pk_columns: [t2._row_id, t1._row_id, b], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: LeftOuter, predicate: t2.b = t1.a, output: [t1.a, t1.ta, t2.b, t2.tb, t2._row_id, t1._row_id] }
+      ├─StreamExchange { dist: HashShard(t2.b) }
+      │ └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+      └─StreamExchange { dist: HashShard(t1.a) }
+        └─StreamDynamicFilter { predicate: (t1.ta < $expr2), output: [t1.a, t1.ta, t1._row_id] }
+          ├─StreamDynamicFilter { predicate: (t1.ta >= $expr1), output_watermarks: [t1.ta], output: [t1.a, t1.ta, t1._row_id] }
+          │ ├─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+          │ └─StreamExchange { dist: Broadcast }
+          │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+          │     └─StreamNow { output: [now] }
+          └─StreamExchange { dist: Broadcast }
+            └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+              └─StreamNow { output: [now] }
+- name: Temporal filter in on clause for full join's left side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 full join t2 on a = b AND ta < now() - interval '1 hour' and ta >= now() - interval '2 hour';
+  stream_error: |-
+    Not supported: optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?
+    HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+- name: Temporal filter in on clause for left join's right side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 left join t2 on a = b AND tb < now() - interval '1 hour' and tb >= now() - interval '2 hour';
+  stream_plan: |-
+    StreamMaterialize { columns: [a, ta, b, tb, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, a], pk_columns: [t1._row_id, t2._row_id, a], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: LeftOuter, predicate: t1.a = t2.b, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
+      ├─StreamExchange { dist: HashShard(t1.a) }
+      │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: HashShard(t2.b) }
+        └─StreamDynamicFilter { predicate: (t2.tb < $expr2), output: [t2.b, t2.tb, t2._row_id] }
+          ├─StreamDynamicFilter { predicate: (t2.tb >= $expr1), output_watermarks: [t2.tb], output: [t2.b, t2.tb, t2._row_id] }
+          │ ├─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+          │ └─StreamExchange { dist: Broadcast }
+          │   └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+          │     └─StreamNow { output: [now] }
+          └─StreamExchange { dist: Broadcast }
+            └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+              └─StreamNow { output: [now] }
+- name: Temporal filter in on clause for right join's right side
+  sql: |
+    create table t1 (a int, ta timestamp with time zone);
+    create table t2 (b int, tb timestamp with time zone);
+    select * from t1 right join t2 on a = b AND tb < now() - interval '1 hour' and tb >= now() - interval '2 hour';
+  stream_error: |-
+    Not supported: optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?
+    HINT: please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information

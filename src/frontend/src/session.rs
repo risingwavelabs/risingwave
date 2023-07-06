@@ -40,6 +40,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
@@ -53,6 +54,7 @@ use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient}
 use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use tokio::runtime::Builder;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -117,6 +119,10 @@ pub struct FrontendEnv {
     /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
     /// received.
     creating_streaming_job_tracker: StreamingJobTrackerRef,
+
+    /// Runtime for compute intensive tasks in frontend, e.g. executors in local mode,
+    /// root stage in mpp mode.
+    compute_runtime: Arc<BackgroundShutdownRuntime>,
 }
 
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
@@ -162,6 +168,7 @@ impl FrontendEnv {
             meta_config: MetaConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
+            compute_runtime: Self::create_compute_runtime(),
         }
     }
 
@@ -331,6 +338,7 @@ impl FrontendEnv {
                 meta_config,
                 source_metrics,
                 creating_streaming_job_tracker,
+                compute_runtime: Self::create_compute_runtime(),
             },
             join_handles,
             shutdown_senders,
@@ -403,6 +411,21 @@ impl FrontendEnv {
 
     pub fn creating_streaming_job_tracker(&self) -> &StreamingJobTrackerRef {
         &self.creating_streaming_job_tracker
+    }
+
+    pub fn compute_runtime(&self) -> Arc<BackgroundShutdownRuntime> {
+        self.compute_runtime.clone()
+    }
+
+    fn create_compute_runtime() -> Arc<BackgroundShutdownRuntime> {
+        Arc::new(BackgroundShutdownRuntime::from(
+            Builder::new_multi_thread()
+                .worker_threads(4)
+                .thread_name("frontend-compute-threads")
+                .enable_all()
+                .build()
+                .unwrap(),
+        ))
     }
 }
 

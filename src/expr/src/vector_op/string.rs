@@ -161,7 +161,7 @@ pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
 /// query T
 /// select rpad('abc', 5);
 /// ----
-/// abc  
+/// abc
 ///
 /// query T
 /// select rpad('abcdef', 3);
@@ -380,4 +380,124 @@ pub fn quote_ident(s: &str, writer: &mut dyn Write) {
         }
     }
     write!(writer, "\"").unwrap();
+}
+
+/// Returns the first n characters in the string.
+/// If n is a negative value, the function will return all but last |n| characters.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select left('RisingWave', 6)
+/// ----
+/// Rising
+///
+/// query T
+/// select left('RisingWave', 42)
+/// ----
+/// RisingWave
+///
+/// query T
+/// select left('RisingWave', 0)
+/// ----
+/// (empty)
+///
+/// query T
+/// select left('RisingWave', -4)
+/// ----
+/// Rising
+///
+/// query T
+/// select left('RisingWave', -2147483648);
+/// ----
+/// (empty)
+/// ```
+#[function("left(varchar, int32) -> varchar")]
+pub fn left(s: &str, n: i32, writer: &mut dyn Write) {
+    let n = if n >= 0 {
+        n as usize
+    } else {
+        s.chars().count().saturating_add_signed(n as isize)
+    };
+
+    s.chars()
+        .take(n)
+        .for_each(|c| writer.write_char(c).unwrap());
+}
+
+/// Returns the last n characters in the string.
+/// If n is a negative value, the function will return all but first |n| characters.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// select right('RisingWave', 4)
+/// ----
+/// Wave
+///
+/// query T
+/// select left('RisingWave', 42)
+/// ----
+/// RisingWave
+///
+/// query T
+/// select right('RisingWave', 0)
+/// ----
+/// (empty)
+///
+/// query T
+/// select right('RisingWave', -6)
+/// ----
+/// Wave
+///
+/// # PostgreSQL returns the whole string due to an overflow bug, which we do not follow.
+/// query T
+/// select right('RisingWave', -2147483648);
+/// ----
+/// (empty)
+/// ```
+#[function("right(varchar, int32) -> varchar")]
+pub fn right(s: &str, n: i32, writer: &mut dyn Write) {
+    let skip = if n >= 0 {
+        s.chars().count().saturating_sub(n as usize)
+    } else {
+        // `n as usize` is signed extended. This is `-n` without overflow.
+        usize::MAX - (n as usize) + 1
+    };
+
+    s.chars()
+        .skip(skip)
+        .for_each(|c| writer.write_char(c).unwrap());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_left_and_right() {
+        let s = "cxscgccdd";
+        let us = "上海自来水来自海上";
+
+        let cases = [
+            (s, 3, "cxs", "cdd"),
+            (s, -3, "cxscgc", "cgccdd"),
+            (s, 0, "", ""),
+            (s, 15, "cxscgccdd", "cxscgccdd"),
+            // Unicode test
+            (us, 5, "上海自来水", "水来自海上"),
+            (us, -6, "上海自", "自海上"),
+        ];
+
+        for (s, n, left_expected, right_expected) in cases {
+            let mut left_writer = String::new();
+            let mut right_writer = String::new();
+            left(s, n, &mut left_writer);
+            right(s, n, &mut right_writer);
+            assert_eq!(left_writer, left_expected);
+            assert_eq!(right_writer, right_expected);
+        }
+    }
 }

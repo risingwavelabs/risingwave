@@ -39,6 +39,125 @@ use crate::utils::{
 };
 use crate::TableCatalog;
 
+/// Macros to generate match arms for [`AggKind`].
+/// IMPORTANT: These macros must be carefully maintained especially when adding new [`AggKind`]
+/// variants.
+pub(crate) mod agg_kinds {
+    /// [`AggKind`]s that are currently not supported in streaming mode.
+    macro_rules! unimplemented_in_stream {
+        () => {
+            AggKind::BitAnd
+                | AggKind::BitOr
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::JsonbAgg
+                | AggKind::JsonbObjectAgg
+                | AggKind::PercentileCont
+                | AggKind::PercentileDisc
+                | AggKind::Mode
+        };
+    }
+    pub(crate) use unimplemented_in_stream;
+
+    /// [`AggKind`]s that should've been rewritten to other kinds. These kinds should not appear
+    /// when generating physical plan nodes.
+    macro_rules! rewritten {
+        () => {
+            AggKind::Avg
+                | AggKind::StddevPop
+                | AggKind::StddevSamp
+                | AggKind::VarPop
+                | AggKind::VarSamp
+        };
+    }
+    pub(crate) use rewritten;
+
+    /// [`AggKind`]s of which the aggregate results are not affected by the user given ORDER BY
+    /// clause.
+    macro_rules! result_unaffected_by_order_by {
+        () => {
+            AggKind::BitAnd
+                | AggKind::BitOr
+                | AggKind::BitXor // XOR is commutative and associative
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::Min
+                | AggKind::Max
+                | AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::Avg
+                | AggKind::ApproxCountDistinct
+                | AggKind::VarPop
+                | AggKind::VarSamp
+                | AggKind::StddevPop
+                | AggKind::StddevSamp
+        };
+    }
+    pub(crate) use result_unaffected_by_order_by;
+
+    /// [`AggKind`]s that must be called with ORDER BY clause. These are slightly different from
+    /// variants not in [`result_unaffected_by_order_by`], in that variants returned by this macro
+    /// should be banned while the others should just be warned.
+    macro_rules! must_have_order_by {
+        () => {
+            AggKind::FirstValue
+                | AggKind::LastValue
+                | AggKind::PercentileCont
+                | AggKind::PercentileDisc
+                | AggKind::Mode
+        };
+    }
+    pub(crate) use must_have_order_by;
+
+    /// [`AggKind`]s of which the aggregate results are not affected by the user given DISTINCT
+    /// keyword.
+    macro_rules! result_unaffected_by_distinct {
+        () => {
+            AggKind::BitAnd
+                | AggKind::BitOr
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::Min
+                | AggKind::Max
+                | AggKind::ApproxCountDistinct
+        };
+    }
+    pub(crate) use result_unaffected_by_distinct;
+
+    /// [`AggKind`]s that are simply cannot 2-phased.
+    macro_rules! simply_cannot_two_phase {
+        () => {
+            AggKind::StringAgg
+                | AggKind::ApproxCountDistinct
+                | AggKind::ArrayAgg
+                | AggKind::JsonbAgg
+                | AggKind::JsonbObjectAgg
+                | AggKind::PercentileCont
+                | AggKind::PercentileDisc
+                | AggKind::Mode
+        };
+    }
+    pub(crate) use simply_cannot_two_phase;
+
+    /// [`AggKind`]s that are implemented with a single value state (so-called stateless).
+    macro_rules! single_value_state {
+        () => {
+            AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::BitXor
+        };
+    }
+    pub(crate) use single_value_state;
+
+    /// [`AggKind`]s that are implemented with a single value state (so-called stateless) iff the
+    /// input is append-only.
+    macro_rules! single_value_state_iff_in_append_only {
+        () => {
+            AggKind::Max | AggKind::Min
+        };
+    }
+    pub(crate) use single_value_state_iff_in_append_only;
+}
+
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
 ///
 /// It corresponds to the `GROUP BY` operator in a SQL query statement together with the aggregate
@@ -82,23 +201,31 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         ColIndexMapping::with_target_size(map, self.output_len())
     }
 
-    pub(crate) fn can_two_phase_agg(&self) -> bool {
-        self.call_support_two_phase()
-            && !self.is_agg_result_affected_by_order()
-            && self.two_phase_agg_enabled()
-    }
-
-    /// Must try two phase agg iff we are forced to, and we satisfy the constraints.
-    pub(crate) fn must_try_two_phase_agg(&self) -> bool {
-        self.two_phase_agg_forced() && self.can_two_phase_agg()
-    }
-
     fn two_phase_agg_forced(&self) -> bool {
         self.ctx().session_ctx().config().get_force_two_phase_agg()
     }
 
     fn two_phase_agg_enabled(&self) -> bool {
         self.ctx().session_ctx().config().get_enable_two_phase_agg()
+    }
+
+    pub(crate) fn can_two_phase_agg(&self) -> bool {
+        self.two_phase_agg_enabled()
+            && !self.agg_calls.is_empty()
+            && self.agg_calls.iter().all(|call| {
+                let agg_kind_ok = !matches!(call.agg_kind, agg_kinds::simply_cannot_two_phase!());
+                let order_ok = matches!(call.agg_kind, agg_kinds::result_unaffected_by_order_by!())
+                    || call.order_by.is_empty();
+                let distinct_ok =
+                    matches!(call.agg_kind, agg_kinds::result_unaffected_by_distinct!())
+                        || !call.distinct;
+                agg_kind_ok && order_ok && distinct_ok
+            })
+    }
+
+    /// Must try two phase agg iff we are forced to, and we satisfy the constraints.
+    pub(crate) fn must_try_two_phase_agg(&self) -> bool {
+        self.two_phase_agg_forced() && self.can_two_phase_agg()
     }
 
     /// Generally used by two phase hash agg.
@@ -112,21 +239,12 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         input_dist.satisfies(&required_dist)
     }
 
-    fn call_support_two_phase(&self) -> bool {
-        !self.agg_calls.is_empty()
-            && self.agg_calls.iter().all(|call| {
-                matches!(
-                    call.agg_kind,
-                    AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
-                ) && !call.distinct
-            })
-    }
-
-    /// Check if the aggregation result will be affected by order by clause, if any.
-    pub(crate) fn is_agg_result_affected_by_order(&self) -> bool {
-        self.agg_calls
-            .iter()
-            .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
+    /// See if all stream aggregation calls have a stateless local agg counterpart.
+    pub(crate) fn all_local_aggs_are_stateless(&self, stream_input_append_only: bool) -> bool {
+        self.agg_calls.iter().all(|c| {
+            matches!(c.agg_kind, agg_kinds::single_value_state!())
+                || (matches!(c.agg_kind, agg_kinds::single_value_state_iff_in_append_only!() if stream_input_append_only))
+        })
     }
 
     pub(crate) fn watermark_group_key(&self, input_watermark_columns: &FixedBitSet) -> Vec<usize> {
@@ -395,23 +513,14 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             }
         };
 
-        let gen_table_state = |agg_kind: AggKind| -> TableState {
+        let gen_table_state = |fields: Vec<Field>| -> TableState {
             let (mut table_builder, included_upstream_indices, _) =
                 self.create_table_builder(me.ctx(), window_col_idx);
             let read_prefix_len_hint = table_builder.get_current_pk_len();
 
-            match agg_kind {
-                AggKind::ApproxCountDistinct => {
-                    // Add register column.
-                    table_builder.add_column(&Field {
-                        data_type: DataType::List(Box::new(DataType::Int64)),
-                        name: String::from("registers"),
-                        sub_fields: vec![],
-                        type_name: String::default(),
-                    });
-                }
-                _ => panic!("state of agg kind `{agg_kind}` is not supposed to be `TableState`"),
-            }
+            fields.iter().for_each(|field| {
+                table_builder.add_column(field);
+            });
 
             let mapping =
                 ColIndexMapping::with_included_columns(&included_upstream_indices, in_fields.len());
@@ -427,78 +536,85 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         self.agg_calls
             .iter()
             .map(|agg_call| match agg_call.agg_kind {
+                agg_kinds::single_value_state_iff_in_append_only!() if in_append_only => {
+                    AggCallState::ResultValue
+                }
+                agg_kinds::single_value_state!() => AggCallState::ResultValue,
                 AggKind::Min
                 | AggKind::Max
+                | AggKind::FirstValue
+                | AggKind::LastValue
                 | AggKind::StringAgg
-                | AggKind::ArrayAgg
-                | AggKind::JsonbAgg
-                | AggKind::JsonbObjectAgg
-                | AggKind::FirstValue => {
-                    if !in_append_only {
-                        // columns with order requirement in state table
-                        let sort_keys = {
-                            match agg_call.agg_kind {
-                                AggKind::Min => {
-                                    vec![(OrderType::ascending(), agg_call.inputs[0].index)]
+                | AggKind::ArrayAgg => {
+                    // columns with order requirement in state table
+                    let sort_keys = {
+                        match agg_call.agg_kind {
+                            AggKind::Min => {
+                                vec![(OrderType::ascending(), agg_call.inputs[0].index)]
+                            }
+                            AggKind::Max => {
+                                vec![(OrderType::descending(), agg_call.inputs[0].index)]
+                            }
+                            AggKind::FirstValue
+                            | AggKind::LastValue
+                            | AggKind::StringAgg
+                            | AggKind::ArrayAgg => {
+                                if agg_call.order_by.is_empty() {
+                                    me.ctx().warn_to_user(format!(
+                                        "{} without ORDER BY may produce non-deterministic result",
+                                        agg_call.agg_kind,
+                                    ));
                                 }
-                                AggKind::Max => {
-                                    vec![(OrderType::descending(), agg_call.inputs[0].index)]
-                                }
-                                AggKind::StringAgg
-                                | AggKind::ArrayAgg
-                                | AggKind::JsonbAgg
-                                | AggKind::JsonbObjectAgg => agg_call
+                                agg_call
                                     .order_by
                                     .iter()
-                                    .map(|o| (o.order_type, o.column_index))
-                                    .collect(),
-                                _ => unreachable!(),
+                                    .map(|o| {
+                                        (
+                                            if agg_call.agg_kind == AggKind::LastValue {
+                                                o.order_type.reverse()
+                                            } else {
+                                                o.order_type
+                                            },
+                                            o.column_index,
+                                        )
+                                    })
+                                    .collect()
                             }
-                        };
-                        // other columns that should be contained in state table
-                        let include_keys = match agg_call.agg_kind {
-                            AggKind::StringAgg
-                            | AggKind::ArrayAgg
-                            | AggKind::JsonbAgg
-                            | AggKind::JsonbObjectAgg => {
-                                agg_call.inputs.iter().map(|i| i.index).collect()
-                            }
-                            _ => vec![],
-                        };
-                        let state = gen_materialized_input_state(sort_keys, include_keys);
-                        AggCallState::MaterializedInput(Box::new(state))
-                    } else {
-                        AggCallState::ResultValue
-                    }
+                            _ => unreachable!(),
+                        }
+                    };
+                    // other columns that should be contained in state table
+                    let include_keys = match agg_call.agg_kind {
+                        AggKind::FirstValue
+                        | AggKind::LastValue
+                        | AggKind::StringAgg
+                        | AggKind::ArrayAgg => agg_call.inputs.iter().map(|i| i.index).collect(),
+                        _ => vec![],
+                    };
+                    let state = gen_materialized_input_state(sort_keys, include_keys);
+                    AggCallState::MaterializedInput(Box::new(state))
                 }
-                AggKind::BitXor
-                | AggKind::Sum
-                | AggKind::Sum0
-                | AggKind::Count
-                | AggKind::Avg
-                | AggKind::StddevPop
-                | AggKind::StddevSamp
-                | AggKind::VarPop
-                | AggKind::VarSamp => AggCallState::ResultValue,
                 AggKind::ApproxCountDistinct => {
-                    if !in_append_only {
-                        // FIXME: now the approx count distinct on a non-append-only stream does not
-                        // really has state and can handle failover or scale-out correctly
-                        AggCallState::ResultValue
-                    } else {
-                        let state = gen_table_state(agg_call.agg_kind);
+                    // NOTE(rc): This is quite confusing, in that the append-only version has table
+                    // state while updatable version has value state. The latter one may be
+                    // incorrect.
+                    if in_append_only {
+                        let state = gen_table_state(vec![Field {
+                            data_type: DataType::List(Box::new(DataType::Int64)),
+                            name: String::from("registers"),
+                            sub_fields: vec![],
+                            type_name: String::default(),
+                        }]);
                         AggCallState::Table(Box::new(state))
+                    } else {
+                        AggCallState::ResultValue
                     }
                 }
-                // TODO: is its state a Table?
-                AggKind::BitAnd
-                | AggKind::BitOr
-                | AggKind::BoolAnd
-                | AggKind::BoolOr
-                | AggKind::PercentileCont
-                | AggKind::PercentileDisc
-                | AggKind::Mode => {
-                    unimplemented!()
+                agg_kinds::rewritten!() => {
+                    unreachable!("should have been rewritten")
+                }
+                agg_kinds::unimplemented_in_stream!() => {
+                    unreachable!("should have been banned")
                 }
             })
             .collect()
@@ -594,7 +710,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
     pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
         let last = ("aggs", self.agg_calls_pretty());
-        if self.group_key.count_ones(..) != 0 {
+        if !self.group_key.is_clear() {
             let first = ("group_key", self.group_key_pretty());
             vec![first, last]
         } else {
@@ -728,21 +844,21 @@ impl PlanAggCall {
             | AggKind::BoolOr
             | AggKind::Min
             | AggKind::Max
-            | AggKind::StringAgg
             | AggKind::FirstValue
-            | AggKind::PercentileCont
-            | AggKind::PercentileDisc
-            | AggKind::Mode => self.agg_kind,
-            AggKind::Count | AggKind::ApproxCountDistinct | AggKind::Sum0 => AggKind::Sum0,
+            | AggKind::LastValue => self.agg_kind,
             AggKind::Sum => AggKind::Sum,
-            AggKind::Avg => {
-                panic!("Avg aggregation should have been rewritten to Sum+Count")
+            AggKind::Sum0 | AggKind::Count => AggKind::Sum0,
+            agg_kinds::simply_cannot_two_phase!() => {
+                unreachable!(
+                    "{} aggregation cannot be converted to 2-phase",
+                    self.agg_kind
+                )
             }
-            AggKind::ArrayAgg | AggKind::JsonbAgg | AggKind::JsonbObjectAgg => {
-                panic!("2-phase {} is not supported yet", self.agg_kind)
-            }
-            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
-                panic!("Stddev/Var aggregation should have been rewritten to Sum, Count and Case")
+            agg_kinds::rewritten!() => {
+                unreachable!(
+                    "{} aggregation should have been rewritten to Sum, Count and Case",
+                    self.agg_kind
+                )
             }
         };
         PlanAggCall {

@@ -42,7 +42,7 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
     fn visit_logical_agg(&mut self, plan: &plan_node::LogicalAgg) -> Cardinality {
         let input = self.visit(plan.input());
 
-        if plan.group_key().is_empty() {
+        if plan.group_key().is_clear() {
             input.min(1)
         } else {
             input.min(1..)

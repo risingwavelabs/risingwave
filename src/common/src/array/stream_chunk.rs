@@ -101,6 +101,12 @@ impl StreamChunk {
         StreamChunk { ops, data }
     }
 
+    /// Create a `StreamChunk` from the given `DataChunk` and `Op`s.
+    pub fn from_data_chunk(ops: Vec<Op>, data: DataChunk) -> Self {
+        assert_eq!(ops.len(), data.capacity());
+        StreamChunk { ops, data }
+    }
+
     /// Build a `StreamChunk` from rows.
     // TODO: introducing something like `StreamChunkBuilder` maybe better.
     pub fn from_rows(rows: &[(Op, OwnedRow)], data_types: &[DataType]) -> Self {
@@ -358,6 +364,7 @@ impl StreamChunkTestExt for StreamChunk {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// //    TZ: Timestamptz
     /// //   SRL: Serial
     /// // {i,f}: struct
     /// ```

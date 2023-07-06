@@ -103,6 +103,7 @@ impl BuildingFragment {
                 table_type_name,
             );
             table.fragment_id = fragment_id;
+            table.owner = job.owner();
 
             // Record the internal table.
             internal_tables.push(table.clone());

@@ -40,7 +40,7 @@ pub struct Expand<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
-    fn output_len(&self) -> usize {
+    pub fn output_len(&self) -> usize {
         self.input.schema().len() * 2 + 1
     }
 
