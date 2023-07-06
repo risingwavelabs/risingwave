@@ -659,6 +659,14 @@ pub fn validate_compatibility(
             // Default schema name is "public"
             props.insert("schema.name".into(), "public".into());
         }
+        if !props.contains_key("publication.name") {
+            // Default publication name is "rw_publication"
+            props.insert("publication.name".into(), "rw_publication".into());
+        }
+        if !props.contains_key("publication.create.enable") {
+            // Default auto create publication if doesn't exist
+            props.insert("publication.create.enable".into(), "true".into());
+        }
     }
     Ok(())
 }
