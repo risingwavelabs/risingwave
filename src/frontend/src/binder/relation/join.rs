@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{
 
 use crate::binder::bind_context::BindContext;
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
+use crate::binder::{Binder, Clause, Relation, COLUMN_GROUP_PREFIX};
 use crate::expr::ExprImpl;
 
 #[derive(Debug, Clone)]
@@ -141,7 +141,7 @@ impl Binder {
                     .context
                     .indices_of
                     .iter()
-                    .filter(|(s, _)| *s != "_row_id") // filter out `_row_id`
+                    .filter(|(_, idxs)| idxs.iter().all(|i| !self.context.columns[*i].is_hidden))
                     .map(|(s, idxes)| (Ident::new_unchecked(s.to_owned()), idxes))
                     .collect::<Vec<_>>();
                 columns.sort_by(|a, b| a.0.real_value().cmp(&b.0.real_value()));
@@ -206,9 +206,12 @@ impl Binder {
                 (expr, Some(relation))
             }
             JoinConstraint::On(expr) => {
-                let bound_expr = self
+                let clause = self.context.clause;
+                self.context.clause = Some(Clause::JoinOn);
+                let bound_expr: ExprImpl = self
                     .bind_expr(expr)
                     .and_then(|expr| expr.enforce_bool_clause("JOIN ON"))?;
+                self.context.clause = clause;
                 (bound_expr, None)
             }
         })

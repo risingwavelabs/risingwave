@@ -99,3 +99,29 @@ drop materialized view v2;
 
 statement ok
 drop table t1;
+
+statement ok
+create table t(v1 int, v2 int);
+
+statement ok
+create materialized view mv as
+select
+    first_value(v1 order by v1) as o1
+  , first_value(v1 order by v2 desc) as o2
+  , last_value(v1 order by v1) as o3
+  , last_value(v1 order by v2 asc nulls first) as o4
+from t;
+
+statement ok
+insert into t values (1, 2), (5, null), (4, 0);
+
+query iiii
+select * from mv;
+----
+1  5  5  1
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;

@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::{self, Error as IoError, ErrorKind};
+use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str;
@@ -26,6 +27,7 @@ use futures::stream::StreamExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use risingwave_common::types::DataType;
+use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -162,7 +164,17 @@ where
     }
 
     async fn do_process(&mut self, msg: FeMessage) -> bool {
-        match self.do_process_inner(msg).await {
+        let result = AssertUnwindSafe(self.do_process_inner(msg))
+            .rw_catch_unwind()
+            .await
+            .unwrap_or_else(|payload| {
+                Err(PsqlError::Panic(
+                    panic_message::panic_message(&payload).to_owned(),
+                ))
+            })
+            .inspect_err(|error| error!(%error, "error when process message"));
+
+        match result {
             Ok(v) => v,
             Err(e) => {
                 match e {
@@ -172,10 +184,9 @@ where
                         }
                     }
 
-                    PsqlError::SslError(e) => {
+                    PsqlError::SslError(_) => {
                         // For ssl error, because the stream has already been consumed, so there is
                         // no way to write more message.
-                        error!("SSL connection setup error: {}", e);
                         return true;
                     }
 
@@ -184,9 +195,7 @@ where
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
                             .unwrap();
-                        self.stream.flush().await.unwrap_or_else(|e| {
-                            tracing::error!("flush error: {}", e);
-                        });
+                        let _ = self.stream.flush().await;
                         return true;
                     }
 
@@ -199,6 +208,18 @@ where
                             .unwrap();
                     }
 
+                    PsqlError::Panic(_) => {
+                        self.stream
+                            .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
+                            .unwrap();
+                        let _ = self.stream.flush().await;
+
+                        // Catching the panic during message processing may leave the session in an
+                        // inconsistent state. We forcefully close the connection (then end the
+                        // session) here for safety.
+                        return true;
+                    }
+
                     PsqlError::Internal(_)
                     | PsqlError::ParseError(_)
                     | PsqlError::ExecuteError(_) => {
@@ -207,9 +228,7 @@ where
                             .unwrap();
                     }
                 }
-                self.stream.flush().await.unwrap_or_else(|e| {
-                    tracing::error!("flush error: {}", e);
-                });
+                let _ = self.stream.flush().await;
                 false
             }
         }
@@ -369,7 +388,7 @@ where
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
-            let span = tracing::info_span!("run_stmt", %stmt);
+            let span = tracing::info_span!("run_stmt", %stmt, session_id = session.id().0);
 
             self.inner_process_query_msg_one_stmt(stmt, session.clone())
                 .instrument(span)
@@ -894,10 +913,7 @@ where
             Conn::Unencrypted(s) => s.write_no_flush(message),
             Conn::Ssl(s) => s.write_no_flush(message),
         }
-        .map_err(|e| {
-            tracing::error!("flush error: {}", e);
-            e
-        })
+        .inspect_err(|error| tracing::error!(%error, "flush error"))
     }
 
     async fn write(&mut self, message: &BeMessage<'_>) -> io::Result<()> {
@@ -912,6 +928,7 @@ where
             Conn::Unencrypted(s) => s.flush().await,
             Conn::Ssl(s) => s.flush().await,
         }
+        .inspect_err(|error| tracing::error!(%error, "flush error"))
     }
 
     async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<PgStream<SslStream<S>>> {

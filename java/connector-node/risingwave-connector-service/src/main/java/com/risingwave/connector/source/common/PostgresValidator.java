@@ -51,13 +51,39 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     @Override
     public void validateDbConfig() {
         // TODO: check database server version
-        // check whether source db has enabled wal
         try (var stmt = jdbcConnection.createStatement()) {
+            // check whether wal has been enabled
             var res = stmt.executeQuery(ValidatorUtils.getSql("postgres.wal"));
             while (res.next()) {
                 if (!res.getString(1).equals("logical")) {
                     throw ValidatorUtils.invalidArgument(
                             "Postgres wal_level should be 'logical'.\nPlease modify the config and restart your Postgres server.");
+                }
+            }
+        } catch (SQLException e) {
+            throw ValidatorUtils.internalError(e);
+        }
+
+        try (var stmt =
+                jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.slot.check"))) {
+            // check whether the replication slot is already existed
+            var slotName = userProps.get(DbzConnectorConfig.PG_SLOT_NAME);
+            var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
+            stmt.setString(1, slotName);
+            stmt.setString(2, dbName);
+            var res = stmt.executeQuery();
+            if (res.next() && res.getString(1).equals(slotName)) {
+                LOG.info("replication slot '{}' already exists, just use it", slotName);
+            } else {
+                // otherwise, we need to create a new one
+                var stmt2 =
+                        jdbcConnection.prepareStatement(
+                                ValidatorUtils.getSql("postgres.slot_limit.check"));
+                var res2 = stmt2.executeQuery();
+                // check whether the number of replication slots reaches the max limit
+                if (res2.next() && res2.getString(1).equals("true")) {
+                    throw ValidatorUtils.failedPrecondition(
+                            "all replication slots are in use\n Hint: Free one or increase max_replication_slots.");
                 }
             }
         } catch (SQLException e) {
@@ -141,7 +167,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             stmt.setString(2, tableName);
             var res = stmt.executeQuery();
 
-            // Field name in lower case -> data type
+            // Field names in lower case -> data type
             Map<String, String> schema = new HashMap<>();
             while (res.next()) {
                 var field = res.getString(1);
