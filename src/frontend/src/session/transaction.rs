@@ -112,7 +112,7 @@ impl SessionImpl {
     pub fn txn_begin_implicit(&self) -> ImplicitAutoCommitGuard {
         let mut txn = self.txn.lock();
 
-        match &mut *txn {
+        match &*txn {
             State::Initial => {
                 *txn = State::Implicit(Context {
                     id: Id::new(),
@@ -132,7 +132,7 @@ impl SessionImpl {
     pub fn txn_begin_explicit(&self, access_mode: AccessMode) {
         let mut txn = self.txn.lock();
 
-        match &mut *txn {
+        match &*txn {
             // Since an implicit transaction is always started, we only need to upgrade it to an
             // explicit transaction.
             State::Initial => unreachable!(),
@@ -150,18 +150,39 @@ impl SessionImpl {
         }
     }
 
-    /// Ends an explicit transaction.
-    // TODO: handle failed transaction and rollback
-    pub fn txn_end_explicit(&self) {
+    /// Commits an explicit transaction.
+    // TODO: handle failed transaction
+    pub fn txn_commit_explicit(&self) {
         let mut txn = self.txn.lock();
 
-        match &mut *txn {
+        match &*txn {
             State::Initial => unreachable!(),
             State::Implicit(_) => {
                 // TODO: should be warning
                 self.notice_to_user("there is no transaction in progress")
             }
-            State::Explicit(_ctx) => *txn = State::Initial,
+            State::Explicit(ctx) => match ctx.access_mode {
+                AccessMode::ReadWrite => unimplemented!(),
+                AccessMode::ReadOnly => *txn = State::Initial,
+            },
+        }
+    }
+
+    /// Rollbacks an explicit transaction.
+    // TODO: handle failed transaction
+    pub fn txn_rollback_explicit(&self) {
+        let mut txn = self.txn.lock();
+
+        match &*txn {
+            State::Initial => unreachable!(),
+            State::Implicit(_) => {
+                // TODO: should be warning
+                self.notice_to_user("there is no transaction in progress")
+            }
+            State::Explicit(ctx) => match ctx.access_mode {
+                AccessMode::ReadWrite => unimplemented!(),
+                AccessMode::ReadOnly => *txn = State::Initial,
+            },
         }
     }
 

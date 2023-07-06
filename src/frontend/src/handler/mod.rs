@@ -471,10 +471,6 @@ pub async fn handle(
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
-        // Ignore `Abort`,`Rollback`, etc. temporarily. It's not the final implementation.
-        // 1. Fully support transaction is too hard and gives few benefits to us.
-        // 2. Some client e.g. psycopg2 will use this statement.
-        // TODO: Tracking issues #2595 #2541
         Statement::StartTransaction { modes } => {
             transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
         }
@@ -482,9 +478,9 @@ pub async fn handle(
         Statement::Commit { chain } => {
             transaction::handle_commit(handler_args, COMMIT, chain).await
         }
-        Statement::Abort => Ok(PgResponse::builder(ABORT).notice(IGNORE_NOTICE).into()),
-        Statement::Rollback { .. } => {
-            Ok(PgResponse::builder(ROLLBACK).notice(IGNORE_NOTICE).into())
+        Statement::Abort => transaction::handle_rollback(handler_args, ABORT, false).await,
+        Statement::Rollback { chain } => {
+            transaction::handle_rollback(handler_args, ROLLBACK, chain).await
         }
         Statement::SetTransaction { .. } => Ok(PgResponse::builder(SET_TRANSACTION)
             .notice(IGNORE_NOTICE)

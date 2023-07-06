@@ -21,7 +21,7 @@ use crate::session::transaction::AccessMode;
 
 macro_rules! not_impl {
     ($body:expr) => {
-        Err(ErrorCode::NotImplemented($body.into(), None.into()))
+        Err(ErrorCode::NotImplemented($body.into(), 10736.into()))
     };
 }
 
@@ -72,7 +72,25 @@ pub async fn handle_commit(
         not_impl!("COMMIT AND CHAIN")?;
     }
 
-    session.txn_end_explicit();
+    session.txn_commit_explicit();
+
+    // TODO: pgwire integration of the transaction state
+    Ok(RwPgResponse::empty_result(stmt_type))
+}
+
+#[expect(clippy::unused_async)]
+pub async fn handle_rollback(
+    handler_args: HandlerArgs,
+    stmt_type: StatementType,
+    chain: bool,
+) -> Result<RwPgResponse> {
+    let HandlerArgs { session, .. } = handler_args;
+
+    if chain {
+        not_impl!("ROLLBACK AND CHAIN")?;
+    }
+
+    session.txn_rollback_explicit();
 
     // TODO: pgwire integration of the transaction state
     Ok(RwPgResponse::empty_result(stmt_type))
