@@ -24,7 +24,7 @@ use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
 use rand::seq::SliceRandom;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
-use risingwave_batch::task::{ShutdownMsg, TaskId};
+use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
@@ -112,7 +112,7 @@ impl LocalQueryExecution {
 
         // TODO(ZENOTME): For now this rx is only used as placeholder, it didn't take effect.
         // Refactor later to make use it.
-        let (_tx, rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
+        let (_tx, rx) = ShutdownToken::new();
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
