@@ -43,7 +43,7 @@ use tokio::task::{JoinError, JoinHandle};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::Status;
 use tracing::log::warn;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 macro_rules! send_with_err_check {
     ($tx:expr, $msg:expr) => {
@@ -65,8 +65,11 @@ struct NewSinkWriterRequest {
 
 enum SinkManagerRequest {
     NewSinkWriter(NewSinkWriterRequest),
-    // TODO: support stop a specific sink coordinator during drop sink.
-    Reset(Sender<()>),
+    StopCoordinator {
+        finish_notifier: Sender<()>,
+        /// sink id to stop. When `None`, stop all sink coordinator
+        sink_id: Option<SinkId>,
+    },
 }
 
 #[derive(Clone)]
@@ -95,12 +98,10 @@ impl SinkManager {
         let (param, vnode_bitmap) = match request_stream.try_next().await? {
             Some(SinkWriterToCoordinatorMsg {
                 msg:
-                    Some(sink_writer_to_coordinator_msg::Msg::StartRequest(
-                        sink_writer_to_coordinator_msg::StartCoordinationRequest {
-                            param: Some(param),
-                            vnode_bitmap: Some(vnode_bitmap),
-                        },
-                    )),
+                    Some(Msg::StartRequest(sink_writer_to_coordinator_msg::StartCoordinationRequest {
+                        param: Some(param),
+                        vnode_bitmap: Some(vnode_bitmap),
+                    })),
             }) => (
                 BuildSinkParam::from_proto(param),
                 Bitmap::from(&vnode_bitmap),
@@ -129,14 +130,33 @@ impl SinkManager {
         Ok(UnboundedReceiverStream::new(response_rx))
     }
 
-    pub(crate) async fn reset(&self) {
+    async fn stop_coordinator(&self, sink_id: Option<SinkId>) {
         let (tx, rx) = channel();
         let request_tx = &self.request_tx;
-        send_with_err_check!(request_tx, SinkManagerRequest::Reset(tx));
+        send_with_err_check!(
+            request_tx,
+            SinkManagerRequest::StopCoordinator {
+                finish_notifier: tx,
+                sink_id,
+            }
+        );
         if rx.await.is_err() {
             error!("fail to wait for resetting sink manager worker");
         }
     }
+
+    pub(crate) async fn reset(&self) {
+        self.stop_coordinator(None).await;
+    }
+
+    pub(crate) async fn stop_sink_coordinator(&self, sink_id: SinkId) {
+        self.stop_coordinator(Some(sink_id)).await;
+    }
+}
+
+struct SinkCoordinatorWorkerHandle {
+    request_sender: UnboundedSender<SinkCoordinatorWorkerRequest>,
+    finish_notifiers: Vec<Sender<()>>,
 }
 
 struct SinkManagerWorker {
@@ -146,7 +166,7 @@ struct SinkManagerWorker {
 
     running_coordinator_worker_join_handles:
         FuturesUnordered<BoxFuture<'static, (SinkId, Result<(), JoinError>)>>,
-    running_coordinator_worker: HashMap<SinkId, UnboundedSender<SinkCoordinatorWorkerRequest>>,
+    running_coordinator_worker: HashMap<SinkId, SinkCoordinatorWorkerHandle>,
 }
 
 enum SinkManagerWorkerEvent {
@@ -168,15 +188,35 @@ impl SinkManagerWorker {
     async fn execute(mut self) {
         while let Some(event) = self.next_event().await {
             match event {
-                SinkManagerWorkerEvent::NewRequest(request) => match request {
-                    SinkManagerRequest::NewSinkWriter(request) => {
-                        self.handle_new_sink_writer(request)
+                SinkManagerWorkerEvent::NewRequest(request) => {
+                    match request {
+                        SinkManagerRequest::NewSinkWriter(request) => {
+                            self.handle_new_sink_writer(request)
+                        }
+                        SinkManagerRequest::StopCoordinator {
+                            finish_notifier,
+                            sink_id,
+                        } => {
+                            if let Some(sink_id) = sink_id {
+                                if let Some(worker_handle) =
+                                    self.running_coordinator_worker.get_mut(&sink_id)
+                                {
+                                    send_with_err_check!(
+                                        worker_handle.request_sender,
+                                        SinkCoordinatorWorkerRequest::Stop
+                                    );
+                                    worker_handle.finish_notifiers.push(finish_notifier);
+                                } else {
+                                    debug!("sink coordinator of {} is not running. Notify finish directly", sink_id.sink_id);
+                                    send_with_err_check!(finish_notifier, ());
+                                }
+                            } else {
+                                self.clean_up().await;
+                                send_with_err_check!(finish_notifier, ());
+                            }
+                        }
                     }
-                    SinkManagerRequest::Reset(tx) => {
-                        self.clean_up().await;
-                        send_with_err_check!(tx, ());
-                    }
-                },
+                }
                 SinkManagerWorkerEvent::CoordinatorWorkerFinished {
                     sink_id,
                     join_result,
@@ -221,8 +261,11 @@ impl SinkManagerWorker {
 
     async fn clean_up(&mut self) {
         info!("sink manager worker start cleaning up");
-        for sender in self.running_coordinator_worker.values() {
-            send_with_err_check!(sender, SinkCoordinatorWorkerRequest::Stop);
+        for worker_handle in self.running_coordinator_worker.values() {
+            send_with_err_check!(
+                worker_handle.request_sender,
+                SinkCoordinatorWorkerRequest::Stop
+            );
         }
         while let Some((sink_id, join_result)) =
             self.running_coordinator_worker_join_handles.next().await
@@ -233,9 +276,13 @@ impl SinkManagerWorker {
     }
 
     fn handle_coordinator_finished(&mut self, sink_id: SinkId, join_result: Result<(), JoinError>) {
-        self.running_coordinator_worker
+        let worker_handle = self
+            .running_coordinator_worker
             .remove(&sink_id)
             .expect("finished coordinator should have an associated sender");
+        for finish_notifier in worker_handle.finish_notifiers {
+            send_with_err_check!(finish_notifier, ());
+        }
         match join_result {
             Ok(()) => {
                 info!(
@@ -259,7 +306,7 @@ impl SinkManagerWorker {
         // Launch the coordinator worker task if it is the first
         match self.running_coordinator_worker.entry(param.sink_id) {
             Entry::Occupied(entry) => {
-                let sender = entry.into_mut();
+                let sender = &entry.into_mut().request_sender;
                 send_with_err_check!(sender, SinkCoordinatorWorkerRequest::NewWriter(request));
             }
             Entry::Vacant(entry) => {
@@ -276,7 +323,10 @@ impl SinkManagerWorker {
                         .map(move |join_result| (sink_id, join_result))
                         .boxed(),
                 );
-                entry.insert(request_tx);
+                entry.insert(SinkCoordinatorWorkerHandle {
+                    request_sender: request_tx,
+                    finish_notifiers: Vec::new(),
+                });
             }
         };
     }
@@ -292,7 +342,7 @@ struct SinkCoordinatorWorker {
     param: BuildSinkParam,
     request_streams: Vec<SinkWriterInputStream>,
     response_response_senders: Vec<SinkCoordinatorResponseSender>,
-    _request_rx: UnboundedReceiver<SinkCoordinatorWorkerRequest>,
+    request_rx: UnboundedReceiver<SinkCoordinatorWorkerRequest>,
 }
 
 impl SinkCoordinatorWorker {
@@ -397,7 +447,7 @@ impl SinkCoordinatorWorker {
             param,
             request_streams: pending_request_streams,
             response_response_senders: pending_response_senders,
-            _request_rx: request_rx,
+            request_rx,
         })
     }
 
@@ -428,16 +478,53 @@ impl SinkCoordinatorWorker {
                 );
                 return;
             }
-            // TODO: poll request_tx for stop request
-            self.execute_inner(coordinator).await;
+            let sink_id = self.param.sink_id.sink_id;
+            select(
+                pin!(Self::execute_inner(
+                    coordinator,
+                    self.param,
+                    self.request_streams,
+                    self.response_response_senders
+                )),
+                pin!(async move {
+                    while let Some(request) = self.request_rx.recv().await {
+                        match request {
+                            SinkCoordinatorWorkerRequest::NewWriter(request) => {
+                                warn!(
+                                    "sink coordinator of {} gets new writer request after initialization",
+                                    sink_id
+                                );
+                                send_with_err_check!(
+                                    request.response_tx,
+                                    Err(Status::already_exists("sink coordinator already running"))
+                                );
+                            }
+                            SinkCoordinatorWorkerRequest::Stop => {
+                                info!("sink coordinator of {} gets notified to stop", sink_id);
+                                return;
+                            }
+                        };
+                    }
+                    warn!(
+                        "sink coordinator of {} stopped because of end of request stream from sink manager",
+                        sink_id
+                    );
+                }),
+            )
+            .await;
         })
     }
 
-    async fn execute_inner(mut self, mut coordinator: impl SinkCommitCoordinator) {
+    async fn execute_inner(
+        mut coordinator: impl SinkCommitCoordinator,
+        param: BuildSinkParam,
+        mut request_streams: Vec<SinkWriterInputStream>,
+        response_response_senders: Vec<SinkCoordinatorResponseSender>,
+    ) {
         let result: Result<(), Status> = try {
             loop {
                 let commit_infos: Vec<(Vec<u8>, u64)> =
-                    try_join_all(self.request_streams.iter_mut().map(|stream| {
+                    try_join_all(request_streams.iter_mut().map(|stream| {
                         stream.next().map(|event| {
                             event
                                 .ok_or(Status::aborted("end of input"))
@@ -470,13 +557,14 @@ impl SinkCoordinatorWorker {
                         warn!("unaligned epoch {} {}", other_epoch, epoch);
                     }
                 }
-                if let Err(e) = coordinator.commit(epoch, metadatas).await {
+                coordinator.commit(epoch, metadatas).await.map_err(|e| {
                     error!(
                         "failed to commit on coordinator with param {:?}: {:?}",
-                        self.param, e
+                        param, e
                     );
-                }
-                for sender in &self.response_response_senders {
+                    Status::internal(format!("failed to commit on epoch {}: {:?}", epoch, param))
+                })?;
+                for sender in &response_response_senders {
                     send_with_err_check!(
                         sender,
                         Ok(SinkCoordinatorToWriterMsg {
@@ -489,7 +577,7 @@ impl SinkCoordinatorWorker {
             }
         };
         if let Err(e) = result {
-            for sender in self.response_response_senders {
+            for sender in response_response_senders {
                 send_with_err_check!(sender, Err(e.clone()));
             }
         }
