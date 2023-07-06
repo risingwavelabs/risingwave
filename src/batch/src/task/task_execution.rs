@@ -309,10 +309,11 @@ impl ShutdownToken {
 
     /// Return error if the shutdown token has been triggered.
     pub fn check(&self) -> Result<()> {
-        if matches!(*self.0.borrow(), ShutdownMsg::Init) {
-            Ok(())
-        } else {
-            Err(ErrorCode::BatchError("Receive shutdown msg".into()).into())
+        match &*self.0.borrow() {
+            ShutdownMsg::Init => Ok(()),
+            msg => {
+                Err(ErrorCode::BatchError(format!("Receive shutdown msg: {msg:?}").into()).into())
+            }
         }
     }
 
@@ -325,6 +326,11 @@ impl ShutdownToken {
             self.0.changed().await.expect("shutdown sender dropped");
         }
         self.0.borrow().clone()
+    }
+
+    /// Return true if the shutdown token has been triggered.
+    pub fn is_cancelled(&self) -> bool {
+        !matches!(*self.0.borrow(), ShutdownMsg::Init)
     }
 
     /// Return the current shutdown message.

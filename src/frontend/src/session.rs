@@ -25,7 +25,7 @@ use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Format;
 use rand::RngCore;
-use risingwave_common::array::DataChunk;
+use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
@@ -41,7 +41,6 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
-use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
@@ -77,7 +76,6 @@ use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::SchedulerError::QueryCancelError;
 use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
 };
@@ -461,7 +459,7 @@ pub struct SessionImpl {
     /// Query cancel flag.
     /// This flag is set only when current query is executed in local mode, and used to cancel
     /// local query.
-    current_query_cancel_flag: Mutex<Option<Trigger>>,
+    current_query_cancel_flag: Mutex<Option<ShutdownSender>>,
 }
 
 #[derive(Error, Debug)]
@@ -667,11 +665,11 @@ impl SessionImpl {
         *flag = None;
     }
 
-    pub fn reset_cancel_query_flag(&self) -> Tripwire<std::result::Result<DataChunk, BoxedError>> {
+    pub fn reset_cancel_query_flag(&self) -> ShutdownToken {
         let mut flag = self.current_query_cancel_flag.lock().unwrap();
-        let (trigger, tripwire) = stream_tripwire(|| Err(Box::new(QueryCancelError) as BoxedError));
-        *flag = Some(trigger);
-        tripwire
+        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
+        *flag = Some(shutdown_tx);
+        shutdown_rx
     }
 
     fn clear_notices(&self) {
@@ -680,10 +678,10 @@ impl SessionImpl {
 
     pub fn cancel_current_query(&self) {
         let mut flag_guard = self.current_query_cancel_flag.lock().unwrap();
-        if let Some(trigger) = flag_guard.take() {
+        if let Some(sender) = flag_guard.take() {
             info!("Trying to cancel query in local mode.");
             // Current running query is in local mode
-            trigger.abort();
+            sender.cancel();
             info!("Cancel query request sent.");
         } else {
             info!("Trying to cancel query in distributed mode.");
