@@ -157,8 +157,6 @@ pub struct MetaMetrics {
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
-
-    pub mv_id_to_internal_tables: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -479,7 +477,7 @@ impl MetaMetrics {
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
             "Mapping from actor id to (fragment id, compute node",
-            &["actor_id", "fragment_id", "compute_node"],
+            &["Actor_id", "fragment_id", "compute_node"],
             registry
         )
         .unwrap();
@@ -487,15 +485,15 @@ impl MetaMetrics {
         let table_info = register_int_gauge_vec_with_registry!(
             "table_info",
             "Mapping from table id to (actor id, table name)",
-            &["table_id", "actor_id", "table_name"],
+            &["Table_id", "actor_id", "table_name"],
             registry
         )
         .unwrap();
 
         let mv_info = register_int_gauge_vec_with_registry!(
             "mv_info",
-            "Mapping from mv table id to (internal table id, internal table name)",
-            &["mv_table_id", "internal_table_id"],
+            "Mapping from materialized view table id to internal table id",
+            &["Materialized_view_table_id", "internal_table_id"],
             registry
         )
         .unwrap();
@@ -552,14 +550,6 @@ impl MetaMetrics {
             "storage_branched_sst_count",
             "Count of branched sst per compaction group",
             &["group"],
-            registry
-        )
-        .unwrap();
-
-        let mv_id_to_internal_tables = register_int_counter_vec_with_registry!(
-            "materialize_views_internal_tables",
-            "123",
-            &["mv_id", "internal_table_id"],
             registry
         )
         .unwrap();
@@ -622,7 +612,6 @@ impl MetaMetrics {
             move_state_table_count,
             state_table_count,
             branched_sst_count,
-            mv_id_to_internal_tables,
         }
     }
 
