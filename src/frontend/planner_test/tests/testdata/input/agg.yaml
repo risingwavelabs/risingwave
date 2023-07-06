@@ -863,3 +863,8 @@
     select mode(1) within group (order by y desc) from t;
   expected_outputs:
   - binder_error
+- sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT count(DISTINCT i) FROM integers;
+  expected_outputs:
+  - batch_plan
