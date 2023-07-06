@@ -42,8 +42,8 @@ use tonic::{Status, Streaming};
 
 use crate::sink::catalog::{SinkId, SinkType};
 use crate::sink::{
-    record_to_json, DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter,
-    TimestampHandlingMode,
+    record_to_json, DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriterParam,
+    SinkWriterV1, SinkWriterV1Adapter, TimestampHandlingMode,
 };
 use crate::ConnectorParams;
 
@@ -109,17 +109,19 @@ impl RemoteSink {
 #[async_trait]
 impl Sink for RemoteSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = RemoteSinkWriter;
+    type Writer = SinkWriterV1Adapter<RemoteSinkWriter>;
 
-    async fn new_writer(&self, connector_params: ConnectorParams) -> Result<Self::Writer> {
-        RemoteSinkWriter::new(
-            self.config.clone(),
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            connector_params,
-            self.sink_id,
-        )
-        .await
+    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
+        Ok(SinkWriterV1Adapter::new(
+            RemoteSinkWriter::new(
+                self.config.clone(),
+                self.schema.clone(),
+                self.pk_indices.clone(),
+                writer_param.connector_params,
+                self.sink_id,
+            )
+            .await?,
+        ))
     }
 
     async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()> {
@@ -338,7 +340,7 @@ impl RemoteSinkWriter {
 }
 
 #[async_trait]
-impl SinkWriter for RemoteSinkWriter {
+impl SinkWriterV1 for RemoteSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let payload = match self.payload_format {
             SinkPayloadFormat::Json => {
@@ -434,7 +436,7 @@ mod test {
     use tokio::sync::mpsc;
 
     use crate::sink::remote::RemoteSinkWriter;
-    use crate::sink::SinkWriter;
+    use crate::sink::SinkWriterV1;
 
     #[tokio::test]
     async fn test_epoch_check() {
