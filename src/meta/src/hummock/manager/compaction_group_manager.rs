@@ -112,8 +112,6 @@ impl<S: MetaStore> HummockManager<S> {
             if internal_tables.drain_filter(|t| *t == mv_table).count() > 0 {
                 tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
             }
-
-
             // materialized_view
             pairs.push((
                 mv_table,

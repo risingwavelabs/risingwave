@@ -29,7 +29,6 @@ def section_actor_info(panels):
         panels.table_info("Table Id Info",
                           "Mapping from table id to actor id and table name",
                           [panels.table_target(f"{metric('table_info')}")], excluded_cols),
-
         panels.table_info("Materialized View  Info",
                           "Mapping from materialized view table id to it's internal table ids",
                            [panels.table_target(f"{metric('mv_info')}")], excluded_cols),
@@ -2249,9 +2248,9 @@ def section_hummock_manager(outer_panels):
                                       "table{{table_id}} {{metric}}"),
                         panels.target(f"{table_metric('storage_version_stats', total_value_size_filter)}/1024",
                                       "table{{table_id}} {{metric}}"),
-                        panels.target("sum by (table_id) (storage_version_stats{metric='total_key_size', table_id=~\"$table\",job=~\"$job\",instance=~\"$node\"}) / 1024 + sum by (table_id) (storage_version_stats{metric='total_value_size',table_id=~\"$table\",job=~\"$job\",instance=~\"$node\"}) / 1024", "table size - {{table_id}}"),
+                       
                     ],
-                ),        
+                ),
                 panels.timeseries_count(
                     "Table KV Count",
                     "",
