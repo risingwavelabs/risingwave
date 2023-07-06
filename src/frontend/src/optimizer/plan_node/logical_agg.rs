@@ -19,7 +19,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::agg::AggKind;
 
-use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::generic::{self, agg_kinds, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
@@ -179,14 +179,6 @@ impl LogicalAgg {
         Ok(new_stream_hash_agg(logical, None).into())
     }
 
-    /// See if all stream aggregation calls have a stateless local agg counterpart.
-    fn all_local_aggs_are_stateless(&self, stream_input_append_only: bool) -> bool {
-        self.agg_calls().iter().all(|c| {
-            matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
-                || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && stream_input_append_only)
-        })
-    }
-
     /// Generates distributed stream plan.
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input_dist = stream_input.distribution();
@@ -215,7 +207,9 @@ impl LogicalAgg {
         // can be applied on stateless simple agg calls,
         // with input distributed by [`Distribution::AnyShard`]
         if self.group_key().is_empty()
-            && self.all_local_aggs_are_stateless(stream_input.append_only())
+            && self
+                .core
+                .all_local_aggs_are_stateless(stream_input.append_only())
             && input_dist.satisfies(&RequiredDist::AnyShard)
         {
             return self.gen_stateless_two_phase_streaming_agg_plan(stream_input);
@@ -421,25 +415,21 @@ impl LogicalAggBuilder {
         let return_type = agg_call.return_type();
         let (agg_kind, inputs, mut distinct, mut order_by, filter, direct_args) =
             agg_call.decompose();
-        match &agg_kind {
-            AggKind::Min | AggKind::Max => {
-                distinct = false;
-                order_by = OrderBy::any();
-            }
-            AggKind::Sum
-            | AggKind::Count
-            | AggKind::Avg
-            | AggKind::ApproxCountDistinct
-            | AggKind::StddevSamp
-            | AggKind::StddevPop
-            | AggKind::VarPop
-            | AggKind::VarSamp => {
-                order_by = OrderBy::any();
-            }
-            _ => {
-                // To be conservative, we just treat newly added AggKind in the future as not
-                // rewritable.
-            }
+
+        if matches!(agg_kind, agg_kinds::must_have_order_by!()) && order_by.sort_exprs.is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Aggregation function {} requires ORDER BY clause",
+                agg_kind
+            )));
+        }
+
+        // try ignore ORDER BY if it doesn't affect the result
+        if matches!(agg_kind, agg_kinds::result_unaffected_by_order_by!()) {
+            order_by = OrderBy::any();
+        }
+        // try ignore DISTINCT if it doesn't affect the result
+        if matches!(agg_kind, agg_kinds::result_unaffected_by_distinct!()) {
+            distinct = false;
         }
 
         self.is_in_filter_clause = true;
@@ -1062,16 +1052,7 @@ fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> S
 impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         for agg_call in self.agg_calls() {
-            if matches!(
-                agg_call.agg_kind,
-                AggKind::BitAnd
-                    | AggKind::BitOr
-                    | AggKind::BoolAnd
-                    | AggKind::BoolOr
-                    | AggKind::PercentileCont
-                    | AggKind::PercentileDisc
-                    | AggKind::Mode
-            ) {
+            if matches!(agg_call.agg_kind, agg_kinds::unimplemented_in_stream!()) {
                 return Err(ErrorCode::NotImplemented(
                     format!("{} aggregation in materialized view", agg_call.agg_kind),
                     None.into(),

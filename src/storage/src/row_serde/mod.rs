@@ -17,6 +17,8 @@ use risingwave_common::row::{OwnedRow, Project, RowExt};
 
 pub mod row_serde_util;
 
+pub mod value_serde;
+
 /// Find out the [`ColumnDesc`] by a list of [`ColumnId`].
 ///
 /// # Returns

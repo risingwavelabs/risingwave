@@ -31,6 +31,7 @@ pub use split::*;
 use tempfile::NamedTempFile;
 use url::Url;
 
+use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
@@ -83,8 +84,16 @@ impl PulsarProperties {
             let url = Url::parse(&oauth.credentials_url)?;
             match url.scheme() {
                 "s3" => {
-                    let credentials =
-                        load_file_descriptor_from_s3(&url, &oauth.s3_credentials).await?;
+                    let credentials = load_file_descriptor_from_s3(
+                        &url,
+                        &AwsAuthProps::from_pairs(
+                            oauth
+                                .s3_credentials
+                                .iter()
+                                .map(|(k, v)| (k.as_str(), v.as_str())),
+                        ),
+                    )
+                    .await?;
                     let mut f = NamedTempFile::new()?;
                     f.write_all(&credentials)?;
                     f.as_file().sync_all()?;

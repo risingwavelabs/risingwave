@@ -1785,15 +1785,16 @@
     │         └─BatchFilter { predicate: (event_type = 2:Int32) }
     │           └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr4, _row_id] }
     │             └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
-    └─BatchProject { exprs: [(sum0(count) / count($expr7)) as $expr8] }
-      └─BatchSimpleAgg { aggs: [sum0(count), count($expr7)] }
+    └─BatchProject { exprs: [(sum0(sum0(count)) / sum0(count($expr7))) as $expr8] }
+      └─BatchSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr7))] }
         └─BatchExchange { order: [], dist: Single }
-          └─BatchHashAgg { group_key: [$expr7], aggs: [count] }
-            └─BatchExchange { order: [], dist: HashShard($expr7) }
-              └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr7] }
-                └─BatchFilter { predicate: (event_type = 2:Int32) }
-                  └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr6, _row_id] }
-                    └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
+          └─BatchSimpleAgg { aggs: [sum0(count), count($expr7)] }
+            └─BatchHashAgg { group_key: [$expr7], aggs: [count] }
+              └─BatchExchange { order: [], dist: HashShard($expr7) }
+                └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr7] }
+                  └─BatchFilter { predicate: (event_type = 2:Int32) }
+                    └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr6, _row_id] }
+                      └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: NoCheck }
     └─StreamDynamicFilter { predicate: (count($expr4) >= $expr5), output: [$expr2, $expr3, count($expr4)] }
@@ -1822,21 +1823,22 @@
       │                       └─StreamProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id], output_watermarks: [_row_id] }
       │                         └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(sum0(count) / count($expr4)) as $expr5] }
-          └─StreamSimpleAgg { aggs: [sum0(count), count($expr4), count] }
+        └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr4))) as $expr5] }
+          └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr4)), count] }
             └─StreamExchange { dist: Single }
-              └─StreamHashAgg [append_only] { group_key: [$expr4], aggs: [count] }
-                └─StreamExchange { dist: HashShard($expr4) }
-                  └─StreamShare { id: 12 }
-                    └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr4, _row_id] }
-                      └─StreamFilter { predicate: (event_type = 2:Int32) }
-                        └─StreamShare { id: 6 }
-                          └─StreamProject { exprs: [event_type, auction, bid, _row_id] }
-                            └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
-                              └─StreamRowIdGen { row_id_index: 5 }
-                                └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 4, expr: ($expr1 - '00:00:04':Interval) }] }
-                                  └─StreamProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id], output_watermarks: [_row_id] }
-                                    └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
+              └─StreamStatelessSimpleAgg { aggs: [sum0(count), count($expr4)] }
+                └─StreamHashAgg [append_only] { group_key: [$expr4], aggs: [count] }
+                  └─StreamExchange { dist: HashShard($expr4) }
+                    └─StreamShare { id: 12 }
+                      └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr4, _row_id] }
+                        └─StreamFilter { predicate: (event_type = 2:Int32) }
+                          └─StreamShare { id: 6 }
+                            └─StreamProject { exprs: [event_type, auction, bid, _row_id] }
+                              └─StreamFilter { predicate: ((event_type = 1:Int32) OR (event_type = 2:Int32)) }
+                                └─StreamRowIdGen { row_id_index: 5 }
+                                  └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 4, expr: ($expr1 - '00:00:04':Interval) }] }
+                                    └─StreamProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id], output_watermarks: [_row_id] }
+                                      └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: NoCheck }
@@ -1876,13 +1878,14 @@
         └── StreamExchange NoShuffle from 2
 
     Fragment 5
-    StreamProject { exprs: [(sum0(count) / count($expr4)) as $expr5] }
-    └── StreamSimpleAgg { aggs: [sum0(count), count($expr4), count] } { result table: 9, state tables: [], distinct tables: [] }
+    StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr4))) as $expr5] }
+    └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr4)), count] } { result table: 9, state tables: [], distinct tables: [] }
         └── StreamExchange Single from 6
 
     Fragment 6
-    StreamHashAgg [append_only] { group_key: [$expr4], aggs: [count] } { result table: 10, state tables: [], distinct tables: [] }
-    └── StreamExchange Hash([0]) from 7
+    StreamStatelessSimpleAgg { aggs: [sum0(count), count($expr4)] }
+    └── StreamHashAgg [append_only] { group_key: [$expr4], aggs: [count] } { result table: 10, state tables: [], distinct tables: [] }
+        └── StreamExchange Hash([0]) from 7
 
     Fragment 7
     StreamNoOp
@@ -1904,7 +1907,7 @@
 
     Table 8 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ sum0(count), count($expr4), count ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 9 { columns: [ sum0(sum0(count)), sum0(count($expr4)), count ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 10 { columns: [ $expr4, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 

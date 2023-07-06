@@ -175,7 +175,7 @@ pub fn create_streaming_agg_impl(
                     (
                         Count,
                         timestamptz,
-                        timestamptz,
+                        int64,
                         StreamingCountAgg::<TimestamptzArray>
                     ),
                     (Count, time, int64, StreamingCountAgg::<TimeArray>),
