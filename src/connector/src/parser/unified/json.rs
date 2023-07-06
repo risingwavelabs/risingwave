@@ -308,12 +308,12 @@ impl JsonParseOptions {
                 // handle debezium json (variable scale): {"scale": int, "value": bytes}
                 let scale = value
                     .get("scale")
-                    .ok_or_else(|_| create_error())?
+                    .ok_or_else(create_error)?
                     .as_i32()
                     .unwrap();
                 let value = value
                     .get("value")
-                    .ok_or_else(|_| create_error())?
+                    .ok_or_else(create_error)?
                     .as_str()
                     .unwrap()
                     .as_bytes();
