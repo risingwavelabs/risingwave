@@ -51,6 +51,24 @@ services:
     command: [ "postgres", "-c", "wal_level=logical" ]
     restart: always
     container_name: postgres
+
+  postgres_new:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=123456
+      - POSTGRES_DB=mydb
+    ports:
+      - 9432:5432
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready --username=myuser --dbname=mydb" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: [ "postgres", "-c", "wal_level=logical" ]
+    restart: always
+    container_name: postgres_new
+
   connector-node:
     extends:
       file: ../../docker/docker-compose.yml

@@ -306,7 +306,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         }
                     }
                     if (publicationCoversTable) {
-                        LOG.info("The publication covers the table.");
+                        LOG.info("The publication covers the table '{}'.", schemaName + "." + tableName);
                         break;
                     }
                 }
@@ -332,9 +332,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
         // If auto create is enabled and the publication doesn't exist or doesn't cover the table,
         // we need to create or alter the publication. And we need to check the required privileges.
-        if (!publicationCoversTable && !isSuperUser) {
+        if (!publicationCoversTable) {
             // check whether the user has the CREATE privilege on database
-            validatePublicationPrivileges();
+            if (!isSuperUser) {
+                validatePublicationPrivileges();
+            }
             if (publicationExists) {
                 alterPublicationIfNeeded();
             } else {

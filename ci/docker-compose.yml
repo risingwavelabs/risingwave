@@ -15,6 +15,22 @@ services:
       retries: 5
     command: [ "postgres", "-c", "wal_level=logical" ]
 
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=123456
+      - POSTGRES_DB=mydb
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    ports:
+      - 5433
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: [ "postgres", "-c", "wal_level=logical" ]
+
   mysql:
     image: mysql:8.0
     ports:
