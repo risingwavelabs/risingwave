@@ -928,7 +928,7 @@ mod default {
         }
 
         pub fn stream_exchange_concurrent_barriers() -> usize {
-            1
+            100
         }
 
         pub fn stream_dml_channel_initial_permits() -> usize {
