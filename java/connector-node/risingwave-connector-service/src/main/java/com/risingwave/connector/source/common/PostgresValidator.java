@@ -274,8 +274,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 while (res.next()) {
                     if (!res.getBoolean(1)) {
                         throw ValidatorUtils.invalidArgument(
-                                "Postgres user must have create privilege on database"
-                                        + userProps.get(DbzConnectorConfig.DB_NAME));
+                                "Postgres user must have create privilege on database '"
+                                        + userProps.get(DbzConnectorConfig.DB_NAME)
+                                        + "'");
                     }
                 }
             }
