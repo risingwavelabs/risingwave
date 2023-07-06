@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod rw_actors;
 mod rw_connections;
 mod rw_databases;
 mod rw_ddl_progress;
+mod rw_fragments;
 mod rw_functions;
 mod rw_indexes;
 mod rw_materialized_views;
@@ -24,6 +26,7 @@ mod rw_relation_info;
 mod rw_schemas;
 mod rw_sinks;
 mod rw_sources;
+mod rw_table_fragments;
 mod rw_table_stats;
 mod rw_tables;
 mod rw_users;
@@ -37,9 +40,11 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{ScalarImpl, Timestamp};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::user::grant_privilege::Object;
+pub use rw_actors::*;
 pub use rw_connections::*;
 pub use rw_databases::*;
 pub use rw_ddl_progress::*;
+pub use rw_fragments::*;
 pub use rw_functions::*;
 pub use rw_indexes::*;
 pub use rw_materialized_views::*;
@@ -49,6 +54,7 @@ pub use rw_relation_info::*;
 pub use rw_schemas::*;
 pub use rw_sinks::*;
 pub use rw_sources::*;
+pub use rw_table_fragments::*;
 pub use rw_table_stats::*;
 pub use rw_tables::*;
 pub use rw_users::*;
@@ -594,5 +600,83 @@ impl SysCatalogReaderImpl {
                 })
             })
             .collect_vec())
+    }
+
+    /// FIXME: we need to introduce revision snapshot read on meta to avoid any inconsistency when
+    /// we are trying to join any table fragments related system tables.
+    pub(super) async fn read_rw_table_fragments_info(&self) -> Result<Vec<OwnedRow>> {
+        let states = self.meta_client.list_table_fragment_states().await?;
+
+        Ok(states
+            .into_iter()
+            .map(|state| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int32(state.table_id as i32)),
+                    Some(ScalarImpl::Utf8(state.state().as_str_name().into())),
+                ])
+            })
+            .collect_vec())
+    }
+
+    pub(super) async fn read_rw_fragment_distributions_info(&self) -> Result<Vec<OwnedRow>> {
+        let distributions = self.meta_client.list_fragment_distribution().await?;
+
+        Ok(distributions
+            .into_iter()
+            .map(|distribution| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int32(distribution.fragment_id as i32)),
+                    Some(ScalarImpl::Int32(distribution.table_id as i32)),
+                    Some(ScalarImpl::Utf8(
+                        distribution.distribution_type().as_str_name().into(),
+                    )),
+                    Some(ScalarImpl::List(ListValue::new(
+                        distribution
+                            .state_table_ids
+                            .into_iter()
+                            .map(|id| Some(ScalarImpl::Int32(id as i32)))
+                            .collect_vec(),
+                    ))),
+                    Some(ScalarImpl::List(ListValue::new(
+                        distribution
+                            .upstream_fragment_ids
+                            .into_iter()
+                            .map(|id| Some(ScalarImpl::Int32(id as i32)))
+                            .collect_vec(),
+                    ))),
+                ])
+            })
+            .collect_vec())
+    }
+
+    pub(super) async fn read_rw_actor_states_info(&self) -> Result<Vec<OwnedRow>> {
+        let states = self.meta_client.list_actor_states().await?;
+
+        Ok(states
+            .into_iter()
+            .map(|state| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int32(state.actor_id as i32)),
+                    Some(ScalarImpl::Int32(state.fragment_id as i32)),
+                    Some(ScalarImpl::Int32(state.parallel_unit_id as i32)),
+                    Some(ScalarImpl::Utf8(state.state().as_str_name().into())),
+                ])
+            })
+            .collect_vec())
+    }
+
+    pub(super) fn read_table_stats(&self) -> Result<Vec<OwnedRow>> {
+        let catalog = self.catalog_reader.read_guard();
+        let table_stats = catalog.table_stats();
+        let mut rows = vec![];
+        for (id, stats) in &table_stats.table_stats {
+            rows.push(OwnedRow::new(vec![
+                Some(ScalarImpl::Int32(*id as i32)),
+                Some(ScalarImpl::Int64(stats.total_key_count)),
+                Some(ScalarImpl::Int64(stats.total_key_size)),
+                Some(ScalarImpl::Int64(stats.total_value_size)),
+            ]));
+        }
+        Ok(rows)
     }
 }

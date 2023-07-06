@@ -14,18 +14,12 @@
 
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable).
-
-use std::marker::{Send, Sync};
-use std::sync::Arc;
-
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
-use itertools::Itertools;
 
 use crate::array::{ArrayImpl, ListRef, ListValue, StructRef, StructValue};
-use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::*;
 
@@ -56,21 +50,9 @@ pub trait ValueRowDeserializer: Clone {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
 
-/// Part of `ValueRowSerde` that implements `new` a serde given `column_ids` and `schema`
-pub trait ValueRowSerdeNew: Clone {
-    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self;
-}
-
-/// The compound trait used in `StateTableInner`, implemented by `BasicSerde` and `ColumnAwareSerde`
-pub trait ValueRowSerde:
-    ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew + Sync + Send + 'static
-{
-    fn kind(&self) -> ValueRowSerdeKind;
-}
-
 /// The type-erased `ValueRowSerde`, used for simplifying the code.
 #[derive(Clone)]
-pub struct EitherSerde(Either<BasicSerde, ColumnAwareSerde>);
+pub struct EitherSerde(pub Either<BasicSerde, ColumnAwareSerde>);
 
 impl From<BasicSerde> for EitherSerde {
     fn from(value: BasicSerde) -> Self {
@@ -92,18 +74,6 @@ impl ValueRowSerializer for EitherSerde {
 impl ValueRowDeserializer for EitherSerde {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         for_both!(&self.0, s => s.deserialize(encoded_bytes))
-    }
-}
-
-impl ValueRowSerdeNew for EitherSerde {
-    fn new(_column_ids: &[ColumnId], _schema: Arc<[DataType]>) -> EitherSerde {
-        unreachable!("should construct manually")
-    }
-}
-
-impl ValueRowSerde for EitherSerde {
-    fn kind(&self) -> ValueRowSerdeKind {
-        for_both!(&self.0, s => s.kind())
     }
 }
 
@@ -130,17 +100,8 @@ impl ValueRowDeserializer for BasicDeserializer {
 /// Wrap of the original `Row` serializing and deserializing function
 #[derive(Clone)]
 pub struct BasicSerde {
-    serializer: BasicSerializer,
-    deserializer: BasicDeserializer,
-}
-
-impl ValueRowSerdeNew for BasicSerde {
-    fn new(_column_ids: &[ColumnId], schema: Arc<[DataType]>) -> BasicSerde {
-        BasicSerde {
-            serializer: BasicSerializer {},
-            deserializer: BasicDeserializer::new(schema.as_ref().to_owned()),
-        }
-    }
+    pub serializer: BasicSerializer,
+    pub deserializer: BasicDeserializer,
 }
 
 impl ValueRowSerializer for BasicSerde {
@@ -156,12 +117,6 @@ impl ValueRowDeserializer for BasicSerde {
             .deserialize(encoded_bytes)?
             .into_inner()
             .into())
-    }
-}
-
-impl ValueRowSerde for BasicSerde {
-    fn kind(&self) -> ValueRowSerdeKind {
-        ValueRowSerdeKind::Basic
     }
 }
 
@@ -244,6 +199,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Timestamp(v) => {
             serialize_timestamp(v.0.timestamp(), v.0.timestamp_subsec_nanos(), buf)
         }
+        ScalarRefImpl::Timestamptz(v) => buf.put_i64_le(v.timestamp_micros()),
         ScalarRefImpl::Time(v) => {
             serialize_time(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
@@ -269,6 +225,7 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Interval(_) => estimate_serialize_interval_size(),
         ScalarRefImpl::Date(_) => estimate_serialize_date_size(),
         ScalarRefImpl::Timestamp(_) => estimate_serialize_timestamp_size(),
+        ScalarRefImpl::Timestamptz(_) => 8,
         ScalarRefImpl::Time(_) => estimate_serialize_time_size(),
         ScalarRefImpl::Jsonb(_) => 8,
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
@@ -365,7 +322,9 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Interval => ScalarImpl::Interval(deserialize_interval(data)?),
         DataType::Time => ScalarImpl::Time(deserialize_time(data)?),
         DataType::Timestamp => ScalarImpl::Timestamp(deserialize_timestamp(data)?),
-        DataType::Timestamptz => ScalarImpl::Int64(data.get_i64_le()),
+        DataType::Timestamptz => {
+            ScalarImpl::Timestamptz(Timestamptz::from_micros(data.get_i64_le()))
+        }
         DataType::Date => ScalarImpl::Date(deserialize_date(data)?),
         DataType::Jsonb => ScalarImpl::Jsonb(
             JsonbVal::value_deserialize(&deserialize_bytea(data))

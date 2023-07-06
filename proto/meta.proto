@@ -165,10 +165,48 @@ message ListTableFragmentsResponse {
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
 
+message ListTableFragmentStatesRequest {}
+
+message ListTableFragmentStatesResponse {
+  message TableFragmentState {
+    uint32 table_id = 1;
+    TableFragments.State state = 2;
+  }
+  repeated TableFragmentState states = 1;
+}
+
+message ListFragmentDistributionRequest {}
+
+message ListFragmentDistributionResponse {
+  message FragmentDistribution {
+    uint32 fragment_id = 1;
+    uint32 table_id = 2;
+    TableFragments.Fragment.FragmentDistributionType distribution_type = 3;
+    repeated uint32 state_table_ids = 4;
+    repeated uint32 upstream_fragment_ids = 5;
+  }
+  repeated FragmentDistribution distributions = 1;
+}
+
+message ListActorStatesRequest {}
+
+message ListActorStatesResponse {
+  message ActorState {
+    uint32 actor_id = 1;
+    uint32 fragment_id = 2;
+    uint32 parallel_unit_id = 3;
+    TableFragments.ActorStatus.ActorState state = 4;
+  }
+  repeated ActorState states = 1;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
+  rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
+  rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
+  rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
 }
 
 // Below for cluster service.

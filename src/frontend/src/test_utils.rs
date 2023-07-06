@@ -36,6 +36,9 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
 use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -729,6 +732,18 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _table_ids: &[u32],
     ) -> RpcResult<HashMap<u32, TableFragmentInfo>> {
         Ok(HashMap::default())
+    }
+
+    async fn list_table_fragment_states(&self) -> RpcResult<Vec<TableFragmentState>> {
+        Ok(vec![])
+    }
+
+    async fn list_fragment_distribution(&self) -> RpcResult<Vec<FragmentDistribution>> {
+        Ok(vec![])
+    }
+
+    async fn list_actor_states(&self) -> RpcResult<Vec<ActorState>> {
+        Ok(vec![])
     }
 
     async fn unpin_snapshot(&self) -> RpcResult<()> {

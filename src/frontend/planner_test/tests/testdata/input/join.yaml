@@ -201,6 +201,14 @@
     select x, a.x, b.x from a natural full join b;
   expected_outputs:
   - logical_plan
+- name: Ensure that natural joins work on materialized views
+  sql: |
+    create table t (a int, b int, c int);
+    create materialized view mv1 as select *, lag(a) over (partition by c) out1 from t;
+    create materialized view mv2 as select *, lead(b) over (partition by c) out2 from t;
+    select * from mv1 natural join mv2;
+  expected_outputs:
+  - logical_plan
 - name: Ensure that nested natural joins bind and disambiguate columns
   sql: |
     create table a(x int, y int);

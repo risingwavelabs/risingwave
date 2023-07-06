@@ -19,7 +19,7 @@ use aws_sdk_kinesis::Client as kinesis_client;
 
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::source::kinesis::*;
-use crate::source::SplitEnumerator;
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct KinesisSplitEnumerator {
     stream_name: String,
@@ -33,7 +33,10 @@ impl SplitEnumerator for KinesisSplitEnumerator {
     type Properties = KinesisProperties;
     type Split = KinesisSplit;
 
-    async fn new(properties: KinesisProperties) -> Result<Self> {
+    async fn new(
+        properties: KinesisProperties,
+        _context: SourceEnumeratorContextRef,
+    ) -> Result<Self> {
         let client = properties.common.build_client().await?;
         let stream_name = properties.common.stream_name.clone();
         Ok(Self {
