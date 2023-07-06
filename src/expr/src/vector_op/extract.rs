@@ -16,8 +16,7 @@ use chrono::{Datelike, NaiveTime, Timelike};
 use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, Timestamptz, F64};
 use risingwave_expr_macro::function;
 
-use super::timestamptz::timestamptz_at_time_zone;
-use crate::vector_op::timestamptz::timestamptz_view;
+use crate::vector_op::timestamptz::time_zone_err;
 use crate::{ExprError, Result};
 
 fn extract_date(date: impl Datelike, unit: &str) -> Option<Decimal> {
@@ -121,26 +120,26 @@ pub fn extract_from_timestamptz_at_timezone(
 ) -> Result<Decimal> {
     use chrono::Offset as _;
 
+    let time_zone = Timestamptz::lookup_time_zone(timezone).map_err(time_zone_err)?;
+    let instant_local = input.to_datetime_in_zone(time_zone);
+
     if unit.eq_ignore_ascii_case("epoch") {
         Ok(Decimal::from_i128_with_scale(
             input.timestamp_micros() as _,
             6,
         ))
     } else if unit.eq_ignore_ascii_case("timezone") {
-        let instant_local = timestamptz_view(input, timezone)?;
         let east_secs = instant_local.offset().fix().local_minus_utc();
         Ok(east_secs.into())
     } else if unit.eq_ignore_ascii_case("timezone_hour") {
-        let instant_local = timestamptz_view(input, timezone)?;
         let east_secs = instant_local.offset().fix().local_minus_utc();
         Ok((east_secs / 3600).into())
     } else if unit.eq_ignore_ascii_case("timezone_minute") {
-        let instant_local = timestamptz_view(input, timezone)?;
         let east_secs = instant_local.offset().fix().local_minus_utc();
         Ok((east_secs % 3600 / 60).into())
     } else {
-        let timestamp = timestamptz_at_time_zone(input, timezone)?;
-        extract_from_timestamp(unit, timestamp)
+        let timestamp = instant_local.naive_local();
+        extract_from_timestamp(unit, timestamp.into())
     }
 }
 
