@@ -70,11 +70,11 @@ impl Key for SstableBlockIndex {
 
 impl Value for Box<Block> {
     fn serialized_len(&self) -> usize {
-        self.data().len()
+        self.raw_data().len()
     }
 
     fn write(&self, mut buf: &mut [u8]) {
-        buf.put_slice(self.data())
+        buf.put_slice(self.raw_data())
     }
 
     fn read(buf: &[u8]) -> Self {
@@ -128,5 +128,76 @@ impl FileCache {
             FileCache::None => Ok(None),
             FileCache::Foyer(store) => store.lookup(key).await.map_err(FileCacheError::foyer),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::FullKey;
+
+    use super::*;
+    use crate::hummock::{
+        BlockBuilder, BlockBuilderOptions, BlockHolder, BlockIterator, CompressionAlgorithm,
+    };
+
+    #[test]
+    fn test_enc_dec() {
+        let options = BlockBuilderOptions {
+            compression_algorithm: CompressionAlgorithm::Lz4,
+            ..Default::default()
+        };
+
+        let mut builder = BlockBuilder::new(options);
+        builder.add_for_test(construct_full_key_struct(0, b"k1", 1), b"v01");
+        builder.add_for_test(construct_full_key_struct(0, b"k2", 2), b"v02");
+        builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
+        builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
+
+        let block = Box::new(
+            Block::decode(
+                builder.build().to_vec().into(),
+                builder.uncompressed_block_size(),
+            )
+            .unwrap(),
+        );
+
+        let mut buf = vec![0; block.serialized_len()];
+        block.write(&mut buf[..]);
+
+        let block = <Box<Block> as Value>::read(&buf[..]);
+
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
+
+        bi.seek_to_first();
+        assert!(bi.is_valid());
+        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
+        assert_eq!(b"v01", bi.value());
+
+        bi.next();
+        assert!(bi.is_valid());
+        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
+        assert_eq!(b"v02", bi.value());
+
+        bi.next();
+        assert!(bi.is_valid());
+        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
+        assert_eq!(b"v03", bi.value());
+
+        bi.next();
+        assert!(bi.is_valid());
+        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
+        assert_eq!(b"v04", bi.value());
+
+        bi.next();
+        assert!(!bi.is_valid());
+    }
+
+    pub fn construct_full_key_struct(
+        table_id: u32,
+        table_key: &[u8],
+        epoch: u64,
+    ) -> FullKey<&[u8]> {
+        FullKey::for_test(TableId::new(table_id), table_key, epoch)
     }
 }

@@ -575,6 +575,7 @@ impl StateStoreImpl {
                 flushers: opts.file_cache_flushers,
                 reclaimers: opts.file_cache_reclaimers,
                 recover_concurrency: opts.file_cache_recover_concurrency,
+                prometheus_registry: Some(state_store_metrics.registry().clone()),
             };
             FileCache::foyer(config)
                 .await
