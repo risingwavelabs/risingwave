@@ -23,25 +23,20 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use base64::engine::general_purpose;
-use base64::Engine as _;
 use bytes::Bytes;
-use chrono::{Datelike, Timelike};
 use enum_as_inner::EnumAsInner;
-use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_pb::catalog::PbSinkType;
+use risingwave_pb::connector_service::{PbSinkParam, TableSchema};
 use risingwave_rpc_client::error::RpcError;
-use serde_json::{json, Map, Value};
 use thiserror::Error;
 pub use tracing;
 
 use self::catalog::SinkType;
-use crate::sink::catalog::SinkId;
+use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
@@ -55,6 +50,69 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
+#[derive(Debug, Clone)]
+pub struct SinkParam {
+    pub sink_id: SinkId,
+    pub properties: HashMap<String, String>,
+    pub columns: Vec<ColumnDesc>,
+    pub pk_indices: Vec<usize>,
+    pub sink_type: SinkType,
+}
+
+impl SinkParam {
+    pub fn from_proto(pb_param: PbSinkParam) -> Self {
+        let table_schema = pb_param.table_schema.expect("should contain table schema");
+        Self {
+            sink_id: SinkId::from(pb_param.sink_id),
+            properties: pb_param.properties,
+            columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
+            pk_indices: table_schema
+                .pk_indices
+                .iter()
+                .map(|i| *i as usize)
+                .collect(),
+            sink_type: SinkType::from_proto(
+                PbSinkType::from_i32(pb_param.sink_type).expect("should be able to convert"),
+            ),
+        }
+    }
+
+    pub fn to_proto(&self) -> PbSinkParam {
+        PbSinkParam {
+            sink_id: self.sink_id.sink_id,
+            properties: self.properties.clone(),
+            table_schema: Some(TableSchema {
+                columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
+                pk_indices: self.pk_indices.iter().map(|i| *i as u32).collect(),
+            }),
+            sink_type: self.sink_type.to_proto().into(),
+        }
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema {
+            fields: self.columns.iter().map(Field::from).collect(),
+        }
+    }
+}
+
+impl From<SinkCatalog> for SinkParam {
+    fn from(sink_catalog: SinkCatalog) -> Self {
+        let columns = sink_catalog
+            .visible_columns()
+            .map(|col| col.column_desc.clone())
+            .collect();
+        Self {
+            sink_id: sink_catalog.id,
+            properties: sink_catalog.properties,
+            columns,
+            pk_indices: sink_catalog.downstream_pk,
+            sink_type: sink_catalog.sink_type,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
@@ -261,31 +319,11 @@ impl SinkConfig {
             _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
     }
-
-    pub fn get_connector(&self) -> &'static str {
-        match self {
-            SinkConfig::Kafka(_) => "kafka",
-            SinkConfig::Redis(_) => "redis",
-            SinkConfig::Remote(_) => "remote",
-            SinkConfig::BlackHole => "blackhole",
-            SinkConfig::Kinesis(_) => "kinesis",
-        }
-    }
 }
 
-pub fn build_sink(
-    config: SinkConfig,
-    columns: &[ColumnCatalog],
-    pk_indices: Vec<usize>,
-    sink_type: SinkType,
-    sink_id: SinkId,
-) -> Result<SinkImpl> {
-    // The downstream sink can only see the visible columns.
-    let schema: Schema = columns
-        .iter()
-        .filter_map(|column| (!column.is_hidden).then(|| column.column_desc.clone().into()))
-        .collect();
-    SinkImpl::new(config, schema, pk_indices, sink_type, sink_id)
+pub fn build_sink(param: SinkParam) -> Result<SinkImpl> {
+    let config = SinkConfig::from_hashmap(param.properties.clone())?;
+    SinkImpl::new(config, param)
 }
 
 #[derive(Debug)]
@@ -295,6 +333,18 @@ pub enum SinkImpl {
     Remote(RemoteSink),
     BlackHole(BlackHoleSink),
     Kinesis(KinesisSink),
+}
+
+impl SinkImpl {
+    pub fn get_connector(&self) -> &'static str {
+        match self {
+            SinkImpl::Kafka(_) => "kafka",
+            SinkImpl::Redis(_) => "redis",
+            SinkImpl::Remote(_) => "remote",
+            SinkImpl::BlackHole(_) => "blackhole",
+            SinkImpl::Kinesis(_) => "kinesis",
+        }
+    }
 }
 
 #[macro_export]
@@ -313,30 +363,22 @@ macro_rules! dispatch_sink {
 }
 
 impl SinkImpl {
-    pub fn new(
-        cfg: SinkConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        sink_type: SinkType,
-        sink_id: SinkId,
-    ) -> Result<Self> {
+    pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, schema)?),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg)?),
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
                 *cfg,
-                schema,
-                pk_indices,
-                sink_type.is_append_only(),
+                param.schema(),
+                param.pk_indices,
+                param.sink_type.is_append_only(),
             )),
             SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(
                 *cfg,
-                schema,
-                pk_indices,
-                sink_type.is_append_only(),
+                param.schema(),
+                param.pk_indices,
+                param.sink_type.is_append_only(),
             )),
-            SinkConfig::Remote(cfg) => {
-                SinkImpl::Remote(RemoteSink::new(cfg, schema, pk_indices, sink_id, sink_type))
-            }
+            SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
         })
     }
@@ -369,248 +411,5 @@ impl From<RpcError> for SinkError {
 impl From<SinkError> for RwError {
     fn from(e: SinkError) -> Self {
         ErrorCode::SinkError(Box::new(e)).into()
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum TimestampHandlingMode {
-    Milli,
-    String,
-}
-
-pub fn record_to_json(
-    row: RowRef<'_>,
-    schema: &[Field],
-    timestamp_handling_mode: TimestampHandlingMode,
-) -> Result<Map<String, Value>> {
-    let mut mappings = Map::with_capacity(schema.len());
-    for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
-        let key = field.name.clone();
-        let value = datum_to_json_object(field, datum_ref, timestamp_handling_mode)
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
-        mappings.insert(key, value);
-    }
-    Ok(mappings)
-}
-
-fn datum_to_json_object(
-    field: &Field,
-    datum: DatumRef<'_>,
-    timestamp_handling_mode: TimestampHandlingMode,
-) -> ArrayResult<Value> {
-    let scalar_ref = match datum {
-        None => return Ok(Value::Null),
-        Some(datum) => datum,
-    };
-
-    let data_type = field.data_type();
-
-    tracing::debug!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
-
-    let value = match (data_type, scalar_ref) {
-        (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
-            json!(v)
-        }
-        (DataType::Int16, ScalarRefImpl::Int16(v)) => {
-            json!(v)
-        }
-        (DataType::Int32, ScalarRefImpl::Int32(v)) => {
-            json!(v)
-        }
-        (DataType::Int64, ScalarRefImpl::Int64(v)) => {
-            json!(v)
-        }
-        (DataType::Float32, ScalarRefImpl::Float32(v)) => {
-            json!(f32::from(v))
-        }
-        (DataType::Float64, ScalarRefImpl::Float64(v)) => {
-            json!(f64::from(v))
-        }
-        (DataType::Varchar, ScalarRefImpl::Utf8(v)) => {
-            json!(v)
-        }
-        (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
-            json!(v.to_text())
-        }
-        (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
-            // risingwave's timestamp with timezone is stored in UTC and does not maintain the
-            // timezone info and the time is in microsecond.
-            let parsed = v.to_datetime_utc().naive_utc();
-            let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
-            json!(v)
-        }
-        (DataType::Time, ScalarRefImpl::Time(v)) => {
-            // todo: just ignore the nanos part to avoid leap second complex
-            json!(v.0.num_seconds_from_midnight() as i64 * 1000)
-        }
-        (DataType::Date, ScalarRefImpl::Date(v)) => {
-            json!(v.0.num_days_from_ce())
-        }
-        (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => match timestamp_handling_mode {
-            TimestampHandlingMode::Milli => json!(v.0.timestamp_millis()),
-            TimestampHandlingMode::String => json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
-        },
-        (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {
-            json!(general_purpose::STANDARD_NO_PAD.encode(v))
-        }
-        // P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
-        (DataType::Interval, ScalarRefImpl::Interval(v)) => {
-            json!(v.as_iso_8601())
-        }
-        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => {
-            json!(jsonb_ref.to_string())
-        }
-        (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
-            let elems = list_ref.iter();
-            let mut vec = Vec::with_capacity(elems.len());
-            let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
-            for sub_datum_ref in elems {
-                let value =
-                    datum_to_json_object(&inner_field, sub_datum_ref, timestamp_handling_mode)?;
-                vec.push(value);
-            }
-            json!(vec)
-        }
-        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(st.len());
-            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
-                st.iter()
-                    .map(|(name, dt)| Field::with_name(dt.clone(), name)),
-            ) {
-                let value =
-                    datum_to_json_object(&sub_field, sub_datum_ref, timestamp_handling_mode)?;
-                map.insert(sub_field.name.clone(), value);
-            }
-            json!(map)
-        }
-        (data_type, scalar_ref) => {
-            return Err(ArrayError::internal(
-                format!("datum_to_json_object: unsupported data type: field name: {:?}, logical type: {:?}, physical type: {:?}", field.name, data_type, scalar_ref),
-            ));
-        }
-    };
-
-    Ok(value)
-}
-
-#[cfg(test)]
-mod tests {
-
-    use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
-
-    use super::*;
-    #[test]
-    fn test_to_json_basic_type() {
-        let mock_field = Field {
-            data_type: DataType::Boolean,
-            name: Default::default(),
-            sub_fields: Default::default(),
-            type_name: Default::default(),
-        };
-        let boolean_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Boolean,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Bool(false).as_scalar_ref_impl()),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(boolean_value, json!(false));
-
-        let int16_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Int16,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Int16(16).as_scalar_ref_impl()),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(int16_value, json!(16));
-
-        let int64_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Int64,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(
-            serde_json::to_string(&int64_value).unwrap(),
-            std::i64::MAX.to_string()
-        );
-
-        // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
-        let tstz_inner = "2018-01-26T18:30:09.453Z".parse().unwrap();
-        let tstz_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Timestamptz,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
-
-        let ts_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Timestamp,
-                ..mock_field.clone()
-            },
-            Some(
-                ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(1000, 0))
-                    .as_scalar_ref_impl(),
-            ),
-            TimestampHandlingMode::Milli,
-        )
-        .unwrap();
-        assert_eq!(ts_value, json!(1000 * 1000));
-
-        let ts_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Timestamp,
-                ..mock_field.clone()
-            },
-            Some(
-                ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(1000, 0))
-                    .as_scalar_ref_impl(),
-            ),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(ts_value, json!("1970-01-01 00:16:40.000000".to_string()));
-
-        // Represents the number of microseconds past midnigh, io.debezium.time.Time
-        let time_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Time,
-                ..mock_field.clone()
-            },
-            Some(
-                ScalarImpl::Time(Time::from_num_seconds_from_midnight_uncheck(1000, 0))
-                    .as_scalar_ref_impl(),
-            ),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(time_value, json!(1000 * 1000));
-
-        let interval_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Interval,
-                ..mock_field
-            },
-            Some(
-                ScalarImpl::Interval(Interval::from_month_day_usec(13, 2, 1000000))
-                    .as_scalar_ref_impl(),
-            ),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
     }
 }

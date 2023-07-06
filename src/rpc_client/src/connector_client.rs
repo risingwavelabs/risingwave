@@ -17,12 +17,15 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use futures::StreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::catalog::SinkType;
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
-use risingwave_pb::connector_service::sink_stream_request::{Request as SinkRequest, StartSink};
-use risingwave_pb::connector_service::*;
+use risingwave_pb::connector_service::sink_writer_request::{Request as SinkRequest, StartSink};
+use risingwave_pb::connector_service::{
+    GetEventStreamRequest, GetEventStreamResponse, SinkParam, SinkPayloadFormat, SinkWriterRequest,
+    SinkWriterResponse, SourceType, TableSchema, ValidateSinkRequest, ValidateSourceRequest,
+};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::{Channel, Endpoint};
@@ -120,30 +123,25 @@ impl ConnectorClient {
 
     pub async fn start_sink_stream(
         &self,
-        connector_type: String,
-        sink_id: u64,
-        properties: HashMap<String, String>,
-        table_schema: Option<TableSchema>,
+        sink_param: SinkParam,
         sink_payload_format: SinkPayloadFormat,
-    ) -> Result<(UnboundedSender<SinkStreamRequest>, Streaming<SinkResponse>)> {
-        let (request_sender, request_receiver) = unbounded_channel::<SinkStreamRequest>();
+    ) -> Result<(
+        UnboundedSender<SinkWriterRequest>,
+        Streaming<SinkWriterResponse>,
+    )> {
+        let (request_sender, request_receiver) = unbounded_channel();
 
         // Send initial request in case of the blocking receive call from creating streaming request
         request_sender
-            .send(SinkStreamRequest {
+            .send(SinkWriterRequest {
                 request: Some(SinkRequest::Start(StartSink {
+                    sink_param: Some(sink_param),
                     format: sink_payload_format as i32,
-                    sink_config: Some(SinkConfig {
-                        connector_type,
-                        properties,
-                        table_schema,
-                    }),
-                    sink_id,
                 })),
             })
             .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
 
-        let response = self
+        let mut response = self
             .0
             .to_owned()
             .sink_stream(Request::new(UnboundedReceiverStream::new(request_receiver)))
@@ -151,26 +149,19 @@ impl ConnectorClient {
             .map_err(RpcError::GrpcStatus)?
             .into_inner();
 
+        response.next().await.ok_or(RpcError::Internal(anyhow!(
+            "get empty response from start sink request"
+        )))??;
+
         Ok((request_sender, response))
     }
 
-    pub async fn validate_sink_properties(
-        &self,
-        connector_type: String,
-        properties: HashMap<String, String>,
-        table_schema: Option<TableSchema>,
-        sink_type: SinkType,
-    ) -> Result<()> {
+    pub async fn validate_sink_properties(&self, sink_param: SinkParam) -> Result<()> {
         let response = self
             .0
             .to_owned()
             .validate_sink(ValidateSinkRequest {
-                sink_config: Some(SinkConfig {
-                    connector_type,
-                    properties,
-                    table_schema,
-                }),
-                sink_type: sink_type as i32,
+                sink_param: Some(sink_param),
             })
             .await
             .inspect_err(|err| {
