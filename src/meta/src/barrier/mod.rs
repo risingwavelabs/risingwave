@@ -1061,14 +1061,6 @@ where
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
         self.tracker.lock().await.gen_ddl_progress()
     }
-
-    /// Only handle `SystemParamsChange`.
-    fn handle_local_notification(&self, notification: LocalNotification) {
-        if let LocalNotification::SystemParamsChange(p) = notification {
-            self.scheduled_barriers
-                .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
-        }
-    }
 }
 
 pub type BarrierManagerRef<S> = Arc<GlobalBarrierManager<S>>;
