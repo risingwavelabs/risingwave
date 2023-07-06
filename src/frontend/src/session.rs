@@ -21,6 +21,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_message::TransactionStatus;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Format;
@@ -1041,6 +1042,16 @@ impl Session for SessionImpl {
     fn take_notices(self: Arc<Self>) -> Vec<String> {
         let inner = &mut (*self.notices.write());
         std::mem::take(inner)
+    }
+
+    fn transaction_status(&self) -> TransactionStatus {
+        match &*self.txn.lock() {
+            transaction::State::Initial | transaction::State::Implicit(_) => {
+                TransactionStatus::Idle
+            }
+            transaction::State::Explicit(_) => TransactionStatus::InTransaction,
+            // TODO: failed transaction
+        }
     }
 }
 

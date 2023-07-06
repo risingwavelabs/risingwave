@@ -362,7 +362,7 @@ pub enum BeMessage<'a> {
     NoData,
     DataRow(&'a Row),
     ParameterStatus(BeParameterStatusMessage<'a>),
-    ReadyForQuery,
+    ReadyForQuery(TransactionStatus),
     RowDescription(&'a [PgFieldDescriptor]),
     ErrorResponse(BoxedError),
     CloseComplete,
@@ -383,6 +383,13 @@ pub enum BeParameterStatusMessage<'a> {
 pub struct BeCommandCompleteMessage {
     pub stmt_type: StatementType,
     pub rows_cnt: i32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum TransactionStatus {
+    Idle,
+    InTransaction,
+    InFailedTransaction,
 }
 
 impl<'a> BeMessage<'a> {
@@ -549,11 +556,15 @@ impl<'a> BeMessage<'a> {
             // +-----+----------+---------------------------+
             // | 'Z' | int32(5) | byte1(transaction status) |
             // +-----+----------+---------------------------+
-            BeMessage::ReadyForQuery => {
+            BeMessage::ReadyForQuery(txn_status) => {
                 buf.put_u8(b'Z');
                 buf.put_i32(5);
                 // TODO: add transaction status
-                buf.put_u8(b'I');
+                buf.put_u8(match txn_status {
+                    TransactionStatus::Idle => b'I',
+                    TransactionStatus::InTransaction => b'T',
+                    TransactionStatus::InFailedTransaction => b'E',
+                });
             }
 
             BeMessage::ParseComplete => {
