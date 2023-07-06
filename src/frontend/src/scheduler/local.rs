@@ -128,7 +128,7 @@ impl LocalQueryExecution {
         }
     }
 
-    pub fn run(self) -> BoxedDataChunkStream {
+    fn run(self) -> BoxedDataChunkStream {
         let span = tracing::info_span!(
             "local_execute",
             query_id = self.query.query_id.id,
@@ -138,6 +138,7 @@ impl LocalQueryExecution {
     }
 
     pub fn stream_rows(mut self) -> LocalQueryStream {
+        let compute_runtime = self.front_env.compute_runtime();
         let (sender, receiver) = mpsc::channel(10);
         let tripwire = self.cancel_flag.take().unwrap();
 
@@ -154,10 +155,7 @@ impl LocalQueryExecution {
             }
         };
 
-        #[cfg(madsim)]
-        tokio::spawn(future);
-        #[cfg(not(madsim))]
-        tokio::task::spawn_blocking(move || futures::executor::block_on(future));
+        compute_runtime.spawn(future);
 
         ReceiverStream::new(receiver)
     }
