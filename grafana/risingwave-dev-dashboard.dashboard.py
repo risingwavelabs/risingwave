@@ -2249,13 +2249,9 @@ def section_hummock_manager(outer_panels):
                                       "table{{table_id}} {{metric}}"),
                         panels.target(f"{table_metric('storage_version_stats', total_value_size_filter)}/1024",
                                       "table{{table_id}} {{metric}}"),
-                        panels.target("sum by (table_id) (storage_version_stats{metric='total_key_size',table_id=~\"$table\",job=~\"$job\",instance=~\"$node\"}) / 1024 + sum by (table_id) (storage_version_stats{metric='total_value_size',table_id=~\"$table\",job=~\"$job\",instance=~\"$node\"}) / 1024",
-                                      "table size - {{table_id}}"),
-
+                        panels.target("sum by (table_id) (storage_version_stats{metric='total_key_size', table_id=~\"$table\",job=~\"$job\",instance=~\"$node\"}) / 1024 + sum by (table_id) (storage_version_stats{metric='total_value_size',table_id=~\"$table\",job=~\"$job\",instance=~\"$node\"}) / 1024", "table size - {{table_id}}"),
                     ],
-                ),
-
-        
+                ),        
                 panels.timeseries_count(
                     "Table KV Count",
                     "",

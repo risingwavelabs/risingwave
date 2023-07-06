@@ -34,16 +34,16 @@ profile:
       #   unsafe-no-fsync: true
 
       # If you want to enable metrics or tracing, uncomment the following lines.
-      - use: prometheus  # metrics
+      # - use: prometheus  # metrics
       # - use: tempo       # tracing
-      - use: grafana     # visualization
+      # - use: grafana     # visualization
 
       - use: meta-node
       - use: compute-node
       - use: frontend
 
       # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-      - use: compactor
+      # - use: compactor
 
       # If you want to create source from Kafka, uncomment the following lines
       # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.

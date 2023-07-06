@@ -113,8 +113,7 @@ impl<S: MetaStore> HummockManager<S> {
                 tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
             }
 
-            // let mut mv_id_to_internal_table_ids: HashMap<u32, Vec<u32>> = HashMap::new();
-            // mv_id_to_internal_table_ids.insert(mv_table, internal_tables.clone());
+
             // materialized_view
             pairs.push((
                 mv_table,
