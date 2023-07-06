@@ -225,7 +225,11 @@ impl StageExecution {
                     query_id = self.stage.query_id.id,
                     stage_id = self.stage.id,
                 );
-                spawn(async move { runner.run(receiver).instrument(span).await });
+                self.ctx
+                    .session()
+                    .env()
+                    .compute_runtime()
+                    .spawn(async move { runner.run(receiver).instrument(span).await });
 
                 tracing::trace!(
                     "Stage {:?}-{:?} started.",
