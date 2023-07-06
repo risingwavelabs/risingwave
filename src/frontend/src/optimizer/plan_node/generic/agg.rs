@@ -710,7 +710,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
     pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
         let last = ("aggs", self.agg_calls_pretty());
-        if self.group_key.count_ones(..) != 0 {
+        if !self.group_key.is_clear() {
             let first = ("group_key", self.group_key_pretty());
             vec![first, last]
         } else {

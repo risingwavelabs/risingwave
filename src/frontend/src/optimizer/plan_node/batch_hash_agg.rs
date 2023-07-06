@@ -37,6 +37,7 @@ pub struct BatchHashAgg {
 
 impl BatchHashAgg {
     pub fn new(logical: generic::Agg<PlanRef>) -> Self {
+        assert!(!logical.group_key.is_clear());
         let input = logical.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {
@@ -90,11 +91,10 @@ impl BatchHashAgg {
 
     fn to_shuffle_agg(&self) -> Result<PlanRef> {
         let input = self.input();
-        let required_dist = if self.group_key().count_ones(..) == 0 {
-            RequiredDist::single()
-        } else {
-            RequiredDist::shard_by_key(input.schema().len(), &self.group_key().ones().collect_vec())
-        };
+        let required_dist = RequiredDist::shard_by_key(
+            input.schema().len(),
+            &self.group_key().ones().collect_vec(),
+        );
         let new_input = input.to_distributed_with_required(&Order::any(), &required_dist)?;
         Ok(self.clone_with_input(new_input).into())
     }

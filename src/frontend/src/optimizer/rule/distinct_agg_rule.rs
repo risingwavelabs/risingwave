@@ -37,7 +37,7 @@ impl Rule for DistinctAggRule {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (mut agg_calls, mut agg_group_keys, input) = agg.clone().decompose();
 
-        if self.for_stream && agg_group_keys.count_ones(..) != 0 {
+        if self.for_stream && !agg_group_keys.is_clear() {
             // Due to performance issue, we don't do 2-phase agg for stream distinct agg with group
             // by. See https://github.com/risingwavelabs/risingwave/issues/7271 for more.
             return None;
