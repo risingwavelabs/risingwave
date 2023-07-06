@@ -55,9 +55,9 @@ where
         request: Request<SetSystemParamRequest>,
     ) -> Result<Response<SetSystemParamResponse>, Status> {
         let req = request.into_inner();
-        self.system_params_manager
+        let params = self.system_params_manager
             .set_param(&req.param, req.value)
             .await?;
-        Ok(Response::new(SetSystemParamResponse {}))
+        Ok(Response::new(SetSystemParamResponse { Some(params) }))
     }
 }
