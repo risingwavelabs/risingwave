@@ -93,6 +93,7 @@ random_delete() {
   do
     run_sql "DELETE FROM t WHERE v1 = $(("$RANDOM" % END));" 1>$QUERY_LOG_FILE 2>&1
   done
+  run_sql "flush;"
 }
 
 random_update() {
@@ -103,6 +104,7 @@ random_update() {
   do
     run_sql "UPDATE t SET v2 = v2 + 1 WHERE v1 = $(("$RANDOM" % END));" 1>$QUERY_LOG_FILE 2>&1
   done
+  run_sql "flush;"
 }
 
 run_sql_old_cluster() {
