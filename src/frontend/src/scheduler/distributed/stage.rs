@@ -570,13 +570,16 @@ impl StageRunner {
             shutdown_rx.clone(),
         );
 
+        let shutdown_rx0 = shutdown_rx.clone();
         let executor = executor.build().await?;
         let chunk_stream = executor.execute();
         let cancelled = pin!(shutdown_rx.cancelled());
-        let mut terminated_chunk_stream = chunk_stream.take_until(cancelled);
         #[for_await]
-        for chunk in &mut terminated_chunk_stream {
+        for chunk in chunk_stream.take_until(cancelled) {
             if let Err(ref e) = chunk {
+                if shutdown_rx0.is_cancelled() {
+                    break;
+                }
                 let err_str = e.to_string();
 
                 // This is possible if The Query Runner drop early before schedule the root
@@ -595,19 +598,15 @@ impl StageRunner {
             }
         }
 
-        if let Some(msg) = terminated_chunk_stream.take_result() {
-            // Terminated by other tasks execution error, so no need to return error here.
-            match msg {
-                ShutdownMsg::Abort(err_str) => {
-                    // Tell Query Result Fetcher to stop polling and attach failure reason as str.
-                    if let Err(_e) = result_tx.send(Err(TaskExecutionError(err_str))).await {
-                        warn!("Send task execution failed");
-                    }
+        // Terminated by other tasks execution error, so no need to return error here.
+        match shutdown_rx0.message() {
+            ShutdownMsg::Abort(err_str) => {
+                // Tell Query Result Fetcher to stop polling and attach failure reason as str.
+                if let Err(_e) = result_tx.send(Err(TaskExecutionError(err_str))).await {
+                    warn!("Send task execution failed");
                 }
-                _ => unreachable!(),
             }
-        } else {
-            self.notify_stage_completed().await;
+            _ => self.notify_stage_completed().await,
         }
 
         tracing::trace!(

@@ -321,11 +321,10 @@ impl ShutdownToken {
     ///
     /// # Cancel safety
     /// This method is cancel safe.
-    pub async fn cancelled(&mut self) -> ShutdownMsg {
+    pub async fn cancelled(&mut self) {
         if matches!(*self.0.borrow(), ShutdownMsg::Init) {
             self.0.changed().await.expect("shutdown sender dropped");
         }
-        self.0.borrow().clone()
     }
 
     /// Return true if the shutdown token has been triggered.
