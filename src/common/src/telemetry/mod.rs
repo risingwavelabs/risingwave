@@ -17,7 +17,6 @@ pub mod report;
 
 use std::time::SystemTime;
 
-use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, SystemExt};
 
@@ -32,6 +31,13 @@ pub const TELEMETRY_REPORT_INTERVAL: u64 = 6 * 60 * 60;
 
 /// Environment Variable that is default to be true
 const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
+
+pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
+
+/// Telemetry errors are generally recoverable/ignorable. `String` is good enough.
+pub type TelemetryError = String;
+
+type Result<T> = core::result::Result<T, TelemetryError>;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TelemetryNodeType {
@@ -57,9 +63,7 @@ pub struct TelemetryReportBase {
     pub node_type: TelemetryNodeType,
 }
 
-pub trait TelemetryReport {
-    fn to_json(&self) -> Result<String>;
-}
+pub trait TelemetryReport: Serialize {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemData {
@@ -125,20 +129,21 @@ impl Default for SystemData {
     }
 }
 
-/// post a telemetry reporting request
-pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(), anyhow::Error> {
+/// Sends a `POST` request of the telemetry reporting to a URL.
+async fn post_telemetry_report(url: &str, report_body: String) -> Result<()> {
     let client = reqwest::Client::new();
     let res = client
         .post(url)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(report_body)
         .send()
-        .await?;
+        .await
+        .map_err(|err| format!("failed to send telemetry report, err: {}", err))?;
     if res.status().is_success() {
         Ok(())
     } else {
-        Err(anyhow!(
-            "invalid telemetry resp, url {}, status {}",
+        Err(format!(
+            "telemetry response is error, url {}, status {}",
             url,
             res.status()
         ))
@@ -151,13 +156,13 @@ pub fn telemetry_env_enabled() -> bool {
     get_bool_env(TELEMETRY_ENV_ENABLE).unwrap_or(true)
 }
 
-pub fn get_bool_env(key: &str) -> Result<bool> {
-    let b = std::env::var(key)
+fn get_bool_env(key: &str) -> Option<bool> {
+    std::env::var(key)
         .unwrap_or("true".to_string())
         .trim()
         .to_ascii_lowercase()
-        .parse()?;
-    Ok(b)
+        .parse()
+        .ok()
 }
 
 pub fn current_timestamp() -> u64 {
@@ -221,6 +226,6 @@ mod tests {
         let key = "MY_ENV_VARIABLE_INVALID";
         std::env::set_var(key, "not_a_bool");
         let result = get_bool_env(key);
-        assert!(result.is_err());
+        assert!(result.is_none());
     }
 }
