@@ -31,7 +31,7 @@ pub(super) async fn load_file_descriptor_from_http(location: &Url) -> Result<Vec
     Ok(schema_bytes.to_vec())
 }
 
-// Pull protobuf schema and all it's deps from the confluent schema regitry,
+// Pull protobuf schema and all it's deps from the confluent schema registry,
 // and compile then into one file descriptor
 pub(super) async fn compile_file_descriptor_from_schema_registry(
     subject_name: &str,

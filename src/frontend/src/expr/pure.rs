@@ -124,6 +124,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Atan2
             | expr_node::Type::Sqrt
             | expr_node::Type::Cbrt
+            | expr_node::Type::Left
+            | expr_node::Type::Right
             | expr_node::Type::Degrees
             | expr_node::Type::Radians
             | expr_node::Type::IsTrue

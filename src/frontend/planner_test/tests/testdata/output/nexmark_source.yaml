@@ -1629,12 +1629,13 @@
     │     │ └─BatchSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], filter: (None, None) }
     │     └─BatchExchange { order: [], dist: HashShard(auction) }
     │       └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
-    └─BatchProject { exprs: [(sum0(count) / count(auction)) as $expr1] }
-      └─BatchSimpleAgg { aggs: [sum0(count), count(auction)] }
+    └─BatchProject { exprs: [(sum0(sum0(count)) / sum0(count(auction))) as $expr1] }
+      └─BatchSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(auction))] }
         └─BatchExchange { order: [], dist: Single }
-          └─BatchHashAgg { group_key: [auction], aggs: [count] }
-            └─BatchExchange { order: [], dist: HashShard(auction) }
-              └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
+          └─BatchSimpleAgg { aggs: [sum0(count), count(auction)] }
+            └─BatchHashAgg { group_key: [auction], aggs: [count] }
+              └─BatchExchange { order: [], dist: HashShard(auction) }
+                └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: NoCheck }
     └─StreamDynamicFilter { predicate: (count(auction) >= $expr1), output: [id, item_name, count(auction)] }
@@ -1650,15 +1651,16 @@
       │           └─StreamRowIdGen { row_id_index: 7 }
       │             └─StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(sum0(count) / count(auction)) as $expr1] }
-          └─StreamSimpleAgg { aggs: [sum0(count), count(auction), count] }
+        └─StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(auction))) as $expr1] }
+          └─StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(auction)), count] }
             └─StreamExchange { dist: Single }
-              └─StreamHashAgg [append_only] { group_key: [auction], aggs: [count] }
-                └─StreamExchange { dist: HashShard(auction) }
-                  └─StreamShare { id: 5 }
-                    └─StreamProject { exprs: [auction, _row_id] }
-                      └─StreamRowIdGen { row_id_index: 7 }
-                        └─StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+              └─StreamStatelessSimpleAgg { aggs: [sum0(count), count(auction)] }
+                └─StreamHashAgg [append_only] { group_key: [auction], aggs: [count] }
+                  └─StreamExchange { dist: HashShard(auction) }
+                    └─StreamShare { id: 5 }
+                      └─StreamProject { exprs: [auction, _row_id] }
+                        └─StreamRowIdGen { row_id_index: 7 }
+                          └─StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], stream_key: [auction_id, auction_item_name], pk_columns: [auction_id, auction_item_name], pk_conflict: NoCheck }
@@ -1689,13 +1691,14 @@
         └── StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] } { source state table: 8 }
 
     Fragment 4
-    StreamProject { exprs: [(sum0(count) / count(auction)) as $expr1] }
-    └── StreamSimpleAgg { aggs: [sum0(count), count(auction), count] } { result table: 9, state tables: [], distinct tables: [] }
+    StreamProject { exprs: [(sum0(sum0(count)) / sum0(count(auction))) as $expr1] }
+    └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count(auction)), count] } { result table: 9, state tables: [], distinct tables: [] }
         └── StreamExchange Single from 5
 
     Fragment 5
-    StreamHashAgg [append_only] { group_key: [auction], aggs: [count] } { result table: 10, state tables: [], distinct tables: [] }
-    └── StreamExchange Hash([0]) from 6
+    StreamStatelessSimpleAgg { aggs: [sum0(count), count(auction)] }
+    └── StreamHashAgg [append_only] { group_key: [auction], aggs: [count] } { result table: 10, state tables: [], distinct tables: [] }
+        └── StreamExchange Hash([0]) from 6
 
     Fragment 6
     StreamNoOp
@@ -1724,7 +1727,7 @@
 
     Table 8 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ sum0(count), count(auction), count ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 9 { columns: [ sum0(sum0(count)), sum0(count(auction)), count ], primary key: [], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 10 { columns: [ auction, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 

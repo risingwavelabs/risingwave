@@ -232,7 +232,7 @@ mod tests {
     use super::*;
     use crate::parser::{CommonParserConfig, CsvParserConfig, SpecificParserConfig};
     use crate::source::filesystem::{S3Properties, S3SplitEnumerator};
-    use crate::source::{SourceColumnDesc, SplitEnumerator};
+    use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
     #[ignore]
@@ -245,7 +245,10 @@ mod tests {
             secret: None,
             endpoint_url: None,
         };
-        let mut enumerator = S3SplitEnumerator::new(props.clone()).await.unwrap();
+        let mut enumerator =
+            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+                .await
+                .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
         println!("splits {:?}", splits);
 

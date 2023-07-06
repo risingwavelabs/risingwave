@@ -16,7 +16,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use risingwave_common::catalog::ColumnId;
+use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
@@ -24,8 +25,9 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{
-    BasicSerde, ValueRowDeserializer, ValueRowSerdeNew, ValueRowSerializer,
+    BasicSerde, ValueRowDeserializer, ValueRowSerializer,
 };
+use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 
 struct Case {
     name: String,
@@ -80,7 +82,20 @@ fn basic_encode(c: &Case) -> Vec<Vec<u8>> {
 }
 
 fn column_aware_encode(c: &Case) -> Vec<Vec<u8>> {
-    let seralizer = ColumnAwareSerde::new(&c.column_ids, c.schema.clone());
+    let table_columns = c
+        .column_ids
+        .iter()
+        .map(|id| {
+            ColumnDesc::unnamed(
+                *id,
+                c.needed_schema.get(id.get_id() as usize).unwrap().clone(),
+            )
+        })
+        .collect_vec();
+    let seralizer = ColumnAwareSerde::new(
+        Arc::from_iter(c.column_ids.iter().map(|id| id.get_id() as usize)),
+        table_columns.into(),
+    );
     let mut array = vec![];
     for row in &c.rows {
         let row_bytes = seralizer.serialize(row);
@@ -132,7 +147,18 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
 }
 
 fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
-    let deserializer = BasicSerde::new(&c.column_ids, c.schema.clone());
+    let table_columns = c
+        .column_ids
+        .iter()
+        .map(|id| {
+            ColumnDesc::unnamed(
+                *id,
+                c.needed_schema.get(id.get_id() as usize).unwrap().clone(),
+            )
+        })
+        .collect_vec();
+    let deserializer =
+        BasicSerde::new(Arc::from_iter(0..table_columns.len()), table_columns.into());
     let mut res = vec![];
     if c.column_ids == c.needed_ids {
         for byte in bytes {
@@ -170,7 +196,20 @@ fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
 }
 
 fn column_aware_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
-    let deserializer = ColumnAwareSerde::new(&c.needed_ids, c.needed_schema.clone());
+    let table_columns = c
+        .column_ids
+        .iter()
+        .map(|id| {
+            ColumnDesc::unnamed(
+                *id,
+                c.needed_schema.get(id.get_id() as usize).unwrap().clone(),
+            )
+        })
+        .collect_vec();
+    let deserializer = ColumnAwareSerde::new(
+        Arc::from_iter(c.needed_ids.iter().map(|id| id.get_id() as usize)),
+        table_columns.into(),
+    );
     let mut res = vec![];
     for byte in bytes {
         let row = deserializer.deserialize(byte)?;
