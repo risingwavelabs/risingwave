@@ -35,12 +35,10 @@ use crate::write_batch::WriteBatch;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
-pub trait NextFutureTrait<'a, Item> = Future<Output = StorageResult<Option<Item>>> + Send + 'a;
 pub trait StateStoreIter: StaticSendSync {
     type Item: Send;
-    type NextFuture<'a>: NextFutureTrait<'a, Self::Item>;
 
-    fn next(&mut self) -> Self::NextFuture<'_>;
+    fn next(&mut self) -> impl Future<Output = StorageResult<Option<Self::Item>>> + Send + '_;
 }
 
 pub trait StateStoreIterStreamTrait<Item> = Stream<Item = StorageResult<Item>> + Send + 'static;
@@ -66,33 +64,23 @@ impl<I: StateStoreIter> StateStoreIterExt for I {
     }
 }
 
-#[macro_export]
-macro_rules! define_state_store_read_associated_type {
-    () => {
-        type GetFuture<'a> = impl GetFutureTrait<'a>;
-        type IterFuture<'a> = impl IterFutureTrait<'a, Self::IterStream>;
-    };
-}
-
-pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
 pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
-pub trait StateStoreIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreIterItem>;
 pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
 pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
 
 pub type IterKeyRange = (Bound<KeyPayloadType>, Bound<KeyPayloadType>);
 
-pub trait IterFutureTrait<'a, I: StateStoreReadIterStream> =
-    Future<Output = StorageResult<I>> + Send + 'a;
 pub trait StateStoreRead: StaticSendSync {
     type IterStream: StateStoreReadIterStream;
 
-    type GetFuture<'a>: GetFutureTrait<'a>;
-    type IterFuture<'a>: IterFutureTrait<'a, Self::IterStream>;
-
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_>;
+    fn get(
+        &self,
+        key: Bytes,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
@@ -104,14 +92,10 @@ pub trait StateStoreRead: StaticSendSync {
         key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> Self::IterFuture<'_>;
+    ) -> impl Future<Output = StorageResult<Self::IterStream>> + Send + '_;
 }
 
-pub trait ScanFutureTrait<'a> = Future<Output = StorageResult<Vec<StateStoreIterItem>>> + Send + 'a;
-
 pub trait StateStoreReadExt: StaticSendSync {
-    type ScanFuture<'a>: ScanFutureTrait<'a>;
-
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
     /// `full_key_range` used for iter.
@@ -125,44 +109,30 @@ pub trait StateStoreReadExt: StaticSendSync {
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_>;
+    ) -> impl Future<Output = StorageResult<Vec<StateStoreIterItem>>> + Send + '_;
 }
 
 impl<S: StateStoreRead> StateStoreReadExt for S {
-    type ScanFuture<'a> = impl ScanFutureTrait<'a>;
-
-    fn scan(
+    async fn scan(
         &self,
         key_range: IterKeyRange,
         epoch: u64,
         limit: Option<usize>,
         mut read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_> {
+    ) -> StorageResult<Vec<StateStoreIterItem>> {
         if limit.is_some() {
             read_options.prefetch_options.exhaust_iter = false;
         }
         let limit = limit.unwrap_or(usize::MAX);
-        async move {
-            self.iter(key_range, epoch, read_options)
-                .await?
-                .take(limit)
-                .try_collect()
-                .await
-        }
+        self.iter(key_range, epoch, read_options)
+            .await?
+            .take(limit)
+            .try_collect()
+            .await
     }
 }
 
-#[macro_export]
-macro_rules! define_state_store_write_associated_type {
-    () => {
-        type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
-    };
-}
-
-pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send + 'a;
 pub trait StateStoreWrite: StaticSendSync {
-    type IngestBatchFuture<'a>: IngestBatchFutureTrait<'a>;
-
     /// Writes a batch to storage. The batch should be:
     /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
     /// * Locally unique. There should not be two or more operations on the same key in one write
@@ -182,7 +152,7 @@ pub trait StateStoreWrite: StaticSendSync {
         kv_pairs: Vec<(Bytes, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
-    ) -> Self::IngestBatchFuture<'_>;
+    ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
 
     /// Creates a `WriteBatch` associated with this state store.
     fn start_write_batch(&self, write_options: WriteOptions) -> WriteBatch<'_, Self>
@@ -200,34 +170,18 @@ pub struct SyncResult {
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
 }
-pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send + 'a;
-pub trait SyncFutureTrait<'a> = Future<Output = StorageResult<SyncResult>> + Send + 'a;
-
-#[macro_export]
-macro_rules! define_state_store_associated_type {
-    () => {
-        type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
-        type SyncFuture<'a> = impl SyncFutureTrait<'a>;
-        type ClearSharedBufferFuture<'a> = impl EmptyFutureTrait<'a>;
-    };
-}
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     type Local: LocalStateStore;
 
-    type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
-
-    type SyncFuture<'a>: SyncFutureTrait<'a>;
-
-    type ClearSharedBufferFuture<'a>: EmptyFutureTrait<'a>;
-
-    type NewLocalFuture<'a>: Future<Output = Self::Local> + Send + 'a;
-
     /// If epoch is `Committed`, we will wait until the epoch is committed and its data is ready to
     /// read. If epoch is `Current`, we will only check if the data can be read with this epoch.
-    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
+    fn try_wait_epoch(
+        &self,
+        epoch: HummockReadEpoch,
+    ) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
-    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_>;
+    fn sync(&self, epoch: u64) -> impl Future<Output = StorageResult<SyncResult>> + Send + '_;
 
     /// update max current epoch in storage.
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
@@ -239,23 +193,12 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
 
     /// Clears contents in shared buffer.
     /// This method should only be called when dropping all actors in the local compute node.
-    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
-        todo!()
-    }
+    fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
-    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_>;
+    fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_;
 
     /// Validates whether store can serve `epoch` at the moment.
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
-}
-
-pub trait MayExistTrait<'a> = Future<Output = StorageResult<bool>> + Send + 'a;
-
-#[macro_export]
-macro_rules! define_local_state_store_associated_type {
-    () => {
-        type MayExistFuture<'a> = impl MayExistTrait<'a>;
-    };
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
@@ -264,21 +207,24 @@ macro_rules! define_local_state_store_associated_type {
 pub trait LocalStateStore: StaticSendSync {
     type IterStream<'a>: StateStoreIterItemStream + 'a;
 
-    type MayExistFuture<'a>: MayExistTrait<'a>;
-    type GetFuture<'a>: GetFutureTrait<'a>;
-    type IterFuture<'a>: Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
-    type FlushFuture<'a>: Future<Output = StorageResult<usize>> + Send + 'a;
-
     /// Point gets a value from the state store.
     /// The result is based on the latest written snapshot.
-    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_>;
+    fn get(
+        &self,
+        key: Bytes,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
     /// in `key_range`) The returned iterator will iterate data based on the latest written
     /// snapshot.
-    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_>;
+    fn iter(
+        &self,
+        key_range: IterKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()>;
@@ -287,7 +233,10 @@ pub trait LocalStateStore: StaticSendSync {
     /// than the given `epoch` will be deleted.
     fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
 
-    fn flush(&mut self, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) -> Self::FlushFuture<'_>;
+    fn flush(
+        &mut self,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+    ) -> impl Future<Output = StorageResult<usize>> + Send + '_;
 
     fn epoch(&self) -> u64;
 
@@ -313,7 +262,7 @@ pub trait LocalStateStore: StaticSendSync {
         &self,
         key_range: IterKeyRange,
         read_options: ReadOptions,
-    ) -> Self::MayExistFuture<'_>;
+    ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
 }
 
 /// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
