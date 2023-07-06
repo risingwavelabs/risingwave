@@ -231,7 +231,7 @@ echo "--- Running Queries New Cluster"
 run_sql_new_cluster
 
 echo "--- Sanity Check"
-echo "$AFTER" | tail -n 100
+echo AFTER | tail -n 100
 
 echo "--- Comparing results"
 assert_eq BEFORE AFTER
