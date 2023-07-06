@@ -80,7 +80,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 }
             }
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
 
         try (var stmt =
@@ -104,7 +104,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 }
             }
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
@@ -113,7 +113,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         try {
             validatePrivileges();
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
@@ -122,7 +122,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         try {
             validateTableSchema();
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
@@ -232,14 +232,17 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             try (var stmt =
                     jdbcConnection.prepareStatement(
                             ValidatorUtils.getSql("postgres.table_privilege.check"))) {
-                stmt.setString(1, this.tableName);
-                stmt.setString(2, this.user);
+                stmt.setString(1, this.schemaName);
+                stmt.setString(2, this.tableName);
+                stmt.setString(3, this.user);
                 var res = stmt.executeQuery();
                 while (res.next()) {
                     if (!res.getBoolean(1)) {
                         throw ValidatorUtils.invalidArgument(
                                 "Postgres user must have select privilege on table '"
-                                        + this.tableName
+                                        + schemaName
+                                        + "."
+                                        + tableName
                                         + "'");
                     }
                 }
