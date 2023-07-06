@@ -1,0 +1,30 @@
+statement ok
+create table a(a1 int, a2 bigint);
+
+statement ok
+create table b(b1 int);
+
+statement ok
+insert into a values (3, 3), (7, 2147483648);
+
+statement ok
+insert into b values (3);
+
+statement ok
+flush;
+
+query II
+select a1, a2 from a, b where a1 = b1 and substr('abcde', b1) > 'a';
+----
+3 3
+
+query II
+select a1, a2 from a, b where a2 = b1 and substr('abcde', b1) > 'a';
+----
+3 3
+
+statement ok
+drop table a;
+
+statement ok
+drop table b;
