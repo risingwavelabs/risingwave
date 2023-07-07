@@ -24,7 +24,7 @@ use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -41,12 +41,9 @@ impl BatchSortAgg {
 
         let input = logical.input.clone();
         let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => logical
-                .i2o_col_mapping()
-                .rewrite_provided_distribution(input_dist),
-            d => d.clone(),
-        };
+        let dist = logical
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(input_dist);
         let input_order = Order {
             column_orders: input
                 .order()
