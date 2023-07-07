@@ -33,7 +33,7 @@ impl Rule for GroupingSetsToExpandRule {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (agg_calls, mut group_keys, grouping_sets, input) = agg.clone().decompose();
 
-        let original_group_keys_num = group_keys.count_ones(..);
+        let original_group_keys_num = group_keys.len();
         let input_schema_len = input.schema().len();
 
         if grouping_sets.is_empty() {
