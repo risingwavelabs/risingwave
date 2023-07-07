@@ -249,10 +249,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             }
         }
 
-        validatePublcationConfig(isSuperUser);
+        validatePublicationConfig(isSuperUser);
     }
 
-    private void validatePublcationConfig(boolean isSuperUser) throws SQLException {
+    /* Check required privilege to create/alter a publication */
+    private void validatePublicationConfig(boolean isSuperUser) throws SQLException {
         boolean publicationCoversTable = false;
         boolean publicationExists = false;
         boolean partialPublication = false;
