@@ -45,7 +45,7 @@ impl Rule for GroupingSetsToExpandRule {
 
         let column_subset = grouping_sets
             .iter()
-            .map(|set| set.ones().collect_vec())
+            .map(|set| set.indices().collect_vec())
             .collect_vec();
         let expand = LogicalExpand::create(input, column_subset);
         // Add the expand flag.

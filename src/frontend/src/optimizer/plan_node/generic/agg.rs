@@ -169,7 +169,7 @@ pub(crate) mod agg_kinds {
 pub struct Agg<PlanRef> {
     pub agg_calls: Vec<PlanAggCall>,
     pub group_key: IndexSet,
-    pub grouping_sets: Vec<FixedBitSet>,
+    pub grouping_sets: Vec<IndexSet>,
     pub input: PlanRef,
 }
 
@@ -266,7 +266,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     pub fn new_with_grouping_sets(
         agg_calls: Vec<PlanAggCall>,
         group_key: IndexSet,
-        grouping_sets: Vec<FixedBitSet>,
+        grouping_sets: Vec<IndexSet>,
         input: PlanRef,
     ) -> Self {
         Self {
@@ -720,7 +720,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect()
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<FixedBitSet>, PlanRef) {
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
         (
             self.agg_calls,
             self.group_key,

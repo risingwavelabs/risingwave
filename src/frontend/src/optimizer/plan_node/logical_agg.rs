@@ -263,7 +263,7 @@ struct LogicalAggBuilder {
     /// the group key column indices in the project's output
     group_key: IndexSet,
     /// the grouping sets
-    grouping_sets: Vec<FixedBitSet>,
+    grouping_sets: Vec<IndexSet>,
     /// the agg calls
     agg_calls: Vec<PlanAggCall>,
     /// the error during the expression rewriting
@@ -295,7 +295,7 @@ impl LogicalAggBuilder {
                 })?;
             (group_key, vec![])
         } else {
-            let grouping_sets: Vec<FixedBitSet> = grouping_sets_exprs
+            let grouping_sets: Vec<IndexSet> = grouping_sets_exprs
                 .into_iter()
                 .map(|set| {
                     set.into_iter()
@@ -311,7 +311,7 @@ impl LogicalAggBuilder {
             let group_key = grouping_sets
                 .iter()
                 .fold(FixedBitSet::with_capacity(input_schema_len), |acc, x| {
-                    acc.union(x).collect()
+                    acc.union(&x.to_bitset()).collect()
                 });
 
             (IndexSet::from_iter(group_key.ones()), grouping_sets)
@@ -838,11 +838,11 @@ impl LogicalAgg {
         &self.core.group_key
     }
 
-    pub fn grouping_sets(&self) -> &Vec<FixedBitSet> {
+    pub fn grouping_sets(&self) -> &Vec<IndexSet> {
         &self.core.grouping_sets
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<FixedBitSet>, PlanRef) {
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
         self.core.decompose()
     }
 
@@ -875,7 +875,7 @@ impl LogicalAgg {
         let grouping_sets = self
             .grouping_sets()
             .iter()
-            .map(|set| set.ones().map(|key| input_col_change.map(key)).collect())
+            .map(|set| set.indices().map(|key| input_col_change.map(key)).collect())
             .collect();
         Agg::new_with_grouping_sets(agg_calls, group_key, grouping_sets, input).into()
     }
