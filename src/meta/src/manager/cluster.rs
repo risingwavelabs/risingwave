@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -176,7 +176,7 @@ where
             .generate::<{ IdCategory::Worker }>()
             .await? as WorkerId;
 
-        let machine_id = match core.available_machine_ids.first() {
+        let transactional_id = match core.available_transactional_ids.front() {
             None => {
                 return Err(MetaError::unavailable(
                     "no available reusable machine id".to_string(),
@@ -200,7 +200,7 @@ where
             state: State::Starting as i32,
             parallel_units,
             property,
-            reusable_machine_id: machine_id,
+            transactional_id,
         };
 
         let worker = Worker::from_protobuf(worker_node.clone());
@@ -510,7 +510,7 @@ pub struct ClusterManagerCore {
     parallel_units: Vec<ParallelUnit>,
 
     /// Record for tracking available machine ids, one is available.
-    available_machine_ids: Vec<u32>,
+    available_transactional_ids: VecDeque<u32>,
 }
 
 impl ClusterManagerCore {
@@ -525,14 +525,14 @@ impl ClusterManagerCore {
         let mut worker_map = HashMap::new();
         let mut parallel_units = Vec::new();
 
-        let used_machine_ids: HashSet<_> = workers
+        let used_transactional_ids: HashSet<_> = workers
             .iter()
-            .map(|w| w.worker_node.reusable_machine_id)
+            .map(|w| w.worker_node.transactional_id)
             .collect();
 
-        let available_machine_ids = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT as u32)
-            .filter(|id| !used_machine_ids.contains(id))
-            .collect::<Vec<u32>>();
+        let available_transactional_ids = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT as u32)
+            .filter(|id| !used_transactional_ids.contains(id))
+            .collect();
 
         workers.into_iter().for_each(|w| {
             worker_map.insert(WorkerKey(w.key().unwrap()), w.clone());
@@ -542,7 +542,7 @@ impl ClusterManagerCore {
         Ok(Self {
             workers: worker_map,
             parallel_units,
-            available_machine_ids,
+            available_transactional_ids,
         })
     }
 
@@ -568,8 +568,8 @@ impl ClusterManagerCore {
     }
 
     fn add_worker_node(&mut self, worker: Worker) {
-        self.available_machine_ids
-            .drain_filter(|id| *id == worker.worker_node.reusable_machine_id);
+        self.available_transactional_ids
+            .retain(|id| *id != worker.worker_node.transactional_id);
 
         self.parallel_units
             .extend(worker.worker_node.parallel_units.clone());
@@ -593,8 +593,8 @@ impl ClusterManagerCore {
             });
         self.workers.remove(&WorkerKey(worker.key().unwrap()));
 
-        self.available_machine_ids
-            .push(worker.worker_node.reusable_machine_id);
+        self.available_transactional_ids
+            .push_back(worker.worker_node.transactional_id);
     }
 
     pub fn list_worker_node(

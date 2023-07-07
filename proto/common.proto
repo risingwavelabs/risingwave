@@ -61,7 +61,7 @@ message WorkerNode {
   Property property = 6;
 
   // Ranges from 0 to 1023, used to generate the machine ID field in the global unique ID.
-  uint32 reusable_machine_id = 7;
+  uint32 transactional_id = 7;
 }
 
 message Buffer {
