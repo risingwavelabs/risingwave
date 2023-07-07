@@ -24,13 +24,18 @@ This test will be run as a unit test:
 You can check [`ci/scripts/build-simulation.sh`](../../../ci/scripts/build-simulation.sh) 
 for the latest madsim build instructions.
 
-```sh
-# Build madsim
-cargo make sslt-build-all --profile ci-sim
-# Run fuzzing
-RUST_LOG=info RUST_BACKTRACE=1 MADSIM_TEST_SEED=1 ./target/sim/ci-sim/risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata
+You can adjust the sample size. Below `100` batch and stream queries are generated (`--sqlsmith 100`).
+It can be useful to run with a larger sample size to ensure new features are well tested.
 
-# Run fuzzing and save contents, since it takes a while to run each time.
+Build madsim and run fuzzing
+```sh
+cargo make sslt-build-all --profile ci-sim
+RUST_LOG=info RUST_BACKTRACE=1 MADSIM_TEST_SEED=1 ./target/sim/ci-sim/risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata
+```
+
+Build madsim and run fuzzing and save contents, since it takes a while to run each time.
+```sh
+cargo make sslt-build-all --profile ci-sim
 RUST_LOG=info RUST_BACKTRACE=1 MADSIM_TEST_SEED=1 ./target/sim/ci-sim/risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 1>sqlsmith.log 2>&1
 cat sqlsmith.log | less
 ```
