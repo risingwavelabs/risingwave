@@ -116,12 +116,12 @@ impl ColIndexMapping {
                         None => RequiredDist::Any,
                     }
                 }
-                Distribution::UpstreamHashShard(keys, tabele_id) => {
+                Distribution::UpstreamHashShard(keys, table_id) => {
                     assert!(!keys.is_empty());
                     let keys = self.rewrite_dist_key(keys);
                     match keys {
                         Some(keys) => RequiredDist::PhysicalDist(Distribution::UpstreamHashShard(
-                            keys, *tabele_id,
+                            keys, *table_id,
                         )),
                         None => RequiredDist::Any,
                     }
