@@ -8,7 +8,7 @@ set -euo pipefail
 # Space delimited micro-benchmarks to run.
 # Each micro-benchmark added here should return a singular result indicative of performance.
 # Make sure the added benchmark has a unique name.
-BENCHMARKS="stream_hash_agg json_parser"
+BENCHMARKS="stream_hash_agg json_parser bench_block_iter bench_compactor bench_lru_cache bench_merge_iter bench_multi_builder"
 
 # cargo criterion --bench stream_hash_agg --message-format=json
 bench() {
