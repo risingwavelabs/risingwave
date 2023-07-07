@@ -224,7 +224,7 @@ impl DispatchExecutorInner {
 
         // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
         // should clean up them.
-        self.dispatchers.drain_filter(|d| d.is_empty());
+        self.dispatchers.retain(|d| !d.is_empty());
 
         Ok(())
     }
