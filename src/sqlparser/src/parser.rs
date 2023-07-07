@@ -40,6 +40,13 @@ pub enum ParserError {
     ParserError(String),
 }
 
+impl ParserError {
+    pub fn inner_msg(self) -> String {
+        match self {
+            ParserError::TokenizerError(s) | ParserError::ParserError(s) => s,
+        }
+    }
+}
 // Use `Parser::expected` instead, if possible
 #[macro_export]
 macro_rules! parser_err {
@@ -2231,7 +2238,7 @@ impl Parser {
         };
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
-        let mut with_options = self.parse_with_properties()?;
+        let with_options = self.parse_with_properties()?;
 
         let option = with_options
             .iter()
@@ -2248,7 +2255,11 @@ impl Parser {
                 {
                     return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
                 }
-                Some(SourceSchema::DebeziumJson)
+                Some(SourceSchemaV2 {
+                    format: Format::Debezium,
+                    row_encode: Encode::Json,
+                    row_options: Default::default(),
+                })
             } else if connector.contains("nexmark") {
                 if (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                     && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
@@ -2256,24 +2267,26 @@ impl Parser {
                 {
                     return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to internal native format".to_string()));
                 }
-                Some(SourceSchema::Native)
+                Some(SourceSchemaV2 {
+                    format: Format::Native,
+                    row_encode: Encode::Native,
+                    row_options: Default::default(),
+                })
             } else if connector.contains("datagen") {
                 if (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                     && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
                     || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
                 {
-                    let schema = SourceSchemaV2::parse_to(self)?;
-                    let (schema, mut row_format_options) = schema.into_source_schema()?;
-                    with_options.append(&mut row_format_options);
-                    Some(schema)
+                    Some(SourceSchemaV2::parse_to(self)?)
                 } else {
-                    Some(SourceSchema::Native)
+                    Some(SourceSchemaV2 {
+                        format: Format::Native,
+                        row_encode: Encode::Native,
+                        row_options: Default::default(),
+                    })
                 }
             } else {
-                let schema = SourceSchemaV2::parse_to(self)?;
-                let (schema, mut row_format_options) = schema.into_source_schema()?;
-                with_options.append(&mut row_format_options);
-                Some(schema)
+                Some(SourceSchemaV2::parse_to(self)?)
             }
         } else {
             // Table is NOT created with an external connector.

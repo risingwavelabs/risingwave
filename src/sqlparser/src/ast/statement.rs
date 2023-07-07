@@ -81,7 +81,7 @@ pub struct CreateSourceStatement {
     pub constraints: Vec<TableConstraint>,
     pub source_name: ObjectName,
     pub with_properties: WithProperties,
-    pub source_schema: SourceSchema,
+    pub source_schema: SourceSchemaV2,
     pub source_watermarks: Vec<SourceWatermark>,
 }
 
@@ -104,6 +104,26 @@ pub enum SourceSchema {
     Bytes,
 }
 
+impl fmt::Display for SourceSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
+            SourceSchema::Json => write!(f, "JSON"),
+            SourceSchema::UpsertJson => write!(f, "UPSERT JSON"),
+            SourceSchema::Maxwell => write!(f, "MAXWELL"),
+            SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
+            SourceSchema::DebeziumMongoJson => write!(f, "DEBEZIUM MONGO JSON"),
+            SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
+            SourceSchema::UpsertAvro(avro_schema) => write!(f, "UPSERT AVRO {}", avro_schema),
+            SourceSchema::CanalJson => write!(f, "CANAL JSON"),
+            SourceSchema::Csv(csv_info) => write!(f, "CSV {}", csv_info),
+            SourceSchema::Native => write!(f, "NATIVE"),
+            SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM AVRO {}", avro_schema),
+            SourceSchema::Bytes => write!(f, "BYTES"),
+        }
+    }
+}
+
 /// will be deprecated and be replaced by Format and Encode
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -120,6 +140,7 @@ pub enum RowFormat {
     Csv,               // Keyword::CSV
     DebeziumAvro,      // Keyword::DEBEZIUM_AVRO
     Bytes,             // Keyword::BYTES
+    Native,
 }
 
 impl RowFormat {
@@ -158,6 +179,7 @@ impl RowFormat {
             RowFormat::Csv => Format::Plain,
             RowFormat::DebeziumAvro => Format::Debezium,
             RowFormat::Bytes => Format::Plain,
+            RowFormat::Native => Format::Native,
         };
 
         let encode = match self {
@@ -173,6 +195,7 @@ impl RowFormat {
             RowFormat::Csv => Encode::Csv,
             RowFormat::DebeziumAvro => Encode::Avro,
             RowFormat::Bytes => Encode::Bytes,
+            RowFormat::Native => Encode::Native,
         };
         (format, encode)
     }
@@ -180,6 +203,9 @@ impl RowFormat {
     /// a compatibility layer
     pub fn from_format_v2(format: &Format, encode: &Encode) -> Result<Self, ParserError> {
         Ok(match (format, encode) {
+            (Format::Native, Encode::Native) => RowFormat::Native,
+            (Format::Native, _) => unreachable!(),
+            (_, Encode::Native) => unreachable!(),
             (Format::Debezium, Encode::Avro) => RowFormat::DebeziumAvro,
             (Format::Debezium, Encode::Json) => RowFormat::DebeziumJson,
             (Format::Debezium, _) => {
@@ -224,12 +250,32 @@ impl RowFormat {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Format {
+    Native,
     Debezium,      // Keyword::DEBEZIUM
     DebeziumMongo, // Keyword::DEBEZIUM_MONGO
     Maxwell,       // Keyword::MAXWELL
     Canal,         // Keyword::CANAL
     Upsert,        // Keyword::UPSERT
     Plain,         // Keyword::PLAIN
+}
+
+// TODO: unify with `from_keyword`
+impl fmt::Display for Format {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Format::Native => "NATIVE",
+                Format::Debezium => "DEBEZIUM",
+                Format::DebeziumMongo => "DEBEZIUM_MONGO",
+                Format::Maxwell => "MAXWELL",
+                Format::Canal => "CANAL",
+                Format::Upsert => "UPSERT",
+                Format::Plain => "PLAIN",
+            }
+        )
+    }
 }
 
 impl Format {
@@ -259,6 +305,25 @@ pub enum Encode {
     Protobuf, // Keyword::PROTOBUF
     Json,     // Keyword::JSON
     Bytes,    // Keyword::BYTES
+    Native,
+}
+
+// TODO: unify with `from_keyword`
+impl fmt::Display for Encode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Encode::Avro => "AVRO",
+                Encode::Csv => "CSV",
+                Encode::Protobuf => "PROTOBUF",
+                Encode::Json => "JSON",
+                Encode::Bytes => "BYTES",
+                Encode::Native => "NATIVE",
+            }
+        )
+    }
 }
 
 impl Encode {
@@ -281,9 +346,9 @@ impl Encode {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SourceSchemaV2 {
-    format: Format,
-    row_encode: Encode,
-    row_options: Vec<SqlOption>,
+    pub format: Format,
+    pub row_encode: Encode,
+    pub row_options: Vec<SqlOption>,
 }
 
 impl ParseTo for SourceSchemaV2 {
@@ -426,29 +491,26 @@ impl SourceSchemaV2 {
                     })
                 }
                 RowFormat::Bytes => SourceSchema::Bytes,
+                RowFormat::Native => SourceSchema::Native,
             },
             self.row_options,
         ))
     }
+
+    pub fn row_options(&self) -> &[SqlOption] {
+        self.row_options.as_ref()
+    }
 }
 
-impl fmt::Display for SourceSchema {
+impl fmt::Display for SourceSchemaV2 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
-            SourceSchema::Json => write!(f, "JSON"),
-            SourceSchema::UpsertJson => write!(f, "UPSERT JSON"),
-            SourceSchema::Maxwell => write!(f, "MAXWELL"),
-            SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
-            SourceSchema::DebeziumMongoJson => write!(f, "DEBEZIUM MONGO JSON"),
-            SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
-            SourceSchema::UpsertAvro(avro_schema) => write!(f, "UPSERT AVRO {}", avro_schema),
-            SourceSchema::CanalJson => write!(f, "CANAL JSON"),
-            SourceSchema::Csv(csv_info) => write!(f, "CSV {}", csv_info),
-            SourceSchema::Native => write!(f, "NATIVE"),
-            SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM AVRO {}", avro_schema),
-            SourceSchema::Bytes => write!(f, "BYTES"),
-        }
+        write!(
+            f,
+            "FORMAT {} ENCODE {} {}",
+            self.format,
+            self.row_encode,
+            display_comma_separated(self.row_options()),
+        )
     }
 }
 
@@ -553,7 +615,7 @@ impl ParseTo for CreateSourceStatement {
         // parse columns
         let (columns, constraints, source_watermarks) = p.parse_columns_with_watermark()?;
 
-        let mut with_options = p.parse_with_properties()?;
+        let with_options = p.parse_with_properties()?;
         let option = with_options
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
@@ -568,7 +630,11 @@ impl ParseTo for CreateSourceStatement {
             {
                 return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
             }
-            SourceSchema::DebeziumJson
+            SourceSchemaV2 {
+                format: Format::Debezium,
+                row_encode: Encode::Json,
+                row_options: Default::default(),
+            }
         } else if connector.contains("nexmark") {
             if (p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                 && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
@@ -576,24 +642,26 @@ impl ParseTo for CreateSourceStatement {
             {
                 return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to internal native format".to_string()));
             }
-            SourceSchema::Native
+            SourceSchemaV2 {
+                format: Format::Native,
+                row_encode: Encode::Native,
+                row_options: Default::default(),
+            }
         } else if connector.contains("datagen") {
             if (p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                 && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
                 || p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
             {
-                let schema = SourceSchemaV2::parse_to(p)?;
-                let (schema, mut row_format_options) = schema.into_source_schema()?;
-                with_options.append(&mut row_format_options);
-                schema
+                SourceSchemaV2::parse_to(p)?
             } else {
-                SourceSchema::Native
+                SourceSchemaV2 {
+                    format: Format::Native,
+                    row_encode: Encode::Native,
+                    row_options: Default::default(),
+                }
             }
         } else {
-            let schema = SourceSchemaV2::parse_to(p)?;
-            let (schema, mut row_format_options) = schema.into_source_schema()?;
-            with_options.append(&mut row_format_options);
-            schema
+            SourceSchemaV2::parse_to(p)?
         };
 
         Ok(Self {

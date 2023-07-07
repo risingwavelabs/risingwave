@@ -750,19 +750,20 @@ pub async fn handle_create_source(
         )));
     }
 
+    let (source_schema, _) = stmt
+        .source_schema
+        .into_source_schema()
+        .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
+
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
-    validate_compatibility(&stmt.source_schema, &mut with_properties)?;
+    validate_compatibility(&source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&stmt.constraints)?;
     let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    let (columns_from_resolve_source, pk_names, source_info) = try_bind_columns_from_source(
-        &stmt.source_schema,
-        pk_names,
-        &stmt.columns,
-        &with_properties,
-    )
-    .await?;
+    let (columns_from_resolve_source, pk_names, source_info) =
+        try_bind_columns_from_source(&source_schema, pk_names, &stmt.columns, &with_properties)
+            .await?;
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);

@@ -35,7 +35,7 @@ use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
     OptimizerContextRef, PlanRef, Planner, WithOptions,
 };
-use risingwave_sqlparser::ast::{EmitMode, ExplainOptions, ObjectName, Statement};
+use risingwave_sqlparser::ast::{EmitMode, ExplainOptions, ObjectName, SourceSchema, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -413,6 +413,15 @@ impl TestCase {
                     append_only,
                     ..
                 } => {
+                    let source_schema = source_schema
+                        .map(|source_schema| -> Result<SourceSchema> {
+                            let (source_schema, _) = source_schema
+                                .into_source_schema()
+                                .map_err(|e| anyhow!(e.inner_msg()))?;
+                            Ok(source_schema)
+                        })
+                        .transpose()?;
+
                     create_table::handle_create_table(
                         handler_args,
                         name,
