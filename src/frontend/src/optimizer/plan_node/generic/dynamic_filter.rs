@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
@@ -130,17 +128,6 @@ impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
 
         let predicate = self.predicate();
         (predicate, concat_schema)
-    }
-
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        let (condition, input_schema) = &self.condition_display();
-        builder.field(
-            "predicate",
-            &ConditionDisplay {
-                condition,
-                input_schema,
-            },
-        );
     }
 
     pub fn pretty_field<'a>(&self) -> Pretty<'a> {
