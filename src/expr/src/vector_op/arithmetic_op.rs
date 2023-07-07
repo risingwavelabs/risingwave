@@ -16,9 +16,9 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
-use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
+use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 use risingwave_common::types::{
-    CheckedAdd, Date, Decimal, FloatExt, Interval, Time, Timestamp, F64,
+    CheckedAdd, Date, Decimal, FloatExt, Interval, IsNegative, Time, Timestamp, F64,
 };
 use risingwave_expr_macro::function;
 use rust_decimal::MathematicalOps;
@@ -129,7 +129,7 @@ where
 
 #[function("abs(*int) -> auto")]
 #[function("abs(*float) -> auto")]
-pub fn general_abs<T1: Signed + CheckedNeg>(expr: T1) -> Result<T1> {
+pub fn general_abs<T1: IsNegative + CheckedNeg>(expr: T1) -> Result<T1> {
     if expr.is_negative() {
         general_neg(expr)
     } else {
@@ -141,7 +141,7 @@ pub fn general_abs<T1: Signed + CheckedNeg>(expr: T1) -> Result<T1> {
 pub fn int256_abs<TRef, T>(expr: TRef) -> Result<T>
 where
     TRef: Into<T> + Debug,
-    T: Signed + CheckedNeg + Debug,
+    T: IsNegative + CheckedNeg + Debug,
 {
     let expr = expr.into();
     if expr.is_negative() {
@@ -376,7 +376,7 @@ pub fn sqrt_f64(expr: F64) -> Result<F64> {
         });
     }
     // Edge cases: nan, inf, negative zero should return itself.
-    match expr.is_nan() || expr == f64::INFINITY || expr.is_negative() {
+    match expr.is_nan() || expr == f64::INFINITY || expr == -0.0 {
         true => Ok(expr),
         false => Ok(expr.sqrt()),
     }
@@ -417,7 +417,7 @@ pub fn sign_f64(input: F64) -> F64 {
 
 #[function("sign(decimal) -> decimal")]
 pub fn sign_dec(input: Decimal) -> Decimal {
-    input.signum()
+    input.sign()
 }
 
 #[cfg(test)]
