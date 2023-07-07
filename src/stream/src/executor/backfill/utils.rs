@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::ops::Bound;
 
 use await_tree::InstrumentAwait;
+use futures::future::try_join_all;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
@@ -28,6 +29,7 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_storage::table::collect_data_chunk;
@@ -207,12 +209,17 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     debug_assert!(!state_table.vnode_bitmap().is_empty());
     let vnodes = state_table.vnodes().iter_vnodes();
     let mut result = Vec::with_capacity(state_table.vnodes().len());
-    for vnode in vnodes {
-        let vnode_key: &[Datum] = &[Some(vnode.to_scalar().into())];
-        let state_for_vnode_key = state_table.get_row(vnode_key).await?;
-
-        // original_backfill_datum_pos = (state_len - 1)
-        // value indices are set, so we can -1 for the pk (a single vnode).
+    let vnode_keys = vnodes.map(|vnode| {
+        let datum: [Datum; 1] = [Some(vnode.to_scalar().into())];
+        datum
+    });
+    let tasks = vnode_keys.map(|vnode_key| state_table.get_row(vnode_key));
+    let states_for_vnode_keys = try_join_all(tasks).await?;
+    for (vnode, state_for_vnode_key) in state_table
+        .vnodes()
+        .iter_vnodes()
+        .zip_eq_debug(states_for_vnode_keys)
+    {
         let backfill_datum_pos = state_len - 2;
         let backfill_progress = match state_for_vnode_key {
             Some(row) => {
