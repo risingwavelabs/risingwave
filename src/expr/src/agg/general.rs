@@ -80,8 +80,13 @@ where
 }
 
 #[aggregate("first_value(*) -> auto", state = "ref")]
-fn first<T>(state: T, _: T) -> T {
+fn first_value<T>(state: T, _: T) -> T {
     state
+}
+
+#[aggregate("last_value(*) -> auto", state = "ref")]
+fn last_value<T>(_: T, input: T) -> T {
+    input
 }
 
 /// Note the following corner cases:

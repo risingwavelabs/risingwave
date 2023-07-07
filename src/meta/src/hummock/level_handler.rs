@@ -80,7 +80,12 @@ impl LevelHandler {
             .all(|table| self.compacting_files.contains_key(&table.sst_id))
     }
 
-    pub fn add_pending_task(&mut self, task_id: u64, target_level: usize, ssts: &[SstableInfo]) {
+    pub fn add_pending_task<'a>(
+        &mut self,
+        task_id: u64,
+        target_level: usize,
+        ssts: impl IntoIterator<Item = &'a SstableInfo>,
+    ) {
         let target_level = target_level as u32;
         let mut table_ids = vec![];
         let mut total_file_size = 0;
@@ -124,8 +129,8 @@ impl LevelHandler {
             .collect_vec()
     }
 
-    pub fn get_pending_tasks(&self) -> Vec<RunningCompactTask> {
-        self.pending_tasks.clone()
+    pub fn get_pending_tasks(&self) -> &[RunningCompactTask] {
+        &self.pending_tasks
     }
 }
 

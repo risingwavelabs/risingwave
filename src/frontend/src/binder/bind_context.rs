@@ -50,6 +50,7 @@ pub enum Clause {
     Where,
     Values,
     GroupBy,
+    JoinOn,
     Having,
     Filter,
     From,

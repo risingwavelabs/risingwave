@@ -119,6 +119,8 @@ mod apply_union_transpose_rule;
 pub use apply_union_transpose_rule::*;
 mod apply_dedup_transpose_rule;
 pub use apply_dedup_transpose_rule::*;
+mod project_join_separate_rule;
+pub use project_join_separate_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -169,6 +171,7 @@ macro_rules! for_all_rules {
             , { ExceptMergeRule }
             , { ApplyUnionTransposeRule }
             , { ApplyDedupTransposeRule }
+            , { ProjectJoinSeparateRule }
         }
     };
 }

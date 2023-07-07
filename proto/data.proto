@@ -94,6 +94,7 @@ enum ArrayType {
   DATE = 9;
   TIME = 10;
   TIMESTAMP = 11;
+  TIMESTAMPTZ = 19;
   INTERVAL = 12;
   STRUCT = 13;
   LIST = 14;

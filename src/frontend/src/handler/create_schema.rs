@@ -67,7 +67,7 @@ pub async fn handle_create_schema(
         Object::DatabaseId(db_id),
     )])?;
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_schema(db_id, &schema_name, session.user_id())
         .await?;

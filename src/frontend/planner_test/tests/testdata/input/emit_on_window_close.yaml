@@ -26,7 +26,6 @@
     select lag(a, 2) over (partition by b order by tm) from t;
   expected_outputs:
     - eowc_stream_dist_plan
-    - stream_error
     - eowc_stream_plan
 - sql: |
     create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;

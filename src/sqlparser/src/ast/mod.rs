@@ -798,6 +798,7 @@ pub enum ShowObject {
     Connection { schema: Option<Ident> },
     Function { schema: Option<Ident> },
     Indexes { table: ObjectName },
+    Cluster,
 }
 
 impl fmt::Display for ShowObject {
@@ -831,6 +832,9 @@ impl fmt::Display for ShowObject {
             ShowObject::Connection { schema } => write!(f, "CONNECTIONS{}", fmt_schema(schema)),
             ShowObject::Function { schema } => write!(f, "FUNCTIONS{}", fmt_schema(schema)),
             ShowObject::Indexes { table } => write!(f, "INDEXES FROM {}", table),
+            ShowObject::Cluster => {
+                write!(f, "CLUSTERS")
+            }
         }
     }
 }
@@ -1118,7 +1122,7 @@ pub enum Statement {
     /// `START TRANSACTION ...`
     StartTransaction { modes: Vec<TransactionMode> },
     /// `BEGIN [ TRANSACTION | WORK ]`
-    BEGIN { modes: Vec<TransactionMode> },
+    Begin { modes: Vec<TransactionMode> },
     /// ABORT
     Abort,
     /// `SET TRANSACTION ...`
@@ -1675,7 +1679,7 @@ impl fmt::Display for Statement {
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
-            Statement::BEGIN { modes } => {
+            Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;
                 if !modes.is_empty() {
                     write!(f, " {}", display_comma_separated(modes))?;

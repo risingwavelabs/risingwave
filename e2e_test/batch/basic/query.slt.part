@@ -30,20 +30,37 @@ select count(*) from t3;
 ----
 1
 
-query III
+query II
 select * except (v1) from t3;
 ----
 2 NULL
 
-query III
+query II
+select * except ("v1") from t3;
+----
+2 NULL
+
+query II
 select * except (t3.v1) from t3;
 ----
 2 NULL
 
-query III
+query IIII
 select * except (v1), * except (v2) from t3;
 ----
 2 NULL 1 NULL
+
+statement error Item not found: Invalid column: v5
+select * except (v5) from t3;
+
+statement error Duplicate entry in except list
+select * except (v1, v1) from t3;
+
+statement error Need column name in except list
+select * except (1) from t3;
+
+statement error Need column name in except list
+select * except ('test') from t3;
 
 statement error Division by zero
 select v1/0 from t3;

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::PbStreamNode;
@@ -46,11 +44,6 @@ impl StreamShare {
     }
 }
 
-impl fmt::Display for StreamShare {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LogicalShare::fmt_with_name(&self.base, f, "StreamShare")
-    }
-}
 impl Distill for StreamShare {
     fn distill<'a>(&self) -> XmlNode<'a> {
         LogicalShare::pretty_fields(&self.base, "StreamShare")
@@ -100,7 +93,7 @@ impl StreamShare {
 
                 let stream_node = PbStreamNode {
                     input,
-                    identity: format!("{}", self),
+                    identity: self.distill_to_string(),
                     node_body: Some(node_body),
                     operator_id: self.id().0 as _,
                     stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),

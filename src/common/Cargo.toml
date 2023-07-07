@@ -40,6 +40,7 @@ ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4.3"
+http = "0.2"
 humantime = "2.1"
 hytra = { workspace = true }
 itertools = "0.10"
@@ -119,10 +120,6 @@ tempfile = "3"
 
 [[bench]]
 name = "bench_encoding"
-harness = false
-
-[[bench]]
-name = "bench_row"
 harness = false
 
 [[bench]]

@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use picker::{LevelCompactionPicker, ManualCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
+    can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
 };
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -157,8 +157,11 @@ impl CompactStatus {
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
-        if task.input_ssts.len() != 2
-            || task.input_ssts[0].level_type != LevelType::Nonoverlapping as i32
+        if task.input_ssts.len() == 1 {
+            return task.input_ssts[0].level_idx == 0
+                && can_concat(&task.input_ssts[0].table_infos);
+        } else if task.input_ssts.len() != 2
+            || task.input_ssts[0].level_type() != LevelType::Nonoverlapping
         {
             return false;
         }

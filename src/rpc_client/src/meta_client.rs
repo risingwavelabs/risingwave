@@ -56,6 +56,9 @@ use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
@@ -76,11 +79,12 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::Endpoint;
 use tonic::{Code, Streaming};
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
+use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
 type ConnectionId = u32;
@@ -683,6 +687,30 @@ impl MetaClient {
         };
         let resp = self.inner.list_table_fragments(request).await?;
         Ok(resp.table_fragments)
+    }
+
+    pub async fn list_table_fragment_states(&self) -> Result<Vec<TableFragmentState>> {
+        let resp = self
+            .inner
+            .list_table_fragment_states(ListTableFragmentStatesRequest {})
+            .await?;
+        Ok(resp.states)
+    }
+
+    pub async fn list_fragment_distributions(&self) -> Result<Vec<FragmentDistribution>> {
+        let resp = self
+            .inner
+            .list_fragment_distribution(ListFragmentDistributionRequest {})
+            .await?;
+        Ok(resp.distributions)
+    }
+
+    pub async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
+        let resp = self
+            .inner
+            .list_actor_states(ListActorStatesRequest {})
+            .await?;
+        Ok(resp.states)
     }
 
     pub async fn pause(&self) -> Result<()> {
@@ -1515,13 +1543,16 @@ impl GrpcMetaClient {
     }
 
     async fn connect_to_endpoint(endpoint: Endpoint) -> Result<Channel> {
-        endpoint
+        let channel = endpoint
             .http2_keep_alive_interval(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
             .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await
-            .map_err(RpcError::TransportError)
+            .map_err(RpcError::TransportError)?
+            .tracing_injected();
+
+        Ok(channel)
     }
 
     pub(crate) fn retry_strategy_to_bound(
@@ -1559,6 +1590,9 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
+            ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
+            ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
+            ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
@@ -64,11 +62,6 @@ impl LogicalTableFunction {
 
 impl_plan_tree_node_for_leaf! { LogicalTableFunction }
 
-impl fmt::Display for LogicalTableFunction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "LogicalTableFunction {{ {:?} }}", self.table_function)
-    }
-}
 impl Distill for LogicalTableFunction {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let data = Pretty::debug(&self.table_function);

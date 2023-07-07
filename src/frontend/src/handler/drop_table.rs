@@ -60,7 +60,7 @@ pub async fn handle_drop_table(
         (table.associated_source_id(), table.id())
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .drop_table(source_id.map(|id| id.table_id), table_id)
         .await?;

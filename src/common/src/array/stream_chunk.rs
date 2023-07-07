@@ -149,7 +149,7 @@ impl StreamChunk {
             .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
         let columns: Vec<_> = columns
             .into_iter()
-            .map(|col| col.compact(&visibility, cardinality).into())
+            .map(|col| col.compact(visibility, cardinality).into())
             .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
         for idx in visibility.iter_ones() {
@@ -347,6 +347,7 @@ impl StreamChunkTestExt for StreamChunk {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// //    TZ: Timestamptz
     /// //   SRL: Serial
     /// //   x[]: array of x
     /// // {i,f}: struct
