@@ -85,6 +85,7 @@ reclaimers = 4
 recover_concurrency = 8
 lfu_window_to_cache_size_ratio = 1
 lfu_tiny_lru_capacity_ratio = 0.01
+rated_random_rate = 0
 
 [system]
 barrier_interval_ms = 1000

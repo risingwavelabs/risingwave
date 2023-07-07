@@ -13,10 +13,16 @@
 // limitations under the License.
 
 use std::hash::Hash;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::{Buf, BufMut, Bytes};
 use foyer::common::code::{Key, Value};
+use foyer::storage::admission::rated_random::RatedRandom;
+use foyer::storage::admission::AdmissionPolicy;
+use foyer::storage::LfuFsStoreConfig;
+use prometheus::Registry;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 
 use super::Block;
@@ -35,15 +41,26 @@ impl FileCacheError {
 
 pub type Result<T> = core::result::Result<T, FileCacheError>;
 
-pub type Admission = foyer::storage::admission::AdmitAll<SstableBlockIndex, Box<Block>>;
-pub type Reinsertion = foyer::storage::reinsertion::ReinsertNone<SstableBlockIndex, Box<Block>>;
 pub type EvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
 pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
-pub type FoyerStore =
-    foyer::storage::LfuFsStore<SstableBlockIndex, Box<Block>, Admission, Reinsertion>;
+pub type FoyerStore = foyer::storage::LfuFsStore<SstableBlockIndex, Box<Block>>;
 
-pub type FoyerStoreConfig = foyer::storage::LfuFsStoreConfig<Admission, Reinsertion>;
+pub struct FoyerStoreConfig {
+    pub dir: String,
+    pub capacity: usize,
+    pub file_capacity: usize,
+    pub buffer_pool_size: usize,
+    pub device_align: usize,
+    pub device_io_size: usize,
+    pub flushers: usize,
+    pub reclaimers: usize,
+    pub recover_concurrency: usize,
+    pub lfu_window_to_cache_size_ratio: usize,
+    pub lfu_tiny_lru_capacity_ratio: f64,
+    pub rated_random_rate: usize,
+    pub prometheus_registry: Option<Registry>,
+}
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct SstableBlockIndex {
@@ -96,9 +113,42 @@ impl FileCache {
     }
 
     pub async fn foyer(config: FoyerStoreConfig) -> Result<Self> {
-        let store = FoyerStore::open(config)
-            .await
-            .map_err(FileCacheError::foyer)?;
+        let file_capacity = config.file_capacity;
+        let capacity = config.capacity;
+        let capacity = capacity - (capacity % file_capacity);
+
+        let mut admissions: Vec<
+            Arc<dyn AdmissionPolicy<Key = SstableBlockIndex, Value = Box<Block>>>,
+        > = vec![];
+        if config.rated_random_rate > 0 {
+            let rr = RatedRandom::new(
+                config.rated_random_rate * 1024 * 1024,
+                Duration::from_millis(100),
+            );
+            admissions.push(Arc::new(rr));
+        }
+
+        let c = LfuFsStoreConfig {
+            eviction_config: EvictionConfig {
+                window_to_cache_size_ratio: config.lfu_window_to_cache_size_ratio,
+                tiny_lru_capacity_ratio: config.lfu_tiny_lru_capacity_ratio,
+            },
+            device_config: DeviceConfig {
+                dir: PathBuf::from(config.dir.clone()),
+                capacity,
+                file_capacity,
+                align: config.device_align,
+                io_size: config.device_io_size,
+            },
+            admissions,
+            reinsertions: vec![],
+            buffer_pool_size: config.buffer_pool_size,
+            flushers: config.flushers,
+            reclaimers: config.reclaimers,
+            recover_concurrency: config.recover_concurrency,
+            prometheus_registry: config.prometheus_registry,
+        };
+        let store = FoyerStore::open(c).await.map_err(FileCacheError::foyer)?;
         Ok(Self::Foyer(store))
     }
 

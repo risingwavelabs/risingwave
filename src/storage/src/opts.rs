@@ -71,6 +71,7 @@ pub struct StorageOpts {
     pub file_cache_recover_concurrency: usize,
     pub file_cache_lfu_window_to_cache_size_ratio: usize,
     pub file_cache_lfu_tiny_lru_capacity_ratio: f64,
+    pub file_cache_rated_random_rate: usize,
 
     /// The storage url for storing backups.
     pub backup_storage_url: String,
@@ -139,6 +140,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .file_cache
                 .lfu_tiny_lru_capacity_ratio,
+            file_cache_rated_random_rate: c.storage.file_cache.rated_random_rate,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             object_store_streaming_read_timeout_ms: c
                 .storage

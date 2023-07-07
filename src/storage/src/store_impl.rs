@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
@@ -28,8 +27,8 @@ use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    Admission, DeviceConfig, EvictionConfig, FileCache, FoyerStoreConfig, HummockError,
-    HummockStorage, MemoryLimiter, Reinsertion, SstableObjectIdManagerRef, SstableStore,
+    FileCache, FoyerStoreConfig, HummockError, HummockStorage, MemoryLimiter,
+    SstableObjectIdManagerRef, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -553,25 +552,17 @@ impl StateStoreImpl {
             FileCache::none()
         } else {
             const MB: usize = 1024 * 1024;
-            let file_capacity = opts.file_cache_file_capacity_mb * MB;
-            let capacity = opts.file_cache_capacity_mb * MB;
-            let capacity = capacity - (capacity % file_capacity);
 
             let config = FoyerStoreConfig {
-                eviction_config: EvictionConfig {
-                    window_to_cache_size_ratio: opts.file_cache_lfu_window_to_cache_size_ratio,
-                    tiny_lru_capacity_ratio: opts.file_cache_lfu_tiny_lru_capacity_ratio,
-                },
-                device_config: DeviceConfig {
-                    dir: PathBuf::from(opts.file_cache_dir.clone()),
-                    capacity,
-                    file_capacity,
-                    align: opts.file_cache_device_align,
-                    io_size: opts.file_cache_device_io_size,
-                },
-                admission: Admission::default(),
-                reinsertion: Reinsertion::default(),
+                dir: opts.file_cache_dir.clone(),
+                capacity: opts.file_cache_capacity_mb * MB,
+                file_capacity: opts.file_cache_file_capacity_mb * MB,
                 buffer_pool_size: opts.file_cache_buffer_pool_size_mb * MB,
+                device_align: opts.file_cache_device_align,
+                device_io_size: opts.file_cache_device_io_size,
+                lfu_window_to_cache_size_ratio: opts.file_cache_lfu_window_to_cache_size_ratio,
+                lfu_tiny_lru_capacity_ratio: opts.file_cache_lfu_tiny_lru_capacity_ratio,
+                rated_random_rate: opts.file_cache_rated_random_rate,
                 flushers: opts.file_cache_flushers,
                 reclaimers: opts.file_cache_reclaimers,
                 recover_concurrency: opts.file_cache_recover_concurrency,
