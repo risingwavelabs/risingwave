@@ -156,11 +156,12 @@ async fn compact_shared_buffer(
         splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
     };
     let sstable_size = (context.storage_opts.sstable_size_mb as u64) << 20;
+    let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     let parallelism = std::cmp::min(
         context.storage_opts.share_buffers_sync_parallelism as u64,
         size_and_start_user_keys.len() as u64,
     );
-    let sub_compaction_data_size = if compact_data_size > sstable_size && parallelism > 1 {
+    let sub_compaction_data_size = if compact_data_size > parallel_compact_size && parallelism > 1 {
         compact_data_size / parallelism
     } else {
         compact_data_size
@@ -170,7 +171,7 @@ async fn compact_shared_buffer(
         std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
     let mut split_weight_by_vnode = 0;
     if existing_table_ids.len() > 1 {
-        if parallelism > 1 && compact_data_size > sstable_size {
+        if parallelism > 1 && compact_data_size > parallel_compact_size {
             let mut last_buffer_size = 0;
             let mut last_user_key = UserKey::default();
             for (data_size, user_key) in size_and_start_user_keys {

@@ -64,6 +64,7 @@ impl CompactorContext {
         compactor_metrics: Arc<CompactorMetrics>,
         sstable_object_id_manager: SstableObjectIdManagerRef,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        output_memory_limiter: Arc<MemoryLimiter>,
     ) -> Self {
         let compaction_executor = if storage_opts.share_buffer_compaction_worker_threads_number == 0
         {
@@ -73,8 +74,6 @@ impl CompactorContext {
                 storage_opts.share_buffer_compaction_worker_threads_number as usize,
             )))
         };
-        // not limit memory for local compact
-        let memory_limiter = MemoryLimiter::unlimit();
         Self {
             storage_opts,
             hummock_meta_client,
@@ -83,7 +82,7 @@ impl CompactorContext {
             is_share_buffer_compact: true,
             compaction_executor,
             filter_key_extractor_manager,
-            output_memory_limiter: memory_limiter,
+            output_memory_limiter,
             sstable_object_id_manager,
             task_progress_manager: Default::default(),
             await_tree_reg: None,

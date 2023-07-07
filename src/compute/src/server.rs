@@ -233,11 +233,9 @@ pub async fn compute_node_serve(
                 Compactor::start_compactor(compactor_context, hummock_meta_client);
             sub_tasks.push((handle, shutdown_sender));
         }
-        let shared_buffer_limiter = storage.get_shared_buffer_memory_limiter();
-        let flush_limiter = storage.get_builder_memory_limiter();
+        let flush_limiter = storage.get_memory_limiter();
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
-            shared_buffer_limiter,
             flush_limiter,
             storage_memory_config,
         ));

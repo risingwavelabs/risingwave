@@ -175,7 +175,6 @@ pub async fn compactor_serve(
     let output_memory_limiter = Arc::new(MemoryLimiter::new(output_limit_bytes));
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         sstable_store.clone(),
-        MemoryLimiter::unlimit(),
         output_memory_limiter.clone(),
         storage_memory_config,
     ));

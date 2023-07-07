@@ -38,7 +38,8 @@ macro_rules! for_all_undeprecated_params {
         $macro! {
             { barrier_interval_ms, u32, Some(1000_u32), false },
             { checkpoint_frequency, u64, Some(1_u64), true },
-            { sstable_size_mb, u32, Some(256_u32), false },
+            { sstable_size_mb, u32, Some(64_u32), false },
+            { parallel_compact_size_mb, u32, Some(512_u32), false },
             { block_size_kb, u32, Some(64_u32), false },
             { bloom_false_positive, f64, Some(0.001_f64), false },
             { state_store, String, None, false },

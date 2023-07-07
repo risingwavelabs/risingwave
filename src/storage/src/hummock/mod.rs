@@ -179,7 +179,10 @@ impl HummockStorage {
             pin_version_rx,
             hummock_meta_client.clone(),
         ));
-
+        let buffer_tracker = BufferTracker::from_storage_opts(
+            options.as_ref(),
+            state_store_metrics.uploader_uploading_task_size.clone(),
+        );
         let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
@@ -187,6 +190,7 @@ impl HummockStorage {
             compactor_metrics.clone(),
             sstable_object_id_manager.clone(),
             filter_key_extractor_manager.clone(),
+            buffer_tracker.get_memory_limiter().clone(),
         ));
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -196,6 +200,7 @@ impl HummockStorage {
             event_rx,
             pinned_version,
             compactor_context.clone(),
+            buffer_tracker,
             state_store_metrics.clone(),
         );
 
@@ -256,10 +261,6 @@ impl HummockStorage {
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
         &self.context.filter_key_extractor_manager
-    }
-
-    pub fn get_flush_memory_limiter(&self) -> Arc<MemoryLimiter> {
-        self.context.output_memory_limiter.clone()
     }
 
     pub fn get_buffer_memory_limiter(&self) -> Arc<MemoryLimiter> {

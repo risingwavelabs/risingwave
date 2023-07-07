@@ -60,8 +60,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
         // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
         let tracker = self
             .limiter
-            .require_memory((self.options.capacity + self.options.block_capacity) as u64)
-            .await;
+            .must_require_memory((self.options.capacity + self.options.block_capacity) as u64);
         let timer = Instant::now();
         let table_id = self
             .sstable_object_id_manager
@@ -169,8 +168,8 @@ pub async fn generate_splits(
     compaction_size: u64,
     context: Arc<CompactorContext>,
 ) -> HummockResult<Vec<KeyRange_vec>> {
-    let sstable_size = (context.storage_opts.sstable_size_mb as u64) << 20;
-    if compaction_size > sstable_size * 2 {
+    let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
+    if compaction_size > parallel_compact_size {
         let mut indexes = vec![];
         // preload the meta and get the smallest key to split sub_compaction
         for sstable_info in sstable_infos {
@@ -203,7 +202,8 @@ pub async fn generate_splits(
             indexes.len() as u64,
             context.storage_opts.max_sub_compaction as u64,
         );
-        let sub_compaction_data_size = std::cmp::max(compaction_size / parallelism, sstable_size);
+        let sub_compaction_data_size =
+            std::cmp::max(compaction_size / parallelism, parallel_compact_size);
         let parallelism = compaction_size / sub_compaction_data_size;
 
         if parallelism > 1 {
@@ -213,7 +213,7 @@ pub async fn generate_splits(
             for (data_size, key) in indexes {
                 if last_buffer_size >= sub_compaction_data_size
                     && !last_key.eq(&key)
-                    && remaining_size > sstable_size
+                    && remaining_size > parallel_compact_size
                 {
                     splits.last_mut().unwrap().right = key.clone();
                     splits.push(KeyRange_vec::new(key.clone(), vec![]));

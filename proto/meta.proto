@@ -478,6 +478,7 @@ message SystemParams {
   optional string backup_storage_url = 8;
   optional string backup_storage_directory = 9;
   optional bool telemetry_enabled = 10;
+  optional uint32 parallel_compact_size_mb = 11;
 }
 
 message GetSystemParamsRequest {}

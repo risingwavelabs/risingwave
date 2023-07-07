@@ -528,22 +528,19 @@ pub type SstableStoreRef = Arc<SstableStore>;
 
 pub struct HummockMemoryCollector {
     sstable_store: SstableStoreRef,
-    shared_buffer: Arc<MemoryLimiter>,
-    flush: Arc<MemoryLimiter>,
+    limiter: Arc<MemoryLimiter>,
     storage_memory_config: StorageMemoryConfig,
 }
 
 impl HummockMemoryCollector {
     pub fn new(
         sstable_store: SstableStoreRef,
-        shared_buffer: Arc<MemoryLimiter>,
-        flush: Arc<MemoryLimiter>,
+        limiter: Arc<MemoryLimiter>,
         storage_memory_config: StorageMemoryConfig,
     ) -> Self {
         Self {
             sstable_store,
-            shared_buffer,
-            flush,
+            limiter,
             storage_memory_config,
         }
     }
@@ -559,7 +556,7 @@ impl MemoryCollector for HummockMemoryCollector {
     }
 
     fn get_uploading_memory_usage(&self) -> u64 {
-        self.flush.get_memory_usage() + self.shared_buffer.get_memory_usage()
+        self.limiter.get_memory_usage()
     }
 
     fn get_meta_cache_memory_usage_ratio(&self) -> f64 {
@@ -573,7 +570,7 @@ impl MemoryCollector for HummockMemoryCollector {
     }
 
     fn get_shared_buffer_usage_ratio(&self) -> f64 {
-        self.shared_buffer.get_memory_usage() as f64
+        self.limiter.get_memory_usage() as f64
             / (self.storage_memory_config.shared_buffer_capacity_mb * 1024 * 1024) as f64
     }
 }
