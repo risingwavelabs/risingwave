@@ -564,7 +564,6 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 level0_overlapping_sub_level_compact_level_count = 12;
       uint64 max_space_reclaim_bytes = 13;
       uint64 level0_max_compact_file_number = 14;
-    
     }
   }
   repeated uint64 compaction_group_ids = 1;
