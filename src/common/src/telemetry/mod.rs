@@ -20,6 +20,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, SystemExt};
 
+use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{total_memory_available_bytes, total_memory_used_bytes};
 
@@ -153,16 +154,7 @@ async fn post_telemetry_report(url: &str, report_body: String) -> Result<()> {
 /// check whether telemetry is enabled in environment variable
 pub fn telemetry_env_enabled() -> bool {
     // default to be true
-    get_bool_env(TELEMETRY_ENV_ENABLE).unwrap_or(true)
-}
-
-fn get_bool_env(key: &str) -> Option<bool> {
-    std::env::var(key)
-        .unwrap_or("true".to_string())
-        .trim()
-        .to_ascii_lowercase()
-        .parse()
-        .ok()
+    env_var_is_true_or(TELEMETRY_ENV_ENABLE, true)
 }
 
 pub fn current_timestamp() -> u64 {
@@ -190,42 +182,36 @@ mod tests {
     }
 
     #[test]
-    fn test_get_bool_env_true() {
-        let key = "MY_ENV_VARIABLE_TRUE";
+    fn test_env() {
+        let key = "ENABLE_TELEMETRY";
+
+        // make assertions more readable...
+        fn is_enabled() -> bool {
+            telemetry_env_enabled()
+        }
+        fn is_not_enabled() -> bool {
+            !is_enabled()
+        }
+
         std::env::set_var(key, "true");
-        let result = get_bool_env(key).unwrap();
-        assert!(result);
-    }
+        assert!(is_enabled());
 
-    #[test]
-    fn test_get_bool_env_false() {
-        let key = "MY_ENV_VARIABLE_FALSE";
         std::env::set_var(key, "false");
-        let result = get_bool_env(key).unwrap();
-        assert!(!result);
-    }
+        assert!(is_not_enabled());
 
-    #[test]
-    fn test_get_bool_env_default() {
-        let key = "MY_ENV_VARIABLE_NOT_SET";
-        std::env::remove_var(key);
-        let result = get_bool_env(key).unwrap();
-        assert!(result);
-    }
-
-    #[test]
-    fn test_get_bool_env_case_insensitive() {
-        let key = "MY_ENV_VARIABLE_MIXED_CASE";
         std::env::set_var(key, "tRue");
-        let result = get_bool_env(key).unwrap();
-        assert!(result);
-    }
+        assert!(is_enabled());
 
-    #[test]
-    fn test_get_bool_env_invalid() {
-        let key = "MY_ENV_VARIABLE_INVALID";
+        std::env::set_var(key, "2");
+        assert!(is_not_enabled());
+
+        std::env::set_var(key, "1");
+        assert!(is_enabled());
+
         std::env::set_var(key, "not_a_bool");
-        let result = get_bool_env(key);
-        assert!(result.is_none());
+        assert!(is_not_enabled());
+
+        std::env::remove_var(key);
+        assert!(is_enabled());
     }
 }
