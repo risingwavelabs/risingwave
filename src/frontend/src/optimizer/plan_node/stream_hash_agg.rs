@@ -23,7 +23,7 @@ use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, IndexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashAgg {
@@ -77,7 +77,7 @@ impl StreamHashAgg {
             // EOWC HashAgg only produce one watermark column, i.e. the window column
             watermark_columns.insert(mapping.map(wtmk_group_key[0]));
         } else {
-            for idx in logical.group_key.ones() {
+            for idx in logical.group_key.indices() {
                 if input.watermark_columns().contains(idx) {
                     watermark_columns.insert(mapping.map(idx));
                 }
@@ -106,7 +106,7 @@ impl StreamHashAgg {
         &self.logical.agg_calls
     }
 
-    pub fn group_key(&self) -> &FixedBitSet {
+    pub fn group_key(&self) -> &IndexSet {
         &self.logical.group_key
     }
 
@@ -184,7 +184,7 @@ impl StreamNode for StreamHashAgg {
                 .infer_tables(&self.base, self.vnode_col_idx, self.window_col_idx);
 
         PbNodeBody::HashAgg(HashAggNode {
-            group_key: self.group_key().ones().map(|idx| idx as u32).collect(),
+            group_key: self.group_key().to_vec_as_u32(),
             agg_calls: self
                 .agg_calls()
                 .iter()
