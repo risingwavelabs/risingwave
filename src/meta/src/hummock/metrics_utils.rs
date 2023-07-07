@@ -41,7 +41,6 @@ pub fn trigger_version_stat(
     current_version: &HummockVersion,
     version_stats: &HummockVersionStats,
 ) {
-    
     metrics
         .max_committed_epoch
         .set(current_version.max_committed_epoch as i64);
