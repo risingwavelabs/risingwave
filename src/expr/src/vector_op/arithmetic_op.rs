@@ -405,6 +405,21 @@ pub fn cbrt_f64(expr: F64) -> F64 {
     expr.cbrt()
 }
 
+#[function("sign(float64) -> float64")]
+pub fn sign_f64(input: F64) -> F64 {
+    match input.0.partial_cmp(&0.) {
+        Some(std::cmp::Ordering::Less) => (-1).into(),
+        Some(std::cmp::Ordering::Equal) => 0.into(),
+        Some(std::cmp::Ordering::Greater) => 1.into(),
+        None => 0.into(),
+    }
+}
+
+#[function("sign(decimal) -> decimal")]
+pub fn sign_dec(input: Decimal) -> Decimal {
+    input.signum()
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
