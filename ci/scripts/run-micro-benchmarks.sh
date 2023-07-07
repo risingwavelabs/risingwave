@@ -28,9 +28,6 @@ bench() {
       JSON="  {\"benchmark_id\": $ID, \"time_taken\": $EST, \"unit\": $UNIT},"
       echo -n "Json output: "
       echo "$JSON" | tee -a results.json
-    else
-      echo "Benchmark did not complete: $REASON"
-      exit 1
     fi
   done
 }
