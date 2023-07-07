@@ -378,7 +378,7 @@ impl ParseTo for SourceSchemaV2 {
             ))
         } else {
             Err(ParserError::ParserError(
-                "expect description of the row format".to_string(),
+                "expect description of the format".to_string(),
             ))
         }
     }
@@ -709,7 +709,6 @@ impl fmt::Display for CreateSourceStatement {
         }
 
         impl_fmt_display!(with_properties, v, self);
-        impl_fmt_display!([Keyword::FORMAT], v);
         impl_fmt_display!(source_schema, v, self);
         v.iter().join(" ").fmt(f)
     }
