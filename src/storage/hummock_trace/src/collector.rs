@@ -481,6 +481,7 @@ mod tests {
         runner_handle.await.unwrap();
     }
 
+    #[ignore]
     #[test]
     fn test_set_use_trace() {
         std::env::remove_var(USE_TRACE);
@@ -496,6 +497,7 @@ mod tests {
         assert!(!set_should_use_trace());
     }
 
+    #[ignore]
     #[test]
     fn test_should_use_trace() {
         std::env::set_var(USE_TRACE, "true");

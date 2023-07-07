@@ -26,9 +26,10 @@ use async_trait::async_trait;
 use base64::engine::general_purpose;
 use base64::Engine as _;
 use bytes::Bytes;
-use chrono::{Datelike, NaiveDateTime, Timelike};
+use chrono::{Datelike, Timelike};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::row::Row;
@@ -54,13 +55,19 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
+pub struct SinkWriterParam {
+    pub connector_params: ConnectorParams,
+    pub executor_id: u64,
+    pub vnode_bitmap: Option<Bitmap>,
+}
+
 #[async_trait]
 pub trait Sink {
     type Writer: SinkWriter;
     type Coordinator: SinkCommitCoordinator;
 
     async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()>;
-    async fn new_writer(&self, connector_params: ConnectorParams) -> Result<Self::Writer>;
+    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
         _connector_rpc_endpoint: Option<String>,
@@ -70,7 +77,27 @@ pub trait Sink {
 }
 
 #[async_trait]
-pub trait SinkWriter {
+pub trait SinkWriter: Send {
+    /// Begin a new epoch
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
+
+    /// Write a stream chunk to sink
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
+
+    /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
+    /// writer should commit the current epoch.
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()>;
+
+    /// Clean up
+    async fn abort(&mut self) -> Result<()>;
+
+    /// Update the vnode bitmap of current sink writer
+    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> Result<()>;
+}
+
+#[async_trait]
+// An old version of SinkWriter for backward compatibility
+pub trait SinkWriterV1: Send {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
@@ -83,6 +110,56 @@ pub trait SinkWriter {
     // aborts the current transaction because some error happens. we should rollback to the last
     // commit point.
     async fn abort(&mut self) -> Result<()>;
+}
+
+pub struct SinkWriterV1Adapter<W: SinkWriterV1> {
+    is_empty: bool,
+    epoch: u64,
+    inner: W,
+}
+
+impl<W: SinkWriterV1> SinkWriterV1Adapter<W> {
+    pub(crate) fn new(inner: W) -> Self {
+        Self {
+            inner,
+            is_empty: true,
+            epoch: u64::MIN,
+        }
+    }
+}
+
+#[async_trait]
+impl<W: SinkWriterV1> SinkWriter for SinkWriterV1Adapter<W> {
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.epoch = epoch;
+        Ok(())
+    }
+
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        if self.is_empty {
+            self.is_empty = false;
+            self.inner.begin_epoch(self.epoch).await?;
+        }
+        self.inner.write_batch(chunk).await
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if is_checkpoint {
+            if !self.is_empty {
+                self.inner.commit().await?
+            }
+            self.is_empty = true;
+        }
+        Ok(())
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        self.inner.abort().await
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -128,7 +205,7 @@ impl Sink for BlackHoleSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = Self;
 
-    async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {
+    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
         Ok(Self)
     }
 
@@ -147,11 +224,15 @@ impl SinkWriter for BlackHoleSink {
         Ok(())
     }
 
-    async fn commit(&mut self) -> Result<()> {
+    async fn abort(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn abort(&mut self) -> Result<()> {
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
+        Ok(())
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }
@@ -351,12 +432,10 @@ fn datum_to_json_object(
         (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
             json!(v.to_text())
         }
-        (DataType::Timestamptz, ScalarRefImpl::Int64(v)) => {
+        (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
             // risingwave's timestamp with timezone is stored in UTC and does not maintain the
             // timezone info and the time is in microsecond.
-            let secs = v.div_euclid(1_000_000);
-            let nsecs = v.rem_euclid(1_000_000) * 1000;
-            let parsed = NaiveDateTime::from_timestamp_opt(secs, nsecs as u32).unwrap();
+            let parsed = v.to_datetime_utc().naive_utc();
             let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
             json!(v)
         }
@@ -417,7 +496,6 @@ fn datum_to_json_object(
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::cast::str_with_time_zone_to_timestamptz;
     use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
 
     use super::*;
@@ -466,14 +544,13 @@ mod tests {
         );
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
-        let tstz_str = "2018-01-26T18:30:09.453Z";
-        let tstz_inner = str_with_time_zone_to_timestamptz(tstz_str).unwrap();
+        let tstz_inner = "2018-01-26T18:30:09.453Z".parse().unwrap();
         let tstz_value = datum_to_json_object(
             &Field {
                 data_type: DataType::Timestamptz,
                 ..mock_field.clone()
             },
-            Some(ScalarImpl::Int64(tstz_inner).as_scalar_ref_impl()),
+            Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
         )
         .unwrap();

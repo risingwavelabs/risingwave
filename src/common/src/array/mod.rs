@@ -44,7 +44,8 @@ use std::sync::Arc;
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use bytes_array::*;
 pub use chrono_array::{
-    DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray, TimestampArrayBuilder,
+    DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray,
+    TimestampArrayBuilder, TimestamptzArray, TimestamptzArrayBuilder,
 };
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
@@ -343,6 +344,7 @@ macro_rules! for_all_variants {
             { Interval, interval, IntervalArray, IntervalArrayBuilder },
             { Date, date, DateArray, DateArrayBuilder },
             { Timestamp, timestamp, TimestampArray, TimestampArrayBuilder },
+            { Timestamptz, timestamptz, TimestamptzArray, TimestamptzArrayBuilder },
             { Time, time, TimeArray, TimeArrayBuilder },
             { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
             { Serial, serial, SerialArray, SerialArrayBuilder },

@@ -381,6 +381,7 @@ impl TestCase {
         for stmt in statements {
             // TODO: `sql` may contain multiple statements here.
             let handler_args = HandlerArgs::new(session.clone(), &stmt, sql)?;
+            let _guard = session.txn_begin_implicit();
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }

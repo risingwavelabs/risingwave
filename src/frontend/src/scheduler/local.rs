@@ -52,7 +52,7 @@ use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
-use crate::scheduler::{PinnedHummockSnapshot, SchedulerError, SchedulerResult};
+use crate::scheduler::{PinnedHummockSnapshotRef, SchedulerError, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
@@ -62,7 +62,8 @@ pub struct LocalQueryExecution {
     query: Query,
     front_env: FrontendEnv,
     // The snapshot will be released when LocalQueryExecution is dropped.
-    snapshot: PinnedHummockSnapshot,
+    // TODO
+    snapshot: PinnedHummockSnapshotRef,
     auth_context: Arc<AuthContext>,
     cancel_flag: Option<Tripwire<Result<DataChunk, BoxedError>>>,
     worker_node_manager: WorkerNodeSelector,
@@ -73,7 +74,7 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: PinnedHummockSnapshot,
+        snapshot: PinnedHummockSnapshotRef,
         auth_context: Arc<AuthContext>,
         cancel_flag: Tripwire<Result<DataChunk, BoxedError>>,
     ) -> Self {
@@ -128,7 +129,7 @@ impl LocalQueryExecution {
         }
     }
 
-    pub fn run(self) -> BoxedDataChunkStream {
+    fn run(self) -> BoxedDataChunkStream {
         let span = tracing::info_span!(
             "local_execute",
             query_id = self.query.query_id.id,
@@ -138,6 +139,7 @@ impl LocalQueryExecution {
     }
 
     pub fn stream_rows(mut self) -> LocalQueryStream {
+        let compute_runtime = self.front_env.compute_runtime();
         let (sender, receiver) = mpsc::channel(10);
         let tripwire = self.cancel_flag.take().unwrap();
 
@@ -154,10 +156,7 @@ impl LocalQueryExecution {
             }
         };
 
-        #[cfg(madsim)]
-        tokio::spawn(future);
-        #[cfg(not(madsim))]
-        tokio::task::spawn_blocking(move || futures::executor::block_on(future));
+        compute_runtime.spawn(future);
 
         ReceiverStream::new(receiver)
     }
