@@ -19,7 +19,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::agg::AggKind;
 
-use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::generic::{self, agg_kinds, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
@@ -53,7 +53,7 @@ impl LogicalAgg {
     /// Generate plan for stateless 2-phase streaming agg.
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        debug_assert!(self.group_key().is_empty());
+        debug_assert!(self.group_key().is_clear());
         let mut logical = self.core.clone();
         logical.input = stream_input;
         let local_agg = StreamStatelessSimpleAgg::new(logical);
@@ -122,7 +122,7 @@ impl LogicalAgg {
             .expect("some input group key could not be mapped");
 
         // Generate global agg step
-        if self.group_key().count_ones(..) == 0 {
+        if self.group_key().is_clear() {
             let exchange =
                 RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
             let global_agg = new_stream_simple_agg(Agg::new(
@@ -179,14 +179,6 @@ impl LogicalAgg {
         Ok(new_stream_hash_agg(logical, None).into())
     }
 
-    /// See if all stream aggregation calls have a stateless local agg counterpart.
-    fn all_local_aggs_are_stateless(&self, stream_input_append_only: bool) -> bool {
-        self.agg_calls().iter().all(|c| {
-            matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
-                || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && stream_input_append_only)
-        })
-    }
-
     /// Generates distributed stream plan.
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input_dist = stream_input.distribution();
@@ -195,17 +187,17 @@ impl LogicalAgg {
         // Shuffle agg
         // If we have group key, and we won't try two phase agg optimization at all,
         // we will always choose shuffle agg over single agg.
-        if !self.group_key().is_empty() && !self.core.must_try_two_phase_agg() {
+        if !self.group_key().is_clear() && !self.core.must_try_two_phase_agg() {
             return self.gen_shuffle_plan(stream_input);
         }
 
         // Standalone agg
         // If no group key, and cannot two phase agg, we have to use single plan.
-        if self.group_key().is_empty() && !self.core.can_two_phase_agg() {
+        if self.group_key().is_clear() && !self.core.can_two_phase_agg() {
             return self.gen_single_plan(stream_input);
         }
 
-        debug_assert!(if !self.group_key().is_empty() {
+        debug_assert!(if !self.group_key().is_clear() {
             self.core.must_try_two_phase_agg()
         } else {
             self.core.can_two_phase_agg()
@@ -214,8 +206,10 @@ impl LogicalAgg {
         // Stateless 2-phase simple agg
         // can be applied on stateless simple agg calls,
         // with input distributed by [`Distribution::AnyShard`]
-        if self.group_key().is_empty()
-            && self.all_local_aggs_are_stateless(stream_input.append_only())
+        if self.group_key().is_clear()
+            && self
+                .core
+                .all_local_aggs_are_stateless(stream_input.append_only())
             && input_dist.satisfies(&RequiredDist::AnyShard)
         {
             return self.gen_stateless_two_phase_streaming_agg_plan(stream_input);
@@ -240,7 +234,7 @@ impl LogicalAgg {
         match input_dist {
             Distribution::HashShard(dist_key) | Distribution::UpstreamHashShard(dist_key, _)
                 if (!self.core.hash_agg_dist_satisfied_by_input_dist(input_dist)
-                    || self.group_key().is_empty()) =>
+                    || self.group_key().is_clear()) =>
             {
                 let dist_key = dist_key.clone();
                 return self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dist_key);
@@ -249,7 +243,7 @@ impl LogicalAgg {
         }
 
         // Fallback to shuffle or single, if we can't generate any 2-phase plans.
-        if !self.group_key().is_empty() {
+        if !self.group_key().is_clear() {
             self.gen_shuffle_plan(stream_input)
         } else {
             self.gen_single_plan(stream_input)
@@ -459,25 +453,21 @@ impl LogicalAggBuilder {
         let return_type = agg_call.return_type();
         let (agg_kind, inputs, mut distinct, mut order_by, filter, direct_args) =
             agg_call.decompose();
-        match &agg_kind {
-            AggKind::Min | AggKind::Max => {
-                distinct = false;
-                order_by = OrderBy::any();
-            }
-            AggKind::Sum
-            | AggKind::Count
-            | AggKind::Avg
-            | AggKind::ApproxCountDistinct
-            | AggKind::StddevSamp
-            | AggKind::StddevPop
-            | AggKind::VarPop
-            | AggKind::VarSamp => {
-                order_by = OrderBy::any();
-            }
-            _ => {
-                // To be conservative, we just treat newly added AggKind in the future as not
-                // rewritable.
-            }
+
+        if matches!(agg_kind, agg_kinds::must_have_order_by!()) && order_by.sort_exprs.is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Aggregation function {} requires ORDER BY clause",
+                agg_kind
+            )));
+        }
+
+        // try ignore ORDER BY if it doesn't affect the result
+        if matches!(agg_kind, agg_kinds::result_unaffected_by_order_by!()) {
+            order_by = OrderBy::any();
+        }
+        // try ignore DISTINCT if it doesn't affect the result
+        if matches!(agg_kind, agg_kinds::result_unaffected_by_distinct!()) {
+            distinct = false;
         }
 
         self.is_in_filter_clause = true;
@@ -1069,7 +1059,7 @@ impl ToBatch for LogicalAgg {
             input,
             ..self.core.clone()
         };
-        let agg_plan = if self.group_key().is_empty() {
+        let agg_plan = if self.group_key().is_clear() {
             BatchSimpleAgg::new(new_logical).into()
         } else if self
             .ctx()
@@ -1117,16 +1107,7 @@ fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> S
 impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         for agg_call in self.agg_calls() {
-            if matches!(
-                agg_call.agg_kind,
-                AggKind::BitAnd
-                    | AggKind::BitOr
-                    | AggKind::BoolAnd
-                    | AggKind::BoolOr
-                    | AggKind::PercentileCont
-                    | AggKind::PercentileDisc
-                    | AggKind::Mode
-            ) {
+            if matches!(agg_call.agg_kind, agg_kinds::unimplemented_in_stream!()) {
                 return Err(ErrorCode::NotImplemented(
                     format!("{} aggregation in materialized view", agg_call.agg_kind),
                     None.into(),

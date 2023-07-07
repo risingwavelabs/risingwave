@@ -41,7 +41,7 @@ pub struct MinMaxOnIndexRule {}
 impl Rule for MinMaxOnIndexRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_agg: &LogicalAgg = plan.as_logical_agg()?;
-        if !logical_agg.group_key().is_empty() {
+        if !logical_agg.group_key().is_clear() {
             return None;
         }
         let calls = logical_agg.agg_calls();

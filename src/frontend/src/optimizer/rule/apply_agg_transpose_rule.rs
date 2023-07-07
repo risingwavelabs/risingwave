@@ -55,7 +55,7 @@ impl Rule for ApplyAggTransposeRule {
         let agg: &LogicalAgg = right.as_logical_agg()?;
         let (mut agg_calls, agg_group_key, grouping_sets, agg_input) = agg.clone().decompose();
         assert!(grouping_sets.is_empty());
-        let is_scalar_agg = agg_group_key.is_empty();
+        let is_scalar_agg = agg_group_key.is_clear();
         let apply_left_len = left.schema().len();
 
         if !is_scalar_agg && max_one_row {

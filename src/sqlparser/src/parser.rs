@@ -520,6 +520,10 @@ impl Parser {
                     self.expect_token(&Token::LBracket)?;
                     self.parse_array_expr(true)
                 }
+                // `LEFT` and `RIGHT` are reserved as identifier but okay as function
+                Keyword::LEFT | Keyword::RIGHT => {
+                    self.parse_function(ObjectName(vec![w.to_ident()?]))
+                }
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
                     parser_err!(format!("syntax error at or near \"{w}\""))
                 }
@@ -4383,7 +4387,7 @@ impl Parser {
 
     pub fn parse_begin(&mut self) -> Result<Statement, ParserError> {
         let _ = self.parse_one_of_keywords(&[Keyword::TRANSACTION, Keyword::WORK]);
-        Ok(Statement::BEGIN {
+        Ok(Statement::Begin {
             modes: self.parse_transaction_modes()?,
         })
     }

@@ -38,7 +38,7 @@ impl Rule for DistinctAggRule {
         let (mut agg_calls, mut agg_group_keys, grouping_sets, input) = agg.clone().decompose();
         assert!(grouping_sets.is_empty());
 
-        if self.for_stream && agg_group_keys.count_ones(..) != 0 {
+        if self.for_stream && !agg_group_keys.is_clear() {
             // Due to performance issue, we don't do 2-phase agg for stream distinct agg with group
             // by. See https://github.com/risingwavelabs/risingwave/issues/7271 for more.
             return None;
@@ -302,6 +302,7 @@ impl DistinctAggRule {
                     | AggKind::JsonbAgg
                     | AggKind::JsonbObjectAgg
                     | AggKind::FirstValue
+                    | AggKind::LastValue
                     | AggKind::StddevPop
                     | AggKind::StddevSamp
                     | AggKind::VarPop

@@ -97,11 +97,15 @@ fn visit_stream_node_tables_inner<F>(
             NodeBody::HashAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
                 always!(node.result_table, "HashAggResult");
-                for state in &mut node.agg_call_states {
-                    if let agg_call_state::Inner::MaterializedInputState(s) =
-                        state.inner.as_mut().unwrap()
-                    {
-                        always!(s.table, "HashAgg");
+                for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
+                    match state.inner.as_mut().unwrap() {
+                        agg_call_state::Inner::ResultValueState(_) => {}
+                        agg_call_state::Inner::TableState(s) => {
+                            always!(s.table, &format!("HashAggCall{}", call_idx));
+                        }
+                        agg_call_state::Inner::MaterializedInputState(s) => {
+                            always!(s.table, &format!("HashAggCall{}", call_idx));
+                        }
                     }
                 }
                 for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
@@ -111,11 +115,15 @@ fn visit_stream_node_tables_inner<F>(
             NodeBody::SimpleAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
                 always!(node.result_table, "SimpleAggResult");
-                for state in &mut node.agg_call_states {
-                    if let agg_call_state::Inner::MaterializedInputState(s) =
-                        state.inner.as_mut().unwrap()
-                    {
-                        always!(s.table, "SimpleAgg");
+                for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
+                    match state.inner.as_mut().unwrap() {
+                        agg_call_state::Inner::ResultValueState(_) => {}
+                        agg_call_state::Inner::TableState(s) => {
+                            always!(s.table, &format!("SimpleAggCall{}", call_idx));
+                        }
+                        agg_call_state::Inner::MaterializedInputState(s) => {
+                            always!(s.table, &format!("SimpleAggCall{}", call_idx));
+                        }
                     }
                 }
                 for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {

@@ -57,6 +57,7 @@ use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
 use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
+use crate::source::monitor::EnumeratorMetrics;
 use crate::source::nexmark::source::reader::NexmarkSplitReader;
 use crate::source::nexmark::{
     NexmarkProperties, NexmarkSplit, NexmarkSplitEnumerator, NEXMARK_CONNECTOR,
@@ -77,11 +78,13 @@ pub trait SplitEnumerator: Sized {
     type Split: SplitMetaData + Send + Sync;
     type Properties;
 
-    async fn new(properties: Self::Properties) -> Result<Self>;
+    async fn new(properties: Self::Properties, context: SourceEnumeratorContextRef)
+        -> Result<Self>;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 
 pub type SourceContextRef = Arc<SourceContext>;
+pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
 
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
@@ -99,6 +102,17 @@ impl Default for SourceCtrlOpts {
             chunk_size: MAX_CHUNK_SIZE,
         }
     }
+}
+
+#[derive(Debug, Default)]
+pub struct SourceEnumeratorContext {
+    pub info: SourceEnumeratorInfo,
+    pub metrics: Arc<EnumeratorMetrics>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SourceEnumeratorInfo {
+    pub source_id: u32,
 }
 
 #[derive(Debug, Default)]

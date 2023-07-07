@@ -34,6 +34,8 @@ use risingwave_pb::catalog::StreamSourceInfo;
 
 use self::bytes_parser::BytesParser;
 pub use self::csv_parser::CsvParserConfig;
+use self::util::get_kafka_topic;
+use crate::aws_auth::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::source::{
     BoxSourceStream, SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat, SourceMeta,
@@ -493,6 +495,148 @@ pub enum SpecificParserConfig {
     Bytes,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SchemaRegistryAuth {
+    username: Option<String>,
+    password: Option<String>,
+}
+
+impl From<&HashMap<String, String>> for SchemaRegistryAuth {
+    fn from(props: &HashMap<String, String>) -> Self {
+        const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
+        const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
+
+        SchemaRegistryAuth {
+            username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
+            password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct AvroProperties {
+    pub use_schema_registry: bool,
+    pub row_schema_location: String,
+    pub upsert_primary_key: String,
+    pub client_config: SchemaRegistryAuth,
+    pub aws_auth_props: Option<AwsAuthProps>,
+    pub topic: String,
+    pub enable_upsert: bool,
+}
+
+#[derive(Default)]
+pub struct ProtobufProperties {
+    pub message_name: String,
+    pub use_schema_registry: bool,
+    pub row_schema_location: String,
+    pub aws_auth_props: Option<AwsAuthProps>,
+    pub client_config: SchemaRegistryAuth,
+    pub topic: String,
+}
+
+#[derive(Default)]
+pub struct CsvProperties {
+    pub delimiter: u8,
+    pub has_header: bool,
+}
+
+#[derive(Default)]
+pub enum EncodingProperties {
+    Avro(AvroProperties),
+    Protobuf(ProtobufProperties),
+    Csv(CsvProperties),
+    Bytes,
+    #[default]
+    None,
+}
+
+#[derive(Default)]
+pub enum ProtocolProperties {
+    Debezium,
+    Maxwell,
+    Canal,
+    #[default]
+    Plain,
+}
+
+pub struct ParserProperties {
+    pub encoding_config: EncodingProperties,
+    pub protocol_config: ProtocolProperties,
+}
+
+/// Requirements of each parser currently
+/// 1. CSV: delimiter, has header
+/// 2. AVRO/AVRO UPSERT: row schema location, use schema registry
+///    client info, topic, aws config, optional primary key
+/// 3. PROTOBUF: message name, row schema location, use schema registry
+///    client info, topic, aws config
+/// 4. DEBEZIUM AVRO: row schema location, topic, client info
+/// 5. Other: none
+
+impl ParserProperties {
+    pub fn new(
+        format: SourceFormat,
+        props: &HashMap<String, String>,
+        info: &StreamSourceInfo,
+    ) -> Result<Self> {
+        let encoding_config = match format {
+            SourceFormat::Csv => EncodingProperties::Csv(CsvProperties {
+                delimiter: info.csv_delimiter as u8,
+                has_header: info.csv_has_header,
+            }),
+            SourceFormat::Avro | SourceFormat::UpsertAvro => {
+                let mut config = AvroProperties {
+                    use_schema_registry: info.use_schema_registry,
+                    row_schema_location: info.row_schema_location.clone(),
+                    upsert_primary_key: info.upsert_avro_primary_key.clone(),
+                    ..Default::default()
+                };
+                if let SourceFormat::UpsertAvro = format {
+                    config.enable_upsert = true;
+                }
+                if info.use_schema_registry {
+                    config.topic = get_kafka_topic(props)?.clone();
+                    config.client_config = SchemaRegistryAuth::from(props);
+                } else {
+                    config.aws_auth_props = Some(AwsAuthProps::from_pairs(
+                        props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+                    ));
+                }
+                EncodingProperties::Avro(config)
+            }
+            SourceFormat::Protobuf => {
+                let mut config = ProtobufProperties {
+                    message_name: info.proto_message_name.clone(),
+                    use_schema_registry: info.use_schema_registry,
+                    row_schema_location: info.row_schema_location.clone(),
+                    ..Default::default()
+                };
+                if info.use_schema_registry {
+                    config.topic = get_kafka_topic(props)?.clone();
+                    config.client_config = SchemaRegistryAuth::from(props);
+                } else {
+                    config.aws_auth_props = Some(AwsAuthProps::from_pairs(
+                        props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+                    ));
+                }
+                EncodingProperties::Protobuf(config)
+            }
+            SourceFormat::DebeziumAvro => EncodingProperties::Avro(AvroProperties {
+                row_schema_location: info.row_schema_location.clone(),
+                topic: get_kafka_topic(props).unwrap().clone(),
+                client_config: SchemaRegistryAuth::from(props),
+                ..Default::default()
+            }),
+            _ => EncodingProperties::None,
+        };
+        let protocol_config = ProtocolProperties::Plain;
+        Ok(ParserProperties {
+            encoding_config,
+            protocol_config,
+        })
+    }
+}
+
 impl SpecificParserConfig {
     pub fn get_source_format(&self) -> SourceFormat {
         match self {
@@ -526,44 +670,20 @@ impl SpecificParserConfig {
         info: &StreamSourceInfo,
         props: &HashMap<String, String>,
     ) -> Result<Self> {
+        let parser_properties = ParserProperties::new(format, props, info)?;
         let conf = match format {
-            SourceFormat::Csv => SpecificParserConfig::Csv(CsvParserConfig {
-                delimiter: info.csv_delimiter as u8,
-                has_header: info.csv_has_header,
-            }),
-            SourceFormat::Avro => SpecificParserConfig::Avro(
-                AvroParserConfig::new(
-                    props,
-                    &info.row_schema_location,
-                    info.use_schema_registry,
-                    false,
-                    None,
-                )
-                .await?,
-            ),
-            SourceFormat::UpsertAvro => SpecificParserConfig::UpsertAvro(
-                AvroParserConfig::new(
-                    props,
-                    &info.row_schema_location,
-                    info.use_schema_registry,
-                    true,
-                    if info.upsert_avro_primary_key.is_empty() {
-                        None
-                    } else {
-                        Some(info.upsert_avro_primary_key.to_string())
-                    },
-                )
-                .await?,
-            ),
-            SourceFormat::Protobuf => SpecificParserConfig::Protobuf(
-                ProtobufParserConfig::new(
-                    props,
-                    &info.row_schema_location,
-                    &info.proto_message_name,
-                    info.use_schema_registry,
-                )
-                .await?,
-            ),
+            SourceFormat::Csv => {
+                SpecificParserConfig::Csv(CsvParserConfig::new(parser_properties)?)
+            }
+            SourceFormat::Avro => {
+                SpecificParserConfig::Avro(AvroParserConfig::new(parser_properties).await?)
+            }
+            SourceFormat::UpsertAvro => {
+                SpecificParserConfig::UpsertAvro(AvroParserConfig::new(parser_properties).await?)
+            }
+            SourceFormat::Protobuf => {
+                SpecificParserConfig::Protobuf(ProtobufParserConfig::new(parser_properties).await?)
+            }
             SourceFormat::Json => SpecificParserConfig::Json,
             SourceFormat::UpsertJson => SpecificParserConfig::UpsertJson,
             SourceFormat::DebeziumJson => SpecificParserConfig::DebeziumJson,
@@ -573,7 +693,7 @@ impl SpecificParserConfig {
             SourceFormat::Native => SpecificParserConfig::Native,
             SourceFormat::Bytes => SpecificParserConfig::Bytes,
             SourceFormat::DebeziumAvro => SpecificParserConfig::DebeziumAvro(
-                DebeziumAvroParserConfig::new(props, &info.row_schema_location).await?,
+                DebeziumAvroParserConfig::new(parser_properties).await?,
             ),
             _ => {
                 return Err(RwError::from(ProtocolError(

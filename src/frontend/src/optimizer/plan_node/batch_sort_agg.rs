@@ -36,6 +36,7 @@ pub struct BatchSortAgg {
 
 impl BatchSortAgg {
     pub fn new(logical: generic::Agg<PlanRef>) -> Self {
+        assert!(!logical.group_key.is_clear());
         assert!(logical.input_provides_order_on_group_keys());
 
         let input = logical.input.clone();

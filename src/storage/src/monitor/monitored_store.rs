@@ -32,10 +32,6 @@ use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
-use crate::{
-    define_local_state_store_associated_type, define_state_store_associated_type,
-    define_state_store_read_associated_type,
-};
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
@@ -178,9 +174,12 @@ impl<S> MonitoredStateStore<S> {
 impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     type IterStream = impl StateStoreReadIterStream;
 
-    define_state_store_read_associated_type!();
-
-    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get(
+        &self,
+        key: Bytes,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
         let table_id = read_options.table_id;
         let key_len = key.len();
         self.monitored_get(self.inner.get(key, epoch, read_options), table_id, key_len)
@@ -191,7 +190,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
+    ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
         self.monitored_iter(
             read_options.table_id,
             self.inner.iter(key_range, epoch, read_options),
@@ -201,44 +200,44 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 }
 
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
-    type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
-    type GetFuture<'a> = impl GetFutureTrait<'a>;
-    type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
 
-    // TODO: include the rest future to macro
-    define_local_state_store_associated_type!();
-
-    fn may_exist(
+    async fn may_exist(
         &self,
         key_range: IterKeyRange,
         read_options: ReadOptions,
-    ) -> Self::MayExistFuture<'_> {
-        async move {
-            let table_id_label = read_options.table_id.to_string();
-            let timer = self
-                .storage_metrics
-                .may_exist_duration
-                .with_label_values(&[table_id_label.as_str()])
-                .start_timer();
-            let res = self
-                .inner
-                .may_exist(key_range, read_options)
-                .verbose_instrument_await("store_may_exist")
-                .await;
-            timer.observe_duration();
-            res
-        }
+    ) -> StorageResult<bool> {
+        let table_id_label = read_options.table_id.to_string();
+        let timer = self
+            .storage_metrics
+            .may_exist_duration
+            .with_label_values(&[table_id_label.as_str()])
+            .start_timer();
+        let res = self
+            .inner
+            .may_exist(key_range, read_options)
+            .verbose_instrument_await("store_may_exist")
+            .await;
+        timer.observe_duration();
+        res
     }
 
-    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get(
+        &self,
+        key: Bytes,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
         let table_id = read_options.table_id;
         let key_len = key.len();
         // TODO: may collect the metrics as local
         self.monitored_get(self.inner.get(key, read_options), table_id, key_len)
     }
 
-    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
+    fn iter(
+        &self,
+        key_range: IterKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
         let table_id = read_options.table_id;
         // TODO: may collect the metrics as local
         self.monitored_iter(table_id, self.inner.iter(key_range, read_options))
@@ -255,7 +254,10 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.delete(key, old_val)
     }
 
-    fn flush(&mut self, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) -> Self::FlushFuture<'_> {
+    fn flush(
+        &mut self,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+    ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
         // TODO: collect metrics
         self.inner
             .flush(delete_ranges)
@@ -284,39 +286,33 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     type Local = MonitoredStateStore<S::Local>;
 
-    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
-
-    define_state_store_associated_type!();
-
-    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
-        async move {
-            self.inner
-                .try_wait_epoch(epoch)
-                .verbose_instrument_await("store_wait_epoch")
-                .await
-                .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
-        }
+    fn try_wait_epoch(
+        &self,
+        epoch: HummockReadEpoch,
+    ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        self.inner
+            .try_wait_epoch(epoch)
+            .verbose_instrument_await("store_wait_epoch")
+            .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
     }
 
-    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
-        async move {
-            // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
-            // move this metrics to inside uploader
-            let timer = self.storage_metrics.sync_duration.start_timer();
-            let sync_result = self
-                .inner
-                .sync(epoch)
-                .instrument_await("store_sync")
-                .await
-                .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
-            timer.observe_duration();
-            if sync_result.sync_size != 0 {
-                self.storage_metrics
-                    .sync_size
-                    .observe(sync_result.sync_size as _);
-            }
-            Ok(sync_result)
+    async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
+        // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
+        // move this metrics to inside uploader
+        let timer = self.storage_metrics.sync_duration.start_timer();
+        let sync_result = self
+            .inner
+            .sync(epoch)
+            .instrument_await("store_sync")
+            .await
+            .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
+        timer.observe_duration();
+        if sync_result.sync_size != 0 {
+            self.storage_metrics
+                .sync_size
+                .observe(sync_result.sync_size as _);
         }
+        Ok(sync_result)
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
@@ -330,26 +326,21 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         panic!("the state store is already monitored")
     }
 
-    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
-        async move {
-            self.inner
-                .clear_shared_buffer()
-                .verbose_instrument_await("store_clear_shared_buffer")
-                .await
-                .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
-        }
+    fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        self.inner
+            .clear_shared_buffer()
+            .verbose_instrument_await("store_clear_shared_buffer")
+            .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
     }
 
-    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
-        async move {
-            MonitoredStateStore::new_from_local(
-                self.inner
-                    .new_local(option)
-                    .instrument_await("store_new_local")
-                    .await,
-                self.storage_metrics.clone(),
-            )
-        }
+    async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
+        MonitoredStateStore::new_from_local(
+            self.inner
+                .new_local(option)
+                .instrument_await("store_new_local")
+                .await,
+            self.storage_metrics.clone(),
+        )
     }
 
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
