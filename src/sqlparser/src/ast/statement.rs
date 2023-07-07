@@ -504,13 +504,13 @@ impl SourceSchemaV2 {
 
 impl fmt::Display for SourceSchemaV2 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "FORMAT {} ENCODE {} {}",
-            self.format,
-            self.row_encode,
-            display_comma_separated(self.row_options()),
-        )
+        write!(f, "FORMAT {} ENCODE {}", self.format, self.row_encode)?;
+
+        if !self.row_options().is_empty() {
+            write!(f, " ({})", display_comma_separated(self.row_options()))
+        } else {
+            Ok(())
+        }
     }
 }
 
