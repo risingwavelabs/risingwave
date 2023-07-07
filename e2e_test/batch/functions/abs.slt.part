@@ -18,7 +18,7 @@ SELECT abs(2134)
 ----
 2134
 
-query TRR
+query TRRRR
 with t(s) as (values
 	('-inf'),
 	('-2'),
@@ -27,12 +27,18 @@ with t(s) as (values
 	('2'),
 	('inf'),
 	('nan')
-) select s, sign(s::decimal), sign(s::double precision) from t;
+) select
+	s,
+	sign(s::decimal),
+	sign(s::double precision),
+	abs(s::decimal),
+	abs(s::double precision)
+from t;
 ----
--inf  -1 -1
--2    -1 -1
--0     0  0
-0      0  0
-2      1  1
-inf    1  1
-nan  NaN  0
+-inf  -1 -1 Infinity Infinity
+-2    -1 -1        2        2
+-0     0  0        0        0
+0      0  0        0        0
+2      1  1        2        2
+inf    1  1 Infinity Infinity
+nan  NaN  0      NaN      NaN

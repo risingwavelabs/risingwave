@@ -128,13 +128,17 @@ where
 }
 
 #[function("abs(*int) -> auto")]
-#[function("abs(*float) -> auto")]
 pub fn general_abs<T1: IsNegative + CheckedNeg>(expr: T1) -> Result<T1> {
     if expr.is_negative() {
         general_neg(expr)
     } else {
         Ok(expr)
     }
+}
+
+#[function("abs(*float) -> auto")]
+pub fn float_abs<F: num_traits::Float, T1: FloatExt<F>>(expr: T1) -> T1 {
+    expr.abs()
 }
 
 #[function("abs(int256) -> int256")]
