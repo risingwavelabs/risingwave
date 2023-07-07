@@ -22,7 +22,6 @@ use super::generic::{self, PlanAggCall};
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
-use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, IndexSet};
 
@@ -64,12 +63,9 @@ impl StreamHashAgg {
 
         let input = logical.input.clone();
         let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => logical
-                .i2o_col_mapping()
-                .rewrite_provided_distribution(input_dist),
-            d => d.clone(),
-        };
+        let dist = logical
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(input_dist);
 
         let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
         let mut window_col_idx = None;
