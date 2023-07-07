@@ -257,5 +257,5 @@ assert_not_empty BEFORE_2
 assert_not_empty AFTER_1
 assert_not_empty AFTER_2
 
-echo "--- Running Updates and Deletes on new cluster"
+echo "--- Running Updates and Deletes on new cluster should not fail"
 run_updates_and_deletes_new_cluster
