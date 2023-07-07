@@ -107,6 +107,10 @@ random_update() {
   run_sql "flush;"
 }
 
+# Setup table and materialized view.
+# Run updates and deletes on the table.
+# Get the results.
+# TODO: Run nexmark, tpch queries
 run_sql_old_cluster() {
   run_sql "CREATE TABLE t(v1 int primary key, v2 int);"
 
@@ -123,11 +127,21 @@ run_sql_old_cluster() {
 
   wait $CREATE_MV_PID
 
-  run_sql "select * from m ORDER BY v1;" > BEFORE
+  run_sql "CREATE MATERIALIZED VIEW m2 as SELECT sum(v2) FROM m GROUP BY v1;"
+
+  run_sql "select * from m ORDER BY v1;" > BEFORE_1
+  run_sql "select * from m2 ORDER BY v1;" > BEFORE_2
 }
 
+# Just check if the results are the same as old cluster.
 run_sql_new_cluster() {
-  run_sql "SELECT * from m ORDER BY v1;" > AFTER
+  run_sql "SELECT * from m ORDER BY v1;" > AFTER_1
+  run_sql "select * from m2 ORDER BY v1;" > AFTER_2
+}
+
+run_updates_and_deletes_new_cluster() {
+  random_update 1 20000 1000
+  random_delete 1 20000 1000
 }
 
 ################################### CLUSTER CONFIGURATION
@@ -236,6 +250,12 @@ echo "--- Sanity Check"
 cat AFTER | tail -n 100
 
 echo "--- Comparing results"
-assert_eq BEFORE AFTER
-assert_not_empty BEFORE
-assert_not_empty AFTER
+assert_eq BEFORE_1 AFTER_1
+assert_eq BEFORE_2 AFTER_2
+assert_not_empty BEFORE_1
+assert_not_empty BEFORE_2
+assert_not_empty AFTER_1
+assert_not_empty AFTER_2
+
+echo "--- Running Updates and Deletes on new cluster"
+run_updates_and_deletes_new_cluster
