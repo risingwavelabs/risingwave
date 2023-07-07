@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.WARN)
 def section_actor_info(panels):
     excluded_cols = ["Time", "Value", "__name__", "job", "instance"]
     return [
-        panels.row("Actor/Table Id Info"),
+        panels.row("Materialized View/Actor/Table Id Info"),
         panels.table_info(
             "Actor Id Info",
             "Mapping from actor id to fragment id",
@@ -42,6 +42,12 @@ def section_actor_info(panels):
             "Table Id Info",
             "Mapping from table id to actor id and table name",
             [panels.table_target(f"{metric('table_info')}")],
+            excluded_cols,
+        ),
+        panels.table_info(
+            "Materialized View  Info",
+            "Mapping from materialized view table id to it's internal table ids",
+            [panels.table_target(f"{metric('mv_info')}")],
             excluded_cols,
         ),
     ]
