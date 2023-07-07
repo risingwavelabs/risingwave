@@ -335,16 +335,22 @@ impl WorkerNodeSelector {
                         // 1. Stable mapping for most cases.
                         return Ok(o);
                     }
-                    let p = o.iter_unique().count();
-                    (Some(o), p)
+                    let max_parallelism = o.iter_unique().count();
+                    (Some(o), max_parallelism)
                 }
                 Err(e) => {
                     if !matches!(e, SchedulerError::ServingVnodeMappingNotFound(_)) {
                         return Err(e);
                     }
+                    let max_parallelism = 100;
+                    tracing::warn!(
+                        fragment_id,
+                        max_parallelism,
+                        "Serving fragment mapping not found, fall back to temporary one."
+                    );
                     // Workaround the case that new mapping is not available yet due to asynchronous
                     // notification.
-                    (None, 100)
+                    (None, max_parallelism)
                 }
             };
             // 2. Temporary mapping that filters out unavailable workers.
