@@ -16,8 +16,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_connector::sink::kafka::KAFKA_SINK;
-use risingwave_connector::sink::{build_sink, Sink, SinkConfig, DOWNSTREAM_SINK_KEY};
+use risingwave_connector::sink::{build_sink, Sink, SinkConfig};
 use risingwave_pb::catalog::PbSink;
 
 use crate::{MetaError, MetaResult};
@@ -27,11 +26,7 @@ pub async fn validate_sink(
     connector_rpc_endpoint: Option<String>,
 ) -> MetaResult<()> {
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);
-    let mut properties = sink_catalog.properties.clone();
-    // Insert a value as the `identifier` field to get parsed by serde.
-    if let Some(connector) = properties.get(DOWNSTREAM_SINK_KEY) && connector == KAFKA_SINK {
-        properties.insert("identifier".to_string(), u64::MAX.to_string());
-    }
+    let properties = sink_catalog.properties.clone();
     let sink_config = SinkConfig::from_hashmap(properties)
         .map_err(|err| MetaError::from(anyhow!(err.to_string())))?;
 

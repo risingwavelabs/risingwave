@@ -22,6 +22,6 @@
   expected_outputs:
   - explain_output
 - sql: |
-    explain create table t (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) row format json;
+    explain create table t (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) FORMAT PLAIN ENCODE JSON;
   expected_outputs:
   - explain_output

@@ -25,9 +25,11 @@ use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
-use risingwave_connector::sink::{build_sink, Sink, SinkConfig, SinkImpl, SinkWriter};
-use risingwave_connector::{dispatch_sink, ConnectorParams};
+use risingwave_connector::sink::{
+    build_sink, Sink, SinkConfig, SinkImpl, SinkWriter, SinkWriterParam,
+};
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
@@ -48,7 +50,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
     log_reader: F::Reader,
     log_writer: F::Writer,
-    connector_params: ConnectorParams,
+    sink_writer_param: SinkWriterParam,
 }
 
 struct SinkMetrics {
@@ -76,8 +78,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: BoxedExecutor,
         metrics: Arc<StreamingMetrics>,
         config: SinkConfig,
-        executor_id: u64,
-        connector_params: ConnectorParams,
+        sink_writer_param: SinkWriterParam,
         columns: Vec<ColumnCatalog>,
         pk_indices: Vec<usize>,
         sink_type: SinkType,
@@ -102,7 +103,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             metrics,
             sink,
             config,
-            identity: format!("SinkExecutor {:X?}", executor_id),
+            identity: format!("SinkExecutor {:X?}", sink_writer_param.executor_id),
             columns,
             schema,
             sink_type,
@@ -110,7 +111,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             actor_context,
             log_reader,
             log_writer,
-            connector_params,
+            sink_writer_param,
         })
     }
 
@@ -138,7 +139,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 sink,
                 self.log_reader,
                 sink_metrics,
-                self.connector_params,
+                self.sink_writer_param,
             );
             select(consume_log_stream.into_stream(), write_log_stream).boxed()
         })
@@ -217,96 +218,75 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink: S,
         mut log_reader: R,
         sink_metrics: SinkMetrics,
-        connector_params: ConnectorParams,
+        sink_writer_param: SinkWriterParam,
     ) -> StreamExecutorResult<Message> {
         log_reader.init().await?;
-        let mut sink_writer = sink.new_writer(connector_params).await?;
+        let mut sink_writer = sink.new_writer(sink_writer_param).await?;
 
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
             Uninitialized,
 
-            /// Mark that there is some data written in this checkpoint.
-            Writing { curr_epoch: u64 },
+            /// Mark that a new epoch has begun.
+            EpochBegun { curr_epoch: u64 },
 
-            /// Mark that the consumer has been checkpointed and there is no new data written after
-            /// the checkpoint
-            Checkpointed { prev_epoch: u64 },
+            /// Mark that the consumer has just received a barrier
+            BarrierReceived { prev_epoch: u64 },
         }
 
         let mut state = LogConsumerState::Uninitialized;
 
         loop {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
+            // begin_epoch when not previously began
+            state = match state {
+                LogConsumerState::Uninitialized => {
+                    sink_writer.begin_epoch(epoch).await?;
+                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                }
+                LogConsumerState::EpochBegun { curr_epoch } => {
+                    assert!(
+                        epoch >= curr_epoch,
+                        "new epoch {} should not be below the current epoch {}",
+                        epoch,
+                        curr_epoch
+                    );
+                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                }
+                LogConsumerState::BarrierReceived { prev_epoch } => {
+                    assert!(
+                        epoch > prev_epoch,
+                        "new epoch {} should be greater than prev epoch {}",
+                        epoch,
+                        prev_epoch
+                    );
+                    sink_writer.begin_epoch(epoch).await?;
+                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                }
+            };
             match item {
                 LogStoreReadItem::StreamChunk(chunk) => {
-                    state = match state {
-                        LogConsumerState::Uninitialized => {
-                            sink_writer.begin_epoch(epoch).await?;
-                            LogConsumerState::Writing { curr_epoch: epoch }
-                        }
-                        LogConsumerState::Writing { curr_epoch } => {
-                            assert!(
-                                epoch >= curr_epoch,
-                                "new epoch {} should not be below the current epoch {}",
-                                epoch,
-                                curr_epoch
-                            );
-                            LogConsumerState::Writing { curr_epoch: epoch }
-                        }
-                        LogConsumerState::Checkpointed { prev_epoch } => {
-                            assert!(
-                                epoch > prev_epoch,
-                                "new epoch {} should be greater than prev epoch {}",
-                                epoch,
-                                prev_epoch
-                            );
-                            sink_writer.begin_epoch(epoch).await?;
-                            LogConsumerState::Writing { curr_epoch: epoch }
-                        }
-                    };
-
                     if let Err(e) = sink_writer.write_batch(chunk.clone()).await {
                         sink_writer.abort().await?;
                         return Err(e.into());
                     }
                 }
                 LogStoreReadItem::Barrier { is_checkpoint } => {
-                    state = match state {
-                        LogConsumerState::Uninitialized => {
-                            LogConsumerState::Checkpointed { prev_epoch: epoch }
-                        }
-                        LogConsumerState::Writing { curr_epoch } => {
-                            assert!(
-                                epoch >= curr_epoch,
-                                "barrier epoch {} should not be below current epoch {}",
-                                epoch,
-                                curr_epoch
-                            );
-                            if is_checkpoint {
-                                let start_time = Instant::now();
-                                sink_writer.commit().await?;
-                                sink_metrics
-                                    .sink_commit_duration_metrics
-                                    .observe(start_time.elapsed().as_millis() as f64);
-                                LogConsumerState::Checkpointed { prev_epoch: epoch }
-                            } else {
-                                LogConsumerState::Writing { curr_epoch: epoch }
-                            }
-                        }
-                        LogConsumerState::Checkpointed { prev_epoch } => {
-                            assert!(
-                                epoch > prev_epoch,
-                                "checkpoint epoch {} should be greater than prev checkpoint epoch: {}",
-                                epoch,
-                                prev_epoch
-                            );
-                            LogConsumerState::Checkpointed { prev_epoch: epoch }
-                        }
-                    };
                     if is_checkpoint {
+                        let start_time = Instant::now();
+                        sink_writer.barrier(true).await?;
+                        sink_metrics
+                            .sink_commit_duration_metrics
+                            .observe(start_time.elapsed().as_millis() as f64);
                         log_reader.truncate().await?;
+                    } else {
+                        sink_writer.barrier(false).await?;
                     }
+                    let prev_epoch = match state {
+                        LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
+                        _ => unreachable!("epoch must have begun before handling barrier"),
+                    };
+                    state = LogConsumerState::BarrierReceived { prev_epoch }
                 }
             }
         }
@@ -404,8 +384,11 @@ mod test {
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
             config,
-            0,
-            Default::default(),
+            SinkWriterParam {
+                connector_params: Default::default(),
+                executor_id: 0,
+                vnode_bitmap: None,
+            },
             columns.clone(),
             pk.clone(),
             SinkType::ForceAppendOnly,
@@ -492,8 +475,11 @@ mod test {
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
             config,
-            0,
-            Default::default(),
+            SinkWriterParam {
+                connector_params: Default::default(),
+                executor_id: 0,
+                vnode_bitmap: None,
+            },
             columns,
             pk.clone(),
             SinkType::ForceAppendOnly,

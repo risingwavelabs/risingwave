@@ -18,6 +18,7 @@ use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
+    TelemetryResult,
 };
 use risingwave_pb::common::WorkerType;
 use serde::{Deserialize, Serialize};
@@ -43,12 +44,7 @@ pub(crate) struct MetaTelemetryReport {
     meta_backend: MetaBackend,
 }
 
-impl TelemetryReport for MetaTelemetryReport {
-    fn to_json(&self) -> anyhow::Result<String> {
-        let json = serde_json::to_string(self)?;
-        Ok(json)
-    }
-}
+impl TelemetryReport for MetaTelemetryReport {}
 
 pub(crate) struct MetaTelemetryInfoFetcher {
     tracking_id: ClusterId,
@@ -62,7 +58,7 @@ impl MetaTelemetryInfoFetcher {
 
 #[async_trait::async_trait]
 impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
-    async fn fetch_telemetry_info(&self) -> anyhow::Result<Option<String>> {
+    async fn fetch_telemetry_info(&self) -> TelemetryResult<Option<String>> {
         Ok(Some(self.tracking_id.clone().into()))
     }
 }
@@ -89,7 +85,7 @@ impl<S: MetaStore> TelemetryReportCreator for MetaReportCreator<S> {
         tracking_id: String,
         session_id: String,
         up_time: u64,
-    ) -> anyhow::Result<MetaTelemetryReport> {
+    ) -> TelemetryResult<MetaTelemetryReport> {
         let node_map = self.cluster_mgr.count_worker_node().await;
         Ok(MetaTelemetryReport {
             base: TelemetryReportBase {
