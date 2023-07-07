@@ -176,13 +176,14 @@ where
             .generate::<{ IdCategory::Worker }>()
             .await? as WorkerId;
 
-        let transactional_id = match core.available_transactional_ids.front() {
-            None => {
+        let transactional_id = match (core.available_transactional_ids.front(), r#type) {
+            (None, _) => {
                 return Err(MetaError::unavailable(
                     "no available reusable machine id".to_string(),
                 ))
             }
-            Some(id) => Some(*id),
+            (Some(id), WorkerType::ComputeNode) => Some(*id),
+            _ => None,
         };
 
         // Generate parallel units.
@@ -539,7 +540,11 @@ impl ClusterManagerCore {
         let mut var_txns = vec![];
 
         for worker in &mut workers {
-            if worker.worker_node.transactional_id.is_none() {
+            let worker_type = worker.worker_node.get_type().unwrap();
+
+            if worker.worker_node.transactional_id.is_none()
+                && worker_type == WorkerType::ComputeNode
+            {
                 let worker_id = worker.worker_node.id;
 
                 let transactional_id = match available_transactional_ids.pop_front() {
@@ -605,8 +610,10 @@ impl ClusterManagerCore {
     }
 
     fn add_worker_node(&mut self, worker: Worker) {
-        self.available_transactional_ids
-            .retain(|id| *id != worker.worker_node.transactional_id.unwrap());
+        if let Some(transactional_id) = worker.worker_node.transactional_id {
+            self.available_transactional_ids
+                .retain(|id| *id != transactional_id);
+        }
 
         self.parallel_units
             .extend(worker.worker_node.parallel_units.clone());
@@ -630,8 +637,9 @@ impl ClusterManagerCore {
             });
         self.workers.remove(&WorkerKey(worker.key().unwrap()));
 
-        self.available_transactional_ids
-            .push_back(worker.worker_node.transactional_id.unwrap());
+        if let Some(transactional_id) = worker.worker_node.transactional_id {
+            self.available_transactional_ids.push_back(transactional_id);
+        }
     }
 
     pub fn list_worker_node(
