@@ -709,7 +709,7 @@ impl fmt::Display for CreateSourceStatement {
         }
 
         impl_fmt_display!(with_properties, v, self);
-        impl_fmt_display!([Keyword::ROW, Keyword::FORMAT], v);
+        impl_fmt_display!([Keyword::FORMAT], v);
         impl_fmt_display!(source_schema, v, self);
         v.iter().join(" ").fmt(f)
     }
