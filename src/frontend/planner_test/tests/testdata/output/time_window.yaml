@@ -15,7 +15,8 @@
     select * from tumble(t, (country).created_at, interval '3' day);
   binder_error: 'Bind error: The 2st arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround.'
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";

@@ -441,7 +441,7 @@ impl TopNCacheTrait for TopNCache<true> {
                 if self.high.len() >= self.high_capacity {
                     let high_last = self.high.pop_last().unwrap();
                     let high_last_order_by = high_last.0 .0;
-                    self.high.drain_filter(|k, _| k.0 == high_last_order_by);
+                    self.high.retain(|k, _| k.0 != high_last_order_by);
                 }
 
                 res_ops.push(Op::Insert);

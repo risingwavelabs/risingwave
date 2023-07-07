@@ -491,40 +491,31 @@ fn print_memory_config(
     embedded_compactor_enabled: bool,
     reserved_memory_bytes: usize,
 ) {
-    info!("Memory outline: ");
-    info!("> total_memory: {}", convert(cn_total_memory_bytes as _));
-    info!(
-        ">     storage_memory: {}",
-        convert(storage_memory_bytes as _)
-    );
-    info!(
-        ">         block_cache_capacity: {}",
-        convert((storage_memory_config.block_cache_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         meta_cache_capacity: {}",
-        convert((storage_memory_config.meta_cache_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         shared_buffer_capacity: {}",
-        convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         file_cache_total_buffer_capacity: {}",
-        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _)
-    );
-    if embedded_compactor_enabled {
-        info!(
-            ">         compactor_memory_limit: {}",
+    let memory_config = format!(
+        "\n\
+        Memory outline:\n\
+        > total_memory: {}\n\
+        >     storage_memory: {}\n\
+        >         block_cache_capacity: {}\n\
+        >         meta_cache_capacity: {}\n\
+        >         shared_buffer_capacity: {}\n\
+        >         file_cache_total_buffer_capacity: {}\n\
+        >         compactor_memory_limit: {}\n\
+        >     compute_memory: {}\n\
+        >     reserved_memory: {}",
+        convert(cn_total_memory_bytes as _),
+        convert(storage_memory_bytes as _),
+        convert((storage_memory_config.block_cache_capacity_mb << 20) as _),
+        convert((storage_memory_config.meta_cache_capacity_mb << 20) as _),
+        convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _),
+        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _),
+        if embedded_compactor_enabled {
             convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
-        );
-    }
-    info!(
-        ">     compute_memory: {}",
-        convert(compute_memory_bytes as _)
+        } else {
+            "Not enabled".to_string()
+        },
+        convert(compute_memory_bytes as _),
+        convert(reserved_memory_bytes as _),
     );
-    info!(
-        ">     reserved_memory: {}",
-        convert(reserved_memory_bytes as _)
-    );
+    info!("{}", memory_config);
 }

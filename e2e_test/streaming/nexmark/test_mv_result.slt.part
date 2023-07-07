@@ -5,6 +5,7 @@ include ./q2.slt.part
 include ./q3.slt.part
 include ./q4.slt.part
 include ./q5.slt.part
+include ./q6_group_top1.slt.part
 include ./q7.slt.part
 include ./q8.slt.part
 include ./q9.slt.part
