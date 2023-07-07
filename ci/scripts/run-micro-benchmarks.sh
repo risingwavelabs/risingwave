@@ -74,10 +74,13 @@ local_test() {
   echo ']' >> results.json
 }
 
+set +u
 if [[ "$1" == 'local' ]]; then
-  echo "Running Local Test"
+  set -u
+  echo "Running Local microbench"
   local_test
 else
-  echo "main"
+  set -u
+  echo "Running CI microbench"
   main
 fi
