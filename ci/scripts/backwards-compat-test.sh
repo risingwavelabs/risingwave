@@ -127,7 +127,7 @@ run_sql_old_cluster() {
 
   wait $CREATE_MV_PID
 
-  run_sql "CREATE MATERIALIZED VIEW m2 as SELECT sum(v2) FROM m GROUP BY v1;"
+  run_sql "CREATE MATERIALIZED VIEW m2 as SELECT v1, sum(v2) FROM m GROUP BY v1;"
 
   run_sql "select * from m ORDER BY v1;" > BEFORE_1
   run_sql "select * from m2 ORDER BY v1;" > BEFORE_2
