@@ -125,6 +125,8 @@ create table shipments_2 (
 );
 
 
+# Test user-provided publication
+statement ok
 create table t1_rw (
     v1 int primary key,
     v3 varchar
@@ -142,6 +144,7 @@ create table t1_rw (
   publication.create.enable='false'
 );
 
+statement ok
 create table person_rw (
     id int primary key,
     name varchar,
@@ -157,5 +160,22 @@ create table person_rw (
   database.name='mydb',
   table.name='person',
   publication.name='my_publicaton',
+  publication.create.enable='false'
+);
+
+statement error
+create table person_rw (
+    id int primary key,
+    name varchar,
+    email_address varchar
+) with (
+  connector = 'postgres-cdc',
+  hostname = 'postgres',
+  port = '5433',
+  username = 'myuser',
+  password='123456',
+  database.name='mydb',
+  table.name='person',
+  publication.name='dumb_publicaton',
   publication.create.enable='false'
 );
