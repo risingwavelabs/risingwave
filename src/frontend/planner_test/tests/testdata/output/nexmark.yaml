@@ -497,7 +497,7 @@
 
     Table 4294967294 { columns: [ auction, num, window_start, window_start#1 ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 3 }
 
-- id: nexmark_q7_group_top1
+- id: nexmark_q6_group_top1
   before:
   - create_tables
   sql: |

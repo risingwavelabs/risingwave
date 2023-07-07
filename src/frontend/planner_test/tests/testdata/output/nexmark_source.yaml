@@ -497,7 +497,7 @@
         GROUP BY A.id, A.seller
     ) AS Q;
   planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
-- id: nexmark_q7_group_top1
+- id: nexmark_q6_group_top1
   before:
   - create_sources
   sql: |
