@@ -15,6 +15,7 @@ bench() {
   BENCHMARK_NAME=$1
   for LINE in $(cargo criterion --bench "$BENCHMARK_NAME" --message-format=json)
   do
+    echo "$LINE"
     REASON="$(jq ".reason" <<< "$LINE")"
     if [[ $REASON == \"benchmark-complete\" ]]; then
       ID="$(jq ".id" <<< "$LINE")"
