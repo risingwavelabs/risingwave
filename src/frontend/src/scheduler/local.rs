@@ -51,7 +51,7 @@ use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
-use crate::scheduler::{PinnedHummockSnapshot, SchedulerError, SchedulerResult};
+use crate::scheduler::{PinnedHummockSnapshotRef, SchedulerError, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
@@ -61,7 +61,8 @@ pub struct LocalQueryExecution {
     query: Query,
     front_env: FrontendEnv,
     // The snapshot will be released when LocalQueryExecution is dropped.
-    snapshot: PinnedHummockSnapshot,
+    // TODO
+    snapshot: PinnedHummockSnapshotRef,
     auth_context: Arc<AuthContext>,
     shutdown_rx: ShutdownToken,
     worker_node_manager: WorkerNodeSelector,
@@ -72,7 +73,7 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: PinnedHummockSnapshot,
+        snapshot: PinnedHummockSnapshotRef,
         auth_context: Arc<AuthContext>,
         shutdown_rx: ShutdownToken,
     ) -> Self {
