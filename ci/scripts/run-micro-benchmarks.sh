@@ -62,4 +62,22 @@ main() {
   buildkite-agent artifact upload "./results.json"
 }
 
-main
+local_test() {
+  echo '[' > results.json
+  for BENCHMARK in $BENCHMARKS
+  do
+    echo "--- Running $BENCHMARK"
+    bench $BENCHMARK
+  done
+  NO_TRAILING_COMMA=$(sed -E '$ s/(.*),$/\1/' ./results.json)
+  echo "$NO_TRAILING_COMMA" > ./results.json
+  echo ']' >> results.json
+}
+
+if [[ "$1" -eq "local" ]]; then
+  echo "local test"
+  local_test
+else
+  echo "main"
+  main
+fi
