@@ -70,7 +70,7 @@ use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     validate_ssts, BatchSstableWriterFactory, FilterBuilder, HummockError, SstableWriterFactory,
-    StreamingSstableWriterFactory, Xor8FilterBuilder,
+    StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
