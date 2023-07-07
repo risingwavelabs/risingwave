@@ -76,7 +76,7 @@ Check out ft.txt that will contain all the function signatures.
 
 ## Generate snapshots
 
-These are generated in CI, and published to the `sqlsmith-query-snapshots` repository.
+These are generated in CI, and published to the [sqlsmith-query-snapshots](https://github.com/risingwavelabs/sqlsmith-query-snapshots) repository.
 
 You can re-run the failed query:
 ```sh
