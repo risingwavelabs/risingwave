@@ -43,12 +43,18 @@ main() {
   chmod +x jq-linux64
   mv jq-linux64 /usr/local/bin/jq
 
+  OLD_IFS=$IFS
+  IFS=$'\n'
+
   echo '[' > results.json
   for BENCHMARK in $BENCHMARKS
   do
     echo "--- Running $BENCHMARK"
     bench $BENCHMARK
   done
+
+  IFS=$OLD_IFS
+
   # FIXME: the `-i` (inplace) flag doesn't work with this sed expr for some reason...
   NO_TRAILING_COMMA=$(sed -E '$ s/(.*),$/\1/' ./results.json)
   echo "$NO_TRAILING_COMMA" > ./results.json
