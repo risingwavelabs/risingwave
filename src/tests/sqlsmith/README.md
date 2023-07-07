@@ -5,9 +5,12 @@ SqlSmith is currently used as a testing tool to discover unexpected panics in Ri
 1. There's a bug in SQLSmith, as it generates invalid SQL.
 2. There's a bug in RisingWave because it's unable to handle a correct query.
 
-## Testing your changes
+## Adding new features
+
+Take a look at [develop.md](develop.md) for more details.
 
 Typically you will want to test your changes via madsim. See the section below: [Running with Madsim](#running-with-madsim).
+
 
 ## Frontend
 
