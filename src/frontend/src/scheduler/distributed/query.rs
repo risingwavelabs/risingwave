@@ -610,7 +610,7 @@ pub(crate) mod tests {
                 is_serving: true,
                 is_streaming: true,
             }),
-            transactional_id: 0,
+            transactional_id: Some(0),
         };
         let worker2 = WorkerNode {
             id: 1,
@@ -626,7 +626,7 @@ pub(crate) mod tests {
                 is_serving: true,
                 is_streaming: true,
             }),
-            transactional_id: 1,
+            transactional_id: Some(1),
         };
         let worker3 = WorkerNode {
             id: 2,
@@ -642,7 +642,7 @@ pub(crate) mod tests {
                 is_serving: true,
                 is_streaming: true,
             }),
-            transactional_id: 2,
+            transactional_id: Some(2),
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));

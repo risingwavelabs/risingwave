@@ -413,7 +413,7 @@ mod tests {
                     is_serving: true,
                     is_streaming: true,
                 }),
-                transactional_id: 1,
+                transactional_id: Some(1),
             },
             WorkerNode {
                 id: 2,
@@ -426,7 +426,7 @@ mod tests {
                     is_serving: true,
                     is_streaming: false,
                 }),
-                transactional_id: 2,
+                transactional_id: Some(2),
             },
         ];
         worker_nodes

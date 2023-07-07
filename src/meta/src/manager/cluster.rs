@@ -182,7 +182,7 @@ where
                     "no available reusable machine id".to_string(),
                 ))
             }
-            Some(id) => *id,
+            Some(id) => Some(*id),
         };
 
         // Generate parallel units.
@@ -521,18 +521,55 @@ impl ClusterManagerCore {
     where
         S: MetaStore,
     {
-        let workers = Worker::list(&*meta_store).await?;
+        let mut workers = Worker::list(&*meta_store).await?;
         let mut worker_map = HashMap::new();
         let mut parallel_units = Vec::new();
 
         let used_transactional_ids: HashSet<_> = workers
             .iter()
-            .map(|w| w.worker_node.transactional_id)
+            .flat_map(|w| w.worker_node.transactional_id)
             .collect();
 
-        let available_transactional_ids = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT as u32)
+        let mut available_transactional_ids: VecDeque<_> = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT
+            as u32)
             .filter(|id| !used_transactional_ids.contains(id))
             .collect();
+
+        let mut txn = Transaction::default();
+        let mut var_txns = vec![];
+
+        for worker in &mut workers {
+            if worker.worker_node.transactional_id.is_none() {
+                let worker_id = worker.worker_node.id;
+
+                let transactional_id = match available_transactional_ids.pop_front() {
+                    None => {
+                        return Err(MetaError::unavailable(
+                            "no available transactional id for worker".to_string(),
+                        ))
+                    }
+                    Some(id) => id,
+                };
+
+                let mut var_txn = VarTransaction::new(worker);
+                var_txn.worker_node.transactional_id = Some(transactional_id);
+
+                tracing::info!(
+                    "assigning transactional id {} to worker node {}",
+                    transactional_id,
+                    worker_id
+                );
+
+                var_txn.apply_to_txn(&mut txn)?;
+                var_txns.push(var_txn);
+            }
+        }
+
+        meta_store.txn(txn).await?;
+
+        for var_txn in var_txns {
+            var_txn.commit();
+        }
 
         workers.into_iter().for_each(|w| {
             worker_map.insert(WorkerKey(w.key().unwrap()), w.clone());
@@ -569,7 +606,7 @@ impl ClusterManagerCore {
 
     fn add_worker_node(&mut self, worker: Worker) {
         self.available_transactional_ids
-            .retain(|id| *id != worker.worker_node.transactional_id);
+            .retain(|id| *id != worker.worker_node.transactional_id.unwrap());
 
         self.parallel_units
             .extend(worker.worker_node.parallel_units.clone());
@@ -594,7 +631,7 @@ impl ClusterManagerCore {
         self.workers.remove(&WorkerKey(worker.key().unwrap()));
 
         self.available_transactional_ids
-            .push_back(worker.worker_node.transactional_id);
+            .push_back(worker.worker_node.transactional_id.unwrap());
     }
 
     pub fn list_worker_node(
