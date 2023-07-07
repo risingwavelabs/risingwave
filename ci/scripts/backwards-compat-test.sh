@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+################################### SCRIPT BOILERPLATE
+
 set -euo pipefail
 
 source ci/scripts/common.sh
@@ -26,6 +28,13 @@ if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
     exit 1
 fi
 
+################################### ENVIRONMENT VARIABLES
+
+LOG_DIR=.risingwave/log
+mkdir -p "$LOG_DIR"
+
+QUERY_LOG_FILE="$LOG_DIR/query.log"
+
 # TODO(kwannoel): automatically derive this by:
 # 1. Fetching major version.
 # 2. Find the earliest minor version of that major version.
@@ -33,10 +42,7 @@ TAG=v0.18.0
 # Duration to wait for recovery (seconds)
 RECOVERY_DURATION=20
 
-
-run_sql () {
-    psql -h localhost -p 4566 -d dev -U root -c "$@"
-}
+################################### TEST UTILIIES
 
 assert_not_empty() {
   set +e
@@ -63,13 +69,82 @@ assert_eq() {
   set -e
 }
 
+################################### QUERIES
+
+run_sql () {
+    psql -h localhost -p 4566 -d dev -U root -c "$@"
+}
+
 seed_table() {
-  for i in $(seq 1 10000)
+  START="$1"
+  END="$2"
+  for i in $(seq "$START" "$END")
   do
-    run_sql "INSERT into t values ($i);" 1>/dev/null 2>&1
+    run_sql "INSERT into t values ($i, $i);" 1>$QUERY_LOG_FILE 2>&1
   done
   run_sql "flush;"
 }
+
+random_delete() {
+  START=$1
+  END=$2
+  COUNT=$3
+  for i in $(seq 1 "$COUNT")
+  do
+    run_sql "DELETE FROM t WHERE v1 = $(("$RANDOM" % END));" 1>$QUERY_LOG_FILE 2>&1
+  done
+  run_sql "flush;"
+}
+
+random_update() {
+  START=$1
+  END=$2
+  COUNT=$3
+  for _i in $(seq 1 "$COUNT")
+  do
+    run_sql "UPDATE t SET v2 = v2 + 1 WHERE v1 = $(("$RANDOM" % END));" 1>$QUERY_LOG_FILE 2>&1
+  done
+  run_sql "flush;"
+}
+
+# Setup table and materialized view.
+# Run updates and deletes on the table.
+# Get the results.
+# TODO: Run nexmark, tpch queries
+run_sql_old_cluster() {
+  run_sql "CREATE TABLE t(v1 int primary key, v2 int);"
+
+  seed_table 1 10000
+
+  run_sql "CREATE MATERIALIZED VIEW m as SELECT * from t;" &
+  CREATE_MV_PID=$!
+
+  seed_table 10001 20000
+
+  random_update 1 20000 1000
+
+  random_delete 1 20000 1000
+
+  wait $CREATE_MV_PID
+
+  run_sql "CREATE MATERIALIZED VIEW m2 as SELECT v1, sum(v2) FROM m GROUP BY v1;"
+
+  run_sql "select * from m ORDER BY v1;" > BEFORE_1
+  run_sql "select * from m2 ORDER BY v1;" > BEFORE_2
+}
+
+# Just check if the results are the same as old cluster.
+run_sql_new_cluster() {
+  run_sql "SELECT * from m ORDER BY v1;" > AFTER_1
+  run_sql "select * from m2 ORDER BY v1;" > AFTER_2
+}
+
+run_updates_and_deletes_new_cluster() {
+  random_update 1 20000 1000
+  random_delete 1 20000 1000
+}
+
+################################### CLUSTER CONFIGURATION
 
 configure_rw() {
 echo "--- Setting up cluster config"
@@ -150,15 +225,10 @@ pushd .risingwave/log/
 buildkite-agent artifact upload "./*.log"
 popd
 
-# TODO(kwannoel): This will be the section for which we run nexmark queries + tpch queries.
-echo "--- Running queries"
-run_sql "CREATE TABLE t(v1 int);"
-seed_table
-run_sql "CREATE MATERIALIZED VIEW m as SELECT * from t;" &
-CREATE_MV_PID=$!
-seed_table
-wait $CREATE_MV_PID
-run_sql "select * from m ORDER BY v1;" > BEFORE
+# TODO(kwannoel): Run nexmark queries + tpch queries.
+# TODO(kwannoel): Refactor this into a rust binary + test files for better maintainability.
+echo "--- Running Queries Old Cluster @ $TAG"
+run_sql_old_cluster
 
 echo "--- Kill cluster on tag $TAG"
 ./risedev k
@@ -170,11 +240,25 @@ echo "--- Start cluster on latest"
 configure_rw
 ./risedev d full-without-monitoring
 
-echo "--- Wait ${RECOVERY_DURATION}s for Recovery"
+echo "--- Wait ${RECOVERY_DURATION}s for Recovery on Old Cluster Data"
 sleep $RECOVERY_DURATION
-run_sql "SELECT * from m ORDER BY v1;" > AFTER
+
+echo "--- Running Queries New Cluster"
+run_sql_new_cluster
+
+echo "--- Sanity Checks"
+echo "AFTER_1"
+cat AFTER_1 | tail -n 100
+echo "AFTER_2"
+cat AFTER_2 | tail -n 100
 
 echo "--- Comparing results"
-assert_eq BEFORE AFTER
-assert_not_empty BEFORE
-assert_not_empty AFTER
+assert_eq BEFORE_1 AFTER_1
+assert_eq BEFORE_2 AFTER_2
+assert_not_empty BEFORE_1
+assert_not_empty BEFORE_2
+assert_not_empty AFTER_1
+assert_not_empty AFTER_2
+
+echo "--- Running Updates and Deletes on new cluster should not fail"
+run_updates_and_deletes_new_cluster
