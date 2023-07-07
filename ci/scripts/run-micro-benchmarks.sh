@@ -74,8 +74,8 @@ local_test() {
   echo ']' >> results.json
 }
 
-if [[ "$1" -eq "local" ]]; then
-  echo "local test"
+if [[ "$1" == 'local' ]]; then
+  echo "Running Local Test"
   local_test
 else
   echo "main"
