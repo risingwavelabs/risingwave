@@ -630,7 +630,8 @@ pub trait HummockTrait {
     fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef;
     fn sstable_store(&self) -> SstableStoreRef;
     fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef;
-    fn get_memory_limiter(&self) -> Arc<MemoryLimiter>;
+    fn get_shared_buffer_memory_limiter(&self) -> Arc<MemoryLimiter>;
+    fn get_builder_memory_limiter(&self) -> Arc<MemoryLimiter>;
     fn backup_reader(&self) -> BackupReaderRef;
     fn as_hummock(&self) -> Option<&HummockStorage>;
 }
@@ -648,8 +649,12 @@ impl HummockTrait for HummockStorage {
         self.filter_key_extractor_manager()
     }
 
-    fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
-        self.get_memory_limiter()
+    fn get_builder_memory_limiter(&self) -> Arc<MemoryLimiter> {
+        self.get_flush_memory_limiter()
+    }
+
+    fn get_shared_buffer_memory_limiter(&self) -> Arc<MemoryLimiter> {
+        self.get_buffer_memory_limiter()
     }
 
     fn backup_reader(&self) -> BackupReaderRef {

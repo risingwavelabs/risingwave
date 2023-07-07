@@ -258,7 +258,11 @@ impl HummockStorage {
         &self.context.filter_key_extractor_manager
     }
 
-    pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
+    pub fn get_flush_memory_limiter(&self) -> Arc<MemoryLimiter> {
+        self.context.output_memory_limiter.clone()
+    }
+
+    pub fn get_buffer_memory_limiter(&self) -> Arc<MemoryLimiter> {
         self.buffer_tracker.get_memory_limiter().clone()
     }
 
