@@ -175,3 +175,10 @@
   expected_outputs:
   - stream_plan
   - optimized_logical_plan_for_batch
+- name: eq-predicate derived condition is banned for mismatching types
+  sql: |
+    create table t1(v1 int, v2 int);
+    create table t2(v1 bigint, v2 int);
+    select * from t1 cross join t2 where t1.v1 = t2.v1 and substr('abcde', t1.v1) > 'a';
+  expected_outputs:
+  - optimized_logical_plan_for_batch

@@ -115,6 +115,13 @@ impl TopNCacheState {
     {
         self.inner.drain_filter(pred)
     }
+
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(&CacheKey, &mut CompactedRow) -> bool,
+    {
+        self.inner.retain(f)
+    }
 }
 
 pub struct TopNCacheOccupiedEntry<'a> {

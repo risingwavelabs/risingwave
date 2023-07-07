@@ -489,7 +489,7 @@ where
 
     for (actor_id, mut splits) in actor_splits {
         if opts.enable_scale_in {
-            splits.drain_filter(|split| dropped_splits.contains(&split.id()));
+            splits.retain(|split| !dropped_splits.contains(&split.id()));
         }
 
         heap.push(ActorSplitsAssignment { actor_id, splits })

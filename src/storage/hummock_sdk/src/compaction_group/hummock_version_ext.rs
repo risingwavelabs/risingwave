@@ -427,7 +427,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                     .extend(group_meta_delta.table_ids_add.clone());
                 levels
                     .member_table_ids
-                    .drain_filter(|t| group_meta_delta.table_ids_remove.contains(t));
+                    .retain(|t| !group_meta_delta.table_ids_remove.contains(t));
                 levels.member_table_ids.sort();
             }
 
