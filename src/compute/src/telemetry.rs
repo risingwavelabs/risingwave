@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
 use risingwave_common::telemetry::report::TelemetryReportCreator;
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
+    TelemetryResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,7 +35,7 @@ impl TelemetryReportCreator for ComputeTelemetryCreator {
         tracking_id: String,
         session_id: String,
         up_time: u64,
-    ) -> Result<ComputeTelemetryReport> {
+    ) -> TelemetryResult<ComputeTelemetryReport> {
         Ok(ComputeTelemetryReport::new(
             tracking_id,
             session_id,
@@ -54,12 +54,7 @@ pub(crate) struct ComputeTelemetryReport {
     base: TelemetryReportBase,
 }
 
-impl TelemetryReport for ComputeTelemetryReport {
-    fn to_json(&self) -> Result<String> {
-        let json = serde_json::to_string(self)?;
-        Ok(json)
-    }
-}
+impl TelemetryReport for ComputeTelemetryReport {}
 
 impl ComputeTelemetryReport {
     pub(crate) fn new(tracking_id: String, session_id: String, up_time: u64) -> Self {

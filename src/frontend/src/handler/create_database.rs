@@ -57,7 +57,7 @@ pub async fn handle_create_database(
         }
     }
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_database(&database_name, session.user_id())
         .await?;
