@@ -61,7 +61,7 @@ pub async fn handle_drop_source(
 
     session.check_privilege_for_drop_alter(schema_name, &*source)?;
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_source(source.id).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))

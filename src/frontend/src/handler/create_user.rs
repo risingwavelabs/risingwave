@@ -120,7 +120,7 @@ pub async fn handle_create_user(
         make_prost_user_info(user_name, &stmt.with_options, session_user, database_id)?
     };
 
-    let user_info_writer = session.env().user_info_writer();
+    let user_info_writer = session.user_info_writer()?;
     user_info_writer.create_user(user_info).await?;
     Ok(PgResponse::empty_result(StatementType::CREATE_USER))
 }
