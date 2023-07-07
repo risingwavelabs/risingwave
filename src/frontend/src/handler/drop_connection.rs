@@ -58,7 +58,7 @@ pub async fn handle_drop_connection(
         connection.id
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_connection(connection_id).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_CONNECTION))

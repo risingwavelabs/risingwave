@@ -44,7 +44,7 @@ impl StreamStatelessSimpleAgg {
 
         let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
         // Watermark column(s) must be in group key.
-        for (idx, input_idx) in logical.group_key.ones().enumerate() {
+        for (idx, input_idx) in logical.group_key.indices().enumerate() {
             if input.watermark_columns().contains(input_idx) {
                 watermark_columns.insert(idx);
             }
