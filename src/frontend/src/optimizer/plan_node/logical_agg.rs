@@ -270,6 +270,8 @@ struct LogicalAggBuilder {
     input_proj_builder: ProjectBuilder,
     /// the group key column indices in the project's output
     group_key: FixedBitSet,
+    /// the grouping sets
+    grouping_sets: Vec<FixedBitSet>,
     /// the agg calls
     agg_calls: Vec<PlanAggCall>,
     /// the error during the expression rewriting
@@ -283,19 +285,49 @@ struct LogicalAggBuilder {
 }
 
 impl LogicalAggBuilder {
-    fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
+    fn new(
+        group_exprs: Vec<ExprImpl>,
+        grouping_sets_exprs: Vec<Vec<ExprImpl>>,
+        input_schema_len: usize,
+    ) -> Result<Self> {
+        assert!(group_exprs.is_empty() || grouping_sets_exprs.is_empty());
         let mut input_proj_builder = ProjectBuilder::default();
 
-        let group_key = group_exprs
-            .into_iter()
-            .map(|expr| input_proj_builder.add_expr(&expr))
-            .try_collect()
-            .map_err(|err| {
-                ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
-            })?;
+        let (group_key, grouping_sets) = if grouping_sets_exprs.is_empty() {
+            let group_key = group_exprs
+                .into_iter()
+                .map(|expr| input_proj_builder.add_expr(&expr))
+                .try_collect()
+                .map_err(|err| {
+                    ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
+                })?;
+            (group_key, vec![])
+        } else {
+            let grouping_sets: Vec<FixedBitSet> = grouping_sets_exprs
+                .into_iter()
+                .map(|set| {
+                    set.into_iter()
+                        .map(|expr| input_proj_builder.add_expr(&expr))
+                        .try_collect()
+                        .map_err(|err| {
+                            ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
+                        })
+                })
+                .try_collect()?;
+
+            // Construct group key based on grouping sets.
+            let group_key = grouping_sets
+                .iter()
+                .fold(FixedBitSet::with_capacity(input_schema_len), |acc, x| {
+                    acc.union(x).collect()
+                });
+
+            (group_key, grouping_sets)
+        };
 
         Ok(LogicalAggBuilder {
             group_key,
+            grouping_sets,
             agg_calls: vec![],
             error: None,
             input_proj_builder,
@@ -308,7 +340,13 @@ impl LogicalAggBuilder {
         let logical_project = LogicalProject::with_core(self.input_proj_builder.build(input));
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
-        Agg::new(self.agg_calls, self.group_key, logical_project.into()).into()
+        Agg::new_with_grouping_sets(
+            self.agg_calls,
+            self.group_key,
+            self.grouping_sets,
+            logical_project.into(),
+        )
+        .into()
     }
 
     fn rewrite_with_error(&mut self, expr: ExprImpl) -> Result<ExprImpl> {
@@ -778,10 +816,12 @@ impl LogicalAgg {
     pub fn create(
         select_exprs: Vec<ExprImpl>,
         group_exprs: Vec<ExprImpl>,
+        grouping_sets_exprs: Vec<Vec<ExprImpl>>,
         having: Option<ExprImpl>,
         input: PlanRef,
     ) -> Result<(PlanRef, Vec<ExprImpl>, Option<ExprImpl>)> {
-        let mut agg_builder = LogicalAggBuilder::new(group_exprs)?;
+        let mut agg_builder =
+            LogicalAggBuilder::new(group_exprs, grouping_sets_exprs, input.schema().len())?;
 
         let rewritten_select_exprs = select_exprs
             .into_iter()
@@ -810,7 +850,11 @@ impl LogicalAgg {
         &self.core.group_key
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, FixedBitSet, PlanRef) {
+    pub fn grouping_sets(&self) -> &Vec<FixedBitSet> {
+        &self.core.grouping_sets
+    }
+
+    pub fn decompose(self) -> (Vec<PlanAggCall>, FixedBitSet, Vec<FixedBitSet>, PlanRef) {
         self.core.decompose()
     }
 
@@ -840,7 +884,12 @@ impl LogicalAgg {
             .ones()
             .map(|key| input_col_change.map(key))
             .collect();
-        Agg::new(agg_calls, group_key, input).into()
+        let grouping_sets = self
+            .grouping_sets()
+            .iter()
+            .map(|set| set.ones().map(|key| input_col_change.map(key)).collect())
+            .collect();
+        Agg::new_with_grouping_sets(agg_calls, group_key, grouping_sets, input).into()
     }
 }
 
@@ -850,7 +899,13 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Agg::new(self.agg_calls().to_vec(), self.group_key().clone(), input).into()
+        Agg::new_with_grouping_sets(
+            self.agg_calls().to_vec(),
+            self.group_key().clone(),
+            self.grouping_sets().clone(),
+            input,
+        )
+        .into()
     }
 
     #[must_use]
@@ -1179,7 +1234,7 @@ mod tests {
                                   group_exprs|
          -> (Vec<ExprImpl>, Vec<PlanAggCall>, FixedBitSet) {
             let (plan, exprs, _) =
-                LogicalAgg::create(select_exprs, group_exprs, None, input.clone()).unwrap();
+                LogicalAgg::create(select_exprs, group_exprs, vec![], None, input.clone()).unwrap();
 
             let logical_agg = plan.as_logical_agg().unwrap();
             let agg_calls = logical_agg.agg_calls().to_vec();

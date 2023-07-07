@@ -21,7 +21,8 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -108,8 +109,13 @@ impl_plan_tree_node_for_unary! {LogicalExpand}
 impl_distill_by_unit!(LogicalExpand, core, "LogicalExpand");
 
 impl ColPrunable for LogicalExpand {
-    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        todo!("prune_col of LogicalExpand is not implemented yet.");
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
+        LogicalProject::with_out_col_idx(
+            self.clone_with_input(self.input()).into(),
+            required_cols.iter().cloned(),
+        )
+        .into()
+        // todo!("prune_col of LogicalExpand is not implemented yet.");
     }
 }
 

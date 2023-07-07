@@ -94,13 +94,17 @@ impl_distill_by_unit!(BatchSortAgg, logical, "BatchSortAgg");
 
 impl ToDistributedBatch for BatchSortAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed_with_required(
-            &self.input_order,
-            &RequiredDist::shard_by_key(
+        let required_dist = if self.group_key().count_ones(..) == 0 {
+            RequiredDist::single()
+        } else {
+            RequiredDist::shard_by_key(
                 self.input().schema().len(),
                 &self.group_key().ones().collect_vec(),
-            ),
-        )?;
+            )
+        };
+        let new_input = self
+            .input()
+            .to_distributed_with_required(&self.input_order, &required_dist)?;
         Ok(self.clone_with_input(new_input).into())
     }
 }

@@ -1652,7 +1652,7 @@
     │     └─BatchExchange { order: [], dist: HashShard(bid.auction) }
     │       └─BatchScan { table: bid, columns: [bid.auction], distribution: SomeShard }
     └─BatchProject { exprs: [(sum0(count) / count(bid.auction)) as $expr1] }
-      └─BatchSimpleAgg { aggs: [sum0(count), count(bid.auction)] }
+      └─BatchSortAgg { aggs: [sum0(count), count(bid.auction)] }
         └─BatchExchange { order: [], dist: Single }
           └─BatchHashAgg { group_key: [bid.auction], aggs: [count] }
             └─BatchExchange { order: [], dist: HashShard(bid.auction) }

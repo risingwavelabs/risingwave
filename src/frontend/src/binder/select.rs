@@ -52,6 +52,7 @@ pub struct BoundSelect {
     pub from: Option<Relation>,
     pub where_clause: Option<ExprImpl>,
     pub group_by: Vec<ExprImpl>,
+    pub grouping_sets: Vec<Vec<ExprImpl>>,
     pub having: Option<ExprImpl>,
     schema: Schema,
 }
@@ -190,11 +191,22 @@ impl Binder {
         // Bind GROUP BY clause.
         let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
         self.context.clause = Some(Clause::GroupBy);
-        let group_by = select
-            .group_by
-            .into_iter()
-            .map(|expr| self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items))
-            .try_collect()?;
+
+        // Only support one grouping item in group by clause
+        let (group_by, grouping_sets) = if select.group_by.len() == 1 && let Expr::GroupingSets(grouping_sets) = &select.group_by[0] {
+            let grouping_sets = self.bind_grouping_sets_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?;
+            (vec![], grouping_sets)
+        } else {
+            if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_))) {
+                return Err(ErrorCode::BindError("Only support one grouping item in group by clause".to_string()).into());
+            }
+            let group_by = select
+                .group_by
+                .into_iter()
+                .map(|expr| self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items))
+                .try_collect()?;
+            (group_by, vec![])
+        };
         self.context.clause = None;
 
         // Bind HAVING clause.
@@ -225,6 +237,7 @@ impl Binder {
             from,
             where_clause: selection,
             group_by,
+            grouping_sets,
             having,
             schema: Schema { fields },
         })
@@ -393,6 +406,58 @@ impl Binder {
         }
     }
 
+    fn bind_grouping_sets_expr_in_select(
+        &mut self,
+        grouping_sets: Vec<Vec<Expr>>,
+        name_to_index: &HashMap<String, usize>,
+        select_items: &[ExprImpl],
+    ) -> Result<Vec<Vec<ExprImpl>>> {
+        let mut result = vec![];
+        for set in grouping_sets {
+            let mut set_exprs = vec![];
+            for expr in set {
+                let name = match &expr {
+                    Expr::Identifier(ident) => Some(ident.real_value()),
+                    _ => None,
+                };
+                let expr_impl = match self.bind_expr(expr) {
+                    Ok(ExprImpl::Literal(lit)) => match lit.get_data() {
+                        Some(ScalarImpl::Int32(idx)) => idx
+                            .saturating_sub(1)
+                            .try_into()
+                            .ok()
+                            .and_then(|i: usize| select_items.get(i).cloned())
+                            .ok_or_else(|| {
+                                ErrorCode::BindError(format!(
+                                    "GROUP BY position {idx} is not in select list"
+                                ))
+                                .into()
+                            }),
+                        _ => Err(
+                            ErrorCode::BindError("non-integer constant in GROUP BY".into()).into(),
+                        ),
+                    },
+                    Ok(e) => Ok(e),
+                    Err(e) => match name {
+                        None => Err(e),
+                        Some(name) => match name_to_index.get(&name) {
+                            None => Err(e),
+                            Some(&usize::MAX) => Err(ErrorCode::BindError(format!(
+                                "GROUP BY \"{name}\" is ambiguous"
+                            ))
+                            .into()),
+                            Some(out_idx) => Ok(select_items[*out_idx].clone()),
+                        },
+                    },
+                };
+
+                set_exprs.push(expr_impl?);
+            }
+            result.push(set_exprs);
+        }
+        Ok(result)
+    }
+
     pub fn bind_returning_list(
         &mut self,
         returning_items: Vec<SelectItem>,
@@ -465,6 +530,7 @@ impl Binder {
             from,
             where_clause,
             group_by: vec![],
+            grouping_sets: vec![],
             having: None,
             schema,
         })
@@ -552,6 +618,7 @@ impl Binder {
             from: Some(indexes_with_stats),
             where_clause,
             group_by: vec![],
+            grouping_sets: vec![],
             having: None,
             schema: result_schema,
         })
@@ -608,6 +675,7 @@ impl Binder {
             from,
             where_clause,
             group_by: vec![],
+            grouping_sets: vec![],
             having: None,
             schema: result_schema,
         })
