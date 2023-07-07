@@ -246,8 +246,11 @@ sleep $RECOVERY_DURATION
 echo "--- Running Queries New Cluster"
 run_sql_new_cluster
 
-echo "--- Sanity Check"
-cat AFTER | tail -n 100
+echo "--- Sanity Checks"
+echo "AFTER_1"
+cat AFTER_1 | tail -n 100
+echo "AFTER_2"
+cat AFTER_2 | tail -n 100
 
 echo "--- Comparing results"
 assert_eq BEFORE_1 AFTER_1
