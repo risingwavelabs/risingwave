@@ -87,6 +87,9 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "tpch_upstream.slt",
     // Drop is not retryable in search path test.
     "search_path.slt",
+    // Transaction statements are not retryable.
+    "transaction/read_only.slt",
+    "transaction/tolerance.slt",
 ];
 
 /// Run the sqllogictest files in `glob`.
