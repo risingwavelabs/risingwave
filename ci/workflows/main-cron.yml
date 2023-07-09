@@ -285,7 +285,8 @@ steps:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 20
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
 
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"

@@ -4,7 +4,7 @@ create source s1 (v1 int, v2 varchar) with (
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 create source s2 (v1 int, v2 varchar) with (
@@ -12,7 +12,7 @@ create source s2 (v1 int, v2 varchar) with (
   topic = 'kafka_2_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 create source s3 (v1 int, v2 varchar) with (
@@ -20,7 +20,7 @@ create source s3 (v1 int, v2 varchar) with (
   topic = 'kafka_3_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 create source s4 (v1 int, v2 varchar) with (
@@ -28,7 +28,7 @@ create source s4 (v1 int, v2 varchar) with (
   topic = 'kafka_4_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 create table s5 (v1 int, v2 varchar) with (
@@ -36,7 +36,7 @@ create table s5 (v1 int, v2 varchar) with (
   topic = 'kafka_4_partition_topic_with_100_message',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 create source s6 (v1 int, v2 varchar) with (
@@ -44,7 +44,7 @@ create source s6 (v1 int, v2 varchar) with (
   topic = 'kafka_1_partition_mv_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 CREATE SOURCE s7(
@@ -58,7 +58,7 @@ WITH (
     topic = 'json_c',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest')
-ROW format JSON;
+FORMAT PLAIN ENCODE JSON;
 
 statement ok
 create table s8 (v1 int, v2 varchar) with (
@@ -66,7 +66,7 @@ create table s8 (v1 int, v2 varchar) with (
   topic = 'kafka_4_partition_topic_with_100_message',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'latest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 create source s9 (id bytea) with (
@@ -74,7 +74,7 @@ create source s9 (id bytea) with (
   topic = 'kafka_source_format_bytes',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format bytes
+) FORMAT PLAIN ENCODE BYTES
 
 query IT rowsort
 select * from s1
