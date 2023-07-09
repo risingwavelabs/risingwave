@@ -52,9 +52,6 @@ pub fn trigger_version_stat(
     metrics.version_stats.reset();
     for (table_id, stats) in &version_stats.table_stats {
         let table_id = format!("{}", table_id);
-        println!("这里table_id = {:?}", table_id);
-        println!("stats.total_key_count = {:?}", stats.total_key_count);
-        println!("stats.total_key_size = {:?}", stats.total_key_size);
         metrics
             .version_stats
             .with_label_values(&[&table_id, "total_key_count"])
