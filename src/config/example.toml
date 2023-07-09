@@ -28,7 +28,6 @@ max_compactor_task_multiplier = 2
 move_table_size_limit = 4294967296
 split_group_size_limit = 68719476736
 do_not_config_object_storage_lifecycle = false
-is_force_path_style = false
 partition_vnode_count = 64
 table_write_throughput_threshold = 134217728
 min_table_split_write_throughput = 33554432
