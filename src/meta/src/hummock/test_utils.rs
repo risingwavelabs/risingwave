@@ -31,7 +31,9 @@ use risingwave_pb::meta::add_worker_node_request::Property;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::default_level_selector;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
-use crate::manager::{ClusterManager, ClusterManagerRef, MetaSrvEnv, META_NODE_ID};
+use crate::manager::{
+    ClusterManager, ClusterManagerRef, FragmentManager, MetaSrvEnv, META_NODE_ID,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
@@ -69,7 +71,7 @@ where
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker, vec![])
+        .commit_epoch(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
     // Simulate a compaction and increase version by 1.
@@ -141,7 +143,7 @@ where
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker, vec![])
+        .commit_epoch(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
     vec![test_tables, test_tables_2, test_tables_3]
@@ -311,12 +313,14 @@ pub async fn setup_compute_env_with_config(
             .await
             .unwrap(),
     );
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
 
     let compactor_manager = Arc::new(CompactorManager::for_test());
 
     let hummock_manager = HummockManager::with_config(
         env.clone(),
         cluster_manager.clone(),
+        fragment_manager,
         Arc::new(MetaMetrics::new()),
         compactor_manager,
         config,
@@ -384,7 +388,7 @@ where
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), META_NODE_ID))
         .collect();
     hummock_manager_ref
-        .commit_epoch(epoch, ssts, sst_to_worker, vec![])
+        .commit_epoch(epoch, ssts, sst_to_worker)
         .await
 }
 
@@ -404,7 +408,7 @@ where
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker, vec![])
+        .commit_epoch(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
     test_tables

@@ -50,7 +50,6 @@ use risingwave_pb::hummock::{
     IntraLevelDelta, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::table_fragments;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLockWriteGuard;
 use tokio::task::JoinHandle;
@@ -67,11 +66,12 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, LocalNotification,
+    MetaSrvEnv, META_NODE_ID,
 };
 use crate::model::{
-    BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, TableFragments,
-    ValTransaction, VarTransaction,
+    BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
+    VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
@@ -102,6 +102,8 @@ pub struct HummockManager<S: MetaStore> {
     pub env: MetaSrvEnv<S>,
     pub cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
+
+    fragment_manager: FragmentManagerRef<S>,
     // `CompactionGroupManager` manages `CompactionGroup`'s members.
     // Note that all hummock state store user should register to `CompactionGroupManager`. It
     // includes all state tables of streaming jobs except sink.
@@ -241,6 +243,7 @@ where
     pub(crate) async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         catalog_manager: CatalogManagerRef<S>,
@@ -249,6 +252,7 @@ where
         Self::new_impl(
             env,
             cluster_manager,
+            fragment_manager,
             metrics,
             compactor_manager,
             compaction_group_manager,
@@ -261,6 +265,7 @@ where
     pub(super) async fn with_config(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         config: CompactionConfig,
@@ -274,6 +279,7 @@ where
         Self::new_impl(
             env,
             cluster_manager,
+            fragment_manager,
             metrics,
             compactor_manager,
             compaction_group_manager,
@@ -286,6 +292,7 @@ where
     async fn new_impl(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
@@ -337,6 +344,7 @@ where
             metrics,
             cluster_manager,
             catalog_manager,
+            fragment_manager,
             compaction_group_manager,
             compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
@@ -1276,8 +1284,12 @@ where
                     deterministic_mode,
                 );
                 let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
-                if let Some(table_stats_change) = table_stats_change {
-                    add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
+                let compacted_table_ids = table_stats_change
+                    .as_ref()
+                    .map(|t| t.keys().collect_vec())
+                    .unwrap_or(vec![]);
+                if let Some(table_stats_change) = &table_stats_change {
+                    add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
                 }
 
                 commit_multi_var!(
@@ -1291,12 +1303,22 @@ where
                 )?;
                 branched_ssts.commit_memory();
                 current_version.apply_version_delta(&version_delta);
+                let table_fragments: Vec<crate::model::TableFragments> =
+                    self.fragment_manager.list_table_fragments().await;
 
+                let mv_id_to_all_table_ids = table_fragments
+                    .iter()
+                    .map(|tf| (tf.table_id().table_id(), tf.all_table_ids().collect_vec()))
+                    .collect_vec();
+                let after_compact_mapping = mv_id_to_all_table_ids
+                    .into_iter()
+                    .filter(|(mv_id, _)| !compacted_table_ids.contains(&mv_id))
+                    .collect();
                 trigger_version_stat(
                     &self.metrics,
                     current_version,
                     &versioning.version_stats,
-                    vec![],
+                    after_compact_mapping,
                 );
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
@@ -1411,7 +1433,6 @@ where
         epoch: HummockEpoch,
         sstables: Vec<impl Into<ExtendedSstableInfo>>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
-        table_fragments: Vec<TableFragments>,
     ) -> Result<Option<HummockSnapshot>> {
         let mut sstables = sstables.into_iter().map(|s| s.into()).collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1604,12 +1625,17 @@ where
         let prev_snapshot = self.latest_snapshot.swap(snapshot.clone().into());
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
-
+        let table_fragments: Vec<crate::model::TableFragments> =
+            self.fragment_manager.list_table_fragments().await;
+        let mv_id_to_all_table_ids = table_fragments
+            .iter()
+            .map(|tf| (tf.table_id().table_id(), tf.all_table_ids().collect_vec()))
+            .collect_vec();
         trigger_version_stat(
             &self.metrics,
             &versioning.current_version,
             &versioning.version_stats,
-            table_fragments,
+            mv_id_to_all_table_ids,
         );
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
