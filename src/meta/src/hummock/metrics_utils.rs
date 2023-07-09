@@ -34,13 +34,19 @@ use risingwave_pb::hummock::{
 
 use super::compaction::{get_compression_algorithm, DynamicLevelSelectorCore};
 use crate::hummock::compaction::CompactStatus;
+use crate::model::TableFragments;
 use crate::rpc::metrics::MetaMetrics;
 
 pub fn trigger_version_stat(
     metrics: &MetaMetrics,
     current_version: &HummockVersion,
     version_stats: &HummockVersionStats,
+    table_fragments: Vec<TableFragments>,
 ) {
+    let mv_id_to_all_table_id = table_fragments
+        .iter()
+        .map(|a| (a.table_id(), a.all_table_ids().collect_vec()))
+        .collect_vec();
     metrics
         .max_committed_epoch
         .set(current_version.max_committed_epoch as i64);
@@ -50,6 +56,18 @@ pub fn trigger_version_stat(
     metrics.safe_epoch.set(current_version.safe_epoch as i64);
     metrics.current_version_id.set(current_version.id as i64);
     metrics.version_stats.reset();
+    for (mv_id, all_table_ids) in mv_id_to_all_table_id {
+        let total_size = all_table_ids
+            .iter()
+            .filter_map(|&table_id| version_stats.table_stats.get(&table_id))
+            .map(|stats| stats.total_key_size + stats.total_value_size)
+            .sum();
+
+        metrics
+            .materialized_view_stats
+            .with_label_values(&[&mv_id.to_string(), "materialized_view_total_size"])
+            .set(total_size);
+    }
     for (table_id, stats) in &version_stats.table_stats {
         let table_id = format!("{}", table_id);
         metrics

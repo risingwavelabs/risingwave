@@ -103,12 +103,6 @@ impl<S: MetaStore> HummockManager<S> {
             == Some(true);
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
-            for internal_table_id in &internal_tables {
-                self.metrics
-                    .mv_info
-                    .with_label_values(&[&mv_table.to_string(), &internal_table_id.to_string()])
-                    .set(1)
-            }
             if internal_tables.drain_filter(|t| *t == mv_table).count() > 0 {
                 tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
             }

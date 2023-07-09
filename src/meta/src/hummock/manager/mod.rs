@@ -69,8 +69,8 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID,
 };
 use crate::model::{
-    BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
-    VarTransaction,
+    BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, TableFragments,
+    ValTransaction, VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
@@ -1291,7 +1291,12 @@ where
                 branched_ssts.commit_memory();
                 current_version.apply_version_delta(&version_delta);
 
-                trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
+                trigger_version_stat(
+                    &self.metrics,
+                    current_version,
+                    &versioning.version_stats,
+                    vec![],
+                );
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
 
@@ -1405,6 +1410,7 @@ where
         epoch: HummockEpoch,
         sstables: Vec<impl Into<ExtendedSstableInfo>>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+        table_fragments: Vec<TableFragments>,
     ) -> Result<Option<HummockSnapshot>> {
         let mut sstables = sstables.into_iter().map(|s| s.into()).collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1602,6 +1608,7 @@ where
             &self.metrics,
             &versioning.current_version,
             &versioning.version_stats,
+            table_fragments,
         );
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(

@@ -178,7 +178,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), self.context_id))
             .collect();
         self.hummock_manager
-            .commit_epoch(epoch, sstables, sst_to_worker)
+            .commit_epoch(epoch, sstables, sst_to_worker, vec![])
             .await
             .map_err(mock_err)?;
         Ok(())

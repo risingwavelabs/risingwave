@@ -69,7 +69,7 @@ where
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, ssts, sst_to_worker, vec![])
         .await
         .unwrap();
     // Simulate a compaction and increase version by 1.
@@ -141,7 +141,7 @@ where
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, ssts, sst_to_worker, vec![])
         .await
         .unwrap();
     vec![test_tables, test_tables_2, test_tables_3]
@@ -384,7 +384,7 @@ where
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), META_NODE_ID))
         .collect();
     hummock_manager_ref
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, ssts, sst_to_worker, vec![])
         .await
 }
 
@@ -404,7 +404,7 @@ where
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, ssts, sst_to_worker, vec![])
         .await
         .unwrap();
     test_tables

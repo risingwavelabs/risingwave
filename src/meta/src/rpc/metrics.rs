@@ -103,6 +103,8 @@ pub struct MetaMetrics {
     pub full_gc_selected_object_count: Histogram,
     /// Hummock version stats
     pub version_stats: IntGaugeVec,
+    /// Hummock version stats
+    pub materialized_view_stats: IntGaugeVec,
     /// Total number of objects that is no longer referenced by versions.
     pub stale_object_count: IntGauge,
     /// Total size of objects that is no longer referenced by versions.
@@ -152,8 +154,6 @@ pub struct MetaMetrics {
     pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
-
-    pub mv_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
@@ -340,6 +340,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let materialized_view_stats = register_int_gauge_vec_with_registry!(
+            "storage_materialized_view_stats",
+            "per materialized view stats in current hummock version",
+            &["table_id", "metric"],
+            registry
+        )
+        .unwrap();
+
         let stale_object_count = register_int_gauge_with_registry!(
             "storage_stale_object_count",
             "total number of objects that is no longer referenced by versions.",
@@ -477,7 +485,7 @@ impl MetaMetrics {
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
             "Mapping from actor id to (fragment id, compute node",
-            &["Actor_id", "fragment_id", "compute_node"],
+            &["actor_id", "fragment_id", "compute_node"],
             registry
         )
         .unwrap();
@@ -485,15 +493,7 @@ impl MetaMetrics {
         let table_info = register_int_gauge_vec_with_registry!(
             "table_info",
             "Mapping from table id to (actor id, table name)",
-            &["Table_id", "actor_id", "table_name"],
-            registry
-        )
-        .unwrap();
-
-        let mv_info = register_int_gauge_vec_with_registry!(
-            "mv_info",
-            "Mapping from materialized view table id to internal table id",
-            &["Materialized_view_table_id", "internal_table_id"],
+            &["materialized_view_id", "table_id", "actor_id", "table_name"],
             registry
         )
         .unwrap();
@@ -575,6 +575,7 @@ impl MetaMetrics {
             level_file_size,
             version_size,
             version_stats,
+            materialized_view_stats,
             stale_object_count,
             stale_object_size,
             old_version_object_count,
@@ -604,7 +605,6 @@ impl MetaMetrics {
             source_is_up,
             actor_info,
             table_info,
-            mv_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -711,6 +711,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                 })
                 .collect();
             for table_fragments in fragments {
+                let mv_id_str = table_fragments.table_id().to_string();
                 for (fragment_id, fragment) in table_fragments.fragments {
                     let fragment_id_str = fragment_id.to_string();
                     for actor in fragment.actors {
@@ -741,7 +742,12 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                 let table_id_str = table.id.to_string();
                                 meta_metrics
                                     .table_info
-                                    .with_label_values(&[&table_id_str, &actor_id_str, &table.name])
+                                    .with_label_values(&[
+                                        &mv_id_str,
+                                        &table_id_str,
+                                        &actor_id_str,
+                                        &table.name,
+                                    ])
                                     .set(1);
                             });
                         }

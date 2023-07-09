@@ -908,12 +908,16 @@ where
                         "no sstables should be produced in the first epoch"
                     );
                 } else if checkpoint {
+                    let table_fragments: Vec<crate::model::TableFragments> =
+                        self.fragment_manager.list_table_fragments().await;
+
                     new_snapshot = self
                         .hummock_manager
                         .commit_epoch(
                             node.command_ctx.prev_epoch.value().0,
                             synced_ssts,
                             sst_to_worker,
+                            table_fragments,
                         )
                         .await?;
                 } else {
