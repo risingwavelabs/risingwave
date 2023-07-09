@@ -19,8 +19,15 @@ import com.risingwave.connector.source.SourceValidateHandler;
 import com.risingwave.proto.ConnectorServiceGrpc;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.StreamObserver;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceImplBase {
+    // key: sourceId
+    // value: name of replication slot to be removed
+    private static Map<Long, String> replicationSlotMap =
+            Collections.synchronizedMap(new HashMap<>());
 
     @Override
     public StreamObserver<ConnectorServiceProto.SinkStreamRequest> sinkStream(
@@ -39,7 +46,7 @@ public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceI
     public void getEventStream(
             ConnectorServiceProto.GetEventStreamRequest request,
             StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver) {
-        new SourceRequestHandler(responseObserver).handle(request);
+        new SourceRequestHandler(replicationSlotMap, responseObserver).handle(request);
     }
 
     @Override
@@ -47,5 +54,17 @@ public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceI
             ConnectorServiceProto.ValidateSourceRequest request,
             StreamObserver<ConnectorServiceProto.ValidateSourceResponse> responseObserver) {
         new SourceValidateHandler(responseObserver).handle(request);
+    }
+
+    @Override
+    public void dropReplicationSlot(
+            ConnectorServiceProto.DropReplicationSlotRequest request,
+            StreamObserver<ConnectorServiceProto.DropReplicationSlotResponse> responseObserver) {
+        Long sourceId = request.getSourceId();
+        String slotName = request.getSlotName();
+        replicationSlotMap.put(sourceId, slotName);
+        responseObserver.onNext(
+                ConnectorServiceProto.DropReplicationSlotResponse.newBuilder().build());
+        responseObserver.onCompleted();
     }
 }

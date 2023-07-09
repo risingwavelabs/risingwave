@@ -30,6 +30,7 @@ public abstract class SourceHandlerFactory {
             long sourceId,
             String startOffset,
             Map<String, String> userProps,
+            Map<Long, String> replicationSlotMap,
             boolean snapshotDone) {
         // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
         Map<String, String> mutableUserProps = new HashMap<>(userProps);
@@ -38,6 +39,6 @@ public abstract class SourceHandlerFactory {
                 new DbzConnectorConfig(
                         source, sourceId, startOffset, mutableUserProps, snapshotDone);
         LOG.info("resolved config for source#{}: {}", sourceId, config.getResolvedDebeziumProps());
-        return new DbzSourceHandler(config);
+        return new DbzSourceHandler(replicationSlotMap, config);
     }
 }

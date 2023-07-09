@@ -154,9 +154,17 @@ message ValidateSourceResponse {
   ValidationError error = 1;
 }
 
+message DropReplicationSlotRequest {
+  uint64 source_id = 1;
+  string slot_name = 2;
+}
+
+message DropReplicationSlotResponse {}
+
 service ConnectorService {
   rpc SinkStream(stream SinkStreamRequest) returns (stream SinkResponse);
   rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
+  rpc DropReplicationSlot(DropReplicationSlotRequest) returns (DropReplicationSlotResponse);
 }

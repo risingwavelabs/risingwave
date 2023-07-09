@@ -87,6 +87,26 @@ impl ConnectorClient {
             .into_inner())
     }
 
+    /// Mark postgres replication slot to be dropped during drop table
+    pub async fn drop_replication_slot(&self, source_id: u64, slot_name: String) -> Result<()> {
+        self.0
+            .to_owned()
+            .drop_replication_slot(DropReplicationSlotRequest {
+                source_id,
+                slot_name: slot_name.clone(),
+            })
+            .await
+            .inspect_err(|err| {
+                tracing::error!(
+                    "failed to drop replication slot '{}' for source#{}: {}",
+                    slot_name,
+                    source_id,
+                    err.message()
+                )
+            })?;
+        Ok(())
+    }
+
     /// Validate source properties
     pub async fn validate_source_properties(
         &self,

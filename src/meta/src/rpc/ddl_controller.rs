@@ -13,11 +13,14 @@
 // limitations under the License.
 
 use std::num::NonZeroUsize;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_connector::source::cdc::POSTGRES_CDC_CONNECTOR;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::{
     connection, Connection, Database, Function, Schema, Source, Table, View,
@@ -25,6 +28,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
+use risingwave_rpc_client::connector_client::ConnectorClient;
 use tracing::log::warn;
 use tracing::Instrument;
 
@@ -603,6 +607,8 @@ where
         Vec<risingwave_common::catalog::TableId>,
     )> {
         if let Some(source_id) = source_id {
+            // store source information before removal
+            let source = self.catalog_manager.get_source_by_id(source_id).await?;
             // Drop table and source in catalog. Check `source_id` if it is the table's
             // `associated_source_id`. Indexes also need to be dropped atomically.
             let (version, delete_jobs) = self
@@ -618,6 +624,45 @@ where
             self.source_manager
                 .unregister_sources(vec![source_id])
                 .await;
+            // drop replication slot for pg sources
+            if source.get_properties().get("connector") == Some(&POSTGRES_CDC_CONNECTOR.to_string())
+            {
+                let slot_name = source
+                    .get_properties()
+                    .get("slot.name")
+                    .ok_or_else(|| {
+                        MetaError::invalid_parameter(
+                            "postgres connector has no 'slot.name' property",
+                        )
+                    })?
+                    .to_string();
+                // only drop slot if no `slot.name` specified in with properties
+                if slot_name.starts_with("rw_cdc_") {
+                    // create connector client
+                    let connector_address = self
+                        .env
+                        .opts
+                        .connector_rpc_endpoint
+                        .as_ref()
+                        .ok_or_else(|| {
+                            MetaError::invalid_parameter("connector endpoint not specified")
+                        })?;
+                    let connector_client = ConnectorClient::new(
+                        HostAddr::from_str(connector_address.as_str()).map_err(|e| {
+                            MetaError::invalid_parameter(format!(
+                                "parse connector node endpoint fail: {}",
+                                e
+                            ))
+                        })?,
+                    )
+                    .await?;
+                    // send rpc
+                    connector_client
+                        .drop_replication_slot(source_id.into(), slot_name)
+                        .await
+                        .map_err(MetaError::from)?;
+                }
+            }
             Ok((version, delete_jobs))
         } else {
             self.catalog_manager

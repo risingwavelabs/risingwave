@@ -252,6 +252,10 @@ impl DatabaseManager {
             .collect_vec()
     }
 
+    pub fn get_source(&self, source_id: SourceId) -> Option<&Source> {
+        self.sources.get(&source_id)
+    }
+
     pub fn list_sources(&self) -> Vec<Source> {
         self.sources.values().cloned().collect_vec()
     }
