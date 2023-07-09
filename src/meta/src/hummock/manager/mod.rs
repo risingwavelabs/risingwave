@@ -50,6 +50,7 @@ use risingwave_pb::hummock::{
     IntraLevelDelta, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::table_fragments;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLockWriteGuard;
 use tokio::task::JoinHandle;
