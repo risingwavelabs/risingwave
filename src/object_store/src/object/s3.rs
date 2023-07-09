@@ -563,11 +563,7 @@ impl S3ObjectStore {
     /// Creates an S3 object store from environment variable.
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
-    pub async fn new(
-        bucket: String,
-        metrics: Arc<ObjectStoreMetrics>,
-        is_force_path_style: bool,
-    ) -> Self {
+    pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         // The following code is for compatibility.
         if std::env::var("S3_COMPATIBLE_REGION").is_ok() {
             std::env::set_var("AWS_REGION", std::env::var("S3_COMPATIBLE_REGION").unwrap())
@@ -598,24 +594,23 @@ impl S3ObjectStore {
         let client = match std::env::var("RW_S3_ENDPOINT") {
             Ok(endpoint) => {
                 // s3 compatible storage
+                let is_force_path_style = match std::env::var("IS_FORCE_PATH_STYLE") {
+                    Ok(value) => value == "true",
+                    Err(_) => false,
+                };
+
                 let sdk_config_loader = aws_config::from_env()
                     .retry_config(RetryConfig::standard().with_max_attempts(4));
                 let sdk_config: aws_config::SdkConfig = sdk_config_loader.load().await;
                 #[cfg(madsim)]
                 let client = Client::new(&sdk_config);
                 #[cfg(not(madsim))]
-                let client = {
-                    let config = match is_force_path_style {
-                        true => aws_sdk_s3::config::Builder::from(&sdk_config)
-                            .endpoint_url(endpoint)
-                            .force_path_style(true)
-                            .build(),
-                        false => aws_sdk_s3::config::Builder::from(&sdk_config)
-                            .endpoint_url(endpoint)
-                            .build(),
-                    };
-                    Client::from_conf(config)
-                };
+                let client = Client::from_conf(
+                    aws_sdk_s3::config::Builder::from(&sdk_config)
+                        .endpoint_url(endpoint)
+                        .force_path_style(is_force_path_style)
+                        .build(),
+                );
                 client
             }
             Err(_) => {

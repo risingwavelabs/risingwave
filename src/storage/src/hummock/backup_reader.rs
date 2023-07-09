@@ -48,7 +48,6 @@ async fn create_snapshot_store(config: &StoreConfig) -> StorageResult<BoxedMetaS
             &config.0,
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
-            false,
         )
         .await,
     );

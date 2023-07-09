@@ -664,14 +664,12 @@ pub async fn parse_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
-    is_force_path_style: bool,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
             S3ObjectStore::new(
                 s3.strip_prefix("s3://").unwrap().to_string(),
                 metrics.clone(),
-                is_force_path_style,
             )
             .await
             .monitored(metrics),
@@ -742,7 +740,6 @@ pub async fn parse_remote_object_store(
                     .unwrap()
                     .to_string(),
                 metrics.clone(),
-                is_force_path_style,
             )
             .await
             .monitored(metrics),
