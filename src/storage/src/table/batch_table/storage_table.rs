@@ -32,9 +32,7 @@ use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{
-    BasicSerde, EitherSerde, ValueRowSerde, ValueRowSerdeNew,
-};
+use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
@@ -45,6 +43,7 @@ use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
+use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{PrefetchOptions, ReadOptions};
 use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
@@ -221,26 +220,13 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
             .collect();
-        let all_data_types = table_columns
-            .iter()
-            .map(|d| d.data_type.clone())
-            .collect_vec();
-        let data_types = value_indices
-            .iter()
-            .map(|idx| all_data_types[*idx].clone())
-            .collect_vec();
-        let column_ids = value_indices
-            .iter()
-            .map(|idx| table_columns[*idx].column_id)
-            .collect_vec();
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
 
         let row_serde = {
-            let schema = Arc::from(data_types.into_boxed_slice());
             if versioned {
-                ColumnAwareSerde::new(&column_ids, schema).into()
+                ColumnAwareSerde::new(value_indices.into(), table_columns.into()).into()
             } else {
-                BasicSerde::new(&column_ids, schema).into()
+                BasicSerde::new(value_indices.into(), table_columns.into()).into()
             }
         };
 

@@ -23,6 +23,7 @@ use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::Result;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
@@ -96,6 +97,7 @@ impl BatchManager {
         epoch: BatchQueryEpoch,
         context: ComputeNodeContext,
         state_reporter: StateReporter,
+        tracing_context: TracingContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime())?;
@@ -124,12 +126,31 @@ impl BatchManager {
             ))
             .into())
         };
-        task.async_execute(Some(state_reporter))
+        task.async_execute(Some(state_reporter), tracing_context)
             .await
             .inspect_err(|_| {
                 self.cancel_task(&task_id.to_prost());
             })?;
         ret
+    }
+
+    #[cfg(test)]
+    async fn fire_task_for_test(
+        self: &Arc<Self>,
+        tid: &PbTaskId,
+        plan: PlanFragment,
+    ) -> Result<()> {
+        use risingwave_hummock_sdk::to_committed_batch_query_epoch;
+
+        self.fire_task(
+            tid,
+            plan,
+            to_committed_batch_query_epoch(0),
+            ComputeNodeContext::for_test(),
+            StateReporter::new_with_test(),
+            TracingContext::none(),
+        )
+        .await
     }
 
     async fn start_task_heartbeat(&self, mut state_reporter: StateReporter, task_id: TaskId) {
@@ -307,7 +328,6 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::config::BatchConfig;
-    use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
@@ -316,7 +336,7 @@ mod tests {
     use tonic::Code;
 
     use crate::monitor::BatchManagerMetrics;
-    use crate::task::{BatchManager, ComputeNodeContext, StateReporter, TaskId};
+    use crate::task::{BatchManager, TaskId};
 
     #[test]
     fn test_task_not_found() {
@@ -370,30 +390,17 @@ mod tests {
                 distribution: None,
             }),
         };
-        let context = ComputeNodeContext::for_test();
         let task_id = PbTaskId {
             query_id: "".to_string(),
             stage_id: 0,
             task_id: 0,
         };
         manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                to_committed_batch_query_epoch(0),
-                context.clone(),
-                StateReporter::new_with_test(),
-            )
+            .fire_task_for_test(&task_id, plan.clone())
             .await
             .unwrap();
         let err = manager
-            .fire_task(
-                &task_id,
-                plan,
-                to_committed_batch_query_epoch(0),
-                context,
-                StateReporter::new_with_test(),
-            )
+            .fire_task_for_test(&task_id, plan)
             .await
             .unwrap_err();
         assert!(err
@@ -418,22 +425,12 @@ mod tests {
                 distribution: None,
             }),
         };
-        let context = ComputeNodeContext::for_test();
         let task_id = PbTaskId {
             query_id: "".to_string(),
             stage_id: 0,
             task_id: 0,
         };
-        manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                to_committed_batch_query_epoch(0),
-                context.clone(),
-                StateReporter::new_with_test(),
-            )
-            .await
-            .unwrap();
+        manager.fire_task_for_test(&task_id, plan).await.unwrap();
         manager.cancel_task(&task_id);
         let task_id = TaskId::from(&task_id);
         assert!(!manager.tasks.lock().contains_key(&task_id));
@@ -456,22 +453,12 @@ mod tests {
                 distribution: None,
             }),
         };
-        let context = ComputeNodeContext::for_test();
         let task_id = PbTaskId {
             query_id: "".to_string(),
             stage_id: 0,
             task_id: 0,
         };
-        manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                to_committed_batch_query_epoch(0),
-                context.clone(),
-                StateReporter::new_with_test(),
-            )
-            .await
-            .unwrap();
+        manager.fire_task_for_test(&task_id, plan).await.unwrap();
         manager.cancel_task(&task_id);
         let task_id = TaskId::from(&task_id);
         assert!(!manager.tasks.lock().contains_key(&task_id));
@@ -494,22 +481,12 @@ mod tests {
                 distribution: None,
             }),
         };
-        let context = ComputeNodeContext::for_test();
         let task_id = PbTaskId {
             query_id: "".to_string(),
             stage_id: 0,
             task_id: 0,
         };
-        manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                to_committed_batch_query_epoch(0),
-                context.clone(),
-                StateReporter::new_with_test(),
-            )
-            .await
-            .unwrap();
+        manager.fire_task_for_test(&task_id, plan).await.unwrap();
         let task_id = TaskId::from(&task_id);
         manager
             .tasks
@@ -537,22 +514,12 @@ mod tests {
                 distribution: None,
             }),
         };
-        let context = ComputeNodeContext::for_test();
         let task_id = PbTaskId {
             query_id: "".to_string(),
             stage_id: 0,
             task_id: 0,
         };
-        manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                to_committed_batch_query_epoch(0),
-                context.clone(),
-                StateReporter::new_with_test(),
-            )
-            .await
-            .unwrap();
+        manager.fire_task_for_test(&task_id, plan).await.unwrap();
         let task_id = TaskId::from(&task_id);
         manager
             .tasks

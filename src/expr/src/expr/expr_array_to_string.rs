@@ -32,7 +32,7 @@ fn build_array_to_string(
     let list = iter.next().unwrap();
     let delimiter = iter.next().unwrap();
     let elem_type = match list.return_type() {
-        DataType::List(datatype) => *datatype,
+        DataType::List(datatype) => datatype.unnest_list(),
         _ => panic!("expected list type"),
     };
     let expr = BinaryBytesExpression::<ListArray, Utf8Array, _>::new(
@@ -92,6 +92,17 @@ fn build_array_to_string(
 ///
 /// query error polymorphic type
 /// select array_to_string(null, ',');
+///
+/// # multidimensional array
+/// query T
+/// select array_to_string(array[array['one', null], array['three', 'four']]::text[][], ',');
+/// ----
+/// one,three,four
+///
+/// query T
+/// select array_to_string(array[array['one', null], array['three', 'four']]::text[][], ',', '*');
+/// ----
+/// one,*,three,four
 /// ```
 fn array_to_string(
     array: ListRef<'_>,
@@ -100,7 +111,8 @@ fn array_to_string(
     mut writer: &mut dyn Write,
 ) {
     let mut first = true;
-    for element in array.iter().flatten() {
+    for element in array.flatten() {
+        let Some(element) = element else { continue };
         if !first {
             write!(writer, "{}", delimiter).unwrap();
         } else {
@@ -122,7 +134,7 @@ fn build_array_to_string_with_null(
     let delimiter = iter.next().unwrap();
     let null_string = iter.next().unwrap();
     let elem_type = match list.return_type() {
-        DataType::List(datatype) => *datatype,
+        DataType::List(datatype) => datatype.unnest_list(),
         _ => panic!("expected list type"),
     };
     let expr = TernaryBytesExpression::<ListArray, Utf8Array, Utf8Array, _>::new(
@@ -143,7 +155,7 @@ fn array_to_string_with_null(
     mut writer: &mut dyn Write,
 ) {
     let mut first = true;
-    for element in array.iter() {
+    for element in array.flatten() {
         if !first {
             write!(writer, "{}", delimiter).unwrap();
         } else {

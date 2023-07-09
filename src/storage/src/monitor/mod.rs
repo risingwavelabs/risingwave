@@ -31,7 +31,7 @@ pub use local_metrics::*;
 pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 
 // include only when hummock trace enabled
-#[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+#[cfg(all(not(madsim), feature = "hm-trace"))]
 mod traced_store;
 
 pub trait HummockTraceFutureExt: Sized + Future {
@@ -44,11 +44,11 @@ impl<F: Future> HummockTraceFutureExt for F {
 
     // simply return a future that does nothing if trace is not enabled
     fn may_trace_hummock(self) -> Self::TraceOutput {
-        #[cfg(not(all(not(madsim), any(hm_trace, feature = "hm-trace"))))]
+        #[cfg(not(all(not(madsim), feature = "hm-trace")))]
         {
             self
         }
-        #[cfg(all(not(madsim), any(hm_trace, feature = "hm-trace")))]
+        #[cfg(all(not(madsim), feature = "hm-trace"))]
         {
             use risingwave_hummock_trace::hummock_trace_scope;
             hummock_trace_scope(self)

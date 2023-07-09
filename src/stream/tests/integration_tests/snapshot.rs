@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
-use risingwave_common::types::{DataType, DefaultOrdered};
+use risingwave_common::types::{DataType, DefaultOrdered, ToText};
 use risingwave_stream::executor::test_utils::MessageSender;
 use risingwave_stream::executor::{BoxedMessageStream, Message};
 
@@ -108,7 +108,7 @@ enum SnapshotEvent {
     Noop,
     Recovery,
     Chunk(String),
-    Watermark { col_idx: usize, val: i64 },
+    Watermark { col_idx: usize, val: String }, // FIXME(rc): need better `val`
 }
 
 impl SnapshotEvent {
@@ -157,9 +157,11 @@ where
                 *chunk_str = chunk.to_pretty_string();
                 tx.push_chunk(chunk);
             }
-            SnapshotEvent::Watermark { col_idx, val } => {
-                tx.push_watermark(*col_idx, DataType::Int64, (*val).into())
-            }
+            SnapshotEvent::Watermark { col_idx, val } => tx.push_watermark(
+                *col_idx,
+                DataType::Int64, // TODO(rc): support timestamp data type
+                val.parse::<i64>().unwrap().into(),
+            ),
         }
 
         snapshot.push(Snapshot {
@@ -199,7 +201,7 @@ fn run_until_pending(
             Message::Barrier(barrier) => SnapshotEvent::Barrier(barrier.epoch.curr),
             Message::Watermark(watermark) => SnapshotEvent::Watermark {
                 col_idx: watermark.col_idx,
-                val: watermark.val.into_int64(),
+                val: watermark.val.as_scalar_ref_impl().to_text(),
             },
         });
     }

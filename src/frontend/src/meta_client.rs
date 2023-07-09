@@ -18,6 +18,9 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::CreatingJobInfo;
 use risingwave_rpc_client::error::Result;
@@ -42,6 +45,12 @@ pub trait FrontendMetaClient: Send + Sync {
         &self,
         table_ids: &[u32],
     ) -> Result<HashMap<u32, TableFragmentInfo>>;
+
+    async fn list_table_fragment_states(&self) -> Result<Vec<TableFragmentState>>;
+
+    async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
+
+    async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
     async fn unpin_snapshot(&self) -> Result<()>;
 
@@ -81,6 +90,18 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         table_ids: &[u32],
     ) -> Result<HashMap<u32, TableFragmentInfo>> {
         self.0.list_table_fragments(table_ids).await
+    }
+
+    async fn list_table_fragment_states(&self) -> Result<Vec<TableFragmentState>> {
+        self.0.list_table_fragment_states().await
+    }
+
+    async fn list_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>> {
+        self.0.list_fragment_distributions().await
+    }
+
+    async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
+        self.0.list_actor_states().await
     }
 
     async fn unpin_snapshot(&self) -> Result<()> {

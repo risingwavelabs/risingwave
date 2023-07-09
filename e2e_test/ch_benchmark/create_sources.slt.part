@@ -28,7 +28,7 @@ CREATE TABLE customer (
     topic = 'customer',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 statement ok
 CREATE TABLE district (
@@ -49,7 +49,7 @@ CREATE TABLE district (
     topic = 'district',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 statement ok
 CREATE TABLE history (
@@ -67,7 +67,7 @@ CREATE TABLE history (
     topic = 'history',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 statement ok
 CREATE TABLE item (
@@ -82,7 +82,7 @@ CREATE TABLE item (
     topic = 'item',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 statement ok
 CREATE TABLE neworder (
@@ -95,7 +95,7 @@ CREATE TABLE neworder (
     topic = 'neworder',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 statement ok
 CREATE TABLE orderline (
@@ -115,7 +115,7 @@ CREATE TABLE orderline (
     topic = 'orderline',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 statement ok
 CREATE TABLE orders (
@@ -133,7 +133,7 @@ CREATE TABLE orders (
     topic = 'orders',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 statement ok
 CREATE TABLE stock (
@@ -161,7 +161,7 @@ CREATE TABLE stock (
     topic = 'stock',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 statement ok
 CREATE TABLE warehouse (
@@ -180,7 +180,7 @@ CREATE TABLE warehouse (
     topic = 'warehouse',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 statement ok
 CREATE TABLE supplier (
@@ -197,7 +197,7 @@ CREATE TABLE supplier (
     topic = 'supplier',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 statement ok
 CREATE TABLE region (
@@ -210,7 +210,7 @@ CREATE TABLE region (
      topic = 'region',
      properties.bootstrap.server = 'message_queue:29092',
      scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 statement ok
 CREATE TABLE nation (
@@ -224,4 +224,4 @@ CREATE TABLE nation (
      topic = 'nation',
      properties.bootstrap.server = 'message_queue:29092',
      scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_JSON;
+) FORMAT DEBEZIUM ENCODE JSON;

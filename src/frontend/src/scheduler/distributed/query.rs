@@ -29,7 +29,7 @@ use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Instrument};
 
 use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
@@ -40,7 +40,7 @@ use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{
-    ExecutionContextRef, PinnedHummockSnapshot, SchedulerError, SchedulerResult,
+    ExecutionContextRef, PinnedHummockSnapshotRef, SchedulerError, SchedulerResult,
 };
 
 /// Message sent to a `QueryRunner` to control its execution.
@@ -116,7 +116,7 @@ impl QueryExecution {
         &self,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
-        pinned_snapshot: PinnedHummockSnapshot,
+        pinned_snapshot: PinnedHummockSnapshotRef,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
@@ -154,10 +154,16 @@ impl QueryExecution {
                     query_metrics,
                 };
 
+                let span = tracing::info_span!(
+                    "distributed_execute",
+                    query_id = self.query.query_id.id,
+                    epoch = ?pinned_snapshot.get_batch_query_epoch(),
+                );
+
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run(pinned_snapshot).await });
+                tokio::spawn(async move { runner.run(pinned_snapshot).instrument(span).await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -194,7 +200,7 @@ impl QueryExecution {
 
     fn gen_stage_executions(
         &self,
-        pinned_snapshot: &PinnedHummockSnapshot,
+        pinned_snapshot: &PinnedHummockSnapshotRef,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
         compute_client_pool: ComputeClientPoolRef,
@@ -262,7 +268,7 @@ impl Debug for QueryRunner {
 }
 
 impl QueryRunner {
-    async fn run(mut self, pinned_snapshot: PinnedHummockSnapshot) {
+    async fn run(mut self, pinned_snapshot: PinnedHummockSnapshotRef) {
         self.query_metrics.running_query_num.inc();
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
@@ -457,7 +463,7 @@ pub(crate) mod tests {
         DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot,
         QueryExecutionInfo,
     };
-    use crate::session::SessionImpl;
+    use crate::session::{transaction, SessionImpl};
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
 
@@ -473,7 +479,8 @@ pub(crate) mod tests {
             CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
         let query = create_query().await;
         let query_id = query.query_id().clone();
-        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        let txn_id = transaction::Id::new();
+        let pinned_snapshot = hummock_snapshot_manager.acquire(txn_id).await.unwrap();
         let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
@@ -483,7 +490,7 @@ pub(crate) mod tests {
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
                 worker_node_selector,
-                PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, true),
+                PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, true).into(),
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,

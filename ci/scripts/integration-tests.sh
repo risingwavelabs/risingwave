@@ -22,16 +22,29 @@ while getopts 'c:f:' opt; do
 done
 shift $((OPTIND -1))
 
-echo "--- clean up docker containers"
+echo "export INTEGRATION_TEST_CASE=${case}" > env_vars.sh
+
+echo "--- clean up docker"
 if [ $(docker ps -aq |wc -l) -gt 0 ]; then
   docker rm -f $(docker ps -aq)
 fi
+docker network prune -f
+docker volume prune -f
 
 echo "--- ghcr login"
 echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
 echo "--- install postgresql"
 sudo yum install -y postgresql
+
+rw_image_tag="latest"
+# Check if the variable is set and not empty
+if [[ -n "${RW_IMAGE_VERSION+x}" ]]; then
+  rw_image_tag=$RW_IMAGE_VERSION
+fi
+sed -i "s|risingwave:latest|risingwave:$rw_image_tag|g" docker/docker-compose.yml
+
+grep "risingwave:" docker/docker-compose.yml
 
 cd integration_tests/scripts
 
@@ -44,6 +57,9 @@ fi
 
 echo "--- run Demos"
 python3 run_demos.py --case ${case} --format ${format}
+
+echo "--- run docker ps"
+docker ps
 
 echo "--- check if the ingestion is successful"
 # extract the type of upstream source,e.g. mysql,postgres,etc

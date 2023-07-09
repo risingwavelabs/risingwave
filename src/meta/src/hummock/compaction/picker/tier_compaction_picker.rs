@@ -14,6 +14,8 @@
 
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::can_concat;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
@@ -48,11 +50,28 @@ impl TierCompactionPicker {
                 continue;
             }
 
-            let mut select_level_inputs = vec![InputLevel {
+            let mut input_level = InputLevel {
                 level_idx: 0,
                 level_type: level.level_type,
                 table_infos: level.table_infos.clone(),
-            }];
+            };
+            // Since the level is overlapping, we can change the order of origin sstable infos in
+            // task.
+            input_level.table_infos.sort_by(|sst1, sst2| {
+                let a = sst1.key_range.as_ref().unwrap();
+                let b = sst2.key_range.as_ref().unwrap();
+                a.compare(b)
+            });
+
+            if can_concat(&input_level.table_infos) {
+                return Some(CompactionInput {
+                    input_levels: vec![input_level],
+                    target_level: 0,
+                    target_sub_level_id: level.sub_level_id,
+                });
+            }
+
+            let mut select_level_inputs = vec![input_level];
 
             // We assume that the maximum size of each sub_level is sub_level_max_compaction_bytes,
             // so the design here wants to merge multiple overlapping-levels in one compaction
@@ -144,6 +163,7 @@ impl CompactionPicker for TierCompactionPicker {
 pub mod tests {
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::new_sub_level;
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::{LevelType, OverlappingLevel};
@@ -220,16 +240,13 @@ pub mod tests {
             ],
             vec![generate_table(6, 1, 1, 100, 1)],
             vec![generate_table(7, 1, 1, 100, 1)],
-            vec![generate_table(8, 1, 1, 100, 1)],
-            vec![generate_table(9, 1, 1, 100, 1)],
         ]);
 
-        let mut levels = Levels {
+        let levels = Levels {
             l0: Some(l0),
             levels: vec![],
             ..Default::default()
         };
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let config = Arc::new(
             CompactionConfigBuilder::new()
@@ -248,9 +265,8 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels.len(), 4);
-        assert_eq!(ret.target_level, 0);
-        assert_eq!(ret.target_sub_level_id, 1);
+        assert_eq!(ret.input_levels.len(), 1);
+        assert!(can_concat(&ret.input_levels[0].table_infos));
     }
 
     #[test]

@@ -12,12 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use pretty_xmlish::XmlNode;
-use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
@@ -128,28 +124,6 @@ impl Distill for StreamGroupTopN {
             node.fields.push(("output_watermarks".into(), ow));
         }
         node
-    }
-}
-impl fmt::Display for StreamGroupTopN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = plan_node_name!("StreamGroupTopN",
-            { "append_only", self.input().append_only() },
-        );
-
-        let mut builder = self.logical.fmt_with_name_and_force(f, &name, true);
-        let watermark_columns = &self.base.watermark_columns;
-        if watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        builder.finish()
     }
 }
 

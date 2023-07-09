@@ -15,6 +15,7 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(lazy_cell)]
+#![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
 
 mod hummock_iterator;
@@ -24,7 +25,7 @@ use std::backtrace::Backtrace;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::slice::from_raw_parts;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use hummock_iterator::{HummockJavaBindingIterator, KeyedRow};
 use jni::objects::{
@@ -35,7 +36,6 @@ use jni::sys::{
     jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jobject, jshort, jsize, jvalue,
 };
 use jni::JNIEnv;
-use once_cell::sync::OnceCell;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
@@ -234,11 +234,11 @@ pub enum JavaBindingRowInner {
 }
 #[derive(Default)]
 pub struct JavaClassMethodCache {
-    big_decimal_ctor: OnceCell<(GlobalRef, JMethodID)>,
-    timestamp_ctor: OnceCell<(GlobalRef, JMethodID)>,
+    big_decimal_ctor: OnceLock<(GlobalRef, JMethodID)>,
+    timestamp_ctor: OnceLock<(GlobalRef, JMethodID)>,
 
-    date_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
-    time_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
+    date_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
+    time_ctor: OnceLock<(GlobalRef, JStaticMethodID)>,
 }
 
 pub struct JavaBindingRow {
@@ -543,9 +543,10 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampV
     execute_and_catch(env, move || {
         let scalar_value = pointer.as_ref().datum_at(idx as usize).unwrap();
         let millis = match scalar_value {
-            // supports sinking rw timestamptz (ScalarRefImpl::Int64) to mysql timestamp
-            ScalarRefImpl::Int64(v) => v / 1000,
-            _ => scalar_value.into_timestamp().0.timestamp_millis(),
+            // supports sinking rw timestamptz to mysql timestamp
+            ScalarRefImpl::Timestamptz(tz) => tz.timestamp_millis(),
+            ScalarRefImpl::Timestamp(ts) => ts.0.timestamp_millis(),
+            _ => panic!("expect timestamp or timestamptz"),
         };
         let (ts_class_ref, constructor) = pointer
             .as_ref()
@@ -796,7 +797,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, Timestamptz};
     use risingwave_expr::vector_op::cast::literal_parsing;
 
     /// make sure that the [`ScalarRefImpl::Int64`] received by
@@ -804,8 +805,9 @@ mod tests {
     /// is of type [`DataType::Timestamptz`] stored in microseconds
     #[test]
     fn test_timestamptz_to_i64() {
-        let timestamptz_val =
-            literal_parsing(&DataType::Timestamptz, "2023-06-01 09:45:00+08:00").unwrap();
-        assert_eq!(timestamptz_val.as_int64(), &1_685_583_900_000_000);
+        assert_eq!(
+            literal_parsing(&DataType::Timestamptz, "2023-06-01 09:45:00+08:00").unwrap(),
+            Timestamptz::from_micros(1_685_583_900_000_000).into()
+        );
     }
 }

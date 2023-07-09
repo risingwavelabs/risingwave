@@ -16,17 +16,20 @@ use risingwave_expr_macro::function;
 
 #[function("length(varchar) -> int32")]
 #[function("char_length(varchar) -> int32")]
-pub fn length(s: &str) -> i32 {
+pub fn char_length(s: &str) -> i32 {
     s.chars().count() as i32
 }
 
 #[function("octet_length(varchar) -> int32")]
-pub fn octet_length(s: &str) -> i32 {
-    s.as_bytes().len() as i32
+#[function("length(bytea) -> int32")]
+#[function("octet_length(bytea) -> int32")]
+pub fn octet_length(s: impl AsRef<[u8]>) -> i32 {
+    s.as_ref().len() as i32
 }
 
 #[function("bit_length(varchar) -> int32")]
-pub fn bit_length(s: &str) -> i32 {
+#[function("bit_length(bytea) -> int32")]
+pub fn bit_length(s: impl AsRef<[u8]>) -> i32 {
     octet_length(s) * 8
 }
 
@@ -40,7 +43,7 @@ mod tests {
         let cases = [("hello world", 11), ("hello rust", 10)];
 
         for (s, expected) in cases {
-            assert_eq!(length(s), expected);
+            assert_eq!(char_length(s), expected);
         }
     }
 
