@@ -26,7 +26,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, BytesArray, DateArray,
     DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray,
-    StructArray, TimeArray, TimestampArray, Utf8Array,
+    StructArray, TimeArray, TimestampArray, TimestamptzArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
@@ -172,6 +172,12 @@ pub fn create_streaming_agg_impl(
                     (Count, interval, int64, StreamingCountAgg::<IntervalArray>),
                     (Count, date, int64, StreamingCountAgg::<DateArray>),
                     (Count, timestamp, int64, StreamingCountAgg::<TimestampArray>),
+                    (
+                        Count,
+                        timestamptz,
+                        int64,
+                        StreamingCountAgg::<TimestamptzArray>
+                    ),
                     (Count, time, int64, StreamingCountAgg::<TimeArray>),
                     (Count, struct_type, int64, StreamingCountAgg::<StructArray>),
                     (Count, list, int64, StreamingCountAgg::<ListArray>),
@@ -215,7 +221,12 @@ pub fn create_streaming_agg_impl(
                     (Min, time, time, StreamingMinAgg::<TimeArray>),
                     (Min, date, date, StreamingMinAgg::<DateArray>),
                     (Min, timestamp, timestamp, StreamingMinAgg::<TimestampArray>),
-                    (Min, timestamptz, timestamptz, StreamingMinAgg::<I64Array>),
+                    (
+                        Min,
+                        timestamptz,
+                        timestamptz,
+                        StreamingMinAgg::<TimestamptzArray>
+                    ),
                     (Min, varchar, varchar, StreamingMinAgg::<Utf8Array>),
                     (Min, bytea, bytea, StreamingMinAgg::<BytesArray>),
                     // Max
@@ -229,7 +240,12 @@ pub fn create_streaming_agg_impl(
                     (Max, time, time, StreamingMaxAgg::<TimeArray>),
                     (Max, date, date, StreamingMaxAgg::<DateArray>),
                     (Max, timestamp, timestamp, StreamingMaxAgg::<TimestampArray>),
-                    (Max, timestamptz, timestamptz, StreamingMaxAgg::<I64Array>),
+                    (
+                        Max,
+                        timestamptz,
+                        timestamptz,
+                        StreamingMaxAgg::<TimestamptzArray>
+                    ),
                     (Max, varchar, varchar, StreamingMaxAgg::<Utf8Array>),
                     (Max, bytea, bytea, StreamingMaxAgg::<BytesArray>),
                     // BitXor

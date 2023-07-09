@@ -129,6 +129,10 @@ pub struct Args {
     #[clap(long)]
     generate_sqlsmith_queries: Option<String>,
 
+    /// Run sqlsmith for differential testing
+    #[clap(long)]
+    run_differential_tests: bool,
+
     /// Load etcd data from toml file.
     #[clap(long)]
     etcd_data: Option<PathBuf>,
@@ -204,15 +208,22 @@ async fn main() {
                         Some(seed),
                     )
                     .await;
-                } else {
-                    risingwave_sqlsmith::runner::run(
+                    return;
+                }
+                if args.run_differential_tests {
+                    risingwave_sqlsmith::runner::run_differential_testing(
                         rw.pg_client(),
                         &args.files,
                         count,
                         Some(seed),
                     )
-                    .await;
+                    .await
+                    .unwrap();
+                    return;
                 }
+
+                risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count, Some(seed))
+                    .await;
             })
             .await;
         return;

@@ -35,7 +35,7 @@ use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
     OptimizerContextRef, PlanRef, Planner, WithOptions,
 };
-use risingwave_sqlparser::ast::{EmitMode, ExplainOptions, ObjectName, Statement};
+use risingwave_sqlparser::ast::{EmitMode, ExplainOptions, ObjectName, SourceSchema, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -163,7 +163,8 @@ impl TestCase {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct CreateConnector {
-    row_format: String,
+    format: String,
+    encode: String,
     name: String,
     file: Option<String>,
     is_table: Option<bool>,
@@ -294,14 +295,15 @@ impl TestCase {
     fn create_connector_sql(
         is_table: bool,
         connector_name: String,
-        connector_row_format: String,
+        connector_format: String,
+        connector_encode: String,
     ) -> String {
         let object_to_create = if is_table { "TABLE" } else { "SOURCE" };
         format!(
             r#"CREATE {} {}
     WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT {} (message = '.test.TestRecord', schema.location = 'file://"#,
-            object_to_create, connector_name, connector_row_format
+    FORMAT {} ENCODE {} (message = '.test.TestRecord', schema.location = 'file://"#,
+            object_to_create, connector_name, connector_format, connector_encode
         )
     }
 
@@ -312,8 +314,12 @@ impl TestCase {
         match self.create_table_with_connector().clone() {
             Some(connector) => {
                 if let Some(content) = connector.file {
-                    let sql =
-                        Self::create_connector_sql(true, connector.name, connector.row_format);
+                    let sql = Self::create_connector_sql(
+                        true,
+                        connector.name,
+                        connector.format,
+                        connector.encode,
+                    );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
                         &(sql + temp_file.path().to_str().unwrap() + "')"),
@@ -339,7 +345,12 @@ impl TestCase {
         match self.create_source().clone() {
             Some(source) => {
                 if let Some(content) = source.file {
-                    let sql = Self::create_connector_sql(false, source.name, source.row_format);
+                    let sql = Self::create_connector_sql(
+                        false,
+                        source.name,
+                        source.format,
+                        source.encode,
+                    );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
                         &(sql + temp_file.path().to_str().unwrap() + "')"),
@@ -370,6 +381,7 @@ impl TestCase {
         for stmt in statements {
             // TODO: `sql` may contain multiple statements here.
             let handler_args = HandlerArgs::new(session.clone(), &stmt, sql)?;
+            let _guard = session.txn_begin_implicit();
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -402,6 +414,15 @@ impl TestCase {
                     append_only,
                     ..
                 } => {
+                    let source_schema = source_schema
+                        .map(|source_schema| -> Result<SourceSchema> {
+                            let (source_schema, _) = source_schema
+                                .into_source_schema()
+                                .map_err(|e| anyhow!(e.inner_msg()))?;
+                            Ok(source_schema)
+                        })
+                        .transpose()?;
+
                     create_table::handle_create_table(
                         handler_args,
                         name,

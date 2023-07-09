@@ -14,8 +14,7 @@
 
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::kafka::KAFKA_SINK;
-use risingwave_connector::sink::{SinkConfig, DOWNSTREAM_SINK_KEY};
+use risingwave_connector::sink::{SinkConfig, SinkWriterParam};
 use risingwave_pb::stream_plan::SinkNode;
 
 use super::*;
@@ -39,7 +38,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
         let sink_id = sink_desc.get_id().into();
-        let mut properties = sink_desc.get_properties().clone();
+        let properties = sink_desc.get_properties().clone();
         let pk_indices = sink_desc
             .downstream_pk
             .iter()
@@ -51,14 +50,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .into_iter()
             .map(ColumnCatalog::from)
             .collect_vec();
-        // This field can be used to distinguish a specific actor in parallelism to prevent
-        // transaction execution errors
-        if let Some(connector) = properties.get(DOWNSTREAM_SINK_KEY) && connector == KAFKA_SINK {
-            properties.insert(
-                "identifier".to_string(),
-                format!("sink-{:?}", params.executor_id),
-            );
-        }
         let config = SinkConfig::from_hashmap(properties).map_err(StreamExecutorError::from)?;
 
         Ok(Box::new(
@@ -66,8 +57,11 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 materialize_executor,
                 stream.streaming_metrics.clone(),
                 config,
-                params.executor_id,
-                params.env.connector_params(),
+                SinkWriterParam {
+                    connector_params: params.env.connector_params(),
+                    executor_id: params.executor_id,
+                    vnode_bitmap: params.vnode_bitmap,
+                },
                 columns,
                 pk_indices,
                 sink_type,

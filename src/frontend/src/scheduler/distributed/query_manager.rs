@@ -31,7 +31,7 @@ use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::{WorkerNodeManagerRef, WorkerNodeSelector};
-use crate::scheduler::{ExecutionContextRef, PinnedHummockSnapshot, SchedulerResult};
+use crate::scheduler::{ExecutionContextRef, SchedulerResult};
 
 pub struct DistributedQueryStream {
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
@@ -156,7 +156,6 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
-        pinned_snapshot: PinnedHummockSnapshot,
     ) -> SchedulerResult<DistributedQueryStream> {
         if let Some(query_limit) = self.disrtibuted_query_limit
             && self.query_metrics.running_query_num.get() as u64 == query_limit
@@ -176,6 +175,9 @@ impl QueryManager {
             .env()
             .query_manager()
             .add_query(query_id.clone(), query_execution.clone());
+
+        // TODO: if there's no table scan, we don't need to acquire snapshot.
+        let pinned_snapshot = context.session().pinned_snapshot().await?;
 
         let worker_node_manager_reader = WorkerNodeSelector::new(
             self.worker_node_manager.clone(),

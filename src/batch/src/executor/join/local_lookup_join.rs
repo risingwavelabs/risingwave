@@ -40,7 +40,6 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;
 use tokio::sync::watch::Receiver;
-use uuid::Uuid;
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
@@ -64,6 +63,7 @@ struct InnerSideExecutorBuilder<C> {
     pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>,
     chunk_size: usize,
     shutdown_rx: Receiver<ShutdownMsg>,
+    next_stage_id: usize,
 }
 
 /// Used to build the executor for the inner side
@@ -127,7 +127,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             plan: Some(PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
-                    identity: Uuid::new_v4().to_string(),
+                    identity: "SeqScan".to_string(),
                     node_body: Some(self.create_row_seq_scan_node(id)?),
                 }),
                 exchange_info: Some(ExchangeInfo {
@@ -146,8 +146,9 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
                     // better dashboard. However, due to the lack of info of
                     // stage_id and task_id, we can not do it now. Now just make sure it will not
                     // conflict.
-                    query_id: Uuid::new_v4().to_string(),
-                    ..Default::default()
+                    query_id: self.task_id.query_id.clone(),
+                    stage_id: self.task_id.stage_id + 10000 + self.next_stage_id as u32,
+                    task_id: *id,
                 }),
                 output_id: 0,
             }),
@@ -209,6 +210,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
     /// Builds and returns the `ExchangeExecutor` used for the inner side of the
     /// `LocalLookupJoinExecutor`.
     async fn build_executor(&mut self) -> Result<BoxedExecutor> {
+        self.next_stage_id += 1;
         let mut sources = vec![];
         for id in self.pu_to_scan_range_mapping.keys() {
             sources.push(self.build_prost_exchange_source(id)?);
@@ -390,6 +392,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             pu_to_scan_range_mapping: HashMap::new(),
             chunk_size,
             shutdown_rx: source.shutdown_rx.clone(),
+            next_stage_id: 0,
         };
 
         let identity = source.plan_node().get_identity().clone();

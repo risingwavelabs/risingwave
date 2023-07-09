@@ -169,6 +169,7 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
     match portal {
         Portal::Portal(portal) => {
             session.clear_cancel_query_flag();
+            let _guard = session.txn_begin_implicit(); // TODO(bugen): is this behavior correct?
             let str_sql = portal.statement.to_string();
             let handler_args = HandlerArgs::new(session, &portal.statement, &str_sql)?;
             match &portal.statement {

@@ -15,6 +15,7 @@
 use risingwave_common::telemetry::report::TelemetryReportCreator;
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
+    TelemetryResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -34,7 +35,7 @@ impl TelemetryReportCreator for CompactorTelemetryCreator {
         tracking_id: String,
         session_id: String,
         up_time: u64,
-    ) -> anyhow::Result<CompactorTelemetryReport> {
+    ) -> TelemetryResult<CompactorTelemetryReport> {
         Ok(CompactorTelemetryReport::new(
             tracking_id,
             session_id,
@@ -53,13 +54,7 @@ pub(crate) struct CompactorTelemetryReport {
     base: TelemetryReportBase,
 }
 
-impl TelemetryReport for CompactorTelemetryReport {
-    fn to_json(&self) -> anyhow::Result<String> {
-        let json = serde_json::to_string(self)?;
-        Ok(json)
-    }
-}
-
+impl TelemetryReport for CompactorTelemetryReport {}
 impl CompactorTelemetryReport {
     pub(crate) fn new(tracking_id: String, session_id: String, up_time: u64) -> Self {
         Self {

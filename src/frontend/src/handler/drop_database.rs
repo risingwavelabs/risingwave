@@ -63,7 +63,7 @@ pub async fn handle_drop_database(
         return Err(ErrorCode::PermissionDenied("Do not have the privilege".to_string()).into());
     }
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_database(database.id()).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_DATABASE))
 }

@@ -105,7 +105,7 @@ pub async fn handle_create_view(
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_view(view).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))

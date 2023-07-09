@@ -33,7 +33,7 @@ def do_test(client, config, N,  prefix):
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
         s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
-    ) ROW FORMAT json;''')
+    ) FORMAT PLAIN ENCODE JSON;''')
 
     for i in range(N):
         try:

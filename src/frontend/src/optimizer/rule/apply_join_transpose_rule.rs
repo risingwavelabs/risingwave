@@ -120,6 +120,11 @@ impl Rule for ApplyJoinTransposeRule {
             return None;
         }
 
+        assert!(
+            join.is_full_out(),
+            "ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule"
+        );
+
         let (push_left, push_right) = match join.join_type() {
             // `LeftSemi`, `LeftAnti`, `LeftOuter` can only push to left side if it's right side has
             // no correlated id. Otherwise push to both sides.

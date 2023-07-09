@@ -96,7 +96,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 13
 
   - label: "unit test (deterministic simulation)"
     command: "MADSIM_TEST_NUM=100 timeout 15m ci/scripts/deterministic-unit-test.sh"
@@ -285,7 +285,8 @@ steps:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 20
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
 
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"
