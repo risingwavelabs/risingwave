@@ -46,7 +46,7 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
-use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
+use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, get_second, Distribution};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
 
@@ -63,6 +63,7 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 pub struct StateTableInner<
     S,
     SD = BasicSerde,
+    const IS_REPLICATED: bool = false,
     W = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>,
 > where
     S: StateStore,
@@ -121,9 +122,10 @@ pub struct StateTableInner<
 
 /// `StateTable` will use `BasicSerde` as default
 pub type StateTable<S> = StateTableInner<S, BasicSerde>;
+pub type ReplicatedStateTable<S> = StateTableInner<S, BasicSerde, true>;
 
 // initialize
-impl<S, SD, W> StateTableInner<S, SD, W>
+impl<S, SD, const IS_REPLICATED: bool, W> StateTableInner<S, SD, IS_REPLICATED, W>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -189,13 +191,12 @@ where
         };
 
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
-        let local_state_store = store
-            .new_local(NewLocalOptions::new(
-                table_id,
-                is_consistent_op,
-                table_option,
-            ))
-            .await;
+        let new_local_options = if IS_REPLICATED {
+            NewLocalOptions::new_replicated(table_id, is_consistent_op, table_option)
+        } else {
+            NewLocalOptions::new(table_id, is_consistent_op, table_option)
+        };
+        let local_state_store = store.new_local(new_local_options).await;
 
         let pk_data_types = pk_indices
             .iter()
@@ -495,7 +496,7 @@ where
 }
 
 // point get
-impl<S, SD> StateTableInner<S, SD>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -593,7 +594,7 @@ where
 }
 
 // write
-impl<S, SD> StateTableInner<S, SD>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -854,12 +855,8 @@ where
     }
 }
 
-fn get_second<T, U>(arg: StreamExecutorResult<(T, U)>) -> StreamExecutorResult<U> {
-    arg.map(|x| x.1)
-}
-
 // Iterator functions
-impl<S, SD, W> StateTableInner<S, SD, W>
+impl<S, SD, const IS_REPLICATED: bool, W> StateTableInner<S, SD, IS_REPLICATED, W>
 where
     S: StateStore,
     SD: ValueRowSerde,

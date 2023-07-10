@@ -285,11 +285,8 @@ impl RequiredDist {
         for i in key {
             cols.insert(*i);
         }
-        if cols.count_ones(..) == 0 {
-            Self::Any
-        } else {
-            Self::ShardByKey(cols)
-        }
+        assert!(!cols.is_clear());
+        Self::ShardByKey(cols)
     }
 
     pub fn hash_shard(key: &[usize]) -> Self {

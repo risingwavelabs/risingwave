@@ -17,6 +17,9 @@ statement ok
 drop materialized view nexmark_q5;
 
 statement ok
+drop materialized view nexmark_q6_group_top1;
+
+statement ok
 drop materialized view nexmark_q7;
 
 statement ok

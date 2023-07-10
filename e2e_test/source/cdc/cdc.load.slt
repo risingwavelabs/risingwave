@@ -123,3 +123,59 @@ create table shipments_2 (
  database.name = 'cdc_test',
  table.name = 'shipments'
 );
+
+
+# Test user-provided publication
+statement ok
+create table t1_rw (
+    v1 int primary key,
+    v3 varchar
+) with (
+  connector = 'postgres-cdc',
+  hostname = 'db',
+  port = '5432',
+  username = 'postgres',
+  password='postgres',
+  database.name='cdc_test',
+  table.name='t1',
+  schema.name='abs',
+  slot.name='t1_slot',
+  publication.name='my_publicaton',
+  publication.create.enable='false'
+);
+
+statement ok
+create table person_rw (
+    id int primary key,
+    name varchar,
+    email_address varchar,
+    credit_card varchar,
+    city varchar
+) with (
+  connector = 'postgres-cdc',
+  hostname = 'db',
+  port = '5432',
+  username = 'postgres',
+  password='postgres',
+  database.name='cdc_test',
+  table.name='person',
+  publication.name='my_publicaton',
+  publication.create.enable='false'
+);
+
+statement error
+create table person_rw (
+    id int primary key,
+    name varchar,
+    email_address varchar
+) with (
+  connector = 'postgres-cdc',
+  hostname = 'db',
+  port = '5432',
+  username='postgres',
+  password='postgres',
+  database.name='cdc_test',
+  table.name='person',
+  publication.name='dumb_publicaton',
+  publication.create.enable='false'
+);
