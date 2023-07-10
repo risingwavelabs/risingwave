@@ -255,6 +255,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     pub(crate) fn gen_order_by_within(&mut self, exprs: &[Expr]) -> Vec<OrderByExpr> {
+        let exprs = exprs
+            .iter()
+            .filter(|e| matches!(e, Expr::Identifier(_) | Expr::Value(_)))
+            .cloned()
+            .collect::<Vec<_>>();
         if exprs.is_empty() {
             return vec![];
         }
