@@ -23,7 +23,7 @@ use std::str::FromStr;
 use bytes::{BufMut, Bytes};
 use ethnum::{i256, u256, AsI256};
 use num_traits::{
-    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Signed, Zero,
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
 use risingwave_pb::data::ArrayType;
 use serde::{Deserialize, Serialize};
@@ -323,32 +323,6 @@ impl Num for Int256 {
     }
 }
 
-impl Signed for Int256 {
-    fn abs(&self) -> Self {
-        self.0.abs().into()
-    }
-
-    fn abs_sub(&self, other: &Self) -> Self {
-        if self <= other {
-            Self::zero()
-        } else {
-            self.abs()
-        }
-    }
-
-    fn signum(&self) -> Self {
-        self.0.signum().into()
-    }
-
-    fn is_positive(&self) -> bool {
-        self.0.is_positive()
-    }
-
-    fn is_negative(&self) -> bool {
-        self.0.is_negative()
-    }
-}
-
 impl From<arrow_buffer::i256> for Int256 {
     fn from(value: arrow_buffer::i256) -> Self {
         let buffer = value.to_be_bytes();
@@ -441,13 +415,6 @@ mod tests {
         assert_eq!(-Int256::from(1), Int256::from(-1));
         assert_eq!(Int256::from(0).neg(), Int256::from(0));
         assert_eq!(-Int256::from(0), Int256::from(0));
-    }
-
-    #[test]
-    fn test_abs() {
-        assert_eq!(Int256::from(-1).abs(), Int256::from(1));
-        assert_eq!(Int256::from(1).abs(), Int256::from(1));
-        assert_eq!(Int256::from(0).abs(), Int256::from(0));
     }
 
     #[test]
