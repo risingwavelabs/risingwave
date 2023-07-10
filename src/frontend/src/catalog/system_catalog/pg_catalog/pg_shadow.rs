@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
@@ -20,18 +22,20 @@ use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 /// PostgreSQL before version 8.1. It shows properties of all roles that are marked as rolcanlogin
 /// in `pg_authid`. Ref: [`https://www.postgresql.org/docs/current/view-pg-shadow.html`]
 pub const PG_SHADOW_TABLE_NAME: &str = "pg_shadow";
-pub const PG_SHADOW_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Varchar, "usename"),
-    (DataType::Int32, "usesysid"),
-    (DataType::Boolean, "usecreatedb"),
-    (DataType::Boolean, "usesuper"),
-    // User can initiate streaming replication and put the system in and out of backup mode.
-    (DataType::Boolean, "userepl"),
-    // User can bypass row level security.
-    (DataType::Boolean, "usebypassrls"),
-    (DataType::Varchar, "passwd"),
-    // Password expiry time (only used for password authentication)
-    (DataType::Timestamptz, "valuntil"),
-    // Session defaults for run-time configuration variables
-    (DataType::Varchar, "useconfig"),
-];
+pub static PG_SHADOW_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
+    vec![
+        (DataType::Varchar, "usename"),
+        (DataType::Int32, "usesysid"),
+        (DataType::Boolean, "usecreatedb"),
+        (DataType::Boolean, "usesuper"),
+        // User can initiate streaming replication and put the system in and out of backup mode.
+        (DataType::Boolean, "userepl"),
+        // User can bypass row level security.
+        (DataType::Boolean, "usebypassrls"),
+        (DataType::Varchar, "passwd"),
+        // Password expiry time (only used for password authentication)
+        (DataType::Timestamptz, "valuntil"),
+        // Session defaults for run-time configuration variables
+        (DataType::List(Box::new(DataType::Varchar)), "useconfig"),
+    ]
+});
