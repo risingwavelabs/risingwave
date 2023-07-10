@@ -140,6 +140,7 @@ message ExprNode {
     LN = 272;
     LOG10 = 273;
     CBRT = 274;
+    SIGN = 275;
 
     // Boolean comparison
     IS_TRUE = 301;

@@ -46,6 +46,8 @@ public class DbzConnectorConfig {
 
     /* Postgres specified configs */
     public static final String PG_SLOT_NAME = "slot.name";
+    public static final String PG_PUB_NAME = "publication.name";
+    public static final String PG_PUB_CREATE = "publication.create.enable";
     public static final String PG_SCHEMA_NAME = "schema.name";
 
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
@@ -117,6 +119,14 @@ public class DbzConnectorConfig {
                 postgresProps.setProperty("publication.autocreate.mode", "all_tables");
             }
 
+            // disable publication auto creation if needed
+            var pubAutoCreate =
+                    Boolean.parseBoolean(
+                            userProps.getOrDefault(DbzConnectorConfig.PG_PUB_CREATE, "true"));
+
+            if (!pubAutoCreate) {
+                postgresProps.setProperty("publication.autocreate.mode", "disabled");
+            }
             // if snapshot phase is finished and offset is specified, we will continue reading
             // changes from the given offset
             if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
