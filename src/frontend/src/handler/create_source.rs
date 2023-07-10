@@ -39,7 +39,7 @@ use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
     self, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema,
-    ProtobufSchema, SourceSchema, SourceWatermark,
+    Encode, ProtobufSchema, SourceSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -756,7 +756,7 @@ pub async fn handle_create_source(
         )));
     }
 
-    if stmt.source_schema == SourceSchema::Json && stmt.columns.is_empty() {
+    if stmt.source_schema.row_encode == Encode::Json && stmt.columns.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
             "schema definition is required for ROW FORMAT JSON".to_owned(),
         )));
