@@ -182,7 +182,8 @@ where
                     "no available reusable machine id".to_string(),
                 ))
             }
-            (Some(id), WorkerType::ComputeNode) => Some(*id),
+            // We only assign transactional id to compute node and frontend.
+            (Some(id), WorkerType::ComputeNode | WorkerType::Frontend) => Some(*id),
             _ => None,
         };
 
