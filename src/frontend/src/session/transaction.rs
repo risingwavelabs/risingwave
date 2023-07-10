@@ -17,11 +17,10 @@ use std::sync::{Arc, Weak};
 
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use risingwave_common::error::{ErrorCode, Result};
-use tokio::sync::OnceCell;
 
 use super::SessionImpl;
 use crate::catalog::catalog_service::CatalogWriter;
-use crate::scheduler::{ReadSnapshot, SchedulerResult};
+use crate::scheduler::ReadSnapshot;
 use crate::user::user_service::UserInfoWriter;
 
 /// Globally unique transaction id in this frontend instance.
@@ -64,7 +63,7 @@ pub struct Context {
 
     /// The snapshot of the transaction, acquired lazily at the first read operation in the
     /// transaction.
-    snapshot: Arc<OnceCell<ReadSnapshot>>,
+    snapshot: Option<ReadSnapshot>,
 }
 
 /// Transaction state.
@@ -198,17 +197,13 @@ impl SessionImpl {
     /// Acquires and pins a snapshot for the current transaction.
     ///
     /// If a snapshot is already acquired, returns it directly.
-    pub async fn pinned_snapshot(&self) -> SchedulerResult<ReadSnapshot> {
-        let (id, snapshot) = {
-            let ctx = self.txn_ctx();
-            (ctx.id, ctx.snapshot.clone())
-        };
-
-        snapshot
-            .get_or_try_init(|| async move {
+    pub fn pinned_snapshot(&self) -> ReadSnapshot {
+        self.txn_ctx()
+            .snapshot
+            .get_or_insert_with(|| {
                 let query_epoch = self.config().get_query_epoch();
 
-                let query_snapshot = if let Some(query_epoch) = query_epoch {
+                if let Some(query_epoch) = query_epoch {
                     ReadSnapshot::Other(query_epoch)
                 } else {
                     // Acquire hummock snapshot for execution.
@@ -220,12 +215,9 @@ impl SessionImpl {
                         snapshot: pinned_snapshot,
                         is_barrier_read,
                     }
-                };
-
-                Ok(query_snapshot.into())
+                }
             })
-            .await
-            .cloned()
+            .clone()
     }
 }
 

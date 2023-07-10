@@ -464,7 +464,7 @@ async fn distribute_execute(
 async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQueryStream> {
     let front_env = session.env();
     // TODO: if there's no table scan, we don't need to acquire snapshot.
-    let snapshot = session.pinned_snapshot().await?;
+    let snapshot = session.pinned_snapshot();
 
     // TODO: Passing sql here
     let execution = LocalQueryExecution::new(
