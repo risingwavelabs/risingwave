@@ -94,9 +94,7 @@ impl PinnedSnapshot {
 
 impl Drop for PinnedSnapshot {
     fn drop(&mut self) {
-        let _ = self.unpin_sender.send(Operation::Unpin {
-            commited_epoch: self.value.committed_epoch,
-        });
+        let _ = self.unpin_sender.send(Operation::Unpin(self.value.clone()));
     }
 }
 
@@ -147,9 +145,7 @@ impl HummockSnapshotManager {
 
     pub fn update(&self, snapshot: PbHummockSnapshot) {
         self.worker_sender
-            .send(Operation::Pin {
-                commited_epoch: snapshot.committed_epoch,
-            })
+            .send(Operation::Pin(snapshot.clone()))
             .unwrap();
 
         let snapshot = Arc::new(PinnedSnapshot {
@@ -175,8 +171,38 @@ enum PinState {
 
 #[derive(Debug)]
 enum Operation {
-    Pin { commited_epoch: u64 },
-    Unpin { commited_epoch: u64 },
+    Pin(PbHummockSnapshot),
+    Unpin(PbHummockSnapshot),
+}
+
+impl Operation {
+    fn is_invalid(&self) -> bool {
+        match self {
+            Operation::Pin(s) | Operation::Unpin(s) => s,
+        }
+        .current_epoch
+            == INVALID_EPOCH
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+struct SnapshotKey(PbHummockSnapshot);
+
+impl Eq for SnapshotKey {}
+
+impl Ord for SnapshotKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0
+            .committed_epoch
+            .cmp(&other.0.committed_epoch)
+            .then_with(|| self.0.current_epoch.cmp(&other.0.current_epoch))
+    }
+}
+
+impl PartialOrd for SnapshotKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 struct UnpinWorker {
@@ -184,7 +210,7 @@ struct UnpinWorker {
 
     receiver: UnboundedReceiver<Operation>,
 
-    states: BTreeMap<u64, PinState>,
+    states: BTreeMap<SnapshotKey, PinState>,
 }
 
 impl UnpinWorker {
@@ -202,27 +228,33 @@ impl UnpinWorker {
     async fn run(mut self) {
         let mut ticker = tokio::time::interval(Duration::from_secs(UNPIN_INTERVAL_SECS));
 
-        tokio::select! {
-            operation = self.receiver.recv() => {
-                let Some(operation) = operation else { return };
-                self.handle_operation(operation);
-            }
+        loop {
+            tokio::select! {
+                operation = self.receiver.recv() => {
+                    let Some(operation) = operation else { return };
+                    self.handle_operation(operation);
+                }
 
-            _ = ticker.tick() => {
-                self.unpin_batch().await;
+                _ = ticker.tick() => {
+                    self.unpin_batch().await;
+                }
             }
         }
     }
 
     fn handle_operation(&mut self, operation: Operation) {
+        if operation.is_invalid() {
+            return;
+        }
+
         match operation {
-            Operation::Pin { commited_epoch } => {
+            Operation::Pin(snapshot) => {
                 self.states
-                    .try_insert(commited_epoch, PinState::Pinned)
+                    .try_insert(SnapshotKey(snapshot), PinState::Pinned)
                     .unwrap();
             }
-            Operation::Unpin { commited_epoch } => match self.states.entry(commited_epoch) {
-                Entry::Vacant(_) => assert_eq!(commited_epoch, INVALID_EPOCH),
+            Operation::Unpin(snapshot) => match self.states.entry(SnapshotKey(snapshot)) {
+                Entry::Vacant(_v) => unreachable!(),
                 Entry::Occupied(o) => {
                     assert_matches!(o.get(), PinState::Pinned);
                     *o.into_mut() = PinState::Unpinned;
@@ -232,15 +264,21 @@ impl UnpinWorker {
     }
 
     async fn unpin_batch(&mut self) {
-        if let Some((&min_epoch, _)) = self
+        // println!("self.states: {:#?}", self.states);
+
+        if let Some(min_snapshot) = self
             .states
             .iter()
-            .find(|(_, s)| matches!(s, PinState::Unpinned))
+            .find(|(_, s)| matches!(s, PinState::Pinned))
+            .map(|(k, _)| k.clone())
         {
+            let min_epoch = min_snapshot.0.committed_epoch;
             tracing::info!("Unpin epoch {:?} with RPC", min_epoch);
 
             match self.meta_client.unpin_snapshot_before(min_epoch).await {
-                Ok(()) => self.states = self.states.split_off(&min_epoch),
+                Ok(()) => {
+                    self.states = self.states.split_off(&min_snapshot);
+                }
                 Err(e) => tracing::error!("Request meta to unpin snapshot failed {:?}!", e),
             }
         }

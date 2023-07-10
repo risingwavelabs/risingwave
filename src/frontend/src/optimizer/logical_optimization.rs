@@ -414,8 +414,6 @@ impl LogicalOptimizer {
     }
 
     pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
-        // FIXME: This may differ from the snapshot we use for actual execution. We should instead
-        // use a pinned snapshot consistently during optimization and execution.
         let epoch = ctx
             .session_ctx()
             .pinned_snapshot()
