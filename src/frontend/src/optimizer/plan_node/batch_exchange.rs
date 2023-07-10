@@ -42,10 +42,11 @@ impl BatchExchange {
 impl Distill for BatchExchange {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let input_schema = self.input.schema();
-        let order = Pretty::display(&OrderDisplay {
+        let order = OrderDisplay {
             order: &self.base.order,
             input_schema,
-        });
+        }
+        .distill();
         let dist = Pretty::display(&DistributionDisplay {
             distribution: &self.base.dist,
             input_schema,
