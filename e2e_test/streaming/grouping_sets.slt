@@ -10,7 +10,7 @@ insert into items_sold values ('Foo', 'L', 10),('Foo', 'M', 20),('Bar', 'M', 15)
 statement ok
 create materialized view v as SELECT brand, size, sum(sales), count(distinct sales) FROM items_sold GROUP BY GROUPING SETS ((brand), (size), ());
 
-query IIII rowsort
+query TTII rowsort
 select * from v;
 ----
 Bar NULL 20 2
