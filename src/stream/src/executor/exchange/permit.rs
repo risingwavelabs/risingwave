@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_channel_close() {
-        let (tx, rx) = channel(0, 0, 1);
+        let (tx, mut rx) = channel(0, 0, 1);
 
         let send = || {
             tx.send(Message::Barrier(Barrier::with_prev_epoch_for_test(
@@ -227,6 +227,10 @@ mod tests {
         };
 
         assert_matches!(send().now_or_never(), Some(Ok(_))); // send successfully
+        assert_matches!(rx.recv().now_or_never(), Some(Some(Message::Barrier(_)))); // recv successfully
+
+        assert_matches!(send().now_or_never(), Some(Ok(_))); // send successfully
+                                                             // do not recv, so that the channel is full
 
         let mut send_fut = pin!(send());
         assert_matches!((&mut send_fut).now_or_never(), None); // would block due to no permits
