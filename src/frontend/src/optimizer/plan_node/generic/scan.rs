@@ -44,6 +44,7 @@ pub struct Scan {
     /// Stored as a field so we don't have to re-compute it each time.
     pub table_desc: Rc<TableDesc>,
     /// Table Catalog of the upstream table that the descriptor is derived from.
+    /// This is only present for non `SystemTable`s.
     pub table_catalog: Option<Arc<TableCatalog>>,
     // Descriptors of all indexes on this table
     pub indexes: Vec<Rc<IndexCatalog>>,

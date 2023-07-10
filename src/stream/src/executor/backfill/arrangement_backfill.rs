@@ -31,7 +31,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::ReplicatedStateTable;
+use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, get_progress_per_vnode, iter_chunks,
     mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state_per_vnode,
@@ -57,7 +57,7 @@ pub struct ArrangementBackfillExecutor<S: StateStore> {
     upstream: BoxedExecutor,
 
     /// Internal state table for persisting state of backfill state.
-    state_table: ReplicatedStateTable<S>,
+    state_table: StateTable<S>,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
@@ -82,7 +82,7 @@ where
     pub fn new(
         upstream_table: ReplicatedStateTable<S>,
         upstream: BoxedExecutor,
-        state_table: ReplicatedStateTable<S>,
+        state_table: StateTable<S>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,

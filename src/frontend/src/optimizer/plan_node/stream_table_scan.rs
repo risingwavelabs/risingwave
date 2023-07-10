@@ -118,9 +118,9 @@ impl StreamTableScan {
         self.chain_type
     }
 
-    /// Builds upstream state table description. Used for `ArrangementBackfill`.
-    fn build_upstream_state_table(&self, state: &mut BuildFragmentGraphState) -> TableCatalog {
-        todo!()
+    // TODO: Add note to reviewer about safety, because of `generic::Scan` limitation.
+    fn get_upstream_state_table(&self) -> &TableCatalog {
+        self.logical.table_catalog.as_ref().unwrap()
     }
 
     /// Build catalog for backfill state
@@ -263,10 +263,7 @@ impl StreamTableScan {
         let (table_desc, arrangement_table) = if self.chain_type == ChainType::ArrangementBackfill {
             (
                 None,
-                Some(
-                    self.build_upstream_state_table(state)
-                        .to_internal_table_prost(),
-                ),
+                Some(self.get_upstream_state_table().to_internal_table_prost()),
             )
         } else {
             (Some(self.logical.table_desc.to_protobuf()), None)
