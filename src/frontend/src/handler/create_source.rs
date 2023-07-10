@@ -758,11 +758,13 @@ pub async fn handle_create_source(
         )));
     }
 
-    let (source_schema, _) = stmt
+    let (source_schema, _, notice) = stmt
         .source_schema
         .into_source_schema()
         .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
-
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    }
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
     validate_compatibility(&source_schema, &mut with_properties)?;
 

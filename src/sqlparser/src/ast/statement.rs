@@ -372,10 +372,18 @@ impl fmt::Display for CompatibleSourceSchema {
 }
 
 impl CompatibleSourceSchema {
-    pub fn into_source_schema(self) -> Result<(SourceSchema, Vec<SqlOption>), ParserError> {
+    pub fn into_source_schema(
+        self,
+    ) -> Result<(SourceSchema, Vec<SqlOption>, Option<String>), ParserError> {
         match self {
-            CompatibleSourceSchema::RowFormat(inner) => Ok((inner, vec![])),
-            CompatibleSourceSchema::V2(inner) => inner.into_source_schema(),
+            CompatibleSourceSchema::RowFormat(inner) => Ok((
+                inner,
+                vec![],
+                Some("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.".to_string()),
+            )),
+            CompatibleSourceSchema::V2(inner) => {
+                inner.into_source_schema().map(|(s, ops)| (s, ops, None))
+            }
         }
     }
 }
