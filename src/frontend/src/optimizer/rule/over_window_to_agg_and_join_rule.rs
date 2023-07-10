@@ -22,7 +22,7 @@ use crate::expr::{AggCall, ExprImpl, FunctionCall, InputRef, OrderBy};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalJoin, LogicalProject, LogicalShare, PlanTreeNodeUnary,
 };
-use crate::utils::Condition;
+use crate::utils::{Condition, GroupBy};
 use crate::PlanRef;
 pub struct OverWindowToAggAndJoinRule;
 
@@ -75,8 +75,7 @@ impl Rule for OverWindowToAggAndJoinRule {
         let common_input = LogicalShare::create(over_window.input());
         let (agg, ..) = LogicalAgg::create(
             select_exprs,
-            group_exprs,
-            vec![],
+            GroupBy::GroupKey(group_exprs),
             None,
             common_input.clone(),
         )

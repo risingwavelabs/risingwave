@@ -42,6 +42,7 @@ use crate::expr::{
     AggCall, CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall,
     InputRef, OrderBy,
 };
+use crate::utils::group_by::GroupBy;
 use crate::utils::Condition;
 
 #[derive(Debug, Clone)]
@@ -51,8 +52,7 @@ pub struct BoundSelect {
     pub aliases: Vec<Option<String>>,
     pub from: Option<Relation>,
     pub where_clause: Option<ExprImpl>,
-    pub group_by: Vec<ExprImpl>,
-    pub grouping_sets: Vec<Vec<ExprImpl>>,
+    pub group_by: GroupBy,
     pub having: Option<ExprImpl>,
     schema: Schema,
 }
@@ -74,10 +74,24 @@ impl RewriteExprsRecursive for BoundSelect {
         self.where_clause =
             std::mem::take(&mut self.where_clause).map(|expr| rewriter.rewrite_expr(expr));
 
-        let new_group_by = std::mem::take(&mut self.group_by)
-            .into_iter()
-            .map(|expr| rewriter.rewrite_expr(expr))
-            .collect::<Vec<_>>();
+        let new_group_by = match &mut self.group_by {
+            GroupBy::GroupKey(group_key) => GroupBy::GroupKey(
+                std::mem::take(group_key)
+                    .into_iter()
+                    .map(|expr| rewriter.rewrite_expr(expr))
+                    .collect::<Vec<_>>(),
+            ),
+            GroupBy::GroupingSets(grouping_sets) => GroupBy::GroupingSets(
+                std::mem::take(grouping_sets)
+                    .into_iter()
+                    .map(|set| {
+                        set.into_iter()
+                            .map(|expr| rewriter.rewrite_expr(expr))
+                            .collect()
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        };
         self.group_by = new_group_by;
 
         self.having = std::mem::take(&mut self.having).map(|expr| rewriter.rewrite_expr(expr));
@@ -193,19 +207,17 @@ impl Binder {
         self.context.clause = Some(Clause::GroupBy);
 
         // Only support one grouping item in group by clause
-        let (group_by, grouping_sets) = if select.group_by.len() == 1 && let Expr::GroupingSets(grouping_sets) = &select.group_by[0] {
-            let grouping_sets = self.bind_grouping_sets_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?;
-            (vec![], grouping_sets)
+        let group_by = if select.group_by.len() == 1 && let Expr::GroupingSets(grouping_sets) = &select.group_by[0] {
+            GroupBy::GroupingSets(self.bind_grouping_sets_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?)
         } else {
             if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_))) {
                 return Err(ErrorCode::BindError("Only support one grouping item in group by clause".to_string()).into());
             }
-            let group_by = select
+            GroupBy::GroupKey(select
                 .group_by
                 .into_iter()
                 .map(|expr| self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items))
-                .try_collect()?;
-            (group_by, vec![])
+                .try_collect()?)
         };
         self.context.clause = None;
 
@@ -237,7 +249,6 @@ impl Binder {
             from,
             where_clause: selection,
             group_by,
-            grouping_sets,
             having,
             schema: Schema { fields },
         })
@@ -529,8 +540,7 @@ impl Binder {
             aliases: vec![None],
             from,
             where_clause,
-            group_by: vec![],
-            grouping_sets: vec![],
+            group_by: GroupBy::GroupKey(vec![]),
             having: None,
             schema,
         })
@@ -617,8 +627,7 @@ impl Binder {
             aliases: vec![None],
             from: Some(indexes_with_stats),
             where_clause,
-            group_by: vec![],
-            grouping_sets: vec![],
+            group_by: GroupBy::GroupKey(vec![]),
             having: None,
             schema: result_schema,
         })
@@ -674,8 +683,7 @@ impl Binder {
             aliases: vec![None],
             from,
             where_clause,
-            group_by: vec![],
-            grouping_sets: vec![],
+            group_by: GroupBy::GroupKey(vec![]),
             having: None,
             schema: result_schema,
         })

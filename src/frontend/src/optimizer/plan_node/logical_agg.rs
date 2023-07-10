@@ -35,7 +35,9 @@ use crate::optimizer::plan_node::{
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, IndexSet, Substitute};
+use crate::utils::{
+    ColIndexMapping, ColIndexMappingRewriteExt, Condition, GroupBy, IndexSet, Substitute,
+};
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
 ///
@@ -277,44 +279,45 @@ struct LogicalAggBuilder {
 }
 
 impl LogicalAggBuilder {
-    fn new(
-        group_exprs: Vec<ExprImpl>,
-        grouping_sets_exprs: Vec<Vec<ExprImpl>>,
-        input_schema_len: usize,
-    ) -> Result<Self> {
-        assert!(group_exprs.is_empty() || grouping_sets_exprs.is_empty());
+    fn new(group_by: GroupBy, input_schema_len: usize) -> Result<Self> {
         let mut input_proj_builder = ProjectBuilder::default();
 
-        let (group_key, grouping_sets) = if grouping_sets_exprs.is_empty() {
-            let group_key = group_exprs
-                .into_iter()
-                .map(|expr| input_proj_builder.add_expr(&expr))
-                .try_collect()
-                .map_err(|err| {
-                    ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
-                })?;
-            (group_key, vec![])
-        } else {
-            let grouping_sets: Vec<IndexSet> = grouping_sets_exprs
-                .into_iter()
-                .map(|set| {
-                    set.into_iter()
-                        .map(|expr| input_proj_builder.add_expr(&expr))
-                        .try_collect()
-                        .map_err(|err| {
-                            ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
-                        })
-                })
-                .try_collect()?;
+        let (group_key, grouping_sets) = match group_by {
+            GroupBy::GroupKey(group_key) => {
+                let group_key = group_key
+                    .into_iter()
+                    .map(|expr| input_proj_builder.add_expr(&expr))
+                    .try_collect()
+                    .map_err(|err| {
+                        ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
+                    })?;
+                (group_key, vec![])
+            }
+            GroupBy::GroupingSets(grouping_sets) => {
+                let grouping_sets: Vec<IndexSet> = grouping_sets
+                    .into_iter()
+                    .map(|set| {
+                        set.into_iter()
+                            .map(|expr| input_proj_builder.add_expr(&expr))
+                            .try_collect()
+                            .map_err(|err| {
+                                ErrorCode::NotImplemented(
+                                    format!("{err} inside GROUP BY"),
+                                    None.into(),
+                                )
+                            })
+                    })
+                    .try_collect()?;
 
-            // Construct group key based on grouping sets.
-            let group_key = grouping_sets
-                .iter()
-                .fold(FixedBitSet::with_capacity(input_schema_len), |acc, x| {
-                    acc.union(&x.to_bitset()).collect()
-                });
+                // Construct group key based on grouping sets.
+                let group_key = grouping_sets
+                    .iter()
+                    .fold(FixedBitSet::with_capacity(input_schema_len), |acc, x| {
+                        acc.union(&x.to_bitset()).collect()
+                    });
 
-            (IndexSet::from_iter(group_key.ones()), grouping_sets)
+                (IndexSet::from_iter(group_key.ones()), grouping_sets)
+            }
         };
 
         Ok(LogicalAggBuilder {
@@ -803,13 +806,11 @@ impl LogicalAgg {
     /// results.
     pub fn create(
         select_exprs: Vec<ExprImpl>,
-        group_exprs: Vec<ExprImpl>,
-        grouping_sets_exprs: Vec<Vec<ExprImpl>>,
+        group_by: GroupBy,
         having: Option<ExprImpl>,
         input: PlanRef,
     ) -> Result<(PlanRef, Vec<ExprImpl>, Option<ExprImpl>)> {
-        let mut agg_builder =
-            LogicalAggBuilder::new(group_exprs, grouping_sets_exprs, input.schema().len())?;
+        let mut agg_builder = LogicalAggBuilder::new(group_by, input.schema().len())?;
 
         let rewritten_select_exprs = select_exprs
             .into_iter()
@@ -1212,8 +1213,13 @@ mod tests {
         let gen_internal_value = |select_exprs: Vec<ExprImpl>,
                                   group_exprs|
          -> (Vec<ExprImpl>, Vec<PlanAggCall>, IndexSet) {
-            let (plan, exprs, _) =
-                LogicalAgg::create(select_exprs, group_exprs, vec![], None, input.clone()).unwrap();
+            let (plan, exprs, _) = LogicalAgg::create(
+                select_exprs,
+                GroupBy::GroupKey(group_exprs),
+                None,
+                input.clone(),
+            )
+            .unwrap();
 
             let logical_agg = plan.as_logical_agg().unwrap();
             let agg_calls = logical_agg.agg_calls().to_vec();
