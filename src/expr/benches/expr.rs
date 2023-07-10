@@ -283,7 +283,7 @@ fn bench_expr(c: &mut Criterion) {
             println!("todo: {sig:?}");
             continue;
         }
-        let agg = match build_agg(AggCall {
+        let agg = match build_agg(&AggCall {
             kind: sig.func,
             args: AggArgs::Unary(
                 sig.inputs_type[0].into(),

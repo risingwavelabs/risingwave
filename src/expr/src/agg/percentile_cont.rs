@@ -61,7 +61,7 @@ use crate::Result;
 /// drop table t;
 /// ```
 #[build_aggregate("percentile_cont(float64) -> float64")]
-fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
+fn build(agg: &AggCall) -> Result<Box<dyn Aggregator>> {
     let fraction: Option<f64> = agg.direct_args[0]
         .literal()
         .map(|x| (*x.as_float64()).into());

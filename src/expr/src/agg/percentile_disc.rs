@@ -66,11 +66,14 @@ use crate::Result;
 /// drop table t;
 /// ```
 #[build_aggregate("percentile_disc(*) -> auto")]
-fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
+fn build(agg: &AggCall) -> Result<Box<dyn Aggregator>> {
     let fraction: Option<f64> = agg.direct_args[0]
         .literal()
         .map(|x| (*x.as_float64()).into());
-    Ok(Box::new(PercentileDisc::new(fraction, agg.return_type)))
+    Ok(Box::new(PercentileDisc::new(
+        fraction,
+        agg.return_type.clone(),
+    )))
 }
 
 #[derive(Clone)]

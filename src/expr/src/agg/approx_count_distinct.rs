@@ -176,9 +176,10 @@ mod tests {
 
     #[test]
     fn test() {
-        let mut agg =
-            crate::agg::build(AggCall::from_pretty("(approx_count_distinct:int8 $0:int4)"))
-                .unwrap();
+        let mut agg = crate::agg::build(&AggCall::from_pretty(
+            "(approx_count_distinct:int8 $0:int4)",
+        ))
+        .unwrap();
 
         for range in [0..20000, 20000..30000, 30000..35000] {
             let col = I32Array::from_iter(range.clone()).into_ref();

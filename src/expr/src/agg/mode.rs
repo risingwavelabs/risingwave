@@ -22,8 +22,8 @@ use crate::agg::AggCall;
 use crate::Result;
 
 #[build_aggregate("mode(*) -> auto")]
-fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
-    Ok(Box::new(Mode::new(agg.return_type)))
+fn build(agg: &AggCall) -> Result<Box<dyn Aggregator>> {
+    Ok(Box::new(Mode::new(agg.return_type.clone())))
 }
 
 /// Computes the mode, the most frequent value of the aggregated argument (arbitrarily choosing the

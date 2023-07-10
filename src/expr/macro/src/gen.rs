@@ -455,7 +455,7 @@ impl FunctionAttr {
                 }
 
                 Ok(Box::new(Agg {
-                    return_type: agg.return_type,
+                    return_type: agg.return_type.clone(),
                     state: #init_state,
                 }))
             }

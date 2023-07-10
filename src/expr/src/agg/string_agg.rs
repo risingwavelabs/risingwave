@@ -44,7 +44,7 @@ mod tests {
             + ccc ,
             + ddd ,",
         );
-        let mut agg = crate::agg::build(AggCall::from_pretty(
+        let mut agg = crate::agg::build(&AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
         agg.update(&chunk).await?;
@@ -61,7 +61,7 @@ mod tests {
             + ccc _
             + ddd .",
         );
-        let mut agg = crate::agg::build(AggCall::from_pretty(
+        let mut agg = crate::agg::build(&AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
         agg.update(&chunk).await?;
@@ -78,7 +78,7 @@ mod tests {
             + ccc _ 0 8
             + ddd _ 1 3",
         );
-        let mut agg = crate::agg::build(AggCall::from_pretty(
+        let mut agg = crate::agg::build(&AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $3:desc $0:desc)",
         ))?;
         agg.update(&chunk).await?;

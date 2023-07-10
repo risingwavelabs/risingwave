@@ -227,7 +227,7 @@ mod tests {
     use crate::agg::AggCall;
 
     fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
-        let mut agg_state = crate::agg::build(AggCall::from_pretty(pretty)).unwrap();
+        let mut agg_state = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
         agg_state.update(&input).now_or_never().unwrap().unwrap();
         let actual = agg_state.output().unwrap();
         assert_eq!(actual, expected);
@@ -591,7 +591,7 @@ mod tests {
         };
         let chunk = StreamChunk::from_parts(ops, DataChunk::new(vec![Arc::new(data)], vis));
         let pretty = format!("({agg_desc}:int8 $0:int8)");
-        let mut agg = crate::agg::build(AggCall::from_pretty(pretty)).unwrap();
+        let mut agg = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
         b.iter(|| {
             agg.update(&chunk).now_or_never().unwrap().unwrap();
         });

@@ -88,7 +88,7 @@ impl EstimateSize for BoxedAggState {
 ///
 /// NOTE: This function ignores argument indices, `column_orders`, `filter` and `distinct` in
 /// `AggCall`. Such operations should be done in batch or streaming executors.
-pub fn build(agg: AggCall) -> Result<BoxedAggState> {
+pub fn build(agg: &AggCall) -> Result<BoxedAggState> {
     // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
 
     let args = (agg.args.arg_types().iter())
@@ -109,5 +109,5 @@ pub fn build(agg: AggCall) -> Result<BoxedAggState> {
             ))
         })?;
 
-    (desc.build)(agg.clone())
+    (desc.build)(agg)
 }

@@ -15,7 +15,6 @@
 //! Aggregation function definitions.
 
 use std::iter::Peekable;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use parse_display::{Display, FromStr};
@@ -26,13 +25,11 @@ use risingwave_common::util::value_encoding;
 use risingwave_pb::expr::agg_call::PbType;
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 
-use crate::expr::{
-    build_from_prost, BoxedExpression, ExpectExt, ExpressionRef, LiteralExpression, Token,
-};
+use crate::expr::{build_from_prost, BoxedExpression, ExpectExt, LiteralExpression, Token};
 use crate::Result;
 
 /// Represents an aggregation function.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct AggCall {
     /// Aggregation kind for constructing agg state.
     pub kind: AggKind,
@@ -45,7 +42,7 @@ pub struct AggCall {
     pub column_orders: Vec<ColumnOrder>,
 
     /// Filter of aggregation.
-    pub filter: Option<ExpressionRef>,
+    pub filter: Option<BoxedExpression>,
 
     /// Should deduplicate the input before aggregation.
     pub distinct: bool,
@@ -68,7 +65,7 @@ impl AggCall {
             })
             .collect();
         let filter = match agg_call.filter {
-            Some(ref pb_filter) => Some(Arc::from(build_from_prost(pb_filter)?)),
+            Some(ref pb_filter) => Some(build_from_prost(pb_filter)?),
             None => None,
         };
         let direct_args = agg_call

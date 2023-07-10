@@ -55,7 +55,7 @@ mod tests {
             + 456
             + 789",
         );
-        let mut agg = crate::agg::build(AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
+        let mut agg = crate::agg::build(&AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
         agg.update(&chunk).await?;
         let actual = agg.output()?;
         assert_eq!(
@@ -67,7 +67,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_array_agg_empty() -> Result<()> {
-        let mut agg = crate::agg::build(AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
+        let mut agg = crate::agg::build(&AggCall::from_pretty("(array_agg:int4[] $0:int4)"))?;
 
         assert_eq!(agg.output()?, None);
 
@@ -89,7 +89,7 @@ mod tests {
             + 789  2
             + 321  9",
         );
-        let mut agg = crate::agg::build(AggCall::from_pretty(
+        let mut agg = crate::agg::build(&AggCall::from_pretty(
             "(array_agg:int4[] $0:int4 orderby $1:asc $0:desc)",
         ))?;
         agg.update(&chunk).await?;
