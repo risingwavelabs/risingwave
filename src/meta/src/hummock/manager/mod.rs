@@ -1284,10 +1284,6 @@ where
                     deterministic_mode,
                 );
                 let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
-                let compacted_table_ids = table_stats_change
-                    .as_ref()
-                    .map(|t| t.keys().collect_vec())
-                    .unwrap_or(vec![]);
                 if let Some(table_stats_change) = &table_stats_change {
                     add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
                 }
@@ -1310,15 +1306,12 @@ where
                     .iter()
                     .map(|tf| (tf.table_id().table_id(), tf.all_table_ids().collect_vec()))
                     .collect_vec();
-                let after_compact_mapping = mv_id_to_all_table_ids
-                    .into_iter()
-                    .filter(|(mv_id, _)| !compacted_table_ids.contains(&mv_id))
-                    .collect();
+
                 trigger_version_stat(
                     &self.metrics,
                     current_version,
                     &versioning.version_stats,
-                    after_compact_mapping,
+                    mv_id_to_all_table_ids,
                 );
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
