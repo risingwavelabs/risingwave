@@ -57,7 +57,7 @@ pub enum AggState<S: StateStore> {
     Table(TableState<S>),
 
     /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
-    MaterializedInput(MaterializedInputState<S>),
+    MaterializedInput(MaterializedInputState),
 }
 
 impl<S: StateStore> AggState<S> {
@@ -90,7 +90,7 @@ impl<S: StateStore> AggState<S> {
                     mapping,
                     extreme_cache_size,
                     input_schema,
-                ))
+                )?)
             }
         })
     }
