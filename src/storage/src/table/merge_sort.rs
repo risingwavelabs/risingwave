@@ -14,25 +14,23 @@
 
 use std::collections::binary_heap::PeekMut;
 use std::collections::BinaryHeap;
+use std::error::Error;
 
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::row::OwnedRow;
 
-use super::storage_table::PkAndRowStream;
-use crate::error::StorageError;
+pub trait MergeSortKey = Eq + PartialEq + Ord + PartialOrd;
 
-/// We use a binary heap to merge the results of the different streams in order.
-/// This is the node type of the heap.
-struct Node<S: PkAndRowStream> {
+struct Node<K: MergeSortKey, S> {
     stream: S,
 
     /// The next item polled from `stream` previously. Since the `eq` and `cmp` must be synchronous
     /// functions, we need to implement peeking manually.
-    peeked: (Vec<u8>, OwnedRow),
+    peeked: (K, OwnedRow),
 }
 
-impl<S: PkAndRowStream> PartialEq for Node<S> {
+impl<K: MergeSortKey, S> PartialEq for Node<K, S> {
     fn eq(&self, other: &Self) -> bool {
         match self.peeked.0 == other.peeked.0 {
             true => unreachable!("primary key from different iters should be unique"),
@@ -40,38 +38,36 @@ impl<S: PkAndRowStream> PartialEq for Node<S> {
         }
     }
 }
-impl<S: PkAndRowStream> Eq for Node<S> {}
+impl<K: MergeSortKey, S> Eq for Node<K, S> {}
 
-impl<S: PkAndRowStream> PartialOrd for Node<S> {
+impl<K: MergeSortKey, S> PartialOrd for Node<K, S> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
-impl<S: PkAndRowStream> Ord for Node<S> {
+
+impl<K: MergeSortKey, S> Ord for Node<K, S> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // The heap is a max heap, so we need to reverse the order.
         self.peeked.0.cmp(&other.peeked.0).reverse()
     }
 }
 
-/// Merge multiple streams of primary key and rows into a single stream, sorted by primary key.
-/// We should ensure that the primary key from different streams are unique.
-#[try_stream(ok = (Vec<u8>, OwnedRow), error = StorageError)]
-pub(super) async fn merge_sort<S>(streams: Vec<S>)
+#[try_stream(ok=(K, OwnedRow), error=E)]
+pub async fn merge_sort<'a, K, E, R>(streams: Vec<R>)
 where
-    S: PkAndRowStream + Unpin,
+    K: MergeSortKey + 'a,
+    E: Error + 'a,
+    R: Stream<Item = Result<(K, OwnedRow), E>> + 'a + Unpin,
 {
-    let mut heap = BinaryHeap::with_capacity(streams.len());
+    let mut heap = BinaryHeap::new();
     for mut stream in streams {
         if let Some(peeked) = stream.next().await.transpose()? {
             heap.push(Node { stream, peeked });
         }
     }
-
     while let Some(mut node) = heap.peek_mut() {
         // Note: If the `next` returns `Err`, we'll fail to yield the previous item.
-        // This is acceptable since we're not going to handle errors from cell-based table
-        // iteration, so where to fail does not matter. Or we need an `Option` for this.
         yield match node.stream.next().await.transpose()? {
             // There still remains data in the stream, take and update the peeked value.
             Some(new_peeked) => std::mem::replace(&mut node.peeked, new_peeked),

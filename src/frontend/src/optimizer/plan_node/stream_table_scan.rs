@@ -176,11 +176,11 @@ impl Distill for StreamTableScan {
         vec.push(("columns", self.logical.columns_pretty(verbose)));
 
         if verbose {
-            let pk = Pretty::display(&IndicesDisplay {
+            let pk = IndicesDisplay {
                 indices: self.logical_pk(),
-                input_schema: &self.base.schema,
-            });
-            vec.push(("pk", pk));
+                schema: &self.base.schema,
+            };
+            vec.push(("pk", pk.distill()));
             let dist = Pretty::display(&DistributionDisplay {
                 distribution: self.distribution(),
                 input_schema: &self.base.schema,

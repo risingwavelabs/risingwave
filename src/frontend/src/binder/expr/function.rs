@@ -572,6 +572,7 @@ impl Binder {
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),
                 ("cbrt", raw_call(ExprType::Cbrt)),
+                ("sign", raw_call(ExprType::Sign)),
 
                 (
                     "to_timestamp",

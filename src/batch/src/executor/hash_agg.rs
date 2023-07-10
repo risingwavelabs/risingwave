@@ -26,13 +26,11 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::agg::{build as build_agg, AggCall, BoxedAggState};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
-use tokio::sync::watch::Receiver;
 
-use super::check_shutdown;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
+use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
 type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher, A>;
 
@@ -69,7 +67,7 @@ pub struct HashAggExecutorBuilder {
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
-    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    shutdown_rx: ShutdownToken,
 }
 
 impl HashAggExecutorBuilder {
@@ -80,7 +78,7 @@ impl HashAggExecutorBuilder {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        shutdown_rx: Option<Receiver<ShutdownMsg>>,
+        shutdown_rx: ShutdownToken,
     ) -> Result<BoxedExecutor> {
         let agg_init_states: Vec<_> = hash_agg_node
             .get_agg_calls()
@@ -147,7 +145,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             identity.clone(),
             source.context.get_config().developer.chunk_size,
             source.context.create_executor_mem_context(identity),
-            Some(source.shutdown_rx.clone()),
+            source.shutdown_rx.clone(),
         )
     }
 }
@@ -166,7 +164,7 @@ pub struct HashAggExecutor<K> {
     identity: String,
     chunk_size: usize,
     mem_context: MemoryContext,
-    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    shutdown_rx: ShutdownToken,
     _phantom: PhantomData<K>,
 }
 
@@ -180,7 +178,7 @@ impl<K> HashAggExecutor<K> {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        shutdown_rx: Option<Receiver<ShutdownMsg>>,
+        shutdown_rx: ShutdownToken,
     ) -> Self {
         HashAggExecutor {
             agg_init_states,
@@ -265,7 +263,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let mut has_next = false;
             let mut array_len = 0;
             for (key, states) in result.by_ref().take(cardinality) {
-                check_shutdown(&self.shutdown_rx)?;
+                self.shutdown_rx.check()?;
                 has_next = true;
                 array_len += 1;
                 key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
@@ -369,7 +367,7 @@ mod tests {
                 "HashAggExecutor".to_string(),
                 CHUNK_SIZE,
                 mem_context.clone(),
-                None,
+                ShutdownToken::empty(),
             )
             .unwrap();
 
@@ -440,7 +438,7 @@ mod tests {
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            None,
+            ShutdownToken::empty(),
         )
         .unwrap();
 
@@ -545,7 +543,7 @@ mod tests {
             agg_calls: vec![agg_call],
         };
 
-        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
+        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
         let actual_exec = HashAggExecutorBuilder::deserialize(
             &agg_prost,
             Box::new(src_exec),
@@ -553,11 +551,11 @@ mod tests {
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
             MemoryContext::none(),
-            Some(shutdown_rx),
+            shutdown_rx,
         )
         .unwrap();
 
-        shutdown_tx.send(ShutdownMsg::Cancel).unwrap();
+        shutdown_tx.cancel();
 
         #[for_await]
         for data in actual_exec.execute() {

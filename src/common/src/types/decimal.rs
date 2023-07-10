@@ -18,7 +18,7 @@ use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use num_traits::{
-    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Signed, Zero,
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Zero,
 };
 use postgres_types::{ToSql, Type};
 use rust_decimal::prelude::FromStr;
@@ -446,10 +446,6 @@ impl Decimal {
         Self::Normalized(RustDecimal::new(num, scale))
     }
 
-    pub fn zero() -> Self {
-        Self::from(0)
-    }
-
     #[must_use]
     pub fn round_dp_ties_away(&self, dp: u32) -> Self {
         match self {
@@ -550,6 +546,17 @@ impl Decimal {
             Self::NaN => Self::NaN,
             Self::PositiveInf => Self::PositiveInf,
             Self::NegativeInf => Self::PositiveInf,
+        }
+    }
+
+    pub fn sign(&self) -> Self {
+        match self {
+            Self::NaN => Self::NaN,
+            _ => match self.cmp(&0.into()) {
+                std::cmp::Ordering::Less => (-1).into(),
+                std::cmp::Ordering::Equal => 0.into(),
+                std::cmp::Ordering::Greater => 1.into(),
+            },
         }
     }
 
@@ -740,47 +747,6 @@ impl Num for Decimal {
             Ok(Self::NaN)
         } else {
             RustDecimal::from_str_radix(str, radix).map(Decimal::Normalized)
-        }
-    }
-}
-
-impl Signed for Decimal {
-    fn abs(&self) -> Self {
-        self.abs()
-    }
-
-    fn abs_sub(&self, other: &Self) -> Self {
-        if self <= other {
-            Self::zero()
-        } else {
-            *self - *other
-        }
-    }
-
-    fn signum(&self) -> Self {
-        match self {
-            Self::Normalized(d) => Self::Normalized(d.signum()),
-            Self::NaN => Self::NaN,
-            Self::PositiveInf => Self::Normalized(RustDecimal::one()),
-            Self::NegativeInf => Self::Normalized(-RustDecimal::one()),
-        }
-    }
-
-    fn is_positive(&self) -> bool {
-        match self {
-            Self::Normalized(d) => d.is_sign_positive(),
-            Self::NaN => false,
-            Self::PositiveInf => true,
-            Self::NegativeInf => false,
-        }
-    }
-
-    fn is_negative(&self) -> bool {
-        match self {
-            Self::Normalized(d) => d.is_sign_negative(),
-            Self::NaN => false,
-            Self::PositiveInf => false,
-            Self::NegativeInf => true,
         }
     }
 }

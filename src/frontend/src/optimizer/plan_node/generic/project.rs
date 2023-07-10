@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::fmt::Formatter;
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, StrAssocArr};
@@ -177,10 +176,6 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         (self.exprs, self.input)
     }
 
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>, schema: &Schema) {
-        builder.field("exprs", &self.exprs_for_display(schema));
-    }
-
     pub fn fields_pretty<'a>(&self, schema: &Schema) -> StrAssocArr<'a> {
         let f = |t| Pretty::debug(&t);
         let e = Pretty::Array(self.exprs_for_display(schema).iter().map(f).collect());
@@ -306,7 +301,7 @@ pub struct AliasedExpr<'a> {
 }
 
 impl fmt::Debug for AliasedExpr<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.alias {
             Some(alias) => write!(f, "{:?} as {}", self.expr, alias),
             None => write!(f, "{:?}", self.expr),

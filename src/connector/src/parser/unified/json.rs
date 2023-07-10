@@ -16,6 +16,7 @@ use std::str::FromStr;
 
 use base64::Engine;
 use itertools::Itertools;
+use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{
     i64_to_timestamp, i64_to_timestamptz, str_to_bytea, str_to_date, str_to_time, str_to_timestamp,
@@ -28,6 +29,8 @@ use simd_json::{BorrowedValue, TryTypeError, ValueAccess, ValueType};
 
 use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_smart_get_value;
+use crate::parser::unified::avro::extract_decimal;
+
 #[derive(Clone, Debug)]
 pub enum ByteaHandling {
     Standard,
@@ -300,6 +303,27 @@ impl JsonParseOptions {
             (Some(DataType::Decimal), ValueType::String) => ScalarImpl::Decimal(
                 Decimal::from_str(value.as_str().unwrap()).map_err(|_err| create_error())?,
             ),
+            (Some(DataType::Decimal), ValueType::Object) => {
+                // ref https://github.com/risingwavelabs/risingwave/issues/10628
+                // handle debezium json (variable scale): {"scale": int, "value": bytes}
+                let scale = value
+                    .get("scale")
+                    .ok_or_else(create_error)?
+                    .as_i32()
+                    .unwrap();
+                let value = value
+                    .get("value")
+                    .ok_or_else(create_error)?
+                    .as_str()
+                    .unwrap()
+                    .as_bytes();
+                let decimal = BigInt::from_signed_bytes_be(value);
+                let negative = decimal.sign() == Sign::Minus;
+                let (lo, mid, hi) = extract_decimal(decimal.to_bytes_be().1);
+                let decimal =
+                    rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
+                ScalarImpl::Decimal(Decimal::Normalized(decimal))
+            }
             // ---- Date -----
             (
                 Some(DataType::Date),

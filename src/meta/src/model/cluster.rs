@@ -78,6 +78,10 @@ impl Worker {
         self.worker_node.id
     }
 
+    pub fn transactional_id(&self) -> Option<u32> {
+        self.worker_node.transactional_id
+    }
+
     pub fn worker_type(&self) -> WorkerType {
         self.worker_node.r#type()
     }
