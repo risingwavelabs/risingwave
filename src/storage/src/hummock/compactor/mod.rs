@@ -60,9 +60,7 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
-use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_task_memory_capacity, generate_splits,
-};
+use crate::hummock::compactor::compaction_utils::{build_multi_compaction_filter, generate_splits};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::iterator::{Forward, HummockIterator};
@@ -166,9 +164,6 @@ impl Compactor {
             ])
             .start_timer();
 
-        let (need_quota, total_file_count, total_key_count) =
-            estimate_state_for_compaction(&compact_task);
-
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
         let mut compact_table_ids = compact_task
@@ -249,6 +244,10 @@ impl Compactor {
                 return task_status;
             }
         }
+
+        let (input_memory, total_file_count, total_key_count) =
+            estimate_state_for_compaction(&compact_task);
+
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
@@ -274,31 +273,17 @@ impl Compactor {
             }
         };
 
-        let task_memory_capacity_with_parallelism =
-            estimate_task_memory_capacity(context.clone(), &compact_task) * parallelism;
-
-        tracing::info!(
-                "Ready to handle compaction task: {} need memory: {} input_file_counts {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
-                compact_task.task_id,
-                need_quota,
-                total_file_count,
-                total_key_count,
-                compact_task.target_level,
-                compact_task.compression_algorithm,
-                parallelism,
-                task_memory_capacity_with_parallelism
-            );
-
         // If the task does not have enough memory, it should cancel the task and let the meta
-        // reschedule it, so that it does not occupy the compactor's resources.
-        let memory_detector = context
+        // reschedule it, so that it does not occupy the compactor's resources. Hold this memory
+        // until the compact task end.
+        let memory_holder = context
             .output_memory_limiter
-            .try_require_memory(task_memory_capacity_with_parallelism as u64);
-        if memory_detector.is_none() {
+            .try_require_memory(input_memory as u64);
+        if memory_holder.is_none() {
             tracing::warn!(
-                "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
+                "Not enough memory to serve the task {} which need memory {}, current memory_usage {} memory_quota {}",
                 compact_task.task_id,
-                task_memory_capacity_with_parallelism,
+                parallelism,
                 context.output_memory_limiter.get_memory_usage(),
                 context.output_memory_limiter.quota()
             );
@@ -307,7 +292,17 @@ impl Compactor {
             return task_status;
         }
 
-        drop(memory_detector);
+        tracing::info!(
+                "Ready to handle compaction task: {} need memory: {} input_file_counts {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {}",
+                compact_task.task_id,
+                input_memory,
+                total_file_count,
+                total_key_count,
+                compact_task.target_level,
+                compact_task.compression_algorithm,
+                parallelism,
+            );
+
         context.compactor_metrics.compact_task_pending_num.inc();
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let filter = multi_filter.clone();

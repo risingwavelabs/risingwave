@@ -165,13 +165,10 @@ pub async fn compactor_serve(
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
 
-    // use half of limit because any memory which would hold in meta-cache will be allocate by
-    // limited at first.
     let observer_join_handle = observer_manager.start().await;
-    let output_limit_bytes = compactor_memory_limit_bytes / 2;
+    // left some quota because we can not control it accurately.
+    let output_limit_bytes = compactor_memory_limit_bytes * 4 / 5;
 
-    // In a compact operation, the size of the output files will not be larger than the input files.
-    // So we can limit the input memory with the output memory limit
     let output_memory_limiter = Arc::new(MemoryLimiter::new(output_limit_bytes));
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         sstable_store.clone(),
