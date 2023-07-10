@@ -55,6 +55,14 @@ impl ReadSnapshot {
         }
     }
 
+    pub fn batch_query_epoch_value(&self) -> Epoch {
+        match self.batch_query_epoch().epoch.unwrap() {
+            batch_query_epoch::Epoch::Committed(epoch)
+            | batch_query_epoch::Epoch::Current(epoch)
+            | batch_query_epoch::Epoch::Backup(epoch) => epoch.into(),
+        }
+    }
+
     pub fn support_barrier_read(&self) -> bool {
         match self {
             ReadSnapshot::FrontendPinned {
@@ -156,11 +164,6 @@ impl HummockSnapshotManager {
         while rx.borrow_and_update().value.committed_epoch < snapshot.committed_epoch {
             rx.changed().await.unwrap();
         }
-    }
-
-    // TODO: remove this
-    pub fn latest_snapshot_current_epoch(&self) -> Epoch {
-        self.latest_snapshot.borrow().value.current_epoch.into()
     }
 }
 

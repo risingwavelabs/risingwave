@@ -418,9 +418,8 @@ impl LogicalOptimizer {
         // use a pinned snapshot consistently during optimization and execution.
         let epoch = ctx
             .session_ctx()
-            .env()
-            .hummock_snapshot_manager()
-            .latest_snapshot_current_epoch();
+            .pinned_snapshot()
+            .batch_query_epoch_value();
 
         let plan = plan.rewrite_exprs_recursive(&mut InlineNowProcTime::new(epoch));
 
