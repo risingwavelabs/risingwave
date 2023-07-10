@@ -12,35 +12,47 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
 use std::sync::Arc;
 
-use risingwave_meta::model::{MetadataModel, TableFragments, Worker};
+use itertools::Itertools;
+use risingwave_meta::model::{MetadataModel, Worker};
 use risingwave_meta::storage::meta_store::MetaStore;
 use risingwave_meta::storage::{EtcdMetaStore, WrappedEtcdClient};
-use risingwave_pb::common::WorkerNode;
 
-use crate::common::CtlContext;
+use crate::{DebugCommon, DebugCommonKind};
 
-pub async fn dump(endpoints: Vec<String>) -> anyhow::Result<()> {
-    let client = WrappedEtcdClient::connect(endpoints, None, false).await?;
+async fn list<T, S>(client: &S) -> anyhow::Result<Vec<T>>
+where
+    T: MetadataModel + Send,
+    S: MetaStore,
+{
+    let result = T::list(client).await?;
+    Ok(result)
+}
+
+pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
+    println!("common {:#?}", common);
+
+    let DebugCommon {
+        etcd_endpoints,
+        mut kinds,
+        ..
+    } = common;
+
+    kinds.dedup();
+
+    let client = WrappedEtcdClient::connect(etcd_endpoints, None, false).await?;
     let meta_store = Arc::new(EtcdMetaStore::new(client));
-    let workers = Worker::list(meta_store.clone().deref()).await?;
+    let snapshot = meta_store.snapshot().await;
 
-    for worker in workers {
-        let s = serde_yaml::to_string(&worker.to_protobuf()).unwrap();
-        println!("{}", s);
+    for kind in kinds {
+        match kind {
+            DebugCommonKind::All => {}
+            DebugCommonKind::Worker => {}
+            DebugCommonKind::User => {}
+            DebugCommonKind::Table => {}
+        }
     }
-
-    let tables = TableFragments::list(meta_store.clone().deref()).await?;
-
-    for table in tables {
-        let s = serde_yaml::to_string(&table.to_protobuf()).unwrap();
-        println!("{}", s);
-    }
-
-
-
 
     Ok(())
 }

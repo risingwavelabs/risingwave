@@ -19,7 +19,6 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
-use itertools::Itertools;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
 use crate::cmd_impl::hummock::{
@@ -78,12 +77,46 @@ enum Commands {
     },
 }
 
-#[derive(Subcommand)]
-enum DebugCommands {
-    /// Show all the configuration parameters on compute node
+#[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq)]
+enum DebugCommonKind {
+    All,
+    Worker,
+    User,
+    Table,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum DebugCommonOutputFormat {
+    Json,
+    Yaml,
+    Wide,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct DebugCommon {
+    #[clap(long, required = true, value_delimiter = ',')]
+    etcd_endpoints: Vec<String>,
+
+    #[clap(value_enum, long, short, value_delimiter = ',')]
+    kinds: Vec<DebugCommonKind>,
+
+    #[clap(value_enum, long, default_value_t = DebugCommonOutputFormat::Yaml)]
+    format: DebugCommonOutputFormat,
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum DebugCommands {
     Dump {
-        #[clap(long, required = true, value_delimiter = ',')]
-        etcd_endpoints: Vec<String>,
+        #[command(flatten)]
+        common: DebugCommon,
+    },
+    Edit {
+        #[command(flatten)]
+        common: DebugCommon,
+    },
+    Apply {
+        #[command(flatten)]
+        common: DebugCommon,
     },
 }
 
@@ -522,9 +555,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Schedulable)
                 .await?
         }
-        Commands::Debug(DebugCommands::Dump { etcd_endpoints }) => {
-            cmd_impl::debug::dump(etcd_endpoints).await?
-        }
+        Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
+        Commands::Debug(DebugCommands::Edit { .. }) => {}
+        Commands::Debug(DebugCommands::Apply { .. }) => {}
     }
     Ok(())
 }
