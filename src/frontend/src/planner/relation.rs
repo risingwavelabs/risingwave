@@ -51,7 +51,7 @@ impl Planner {
     }
 
     pub(crate) fn plan_sys_table(&mut self, sys_table: BoundSystemTable) -> Result<PlanRef> {
-        Ok(LogicalScan::create_for_table_catalog(
+        Ok(LogicalScan::create_for_system_catalog(
             sys_table.sys_table_catalog.name().to_string(),
             Rc::new(sys_table.sys_table_catalog.table_desc()),
             vec![],

@@ -62,7 +62,7 @@ impl From<generic::Scan> for PlanRef {
 }
 
 impl LogicalScan {
-    pub fn create_for_table_catalog(
+    pub fn create_for_system_catalog(
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,

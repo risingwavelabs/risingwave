@@ -222,7 +222,7 @@ impl IndexSelectionRule {
         let index_scan = LogicalScan::create(
             index.index_table.name.clone(),
             index.index_table.table_desc().into(),
-            Some((*index.index_table).clone().into()),
+            Some(index.index_table.clone()),
             vec![],
             logical_scan.ctx(),
             false,

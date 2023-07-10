@@ -184,7 +184,7 @@ pub(crate) fn gen_create_index_plan(
     let materialize = assemble_materialize(
         table_name,
         table_desc.clone(),
-        (*table).clone().into(),
+        table.clone(),
         context,
         index_table_name.clone(),
         &index_columns_ordered_expr,
