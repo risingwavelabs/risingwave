@@ -304,7 +304,7 @@ impl SinkWriterV1 for RemoteSinkWriter {
     }
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.begin_epoch(epoch).await?;
+        self.stream_handle.start_epoch(epoch).await?;
         self.epoch = Some(epoch);
         Ok(())
     }
