@@ -70,7 +70,7 @@ use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     validate_ssts, BatchSstableWriterFactory, FilterBuilder, HummockError, SstableWriterFactory,
-    StreamingSstableWriterFactory, Xor8FilterBuilder,
+    StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -869,56 +869,35 @@ impl Compactor {
 
         let (split_table_outputs, table_stats_map) = if self.options.capacity as u64
             > self.context.storage_opts.min_sst_size_for_streaming_upload
+            && self
+                .context
+                .sstable_store
+                .store()
+                .support_streaming_upload()
         {
             let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
-            if self.task_config.is_target_l0_or_lbase {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            } else {
-                self.compact_key_range_impl::<_, Xor8FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            }
+            self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                factory,
+                iter,
+                compaction_filter,
+                del_agg,
+                filter_key_extractor,
+                task_progress.clone(),
+            )
+            .verbose_instrument_await("compact")
+            .await?
         } else {
             let factory = BatchSstableWriterFactory::new(self.context.sstable_store.clone());
-            if self.task_config.is_target_l0_or_lbase {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            } else {
-                self.compact_key_range_impl::<_, Xor8FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            }
+            self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                factory,
+                iter,
+                compaction_filter,
+                del_agg,
+                filter_key_extractor,
+                task_progress.clone(),
+            )
+            .verbose_instrument_await("compact")
+            .await?
         };
 
         compact_timer.observe_duration();

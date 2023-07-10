@@ -825,7 +825,7 @@ template:
 
     # Whether to enable async stack trace for this compute node, `off`, `on`, or `verbose`.
     # Considering the performance, `verbose` mode only effect under `release` profile with `debug_assertions` off.
-    async-stack-trace: on
+    async-stack-trace: verbose
 
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false

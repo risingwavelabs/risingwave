@@ -18,7 +18,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
+use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, SourceSchema, Statement};
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
@@ -62,6 +62,14 @@ async fn do_handle_explain(
                 append_only,
                 ..
             } => {
+                let source_schema = source_schema
+                    .map(|source_schema| -> Result<SourceSchema> {
+                        let (source_schema, _) = source_schema
+                            .into_source_schema()
+                            .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
+                        Ok(source_schema)
+                    })
+                    .transpose()?;
                 let with_options = context.with_options();
                 let plan = match check_create_table_with_source(with_options, source_schema)? {
                     Some(s) => {

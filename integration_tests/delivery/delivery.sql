@@ -8,7 +8,7 @@ CREATE SOURCE delivery_orders_source (
     topic = 'delivery_orders',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;
 
 
 CREATE MATERIALIZED VIEW restaurant_orders AS

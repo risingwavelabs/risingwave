@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::{fmt, vec};
+use std::vec;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -228,53 +228,34 @@ pub(crate) fn watermark_fields_pretty<'a>(
 #[derive(Clone, Copy)]
 pub struct IndicesDisplay<'a> {
     pub indices: &'a [usize],
-    pub input_schema: &'a Schema,
+    pub schema: &'a Schema,
 }
 
 impl<'a> IndicesDisplay<'a> {
     /// Returns `None` means all
-    pub fn from_join<PlanRef: GenericPlanRef>(
+    pub fn from_join<'b, PlanRef: GenericPlanRef>(
         join: &'a generic::Join<PlanRef>,
         input_schema: &'a Schema,
-    ) -> Option<Self> {
-        Self::from(
-            &join.output_indices,
-            join.internal_column_num(),
-            input_schema,
-        )
+    ) -> Pretty<'b> {
+        let col_num = join.internal_column_num();
+        let id = Self::from(&join.output_indices, col_num, input_schema);
+        id.map_or_else(|| Pretty::from("all"), Self::distill)
     }
 
     /// Returns `None` means all
-    pub fn from(
-        indices: &'a [usize],
-        internal_column_num: usize,
-        input_schema: &'a Schema,
-    ) -> Option<Self> {
-        if indices.iter().copied().eq(0..internal_column_num) {
-            None
-        } else {
-            Some(Self {
-                indices,
-                input_schema,
-            })
+    fn from(indices: &'a [usize], col_num: usize, schema: &'a Schema) -> Option<Self> {
+        if indices.iter().copied().eq(0..col_num) {
+            return None;
         }
+        Some(Self { indices, schema })
     }
-}
 
-impl fmt::Display for IndicesDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-impl fmt::Debug for IndicesDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = f.debug_list();
-        for i in self.indices {
-            let name = &self.input_schema.fields.get(*i).unwrap().name;
-            f.entry(&format_args!("{}", name));
-        }
-        f.finish()
+    pub fn distill<'b>(self) -> Pretty<'b> {
+        let vec = self.indices.iter().map(|&i| {
+            let name = self.schema.fields.get(i).unwrap().name.clone();
+            Pretty::from(name)
+        });
+        Pretty::Array(vec.collect())
     }
 }
 

@@ -52,7 +52,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             // TODO: check database server version
             validateBinlogConfig();
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
@@ -96,7 +96,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         try {
             validatePrivileges();
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
@@ -105,7 +105,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         try {
             validateTableSchema();
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
