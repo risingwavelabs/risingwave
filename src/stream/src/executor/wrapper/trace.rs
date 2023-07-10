@@ -48,9 +48,9 @@ pub async fn trace(
             if chunk.cardinality() > 0 {
                 metrics
                     .executor_row_count
-                    .with_label_values(&[&actor_id_string, &info.identity])
+                    .with_label_values(&[&actor_id_string, &span_name])
                     .inc_by(chunk.cardinality() as u64);
-                tracing::trace!(prev = %info.identity, msg = "chunk", "input = \n{:#?}", chunk);
+                tracing::trace!(?chunk, "chunk");
             }
         }
 
@@ -69,32 +69,6 @@ pub async fn trace(
                 span = new_span();
             }
         }
-    }
-}
-
-/// Streams wrapped by `metrics` will update actor metrics.
-#[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn metrics(
-    actor_id: ActorId,
-    executor_id: u64,
-    metrics: Arc<StreamingMetrics>,
-    input: impl MessageStream,
-) {
-    let actor_id_string = actor_id.to_string();
-    let executor_id_string = executor_id.to_string();
-    pin_mut!(input);
-
-    while let Some(message) = input.next().await.transpose()? {
-        if let Message::Chunk(chunk) = &message {
-            if chunk.cardinality() > 0 {
-                metrics
-                    .executor_row_count
-                    .with_label_values(&[&actor_id_string, &executor_id_string])
-                    .inc_by(chunk.cardinality() as u64);
-            }
-        }
-
-        yield message;
     }
 }
 
