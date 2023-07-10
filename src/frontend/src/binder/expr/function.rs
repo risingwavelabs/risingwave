@@ -255,20 +255,14 @@ impl Binder {
         match (kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
             (AggKind::PercentileCont | AggKind::PercentileDisc, [fraction], [arg]) => {
                 if fraction.cast_implicit_mut(DataType::Float64).is_ok() && let Ok(casted) = fraction.fold_const() {
-                    let Some(casted) = casted else {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "direct arg in `{}` cannot be NULL",
-                            kind
-                        )).into());
-                    };
-                    if !(0.0..=1.0).contains(&casted.as_float64().0) {
+                    if let Some(ref casted) = casted && !(0.0..=1.0).contains(&casted.as_float64().0) {
                         return Err(ErrorCode::InvalidInputSyntax(format!(
                             "direct arg in `{}` must between 0.0 and 1.0",
                             kind
                         ))
                         .into());
                     }
-                    *fraction = Literal::new(Some(casted), DataType::Float64).into();
+                    *fraction = Literal::new(casted, DataType::Float64).into();
                 } else {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "direct arg in `{}` must be castable to float64",
