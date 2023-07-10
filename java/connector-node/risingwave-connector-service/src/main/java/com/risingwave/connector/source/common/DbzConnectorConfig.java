@@ -120,8 +120,11 @@ public class DbzConnectorConfig {
             }
 
             // disable publication auto creation if needed
-            var pubAutoCreate = userProps.getOrDefault(DbzConnectorConfig.PG_PUB_CREATE, "true");
-            if (!pubAutoCreate.equals("true")) {
+            var pubAutoCreate =
+                    Boolean.parseBoolean(
+                            userProps.getOrDefault(DbzConnectorConfig.PG_PUB_CREATE, "true"));
+
+            if (!pubAutoCreate) {
                 postgresProps.setProperty("publication.autocreate.mode", "disabled");
             }
             // if snapshot phase is finished and offset is specified, we will continue reading
