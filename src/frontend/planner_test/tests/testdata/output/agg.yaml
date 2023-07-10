@@ -1508,3 +1508,13 @@
 
     Caused by:
       Invalid input syntax: no arguments are expected in mode agg
+- sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT count(DISTINCT i) FROM integers;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum0(count(integers.i))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count(integers.i)] }
+        └─BatchHashAgg { group_key: [integers.i], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(integers.i) }
+            └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }

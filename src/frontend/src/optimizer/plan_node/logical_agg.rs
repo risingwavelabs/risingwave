@@ -53,7 +53,7 @@ impl LogicalAgg {
     /// Generate plan for stateless 2-phase streaming agg.
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        debug_assert!(self.group_key().is_empty());
+        debug_assert!(self.group_key().is_clear());
         let mut logical = self.core.clone();
         logical.input = stream_input;
         let local_agg = StreamStatelessSimpleAgg::new(logical);
@@ -122,7 +122,7 @@ impl LogicalAgg {
             .expect("some input group key could not be mapped");
 
         // Generate global agg step
-        if self.group_key().count_ones(..) == 0 {
+        if self.group_key().is_clear() {
             let exchange =
                 RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
             let global_agg = new_stream_simple_agg(Agg::new(
@@ -195,17 +195,17 @@ impl LogicalAgg {
         // Shuffle agg
         // If we have group key, and we won't try two phase agg optimization at all,
         // we will always choose shuffle agg over single agg.
-        if !self.group_key().is_empty() && !self.core.must_try_two_phase_agg() {
+        if !self.group_key().is_clear() && !self.core.must_try_two_phase_agg() {
             return self.gen_shuffle_plan(stream_input);
         }
 
         // Standalone agg
         // If no group key, and cannot two phase agg, we have to use single plan.
-        if self.group_key().is_empty() && !self.core.can_two_phase_agg() {
+        if self.group_key().is_clear() && !self.core.can_two_phase_agg() {
             return self.gen_single_plan(stream_input);
         }
 
-        debug_assert!(if !self.group_key().is_empty() {
+        debug_assert!(if !self.group_key().is_clear() {
             self.core.must_try_two_phase_agg()
         } else {
             self.core.can_two_phase_agg()
@@ -214,7 +214,7 @@ impl LogicalAgg {
         // Stateless 2-phase simple agg
         // can be applied on stateless simple agg calls,
         // with input distributed by [`Distribution::AnyShard`]
-        if self.group_key().is_empty()
+        if self.group_key().is_clear()
             && self.all_local_aggs_are_stateless(stream_input.append_only())
             && input_dist.satisfies(&RequiredDist::AnyShard)
         {
@@ -240,7 +240,7 @@ impl LogicalAgg {
         match input_dist {
             Distribution::HashShard(dist_key) | Distribution::UpstreamHashShard(dist_key, _)
                 if (!self.core.hash_agg_dist_satisfied_by_input_dist(input_dist)
-                    || self.group_key().is_empty()) =>
+                    || self.group_key().is_clear()) =>
             {
                 let dist_key = dist_key.clone();
                 return self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dist_key);
@@ -249,7 +249,7 @@ impl LogicalAgg {
         }
 
         // Fallback to shuffle or single, if we can't generate any 2-phase plans.
-        if !self.group_key().is_empty() {
+        if !self.group_key().is_clear() {
             self.gen_shuffle_plan(stream_input)
         } else {
             self.gen_single_plan(stream_input)
@@ -1014,7 +1014,7 @@ impl ToBatch for LogicalAgg {
             input,
             ..self.core.clone()
         };
-        let agg_plan = if self.group_key().is_empty() {
+        let agg_plan = if self.group_key().is_clear() {
             BatchSimpleAgg::new(new_logical).into()
         } else if self
             .ctx()
