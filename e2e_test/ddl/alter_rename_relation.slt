@@ -23,7 +23,7 @@ CREATE SOURCE src (v INT) WITH (
     fields.v.end  = '10',
     datagen.rows.per.second='15',
     datagen.split.num = '1'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 CREATE TABLE msrc (v INT) WITH (
@@ -33,7 +33,7 @@ CREATE TABLE msrc (v INT) WITH (
     fields.v.end  = '10',
     datagen.rows.per.second='15',
     datagen.split.num = '1'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 CREATE VIEW v1 AS ( SELECT * FROM t_as WHERE id = 1);
@@ -165,7 +165,7 @@ ALTER SOURCE src RENAME TO src1;
 query TT
 SHOW CREATE SOURCE src1;
 ----
-public.src1 CREATE SOURCE src1 (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '10', datagen.rows.per.second = '15', datagen.split.num = '1') ROW FORMAT JSON
+public.src1 CREATE SOURCE src1 (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '10', datagen.rows.per.second = '15', datagen.split.num = '1') FORMAT PLAIN ENCODE JSON
 
 query TT
 SHOW CREATE MATERIALIZED VIEW mv4;
@@ -182,7 +182,7 @@ ALTER TABLE msrc RENAME TO msrc1;
 query TT
 SHOW CREATE TABLE msrc1;
 ----
-public.msrc1 CREATE TABLE msrc1 (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '10', datagen.rows.per.second = '15', datagen.split.num = '1') ROW FORMAT JSON
+public.msrc1 CREATE TABLE msrc1 (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '10', datagen.rows.per.second = '15', datagen.split.num = '1') FORMAT PLAIN ENCODE JSON
 
 # the underlying source cannot have the same name with other sources
 statement error source .+ exists
