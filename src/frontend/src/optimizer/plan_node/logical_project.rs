@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
@@ -132,12 +130,6 @@ impl PlanTreeNodeUnary for LogicalProject {
 
 impl_plan_tree_node_for_unary! {LogicalProject}
 
-impl fmt::Display for LogicalProject {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core
-            .fmt_with_name(f, "LogicalProject", self.base.schema())
-    }
-}
 impl Distill for LogicalProject {
     fn distill<'a>(&self) -> XmlNode<'a> {
         childless_record(

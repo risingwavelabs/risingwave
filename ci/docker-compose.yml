@@ -70,7 +70,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230611
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230702
     depends_on:
       - mysql
       - db
@@ -79,20 +79,21 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230611
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230702
     depends_on:
       - mysql
       - db
+      - elasticsearch
     volumes:
       - ..:/risingwave
 
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230611
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230702
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230611
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230702
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -103,7 +104,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230611
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230702
     depends_on:
       db:
         condition: service_healthy
@@ -115,3 +116,13 @@ services:
     working_dir: /mnt
     volumes:
       - ..:/mnt
+
+  elasticsearch:
+    container_name: elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.11.0
+    environment:
+      - xpack.security.enabled=true
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=risingwave
+    ports:
+      - 9200:9200

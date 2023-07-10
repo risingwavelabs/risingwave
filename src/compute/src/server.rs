@@ -32,6 +32,7 @@ use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
@@ -296,7 +297,10 @@ pub async fn compute_node_serve(
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
-    let dml_mgr = Arc::new(DmlManager::default());
+    let dml_mgr = Arc::new(DmlManager::new(
+        worker_id,
+        config.streaming.developer.dml_channel_initial_permits,
+    ));
 
     // Initialize batch environment.
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
@@ -385,6 +389,7 @@ pub async fn compute_node_serve(
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
             .layer(AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg))
+            .layer(TracingExtractLayer::new())
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
@@ -486,40 +491,31 @@ fn print_memory_config(
     embedded_compactor_enabled: bool,
     reserved_memory_bytes: usize,
 ) {
-    info!("Memory outline: ");
-    info!("> total_memory: {}", convert(cn_total_memory_bytes as _));
-    info!(
-        ">     storage_memory: {}",
-        convert(storage_memory_bytes as _)
-    );
-    info!(
-        ">         block_cache_capacity: {}",
-        convert((storage_memory_config.block_cache_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         meta_cache_capacity: {}",
-        convert((storage_memory_config.meta_cache_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         shared_buffer_capacity: {}",
-        convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         file_cache_total_buffer_capacity: {}",
-        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _)
-    );
-    if embedded_compactor_enabled {
-        info!(
-            ">         compactor_memory_limit: {}",
+    let memory_config = format!(
+        "\n\
+        Memory outline:\n\
+        > total_memory: {}\n\
+        >     storage_memory: {}\n\
+        >         block_cache_capacity: {}\n\
+        >         meta_cache_capacity: {}\n\
+        >         shared_buffer_capacity: {}\n\
+        >         file_cache_total_buffer_capacity: {}\n\
+        >         compactor_memory_limit: {}\n\
+        >     compute_memory: {}\n\
+        >     reserved_memory: {}",
+        convert(cn_total_memory_bytes as _),
+        convert(storage_memory_bytes as _),
+        convert((storage_memory_config.block_cache_capacity_mb << 20) as _),
+        convert((storage_memory_config.meta_cache_capacity_mb << 20) as _),
+        convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _),
+        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _),
+        if embedded_compactor_enabled {
             convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
-        );
-    }
-    info!(
-        ">     compute_memory: {}",
-        convert(compute_memory_bytes as _)
+        } else {
+            "Not enabled".to_string()
+        },
+        convert(compute_memory_bytes as _),
+        convert(reserved_memory_bytes as _),
     );
-    info!(
-        ">     reserved_memory: {}",
-        convert(reserved_memory_bytes as _)
-    );
+    info!("{}", memory_config);
 }

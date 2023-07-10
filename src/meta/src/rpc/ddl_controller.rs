@@ -26,6 +26,7 @@ use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tracing::log::warn;
+use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
@@ -138,7 +139,7 @@ where
     pub(crate) async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
         let ctrl = self.clone();
-        let handler = tokio::spawn(async move {
+        let fut = async move {
             match command {
                 DdlCommand::CreateDatabase(database) => ctrl.create_database(database).await,
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
@@ -168,8 +169,9 @@ where
                     ctrl.drop_connection(connection_id).await
                 }
             }
-        });
-        handler.await.unwrap()
+        }
+        .in_current_span();
+        tokio::spawn(fut).await.unwrap()
     }
 
     pub(crate) async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
@@ -281,6 +283,8 @@ where
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
@@ -321,7 +325,7 @@ where
     }
 
     async fn drop_streaming_job(&self, job_id: StreamingJobId) -> MetaResult<NotificationVersion> {
-        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
         let table_fragments = self
             .fragment_manager
             .select_table_fragments_by_table_id(&job_id.id().into())
@@ -373,11 +377,12 @@ where
     ) -> MetaResult<StreamFragmentGraph> {
         // 1. Build fragment graph.
         let fragment_graph =
-            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
+            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
                 .await?;
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
         let stream_job = &*stream_job;
 
         // 3. Mark current relation as "creating" and add reference count to dependent relations.
@@ -627,7 +632,7 @@ where
         fragment_graph: StreamFragmentGraphProto,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
-        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
         let fragment_graph = self
@@ -671,13 +676,14 @@ where
     ) -> MetaResult<StreamFragmentGraph> {
         // 1. Build fragment graph.
         let fragment_graph =
-            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
+            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
                 .await?;
         assert!(fragment_graph.internal_tables().is_empty());
         assert!(fragment_graph.dependent_table_ids().is_empty());
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
         let stream_job = &*stream_job;
 
         // 3. Mark current relation as "updating".

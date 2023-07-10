@@ -20,7 +20,6 @@
 use std::collections::BTreeMap;
 use std::vec;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -34,7 +33,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
-use crate::utils::Condition;
+use crate::utils::{Condition, IndexSet};
 
 pub struct MinMaxOnIndexRule {}
 
@@ -126,7 +125,7 @@ impl MinMaxOnIndexRule {
                         },
                         direct_args: vec![],
                     }],
-                    FixedBitSet::new(),
+                    IndexSet::empty(),
                     topn.into(),
                 );
 
@@ -196,7 +195,7 @@ impl MinMaxOnIndexRule {
                     },
                     direct_args: vec![],
                 }],
-                FixedBitSet::new(),
+                IndexSet::empty(),
                 topn.into(),
             );
 

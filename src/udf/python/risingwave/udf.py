@@ -376,7 +376,9 @@ def _to_data_type(t: Union[str, pa.DataType]) -> pa.DataType:
 
 def _string_to_data_type(type_str: str):
     type_str = type_str.upper()
-    if type_str in ("BOOLEAN", "BOOL"):
+    if type_str.endswith("[]"):
+        return pa.list_(_string_to_data_type(type_str[:-2]))
+    elif type_str in ("BOOLEAN", "BOOL"):
         return pa.bool_()
     elif type_str in ("SMALLINT", "INT2"):
         return pa.int16()
@@ -411,8 +413,6 @@ def _string_to_data_type(type_str: str):
         return pa.large_string()
     elif type_str in ("BYTEA"):
         return pa.binary()
-    elif type_str.endswith("[]"):
-        return pa.list_(_string_to_data_type(type_str[:-2]))
     elif type_str.startswith("STRUCT"):
         # extract 'STRUCT<INT, VARCHAR, ...>'
         type_list = type_str[6:].strip("<>")

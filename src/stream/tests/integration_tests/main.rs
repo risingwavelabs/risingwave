@@ -15,6 +15,8 @@
 // tests
 mod eowc_over_window;
 mod hash_agg;
+mod hop_window;
+mod over_window;
 mod project_set;
 
 // utils

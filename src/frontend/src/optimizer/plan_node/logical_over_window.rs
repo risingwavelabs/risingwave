@@ -24,7 +24,8 @@ use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuil
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamSort, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamOverWindow, StreamSort,
+    ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, WindowFunction};
 use crate::optimizer::plan_node::{
@@ -667,9 +668,20 @@ impl ToBatch for LogicalOverWindow {
 
 impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        if self.core.has_rank_function() {
+            return Err(ErrorCode::NotImplemented(
+                "Rank function calls that don't match TopN pattern are not supported yet"
+                    .to_string(),
+                8965.into(),
+            )
+            .into());
+        }
+
         let stream_input = self.core.input.to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {
+            // Emit-On-Window-Close case
+
             if !self.core.funcs_have_same_partition_and_order() {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
@@ -716,14 +728,39 @@ impl ToStream for LogicalOverWindow {
 
             let mut logical = self.core.clone();
             logical.input = sort.into();
-            return Ok(StreamEowcOverWindow::new(logical).into());
-        }
+            Ok(StreamEowcOverWindow::new(logical).into())
+        } else {
+            // General (Emit-On-Update) case
 
-        Err(ErrorCode::NotImplemented(
-            "General version of streaming over window is not implemented yet".to_string(),
-            9124.into(),
-        )
-        .into())
+            if !self.core.funcs_have_same_partition_and_order() {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
+                )
+                .into());
+            }
+
+            // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
+            // empty PARTITION BY by simply removing the following check.
+            let partition_key_indices = self.window_functions()[0]
+                .partition_by
+                .iter()
+                .map(|e| e.index())
+                .collect_vec();
+            if partition_key_indices.is_empty() {
+                return Err(ErrorCode::NotImplemented(
+                    "Window function with empty PARTITION BY is not supported yet".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+
+            let new_input =
+                RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
+                    .enforce_if_not_satisfies(stream_input, &Order::any())?;
+            let mut logical = self.core.clone();
+            logical.input = new_input;
+            Ok(StreamOverWindow::new(logical).into())
+        }
     }
 
     fn logical_rewrite_for_stream(

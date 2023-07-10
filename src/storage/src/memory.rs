@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
@@ -28,10 +27,6 @@ use crate::error::StorageResult;
 use crate::mem_table::MemtableLocalStateStore;
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type,
-};
 
 pub type BytesFullKey = FullKey<Bytes>;
 pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
@@ -540,117 +535,111 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
     type IterStream = StreamTypeOfIter<RangeKvStateStoreIter<R>>;
 
-    define_state_store_read_associated_type!();
+    #[allow(clippy::unused_async)]
+    async fn get(
+        &self,
+        key: Bytes,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<Option<Bytes>> {
+        let range_bounds = (Bound::Included(key.clone()), Bound::Included(key));
+        // We do not really care about vnodes here, so we just use the default value.
+        let res = self.scan(range_bounds, epoch, read_options.table_id, Some(1))?;
 
-    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
-        async move {
-            let range_bounds = (Bound::Included(key.clone()), Bound::Included(key));
-            // We do not really care about vnodes here, so we just use the default value.
-            let res = self.scan(range_bounds, epoch, read_options.table_id, Some(1))?;
-
-            Ok(match res.as_slice() {
-                [] => None,
-                [(_, value)] => Some(value.clone()),
-                _ => unreachable!(),
-            })
-        }
+        Ok(match res.as_slice() {
+            [] => None,
+            [(_, value)] => Some(value.clone()),
+            _ => unreachable!(),
+        })
     }
 
-    fn iter(
+    #[allow(clippy::unused_async)]
+    async fn iter(
         &self,
         key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
-        async move {
-            Ok(RangeKvStateStoreIter::new(
-                batched_iter::Iter::new(
-                    self.inner.clone(),
-                    to_full_key_range(read_options.table_id, key_range),
-                ),
-                epoch,
-            )
-            .into_stream())
-        }
+    ) -> StorageResult<Self::IterStream> {
+        Ok(RangeKvStateStoreIter::new(
+            batched_iter::Iter::new(
+                self.inner.clone(),
+                to_full_key_range(read_options.table_id, key_range),
+            ),
+            epoch,
+        )
+        .into_stream())
     }
 }
 
 impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
-    define_state_store_write_associated_type!();
-
-    fn ingest_batch(
+    #[allow(clippy::unused_async)]
+    async fn ingest_batch(
         &self,
         mut kv_pairs: Vec<(Bytes, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
-    ) -> Self::IngestBatchFuture<'_> {
-        async move {
-            let epoch = write_options.epoch;
+    ) -> StorageResult<usize> {
+        let epoch = write_options.epoch;
 
-            let mut delete_keys = BTreeSet::new();
-            for del_range in delete_ranges {
-                for (key, _) in self.inner.range(
-                    (
-                        del_range.0.map(|table_key| {
-                            FullKey::new(write_options.table_id, TableKey(table_key), epoch)
-                        }),
-                        del_range.1.map(|table_key| {
-                            FullKey::new(write_options.table_id, TableKey(table_key), epoch)
-                        }),
-                    ),
-                    None,
-                )? {
-                    delete_keys.insert(key.user_key.table_key.0);
-                }
+        let mut delete_keys = BTreeSet::new();
+        for del_range in delete_ranges {
+            for (key, _) in self.inner.range(
+                (
+                    del_range.0.map(|table_key| {
+                        FullKey::new(write_options.table_id, TableKey(table_key), epoch)
+                    }),
+                    del_range.1.map(|table_key| {
+                        FullKey::new(write_options.table_id, TableKey(table_key), epoch)
+                    }),
+                ),
+                None,
+            )? {
+                delete_keys.insert(key.user_key.table_key.0);
             }
-            for key in delete_keys {
-                kv_pairs.push((key, StorageValue::new_delete()));
-            }
-
-            let mut size = 0;
-            self.inner
-                .ingest_batch(kv_pairs.into_iter().map(|(key, value)| {
-                    size += key.len() + value.size();
-                    (
-                        FullKey::new(write_options.table_id, TableKey(key), epoch),
-                        value.user_value,
-                    )
-                }))?;
-            Ok(size)
         }
+        for key in delete_keys {
+            kv_pairs.push((key, StorageValue::new_delete()));
+        }
+
+        let mut size = 0;
+        self.inner
+            .ingest_batch(kv_pairs.into_iter().map(|(key, value)| {
+                size += key.len() + value.size();
+                (
+                    FullKey::new(write_options.table_id, TableKey(key), epoch),
+                    value.user_value,
+                )
+            }))?;
+        Ok(size)
     }
 }
 
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     type Local = MemtableLocalStateStore<Self>;
 
-    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
-
-    define_state_store_associated_type!();
-
-    fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
-        async move {
-            // memory backend doesn't need to wait for epoch, so this is a no-op.
-            Ok(())
-        }
+    #[allow(clippy::unused_async)]
+    async fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        // memory backend doesn't need to wait for epoch, so this is a no-op.
+        Ok(())
     }
 
-    fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
-        async move {
-            self.inner.flush()?;
-            // memory backend doesn't need to push to S3, so this is a no-op
-            Ok(SyncResult::default())
-        }
+    #[allow(clippy::unused_async)]
+    async fn sync(&self, _epoch: u64) -> StorageResult<SyncResult> {
+        self.inner.flush()?;
+        // memory backend doesn't need to push to S3, so this is a no-op
+        Ok(SyncResult::default())
     }
 
     fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
 
-    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
-        async move { Ok(()) }
+    #[allow(clippy::unused_async)]
+    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+        unimplemented!("recovery not supported")
     }
 
-    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
-        async move { MemtableLocalStateStore::new(self.clone(), option) }
+    #[allow(clippy::unused_async)]
+    async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
+        MemtableLocalStateStore::new(self.clone(), option)
     }
 
     fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
@@ -683,23 +672,20 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
     type Item = StateStoreIterItem;
 
-    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move {
-            if self.stopped {
-                Ok(None)
-            } else {
-                let ret = self.next_inner();
-                match &ret {
-                    Err(_) | Ok(None) => {
-                        self.stopped = true;
-                    }
-                    _ => {}
+    #[allow(clippy::unused_async)]
+    async fn next(&mut self) -> StorageResult<Option<Self::Item>> {
+        if self.stopped {
+            Ok(None)
+        } else {
+            let ret = self.next_inner();
+            match &ret {
+                Err(_) | Ok(None) => {
+                    self.stopped = true;
                 }
-
-                ret
+                _ => {}
             }
+
+            ret
         }
     }
 }

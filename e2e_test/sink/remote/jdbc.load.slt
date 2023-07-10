@@ -96,6 +96,7 @@ CREATE SINK s2_postgres FROM rw_types WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name='t_types',
+    schema.name='biz',
     type='upsert'
 );
 

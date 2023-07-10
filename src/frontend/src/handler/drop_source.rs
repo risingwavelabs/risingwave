@@ -46,10 +46,12 @@ pub async fn handle_drop_source(
             Ok((s, schema)) => (s.clone(), schema),
             Err(e) => {
                 return if if_exists {
-                    Ok(RwPgResponse::empty_result_with_notice(
-                        StatementType::DROP_SOURCE,
-                        format!("source \"{}\" does not exist, skipping", source_name),
-                    ))
+                    Ok(RwPgResponse::builder(StatementType::DROP_SOURCE)
+                        .notice(format!(
+                            "source \"{}\" does not exist, skipping",
+                            source_name
+                        ))
+                        .into())
                 } else {
                     Err(e.into())
                 }
@@ -59,7 +61,7 @@ pub async fn handle_drop_source(
 
     session.check_privilege_for_drop_alter(schema_name, &*source)?;
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_source(source.id).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))

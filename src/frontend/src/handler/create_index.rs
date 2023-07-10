@@ -407,10 +407,9 @@ pub async fn handle_create_index(
                 Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name)))
                     if if_not_exists =>
                 {
-                    return Ok(PgResponse::empty_result_with_notice(
-                        StatementType::CREATE_INDEX,
-                        format!("relation \"{}\" already exists, skipping", name),
-                    ));
+                    return Ok(PgResponse::builder(StatementType::CREATE_INDEX)
+                        .notice(format!("relation \"{}\" already exists, skipping", name))
+                        .into());
                 }
                 Err(e) => return Err(e.into()),
                 Ok(_) => {}
@@ -452,7 +451,7 @@ pub async fn handle_create_index(
                 index.name.clone(),
             ));
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_index(index, index_table, graph)
         .await?;

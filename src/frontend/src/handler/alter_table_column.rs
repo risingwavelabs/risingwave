@@ -139,10 +139,12 @@ pub async fn handle_alter_table_column(
             if removed_column.is_some() {
                 // PASS
             } else if if_exists {
-                return Ok(PgResponse::empty_result_with_notice(
-                    StatementType::ALTER_TABLE,
-                    format!("column \"{}\" does not exist, skipping", column_name),
-                ));
+                return Ok(PgResponse::builder(StatementType::ALTER_TABLE)
+                    .notice(format!(
+                        "column \"{}\" does not exist, skipping",
+                        column_name
+                    ))
+                    .into());
             } else {
                 Err(ErrorCode::InvalidInputSyntax(format!(
                     "column \"{}\" of table \"{}\" does not exist",
@@ -220,7 +222,7 @@ pub async fn handle_alter_table_column(
             .collect(),
     );
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
         .replace_table(table, graph, col_index_mapping)

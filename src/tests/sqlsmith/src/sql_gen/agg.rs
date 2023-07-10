@@ -90,7 +90,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     )))
                 }
             }
-            A::FirstValue => None,
+            kind @ (A::FirstValue | A::LastValue) => {
+                if order_by.is_empty() {
+                    // `first/last_value` only works when ORDER BY is provided
+                    None
+                } else {
+                    Some(Expr::Function(make_agg_func(
+                        &kind.to_string(),
+                        exprs,
+                        distinct,
+                        filter,
+                        order_by,
+                    )))
+                }
+            }
             A::ApproxCountDistinct => {
                 if self.is_distinct_allowed {
                     None
@@ -129,7 +142,9 @@ fn make_agg_func(
     let args = if exprs.is_empty() {
         // The only agg without args is `count`.
         // `select proname from pg_proc where array_length(proargtypes, 1) = 0 and prokind = 'a';`
-        vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)]
+        vec![FunctionArg::Unnamed(FunctionArgExpr::WildcardOrWithExcept(
+            None,
+        ))]
     } else {
         exprs
             .iter()

@@ -8,7 +8,8 @@
     create materialized view t as select * from s;
     select * from tumble(t, (country).created_at, interval '3' day);
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";

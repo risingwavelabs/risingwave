@@ -30,7 +30,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, StreamActor, StreamFragmentGraph as StreamFragmentGraphProto,
+    DispatchStrategy, DispatcherType, FragmentTypeFlag, StreamActor,
+    StreamFragmentGraph as StreamFragmentGraphProto,
 };
 
 use crate::manager::{IdGeneratorManagerRef, StreamingJob};
@@ -102,6 +103,7 @@ impl BuildingFragment {
                 table_type_name,
             );
             table.fragment_id = fragment_id;
+            table.owner = job.owner();
 
             // Record the internal table.
             internal_tables.push(table.clone());
@@ -347,6 +349,16 @@ impl StreamFragmentGraph {
             .map(|b| b.fragment_id)
             .exactly_one()
             .expect("require exactly 1 materialize/sink node when creating the streaming job")
+    }
+
+    /// Returns the fragment id where the table dml is received.
+    pub fn dml_fragment_id(&self) -> Option<FragmentId> {
+        self.fragments
+            .values()
+            .filter(|b| b.fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0)
+            .map(|b| b.fragment_id)
+            .at_most_one()
+            .expect("require at most 1 dml node when creating the streaming job")
     }
 
     /// Get the dependent streaming job ids of this job.

@@ -45,10 +45,9 @@ pub async fn handle_create_view(
 
     match session.check_relation_name_duplicated(name.clone()) {
         Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::empty_result_with_notice(
-                StatementType::CREATE_VIEW,
-                format!("relation \"{}\" already exists, skipping", name),
-            ));
+            return Ok(PgResponse::builder(StatementType::CREATE_VIEW)
+                .notice(format!("relation \"{}\" already exists, skipping", name))
+                .into());
         }
         Err(e) => return Err(e.into()),
         Ok(_) => {}
@@ -106,7 +105,7 @@ pub async fn handle_create_view(
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_view(view).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))

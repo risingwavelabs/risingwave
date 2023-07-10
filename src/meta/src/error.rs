@@ -15,6 +15,7 @@
 use std::backtrace::Backtrace;
 use std::sync::Arc;
 
+use risingwave_connector::sink::SinkError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
@@ -66,6 +67,9 @@ enum MetaErrorInner {
 
     #[error("SystemParams error: {0}")]
     SystemParams(String),
+
+    #[error("Sink error: {0}")]
+    Sink(SinkError),
 
     #[error(transparent)]
     Internal(anyhow::Error),
@@ -163,6 +167,12 @@ impl From<etcd_client::Error> for MetaError {
 impl From<RpcError> for MetaError {
     fn from(e: RpcError) -> Self {
         MetaErrorInner::RpcError(e).into()
+    }
+}
+
+impl From<SinkError> for MetaError {
+    fn from(e: SinkError) -> Self {
+        MetaErrorInner::Sink(e).into()
     }
 }
 

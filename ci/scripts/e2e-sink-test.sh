@@ -83,7 +83,6 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/remote/types.slt'
 sleep 1
 
 echo "--- testing remote sinks"
-
 # check sink destination postgres
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
@@ -124,6 +123,16 @@ if [ $? -eq 0 ]; then
   echo "kafka sink check passed"
 else
   echo "kafka sink test failed"
+  exit 1
+fi
+
+echo "--- testing elasticsearch sink"
+chmod +x ./ci/scripts/e2e-elasticsearch-sink-test.sh
+./ci/scripts/e2e-elasticsearch-sink-test.sh
+if [ $? -eq 0 ]; then
+  echo "elasticsearch sink check passed"
+else
+  echo "elasticsearch sink test failed"
   exit 1
 fi
 

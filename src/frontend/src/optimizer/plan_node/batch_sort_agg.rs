@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
@@ -24,8 +22,8 @@ use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::utils::ColIndexMappingRewriteExt;
+use crate::optimizer::property::{Order, RequiredDist};
+use crate::utils::{ColIndexMappingRewriteExt, IndexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSortAgg {
@@ -36,22 +34,20 @@ pub struct BatchSortAgg {
 
 impl BatchSortAgg {
     pub fn new(logical: generic::Agg<PlanRef>) -> Self {
+        assert!(!logical.group_key.is_empty());
         assert!(logical.input_provides_order_on_group_keys());
 
         let input = logical.input.clone();
         let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => logical
-                .i2o_col_mapping()
-                .rewrite_provided_distribution(input_dist),
-            d => d.clone(),
-        };
+        let dist = logical
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(input_dist);
         let input_order = Order {
             column_orders: input
                 .order()
                 .column_orders
                 .iter()
-                .filter(|o| logical.group_key.ones().any(|g_k| g_k == o.column_index))
+                .filter(|o| logical.group_key.indices().any(|g_k| g_k == o.column_index))
                 .cloned()
                 .collect(),
         };
@@ -73,7 +69,7 @@ impl BatchSortAgg {
         &self.logical.agg_calls
     }
 
-    pub fn group_key(&self) -> &FixedBitSet {
+    pub fn group_key(&self) -> &IndexSet {
         &self.logical.group_key
     }
 }
@@ -96,10 +92,7 @@ impl ToDistributedBatch for BatchSortAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self.input().to_distributed_with_required(
             &self.input_order,
-            &RequiredDist::shard_by_key(
-                self.input().schema().len(),
-                &self.group_key().ones().collect_vec(),
-            ),
+            &RequiredDist::shard_by_key(self.input().schema().len(), &self.group_key().to_vec()),
         )?;
         Ok(self.clone_with_input(new_input).into())
     }
@@ -116,7 +109,7 @@ impl ToBatchPb for BatchSortAgg {
                 .collect(),
             group_key: self
                 .group_key()
-                .ones()
+                .indices()
                 .map(|idx| {
                     ExprImpl::InputRef(InputRef::new(idx, input.schema()[idx].data_type()).into())
                 })

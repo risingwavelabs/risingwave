@@ -50,10 +50,9 @@ pub async fn handle_create_schema(
         {
             // If `if_not_exist` is true, not return error.
             return if if_not_exist {
-                Ok(PgResponse::empty_result_with_notice(
-                    StatementType::CREATE_SCHEMA,
-                    format!("schema \"{}\" exists, skipping", schema_name),
-                ))
+                Ok(PgResponse::builder(StatementType::CREATE_SCHEMA)
+                    .notice(format!("schema \"{}\" exists, skipping", schema_name))
+                    .into())
             } else {
                 Err(CatalogError::Duplicated("schema", schema_name).into())
             };
@@ -68,7 +67,7 @@ pub async fn handle_create_schema(
         Object::DatabaseId(db_id),
     )])?;
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_schema(db_id, &schema_name, session.user_id())
         .await?;

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -41,23 +39,6 @@ impl BatchExchange {
     }
 }
 
-impl fmt::Display for BatchExchange {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let input_schema = self.input.schema();
-        write!(
-            f,
-            "BatchExchange {{ order: {}, dist: {} }}",
-            OrderDisplay {
-                order: &self.base.order,
-                input_schema
-            },
-            DistributionDisplay {
-                distribution: &self.base.dist,
-                input_schema
-            }
-        )
-    }
-}
 impl Distill for BatchExchange {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let input_schema = self.input.schema();

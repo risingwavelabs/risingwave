@@ -54,7 +54,7 @@ struct Args {
     path: String,
 
     // path to config file
-    #[arg(short, long, default_value = "src/config/risingwave.user.toml")]
+    #[arg(short, long, default_value = "src/config/hummock-trace.toml")]
     config: String,
 
     #[arg(short, long)]
@@ -74,7 +74,7 @@ async fn run_replay(args: Args) -> Result<()> {
     let f = BufReader::new(File::open(path)?);
     let mut reader = TraceReaderImpl::new_bincode(f)?;
     // first record is the snapshot
-    let r = reader.read().unwrap();
+    let r: Record = reader.read().unwrap();
     let replay_interface = create_replay_hummock(r, &args).await.unwrap();
     let mut replayer = HummockReplay::new(reader, replay_interface);
     replayer.run().await.unwrap();
@@ -123,7 +123,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
             Operation::MetaMessage(resp) => {
                 get_replay_notification_client(env, worker_node.clone(), resp)
             }
-            _ => unreachable!(),
+            _ => panic!("unexpected operation, found {:?}", r.operation),
         };
 
         (

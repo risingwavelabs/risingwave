@@ -12,19 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use itertools::Itertools;
 use pretty_xmlish::XmlNode;
-use risingwave_common::catalog::FieldDisplay;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::generic::DynamicFilter;
-use super::utils::{
-    childless_record, column_names_pretty, formatter_debug_plan_node, watermark_pretty, Distill,
-};
+use super::utils::{childless_record, column_names_pretty, watermark_pretty, Distill};
 use super::{generic, ExprRewritable};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
@@ -69,33 +63,6 @@ impl Distill for StreamDynamicFilter {
         }
         vec.push(("output", column_names_pretty(self.schema())));
         childless_record("StreamDynamicFilter", vec)
-    }
-}
-
-impl fmt::Display for StreamDynamicFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = formatter_debug_plan_node!(f, "StreamDynamicFilter");
-
-        self.core.fmt_fields_with_builder(&mut builder);
-        let watermark_columns = &self.base.watermark_columns;
-        if watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        if verbose {
-            // For now, output all columns from the left side. Make it explicit here.
-            builder.field("output", &self.schema().names_str());
-        }
-
-        builder.finish()
     }
 }
 

@@ -43,6 +43,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(test)]
 #![feature(is_sorted)]
+#![feature(btree_cursors)]
 
 #[macro_use]
 extern crate tracing;
