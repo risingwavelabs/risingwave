@@ -70,7 +70,7 @@ pub async fn handle_drop_mv(
         table.id()
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_materialized_view(table_id).await?;
 
     Ok(PgResponse::empty_result(

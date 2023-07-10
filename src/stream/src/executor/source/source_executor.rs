@@ -289,7 +289,7 @@ impl<S: StateStore> SourceExecutor<S> {
             let target_split_ids: HashSet<_> =
                 target_splits.iter().map(|split| split.id()).collect();
 
-            cache.drain_filter(|split| !target_split_ids.contains(&split.id()));
+            cache.retain(|split| target_split_ids.contains(&split.id()));
 
             let dropped_splits = core
                 .stream_source_splits

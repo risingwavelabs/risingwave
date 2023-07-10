@@ -5,7 +5,7 @@ create table s0 (v1 int, v2 varchar) with (
   topic = 'kafka_1_csv_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format csv (delimiter = ',');
+) FORMAT PLAIN ENCODE CSV (delimiter = ',');
 
 statement ok
 create table s0 (v1 int, v2 varchar) with (
@@ -13,7 +13,7 @@ create table s0 (v1 int, v2 varchar) with (
   topic = 'kafka_1_csv_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format csv (delimiter = ',', without_header = true);
+) FORMAT PLAIN ENCODE CSV (delimiter = ',', without_header = true);
 
 # expect fail with invalid broker address
 statement error
@@ -22,7 +22,7 @@ create table s1 (v1 int, v2 varchar) with (
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = '127.0.0.1:9092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 create table s1 (v1 int, v2 varchar) with (
@@ -30,7 +30,7 @@ create table s1 (v1 int, v2 varchar) with (
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 select * from s1;
@@ -41,7 +41,7 @@ create table s2 (v1 int, v2 varchar) with (
   topic = 'kafka_2_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 select * from s2;
@@ -52,7 +52,7 @@ create table s3 (v1 int, v2 varchar) with (
   topic = 'kafka_3_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 select * from s3;
@@ -63,7 +63,7 @@ create table s4 (v1 int, v2 varchar) with (
   topic = 'kafka_4_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 select * from s4;
@@ -74,7 +74,7 @@ create table s5 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) append
   topic = 'kafka_4_partition_topic_with_100_message',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 select * from s5;
@@ -85,7 +85,7 @@ create table s6 (v1 int, v2 varchar) with (
   topic = 'kafka_1_partition_mv_topic',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 select * from s6;
@@ -111,7 +111,7 @@ create table s7 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
   topic = 'sink_target',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 select * from s7
@@ -127,7 +127,7 @@ create table s8 (
   connector = 'kafka',
   topic = 'debezium_log',
   properties.bootstrap.server = 'message_queue:29092'
-) row format debezium_json
+) FORMAT DEBEZIUM ENCODE JSON
 
 statement ok
 create table s8 (
@@ -140,7 +140,7 @@ create table s8 (
   connector = 'kafka',
   topic = 'debezium_log',
   properties.bootstrap.server = 'message_queue:29092'
-) row format debezium_json
+) FORMAT DEBEZIUM ENCODE JSON
 
 statement ok
 create table s8_no_schema_field (
@@ -153,7 +153,7 @@ create table s8_no_schema_field (
   connector = 'kafka',
   topic = 'debezium_log_no_schema_field',
   properties.bootstrap.server = 'message_queue:29092'
-) row format debezium_json
+) FORMAT DEBEZIUM ENCODE JSON
 
 statement ok
 create table s9 with (
@@ -161,7 +161,7 @@ create table s9 with (
   topic = 'avro_bin',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format avro (schema.location = 'file:///risingwave/avro-simple-schema.avsc');
+) FORMAT PLAIN ENCODE AVRO (schema.location = 'file:///risingwave/avro-simple-schema.avsc');
 
 statement ok
 create table s10 with (
@@ -169,7 +169,7 @@ create table s10 with (
   topic = 'avro_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format avro (schema.location = 'file:///risingwave/avro-complex-schema.avsc');
+) FORMAT PLAIN ENCODE AVRO (schema.location = 'file:///risingwave/avro-complex-schema.avsc');
 
 statement ok
 create table s11 with (
@@ -178,7 +178,7 @@ create table s11 with (
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
   proto.message = 'test.User'
-) row format protobuf (message = 'test.User', schema.location = 'file:///risingwave/proto-complex-schema');
+) FORMAT PLAIN ENCODE PROTOBUF (message = 'test.User', schema.location = 'file:///risingwave/proto-complex-schema');
 
 statement ok
 CREATE TABLE s12(
@@ -193,7 +193,7 @@ WITH (
     topic = 'json_c',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest')
-ROW format JSON;
+FORMAT PLAIN ENCODE JSON;
 
 # we cannot create maxwell source without pk
 statement error
@@ -206,7 +206,7 @@ create table s13 (
   connector = 'kafka',
   topic = 'maxwell_json',
   properties.bootstrap.server = 'message_queue:29092'
-) row format maxwell;
+) FORMAT MAXWELL ENCODE JSON;
 
 statement ok
 create table s13 (
@@ -219,7 +219,7 @@ create table s13 (
   connector = 'kafka',
   topic = 'maxwell_json',
   properties.bootstrap.server = 'message_queue:29092'
-) row format maxwell;
+) FORMAT MAXWELL ENCODE JSON;
 
 statement ok
 create table s14 (
@@ -234,7 +234,7 @@ create table s14 (
   connector = 'kafka',
   topic = 'cannal_json',
   properties.bootstrap.server = 'message_queue:29092'
-) row format CANAL_JSON;
+) FORMAT CANAL ENCODE JSON;
 
 statement ok
 create table s15 (
@@ -245,7 +245,7 @@ create table s15 (
   connector = 'kafka',
   topic = 'canal_json_double_field',
   properties.bootstrap.server = 'message_queue:29092'
-) row format CANAL_JSON;
+) FORMAT CANAL ENCODE JSON;
 
 statement ok
 create table s16 (v1 int, v2 varchar) with (
@@ -253,7 +253,7 @@ create table s16 (v1 int, v2 varchar) with (
   topic = 'kafka_4_partition_topic_with_100_message',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'latest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 create source s17 with (
@@ -262,7 +262,7 @@ create source s17 with (
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
   proto.message = 'test.User'
-) row format protobuf (message = 'test.User', schema.location = 'file:///risingwave/proto-complex-schema');
+) FORMAT PLAIN ENCODE PROTOBUF (message = 'test.User', schema.location = 'file:///risingwave/proto-complex-schema');
 
 statement ok
 create source s18 with (
@@ -270,7 +270,7 @@ create source s18 with (
   topic = 'avro_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format avro (schema.location = 'file:///risingwave/avro-complex-schema.avsc');
+) FORMAT PLAIN ENCODE AVRO (schema.location = 'file:///risingwave/avro-complex-schema.avsc');
 
 # we cannot use confluent schema registry when connector is not kafka
 statement error
@@ -279,7 +279,7 @@ with (
   connector = 'kinesis',
   topic = 'topic',
   properties.bootstrap.server = 'message_queue:29092'
-) row format avro (schema.registry = 'http://127.0.0.1:8081');
+) FORMAT PLAIN ENCODE AVRO (schema.registry = 'http://127.0.0.1:8081');
 
 # we cannot create debezium source with generated column
 statement error
@@ -293,7 +293,7 @@ create table s20 (
   connector = 'kafka',
   topic = 'debezium_log',
   properties.bootstrap.server = 'message_queue:29092'
-) row format debezium_json
+) FORMAT DEBEZIUM ENCODE JSON
 
 # create kafka source table with generated column
 statement ok
@@ -302,7 +302,7 @@ create table s21 (v1 int as v2-1, v2 int, v3 int as v2+1) with (
   topic = 'kafka_4_partition_topic_generated_columns',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 # create kafka source with generated column
 statement ok
@@ -311,7 +311,7 @@ create source s22 (v1 int as v2-1, v2 int, v3 int as v2+1, p timestamptz as proc
   topic = 'kafka_4_partition_topic_generated_columns',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 create source s23 (bytea_example bytea) with (
@@ -319,7 +319,7 @@ create source s23 (bytea_example bytea) with (
   topic = 'json_bytea',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format json
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
 create source s24 (id bytea) with (
@@ -327,7 +327,7 @@ create source s24 (id bytea) with (
   topic = 'kafka_source_format_bytes',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format bytes
+) FORMAT PLAIN ENCODE BYTES
 
 # bytes format only accept one column
 statement error 
@@ -336,7 +336,7 @@ create source s25 (v1 bytea, v2 int) with (
   topic = 'kafka_source_format_bytes',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format bytes
+) FORMAT PLAIN ENCODE BYTES
 
 # bytes format only accept bytea type
 statement error 
@@ -345,7 +345,7 @@ create source s26 (id int) with (
   topic = 'kafka_source_format_bytes',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format bytes
+) FORMAT PLAIN ENCODE BYTES
 
 statement ok
 CREATE TABLE mongo_customers (
@@ -356,7 +356,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'debezium_mongo_json_customers')
-ROW FORMAT DEBEZIUM_MONGO_JSON
+FORMAT DEBEZIUM_MONGO ENCODE JSON
 
 statement ok
 CREATE TABLE mongo_customers_no_schema_field (
@@ -367,7 +367,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'debezium_mongo_json_customers_no_schema_field')
-ROW FORMAT DEBEZIUM_MONGO_JSON
+FORMAT DEBEZIUM_MONGO ENCODE JSON
 
 # we cannot create upsert_json source without pk
 statement error
@@ -383,7 +383,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_json')
-ROW FORMAT UPSERT_JSON
+FORMAT UPSERT ENCODE JSON
 
 statement ok
 CREATE TABLE upsert_students (
@@ -398,7 +398,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_json')
-ROW FORMAT UPSERT_JSON
+FORMAT UPSERT ENCODE JSON
 
 statement ok
 CREATE TABLE dbz_ignore_case_json (
@@ -423,7 +423,7 @@ CREATE TABLE dbz_ignore_case_json (
     connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
     topic = 'debezium_ignore_case_json'
-) row format debezium_json
+) FORMAT DEBEZIUM ENCODE JSON
 
 
 statement ok

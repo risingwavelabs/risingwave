@@ -10,4 +10,4 @@ create source ad_source (
     topic = 'ad_clicks',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
