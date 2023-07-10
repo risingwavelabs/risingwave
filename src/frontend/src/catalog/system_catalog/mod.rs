@@ -256,6 +256,7 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_CAST, vec![0], read_cast },
     { PG_CATALOG, PG_MATVIEWS, vec![0, 1], read_mviews_info await },
     { PG_CATALOG, PG_USER, vec![0], read_user_info },
+    { PG_CATALOG, PG_SHADOW, vec![1], read_user_info_shadow },
     { PG_CATALOG, PG_CLASS, vec![0], read_class_info },
     { PG_CATALOG, PG_INDEX, vec![0], read_index_info },
     { PG_CATALOG, PG_OPCLASS, vec![0], read_opclass_info },
