@@ -502,16 +502,25 @@
     select count(x), sum(distinct y), sum(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x int, y int);
     select count(y), sum(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x int, y int);
     select count(distinct x), sum(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x varchar, y int);
     select string_agg(x, ','), count(distinct y) from t;
@@ -523,6 +532,10 @@
     select max(distinct x), min(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
+
 - name: agg filter - subquery
   sql: |
     /* This case is valid in PostgreSQL */
@@ -850,3 +863,31 @@
     select mode(1) within group (order by y desc) from t;
   expected_outputs:
   - binder_error
+
+- sql: |
+    create table t (x int, y int);
+    select first_value(x) from t;
+  expected_outputs:
+  - planner_error
+- sql: |
+    create table t (x int, y int);
+    select last_value(x) from t;
+  expected_outputs:
+  - planner_error
+- sql: |
+    create table t (x int, y int);
+    select first_value(x order by y asc) from t;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- sql: |
+    create table t (x int, y int);
+    select last_value(x order by y desc nulls last) from t;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT count(DISTINCT i) FROM integers;
+  expected_outputs:
+  - batch_plan

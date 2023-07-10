@@ -226,6 +226,11 @@ fn check_default_column_constraints(
         )
         .into());
     }
+    if expr.is_impure() {
+        return Err(
+            ErrorCode::BindError("impure default expr is not supported.".to_string()).into(),
+        );
+    }
     Ok(())
 }
 
@@ -713,7 +718,7 @@ pub async fn handle_create_table(
         serde_json::to_string_pretty(&graph).unwrap()
     );
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_table(source, table, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))

@@ -548,39 +548,41 @@ async fn diff_stream_and_batch(
     // Generate some mviews
     let mview_name = format!("stream_{}", i);
     let (batch, stream, table) = differential_sql_gen(rng, mvs_and_base_tables, &mview_name)?;
+    diff_stream_and_batch_with_sqls(client, i, &batch, &stream, &mview_name, &table).await
+}
 
-    tracing::info!("[EXECUTING DIFF - CREATE MVIEW id={}]: {}", i, &stream);
-    let skip_count = run_query(12, client, &stream).await?;
+async fn diff_stream_and_batch_with_sqls(
+    client: &Client,
+    i: usize,
+    batch: &str,
+    stream: &str,
+    mview_name: &str,
+    table: &Table,
+) -> Result<()> {
+    tracing::info!("[RUN CREATE MVIEW id={}]: {}", i, stream);
+    let skip_count = run_query(12, client, stream).await?;
     if skip_count > 0 {
-        tracing::info!(
-            "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
-            i,
-            &format_drop_mview(&table)
-        );
-        drop_mview_table(&table, client).await;
+        tracing::info!("[RUN DROP MVIEW id={}]: {}", i, &format_drop_mview(table));
+        drop_mview_table(table, client).await;
         return Ok(());
     }
 
     let select = format!("SELECT * FROM {}", &mview_name);
-    tracing::info!(
-        "[EXECUTING DIFF - SELECT * FROM MVIEW id={}]: {}",
-        i,
-        select
-    );
+    tracing::info!("[RUN SELECT * FROM MVIEW id={}]: {}", i, select);
     let (skip_count, stream_result) = run_query_inner(12, client, &select).await?;
     if skip_count > 0 {
         bail!("SQL should not fail: {:?}", select)
     }
 
-    tracing::info!("[EXECUTING DIFF - BATCH QUERY id={}]: {}", i, &batch);
-    let (skip_count, batch_result) = run_query_inner(12, client, &batch).await?;
+    tracing::info!("[RUN - BATCH QUERY id={}]: {}", i, &batch);
+    let (skip_count, batch_result) = run_query_inner(12, client, batch).await?;
     if skip_count > 0 {
         tracing::info!(
-            "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
+            "[DIFF - DROP MVIEW id={}]: {}",
             i,
-            &format_drop_mview(&table)
+            &format_drop_mview(table)
         );
-        drop_mview_table(&table, client).await;
+        drop_mview_table(table, client).await;
         return Ok(());
     }
     let n_stream_rows = stream_result.len();
@@ -588,11 +590,11 @@ async fn diff_stream_and_batch(
     let formatted_stream_rows = format_rows(&batch_result);
     let formatted_batch_rows = format_rows(&stream_result);
     tracing::debug!(
-        "[EXECUTING DIFF - STREAM_FORMATTED_ROW id={}]: {formatted_stream_rows}",
+        "[COMPARE - STREAM_FORMATTED_ROW id={}]: {formatted_stream_rows}",
         i,
     );
     tracing::debug!(
-        "[EXECUTING DIFF - BATCH_FORMATTED_ROW id={}]: {formatted_batch_rows}",
+        "[COMPARE - BATCH_FORMATTED_ROW id={}]: {formatted_batch_rows}",
         i,
     );
 
@@ -608,14 +610,10 @@ async fn diff_stream_and_batch(
         .collect();
 
     if diff.is_empty() {
-        tracing::info!(
-            "[EXECUTING DIFF - DROP MVIEW id={}]: {}",
-            i,
-            &format_drop_mview(&table)
-        );
+        tracing::info!("[RUN DROP MVIEW id={}]: {}", i, format_drop_mview(table));
         tracing::info!("[PASSED DIFF id={}, rows_compared={n_stream_rows}]", i);
 
-        drop_mview_table(&table, client).await;
+        drop_mview_table(table, client).await;
         Ok(())
     } else {
         bail!(

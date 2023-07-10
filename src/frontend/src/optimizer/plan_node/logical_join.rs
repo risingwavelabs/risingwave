@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::max;
 use std::collections::HashMap;
 
 use fixedbitset::FixedBitSet;
@@ -69,8 +68,7 @@ impl Distill for LogicalJoin {
         vec.push(("on", cond));
 
         if verbose {
-            let data = IndicesDisplay::from_join(&self.core, &concat_schema)
-                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            let data = IndicesDisplay::from_join(&self.core, &concat_schema);
             vec.push(("output", data));
         }
 
@@ -359,20 +357,25 @@ impl LogicalJoin {
         let order_col_ids = table_desc.order_column_ids();
         let order_key = table_desc.order_column_indices();
         let dist_key = table_desc.distribution_key.clone();
+        // The at least prefix of order key that contains distribution key.
+        let mut dist_key_in_order_key_pos = vec![];
+        for d in dist_key {
+            let pos = order_key
+                .iter()
+                .position(|&x| x == d)
+                .expect("dist_key must in order_key");
+            dist_key_in_order_key_pos.push(pos);
+        }
         // The shortest prefix of order key that contains distribution key.
-        let shortest_prefix_len = {
-            let mut max_pos = 0;
-            for d in dist_key {
-                max_pos = max(
-                    max_pos,
-                    order_key
-                        .iter()
-                        .position(|&x| x == d)
-                        .expect("dist_key must in order_key"),
-                );
-            }
-            max_pos + 1
-        };
+        let shortest_prefix_len = dist_key_in_order_key_pos
+            .iter()
+            .max()
+            .map_or(0, |pos| pos + 1);
+
+        // Distributed lookup join can't support lookup table with a singleton distribution.
+        if shortest_prefix_len == 0 {
+            return None;
+        }
 
         // Reorder the join equal predicate to match the order key.
         let mut reorder_idx = Vec::with_capacity(shortest_prefix_len);
@@ -664,11 +667,19 @@ fn derive_predicate_from_eq_condition(
     if expr.is_impure() {
         return None;
     }
-    let eq_indices = if expr_is_left {
-        eq_condition.left_eq_indexes()
-    } else {
-        eq_condition.right_eq_indexes()
-    };
+    let eq_indices = eq_condition
+        .eq_indexes_typed()
+        .iter()
+        .filter_map(|(l, r)| {
+            if l.return_type() != r.return_type() {
+                None
+            } else if expr_is_left {
+                Some(l.index())
+            } else {
+                Some(r.index())
+            }
+        })
+        .collect_vec();
     if expr
         .collect_input_refs(col_num)
         .ones()
@@ -1268,6 +1279,17 @@ impl ToBatch for LogicalJoin {
 
 impl ToStream for LogicalJoin {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        if self
+            .on()
+            .conjunctions
+            .iter()
+            .any(|cond| cond.count_nows() > 0)
+        {
+            return Err(ErrorCode::NotSupported(
+                "optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?".to_string(),
+                 "please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information".to_string()).into());
+        }
+
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),

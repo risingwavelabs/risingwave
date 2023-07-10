@@ -46,7 +46,7 @@ use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
-    LocalQueryExecution, LocalQueryStream, PinnedHummockSnapshot,
+    LocalQueryExecution, LocalQueryStream,
 };
 use crate::session::SessionImpl;
 use crate::PlanRef;
@@ -311,7 +311,19 @@ async fn execute(
         ..
     } = plan_fragmenter_result;
 
-    let is_barrier_read = session.is_barrier_read();
+    // Acquire the write guard for DML statements.
+    match stmt_type {
+        StatementType::INSERT
+        | StatementType::INSERT_RETURNING
+        | StatementType::DELETE
+        | StatementType::DELETE_RETURNING
+        | StatementType::UPDATE
+        | StatementType::UPDATE_RETURNING => {
+            session.txn_write_guard()?;
+        }
+        _ => {}
+    }
+
     let query_start_time = Instant::now();
     let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
@@ -326,35 +338,22 @@ async fn execute(
     // Used in counting row count.
     let first_field_format = formats.first().copied().unwrap_or(Format::Text);
 
-    let mut row_stream = {
-        let query_epoch = session.config().get_query_epoch();
-        let query_snapshot = if let Some(query_epoch) = query_epoch {
-            PinnedHummockSnapshot::Other(query_epoch)
-        } else {
-            // Acquire hummock snapshot for execution.
-            // TODO: if there's no table scan, we don't need to acquire snapshot.
-            let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
-            let query_id = query.query_id().clone();
-            let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, is_barrier_read)
-        };
-        match query_mode {
-            QueryMode::Auto => unreachable!(),
-            QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-                local_execute(session.clone(), query, query_snapshot).await?,
+    let mut row_stream = match query_mode {
+        QueryMode::Auto => unreachable!(),
+        QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
+            local_execute(session.clone(), query).await?,
+            column_types,
+            formats,
+            session.clone(),
+        )),
+        // Local mode do not support cancel tasks.
+        QueryMode::Distributed => {
+            PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
+                distribute_execute(session.clone(), query).await?,
                 column_types,
                 formats,
                 session.clone(),
-            )),
-            // Local mode do not support cancel tasks.
-            QueryMode::Distributed => {
-                PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                    distribute_execute(session.clone(), query, query_snapshot).await?,
-                    column_types,
-                    formats,
-                    session.clone(),
-                ))
-            }
+            ))
         }
     };
 
@@ -452,30 +451,27 @@ async fn execute(
 async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    pinned_snapshot: PinnedHummockSnapshot,
 ) -> Result<DistributedQueryStream> {
     let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
     let query_manager = session.env().query_manager().clone();
+
     query_manager
-        .schedule(execution_context, query, pinned_snapshot)
+        .schedule(execution_context, query)
         .await
         .map_err(|err| err.into())
 }
 
-#[expect(clippy::unused_async)]
-async fn local_execute(
-    session: Arc<SessionImpl>,
-    query: Query,
-    pinned_snapshot: PinnedHummockSnapshot,
-) -> Result<LocalQueryStream> {
+async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQueryStream> {
     let front_env = session.env();
+    // TODO: if there's no table scan, we don't need to acquire snapshot.
+    let snapshot = session.pinned_snapshot().await?;
 
     // TODO: Passing sql here
     let execution = LocalQueryExecution::new(
         query,
         front_env.clone(),
         "",
-        pinned_snapshot,
+        snapshot,
         session.auth_context(),
         session.reset_cancel_query_flag(),
     );

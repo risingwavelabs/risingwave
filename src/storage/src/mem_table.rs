@@ -22,7 +22,6 @@ use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::util::value_encoding::ValueRowSerde;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
@@ -31,6 +30,7 @@ use crate::hummock::utils::{
     cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
     do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
 };
+use crate::row_serde::value_serde::ValueRowSerde;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 
@@ -338,34 +338,33 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
 }
 
 impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
-    type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
-    type GetFuture<'a> = impl GetFutureTrait<'a>;
-    type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
 
-    define_local_state_store_associated_type!();
-
-    fn may_exist(
+    #[allow(clippy::unused_async)]
+    async fn may_exist(
         &self,
         _key_range: IterKeyRange,
         _read_options: ReadOptions,
-    ) -> Self::MayExistFuture<'_> {
-        async { Ok(true) }
+    ) -> StorageResult<bool> {
+        Ok(true)
     }
 
-    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
-        async move {
-            match self.mem_table.buffer.get(&key) {
-                None => self.inner.get(key, self.epoch(), read_options).await,
-                Some(op) => match op {
-                    KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
-                    KeyOp::Delete(_) => Ok(None),
-                },
-            }
+    async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+        match self.mem_table.buffer.get(&key) {
+            None => self.inner.get(key, self.epoch(), read_options).await,
+            Some(op) => match op {
+                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
+                KeyOp::Delete(_) => Ok(None),
+            },
         }
     }
 
-    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
+    #[allow(clippy::manual_async_fn)]
+    fn iter(
+        &self,
+        key_range: IterKeyRange,
+        read_options: ReadOptions,
+    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
         async move {
             let stream = self
                 .inner
@@ -394,76 +393,76 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         Ok(self.mem_table.delete(key, old_val)?)
     }
 
-    fn flush(&mut self, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) -> Self::FlushFuture<'_> {
-        async move {
-            debug_assert!(delete_ranges
-                .iter()
-                .map(|(key, _)| key)
-                .is_sorted_by(|a, b| Some(cmp_delete_range_left_bounds(a.as_ref(), b.as_ref()))));
-            let buffer = self.mem_table.drain().into_parts();
-            let mut kv_pairs = Vec::with_capacity(buffer.len());
-            for (key, key_op) in filter_with_delete_range(buffer.into_iter(), delete_ranges.iter())
-            {
-                match key_op {
-                    // Currently, some executors do not strictly comply with these semantics. As
-                    // a workaround you may call disable the check by initializing the
-                    // state store with `is_consistent_op=false`.
-                    KeyOp::Insert(value) => {
-                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
-                            do_insert_sanity_check(
-                                key.clone(),
-                                value.clone(),
-                                &self.inner,
-                                self.epoch(),
-                                self.table_id,
-                                self.table_option,
-                            )
-                            .await?;
-                        }
-                        kv_pairs.push((key, StorageValue::new_put(value)));
+    async fn flush(
+        &mut self,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+    ) -> StorageResult<usize> {
+        debug_assert!(delete_ranges
+            .iter()
+            .map(|(key, _)| key)
+            .is_sorted_by(|a, b| Some(cmp_delete_range_left_bounds(a.as_ref(), b.as_ref()))));
+        let buffer = self.mem_table.drain().into_parts();
+        let mut kv_pairs = Vec::with_capacity(buffer.len());
+        for (key, key_op) in filter_with_delete_range(buffer.into_iter(), delete_ranges.iter()) {
+            match key_op {
+                // Currently, some executors do not strictly comply with these semantics. As
+                // a workaround you may call disable the check by initializing the
+                // state store with `is_consistent_op=false`.
+                KeyOp::Insert(value) => {
+                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                        do_insert_sanity_check(
+                            key.clone(),
+                            value.clone(),
+                            &self.inner,
+                            self.epoch(),
+                            self.table_id,
+                            self.table_option,
+                        )
+                        .await?;
                     }
-                    KeyOp::Delete(old_value) => {
-                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
-                            do_delete_sanity_check(
-                                key.clone(),
-                                old_value,
-                                &self.inner,
-                                self.epoch(),
-                                self.table_id,
-                                self.table_option,
-                            )
-                            .await?;
-                        }
-                        kv_pairs.push((key, StorageValue::new_delete()));
+                    kv_pairs.push((key, StorageValue::new_put(value)));
+                }
+                KeyOp::Delete(old_value) => {
+                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                        do_delete_sanity_check(
+                            key.clone(),
+                            old_value,
+                            &self.inner,
+                            self.epoch(),
+                            self.table_id,
+                            self.table_option,
+                        )
+                        .await?;
                     }
-                    KeyOp::Update((old_value, new_value)) => {
-                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
-                            do_update_sanity_check(
-                                key.clone(),
-                                old_value,
-                                new_value.clone(),
-                                &self.inner,
-                                self.epoch(),
-                                self.table_id,
-                                self.table_option,
-                            )
-                            .await?;
-                        }
-                        kv_pairs.push((key, StorageValue::new_put(new_value)));
+                    kv_pairs.push((key, StorageValue::new_delete()));
+                }
+                KeyOp::Update((old_value, new_value)) => {
+                    if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                        do_update_sanity_check(
+                            key.clone(),
+                            old_value,
+                            new_value.clone(),
+                            &self.inner,
+                            self.epoch(),
+                            self.table_id,
+                            self.table_option,
+                        )
+                        .await?;
                     }
+                    kv_pairs.push((key, StorageValue::new_put(new_value)));
                 }
             }
-            self.inner
-                .ingest_batch(
-                    kv_pairs,
-                    delete_ranges,
-                    WriteOptions {
-                        epoch: self.epoch(),
-                        table_id: self.table_id,
-                    },
-                )
-                .await
         }
+        self.inner
+            .ingest_batch(
+                kv_pairs,
+                delete_ranges,
+                WriteOptions {
+                    epoch: self.epoch(),
+                    table_id: self.table_id,
+                },
+            )
+            .await
     }
 
     fn epoch(&self) -> u64 {

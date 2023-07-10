@@ -9,7 +9,7 @@
             s_phone VARCHAR,
             s_acctbal NUMERIC,
             s_comment VARCHAR
-    ) WITH( connector = 'datagen' ) ROW FORMAT JSON;
+    ) WITH( connector = 'datagen' ) FORMAT PLAIN ENCODE JSON;
 
     CREATE SOURCE part (
             p_partkey INTEGER,
@@ -21,7 +21,7 @@
             p_container VARCHAR,
             p_retailprice NUMERIC,
             p_comment VARCHAR
-    ) WITH( connector = 'datagen' ) ROW FORMAT JSON;
+    ) WITH( connector = 'datagen' ) FORMAT PLAIN ENCODE JSON;
 
     CREATE SOURCE partsupp (
             ps_partkey INTEGER,
@@ -29,7 +29,7 @@
             ps_availqty INTEGER,
             ps_supplycost NUMERIC,
             ps_comment VARCHAR
-    ) WITH( connector = 'datagen' ) ROW FORMAT JSON;
+    ) WITH( connector = 'datagen' ) FORMAT PLAIN ENCODE JSON;
 
     CREATE SOURCE customer (
             c_custkey INTEGER,
@@ -40,7 +40,7 @@
             c_acctbal NUMERIC,
             c_mktsegment VARCHAR,
             c_comment VARCHAR
-    ) WITH( connector = 'datagen' ) ROW FORMAT JSON;
+    ) WITH( connector = 'datagen' ) FORMAT PLAIN ENCODE JSON;
 
     CREATE SOURCE orders (
             o_orderkey BIGINT,
@@ -52,7 +52,7 @@
             o_clerk VARCHAR,
             o_shippriority INTEGER,
             o_comment VARCHAR
-    ) WITH( connector = 'datagen' ) ROW FORMAT JSON;
+    ) WITH( connector = 'datagen' ) FORMAT PLAIN ENCODE JSON;
 
     CREATE SOURCE lineitem (
             l_orderkey BIGINT,
@@ -71,20 +71,20 @@
             l_shipinstruct VARCHAR,
             l_shipmode VARCHAR,
             l_comment VARCHAR
-    ) WITH( connector = 'datagen' ) ROW FORMAT JSON;
+    ) WITH( connector = 'datagen' ) FORMAT PLAIN ENCODE JSON;
 
     CREATE SOURCE nation (
             n_nationkey INTEGER,
             n_name VARCHAR,
             n_regionkey INTEGER,
             n_comment VARCHAR
-    ) WITH( connector = 'datagen' ) ROW FORMAT JSON;
+    ) WITH( connector = 'datagen' ) FORMAT PLAIN ENCODE JSON;
 
     CREATE SOURCE region (
             r_regionkey INTEGER,
             r_name VARCHAR,
             r_comment VARCHAR
-    ) WITH( connector = 'datagen' ) ROW FORMAT JSON;
+    ) WITH( connector = 'datagen' ) FORMAT PLAIN ENCODE JSON;
 - id: tpch_q2
   before:
   - create_tables

@@ -172,7 +172,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 13
 
   - label: "unit test (deterministic simulation)"
     command: "MADSIM_TEST_NUM=50 ci/scripts/deterministic-unit-test.sh"
