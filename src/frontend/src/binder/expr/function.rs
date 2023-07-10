@@ -336,15 +336,6 @@ impl Binder {
             .map(|arg| self.bind_function_arg(arg.clone()))
             .flatten_ok()
             .try_collect()?;
-
-        if f.distinct && args.is_empty() {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "DISTINCT is not allowed for aggregate function `{}` without args",
-                kind
-            ))
-            .into());
-        }
-
         let order_by = OrderBy::new(
             f.order_by
                 .into_iter()
@@ -353,6 +344,14 @@ impl Binder {
         );
 
         if f.distinct {
+            if kind == AggKind::ApproxCountDistinct {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "DISTINCT is not allowed for approximate aggregation `{}`",
+                    kind
+                ))
+                .into());
+            }
+
             if args.is_empty() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "DISTINCT is not allowed for aggregate function `{}` without args",
