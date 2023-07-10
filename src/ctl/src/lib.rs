@@ -19,6 +19,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use itertools::Itertools;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
 use crate::cmd_impl::hummock::{
@@ -64,6 +65,9 @@ enum Commands {
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
+    /// Commands for Debug
+    #[clap(subcommand)]
+    Debug(DebugCommands),
     /// Commands for tracing the compute nodes
     Trace,
     // TODO(yuhao): profile other nodes
@@ -71,6 +75,15 @@ enum Commands {
     Profile {
         #[clap(short, long = "sleep")]
         sleep: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum DebugCommands {
+    /// Show all the configuration parameters on compute node
+    Dump {
+        #[clap(long, required = true, value_delimiter = ',')]
+        etcd_endpoints: Vec<String>,
     },
 }
 
@@ -508,6 +521,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Scale(ScaleCommands::Uncordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Schedulable)
                 .await?
+        }
+        Commands::Debug(DebugCommands::Dump { etcd_endpoints }) => {
+            cmd_impl::debug::dump(etcd_endpoints).await?
         }
     }
     Ok(())
