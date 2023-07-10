@@ -24,6 +24,8 @@ use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::level_handler::LevelHandler;
 
+const MAX_LEVEL_COUNT: usize = 32;
+
 pub struct MinOverlappingPicker {
     level: usize,
     target_level: usize,
@@ -207,7 +209,14 @@ impl NonOverlapSubLevelPicker {
 
             if ret.total_file_size >= self.max_compaction_bytes
                 || ret.total_file_count >= self.max_file_count as usize
+                || ret
+                    .sstable_infos
+                    .iter()
+                    .filter(|ssts| !ssts.is_empty())
+                    .count()
+                    > MAX_LEVEL_COUNT
             {
+                // Too many sub-level will use more memory for merging-iterator.
                 break;
             }
 
