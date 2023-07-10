@@ -30,6 +30,7 @@ pub(crate) async fn do_flush(session: &SessionImpl) -> Result<()> {
     session
         .env()
         .hummock_snapshot_manager()
-        .update_epoch(snapshot);
+        .wait(snapshot)
+        .await;
     Ok(())
 }

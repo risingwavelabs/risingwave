@@ -21,7 +21,7 @@ use tokio::sync::OnceCell;
 
 use super::SessionImpl;
 use crate::catalog::catalog_service::CatalogWriter;
-use crate::scheduler::{PinnedHummockSnapshot, PinnedHummockSnapshotRef, SchedulerResult};
+use crate::scheduler::{ReadSnapshot, SchedulerResult};
 use crate::user::user_service::UserInfoWriter;
 
 /// Globally unique transaction id in this frontend instance.
@@ -64,7 +64,7 @@ pub struct Context {
 
     /// The snapshot of the transaction, acquired lazily at the first read operation in the
     /// transaction.
-    snapshot: Arc<OnceCell<PinnedHummockSnapshotRef>>,
+    snapshot: Arc<OnceCell<ReadSnapshot>>,
 }
 
 /// Transaction state.
@@ -198,7 +198,7 @@ impl SessionImpl {
     /// Acquires and pins a snapshot for the current transaction.
     ///
     /// If a snapshot is already acquired, returns it directly.
-    pub async fn pinned_snapshot(&self) -> SchedulerResult<PinnedHummockSnapshotRef> {
+    pub async fn pinned_snapshot(&self) -> SchedulerResult<ReadSnapshot> {
         let (id, snapshot) = {
             let ctx = self.txn_ctx();
             (ctx.id, ctx.snapshot.clone())
@@ -209,13 +209,17 @@ impl SessionImpl {
                 let query_epoch = self.config().get_query_epoch();
 
                 let query_snapshot = if let Some(query_epoch) = query_epoch {
-                    PinnedHummockSnapshot::Other(query_epoch)
+                    ReadSnapshot::Other(query_epoch)
                 } else {
                     // Acquire hummock snapshot for execution.
                     let is_barrier_read = self.is_barrier_read();
                     let hummock_snapshot_manager = self.env().hummock_snapshot_manager();
-                    let pinned_snapshot = hummock_snapshot_manager.acquire(id).await?;
-                    PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, is_barrier_read)
+                    let pinned_snapshot = hummock_snapshot_manager.acquire();
+
+                    ReadSnapshot::FrontendPinned {
+                        snapshot: pinned_snapshot,
+                        is_barrier_read,
+                    }
                 };
 
                 Ok(query_snapshot.into())

@@ -24,8 +24,9 @@ use crate::session::SessionImpl;
 
 mod distributed;
 pub use distributed::*;
-mod hummock_snapshot_manager;
-pub use hummock_snapshot_manager::*;
+// mod hummock_snapshot_manager;
+pub use new_hummock_snapshot_manager::*;
+mod new_hummock_snapshot_manager;
 pub mod plan_fragmenter;
 pub use plan_fragmenter::BatchPlanFragmenter;
 mod local;
