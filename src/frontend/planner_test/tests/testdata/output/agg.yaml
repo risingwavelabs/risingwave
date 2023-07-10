@@ -1542,3 +1542,13 @@
       └─StreamSimpleAgg { aggs: [last_value(t.x order_by(t.y DESC NULLS LAST)), count] }
         └─StreamExchange { dist: Single }
           └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT count(DISTINCT i) FROM integers;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum0(count(integers.i))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count(integers.i)] }
+        └─BatchHashAgg { group_key: [integers.i], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(integers.i) }
+            └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }

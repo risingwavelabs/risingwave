@@ -886,3 +886,8 @@
   expected_outputs:
   - batch_plan
   - stream_plan
+- sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT count(DISTINCT i) FROM integers;
+  expected_outputs:
+  - batch_plan

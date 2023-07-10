@@ -15,7 +15,6 @@
 //! Provides E2E Test runner functionality.
 
 use std::collections::HashSet;
-use std::path::Path;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -31,13 +30,8 @@ use crate::utils::{create_file, read_file_contents, write_to_file};
 type Result<A> = anyhow::Result<A>;
 
 /// Shrinks a given failing query file.
-/// The shrunk query will be written to [`{outdir}/{filename}.reduced.sql`].
-pub fn shrink_file(input_file_path: &str, outdir: &str) -> Result<()> {
+pub fn shrink_file(input_file_path: &str, output_file_path: &str) -> Result<()> {
     // read failed sql
-    let file_stem = Path::new(input_file_path)
-        .file_stem()
-        .ok_or_else(|| anyhow!("Failed to stem input file path: {input_file_path}"))?;
-    let output_file_path = format!("{outdir}/{}.reduced.sql", file_stem.to_string_lossy());
     let file_contents = read_file_contents(input_file_path)?;
 
     // reduce failed sql

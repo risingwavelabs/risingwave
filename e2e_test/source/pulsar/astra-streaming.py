@@ -24,7 +24,7 @@ def do_test(config):
                     service.url='pulsar+ssl://pulsar-gcp-useast1.streaming.datastax.com:6651',
                     auth.token='{config['ASTRA_STREAMING_TOKEN']}'
                     )
-                    ROW FORMAT JSON''')
+                    FORMAT PLAIN ENCODE JSON''')
     sleep(5)
 
     # Do test with slt

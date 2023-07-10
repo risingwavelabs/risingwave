@@ -161,7 +161,7 @@ pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
 /// query T
 /// select rpad('abc', 5);
 /// ----
-/// abc  
+/// abc
 ///
 /// query T
 /// select rpad('abcdef', 3);
