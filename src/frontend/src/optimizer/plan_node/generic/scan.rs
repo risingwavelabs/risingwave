@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
@@ -43,7 +44,7 @@ pub struct Scan {
     /// Stored as a field so we don't have to re-compute it each time.
     pub table_desc: Rc<TableDesc>,
     /// Table Catalog of the upstream table that the descriptor is derived from.
-    pub table_catalog: Option<Rc<TableCatalog>>,
+    pub table_catalog: Option<Arc<TableCatalog>>,
     // Descriptors of all indexes on this table
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
@@ -173,7 +174,7 @@ impl Scan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        index_table_catalog: Rc<TableCatalog>,
+        index_table_catalog: Arc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
     ) -> Self {
@@ -240,7 +241,7 @@ impl Scan {
         is_sys_table: bool,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
-        table_catalog: Option<Rc<TableCatalog>>,
+        table_catalog: Option<Arc<TableCatalog>>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table

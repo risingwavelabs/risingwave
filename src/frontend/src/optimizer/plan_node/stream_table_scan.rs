@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
@@ -95,7 +96,7 @@ impl StreamTableScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        index_table_catalog: Rc<TableCatalog>,
+        index_table_catalog: Arc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
         chain_type: ChainType,

@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -86,7 +87,7 @@ impl LogicalScan {
     pub fn create(
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
-        table_catalog: Option<Rc<TableCatalog>>,
+        table_catalog: Option<Arc<TableCatalog>>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
@@ -130,13 +131,7 @@ impl LogicalScan {
         self.core.table_desc.as_ref()
     }
 
-    /// Get a reference to the logical scan's table catalog.
-    pub fn table_catalog(&self) -> &Option<TableCatalog> {
-        todo!()
-        // self.core.table_catalog.as_ref()
-    }
-
-    pub fn table_catalog_rc(&self) -> Option<Rc<TableCatalog>> {
+    pub fn table_catalog(&self) -> Option<Arc<TableCatalog>> {
         self.core.table_catalog.clone()
     }
 
@@ -223,7 +218,7 @@ impl LogicalScan {
             let index_scan = self.core.to_index_scan(
                 &index.name,
                 index.index_table.table_desc().into(),
-                (*index.index_table).clone().into(),
+                index.index_table.clone(),
                 p2s_mapping,
                 index.function_mapping(),
             );
@@ -301,7 +296,7 @@ impl LogicalScan {
             self.is_sys_table(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
-            self.table_catalog_rc(),
+            self.table_catalog(),
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             predicate,

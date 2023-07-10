@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -309,7 +310,7 @@ fn build_index_item(
 fn assemble_materialize(
     table_name: String,
     table_desc: Rc<TableDesc>,
-    table_catalog: Rc<TableCatalog>,
+    table_catalog: Arc<TableCatalog>,
     context: OptimizerContextRef,
     index_name: String,
     index_columns: &[(ExprImpl, OrderType)],
