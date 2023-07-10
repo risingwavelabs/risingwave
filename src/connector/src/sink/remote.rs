@@ -335,7 +335,7 @@ impl SinkWriterV1 for RemoteSinkWriter {
     }
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.begin_epoch(epoch).await?;
+        self.stream_handle.start_epoch(epoch).await?;
         self.epoch = Some(epoch);
         Ok(())
     }
@@ -359,7 +359,9 @@ mod test {
 
     use risingwave_common::array::StreamChunk;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_pb::connector_service::sink_response::{Response, SyncResponse};
+    use risingwave_pb::connector_service::sink_response::{
+        Response, StartEpochResponse, SyncResponse, WriteResponse,
+    };
     use risingwave_pb::connector_service::sink_stream_request::write_batch::Payload;
     use risingwave_pb::connector_service::sink_stream_request::{Request, SyncBatch};
     use risingwave_pb::connector_service::{SinkResponse, SinkStreamRequest};
@@ -429,6 +431,11 @@ mod test {
         );
 
         // test write batch
+        response_sender
+            .send(Ok(SinkResponse {
+                response: Some(Response::StartEpoch(StartEpochResponse { epoch: 2022 })),
+            }))
+            .expect("test failed: failed to start epoch");
         sink.begin_epoch(2022).await.unwrap();
         assert_eq!(sink.epoch, Some(2022));
 
@@ -437,6 +444,14 @@ mod test {
             .await
             .expect("test failed: failed to construct start_epoch request");
 
+        response_sender
+            .send(Ok(SinkResponse {
+                response: Some(Response::Write(WriteResponse {
+                    epoch: 2022,
+                    batch_id: 0,
+                })),
+            }))
+            .expect("test failed: failed to start epoch");
         sink.write_batch(chunk_a.clone()).await.unwrap();
         assert_eq!(sink.epoch, Some(2022));
         assert_eq!(sink.batch_id, 1);
@@ -480,12 +495,25 @@ mod test {
         }
 
         // begin another epoch
+        response_sender
+            .send(Ok(SinkResponse {
+                response: Some(Response::StartEpoch(StartEpochResponse { epoch: 2023 })),
+            }))
+            .expect("test failed: failed to start epoch");
         sink.begin_epoch(2023).await.unwrap();
         // simply keep the channel empty since we've tested begin_epoch
         let _ = request_receiver.recv().await.unwrap();
         assert_eq!(sink.epoch, Some(2023));
 
         // test another write
+        response_sender
+            .send(Ok(SinkResponse {
+                response: Some(Response::Write(WriteResponse {
+                    epoch: 2022,
+                    batch_id: 1,
+                })),
+            }))
+            .expect("test failed: failed to start epoch");
         sink.write_batch(chunk_b.clone()).await.unwrap();
         assert_eq!(sink.epoch, Some(2023));
         assert_eq!(sink.batch_id, 2);
