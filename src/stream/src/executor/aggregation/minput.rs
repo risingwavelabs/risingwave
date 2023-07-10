@@ -479,7 +479,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call_1 = AggCall::from_pretty("(min:varchar $0:varchar)"); // min(a)
-        let agg_call_2 = AggCall::from_pretty("(max:varchar $1:varchar)"); // max(b)
+        let agg_call_2 = AggCall::from_pretty("(max:int4 $1:int4)"); // max(b)
         let group_key = None;
 
         let (mut table_1, mapping_1) = create_mem_state_table(
@@ -953,7 +953,7 @@ mod tests {
         let field4 = Field::unnamed(DataType::Int64);
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
-        let agg_call = AggCall::from_pretty("(array_agg:int4 $1:int4 orderby $2:asc $0:desc)");
+        let agg_call = AggCall::from_pretty("(array_agg:int4[] $1:int4 orderby $2:asc $0:desc)");
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(

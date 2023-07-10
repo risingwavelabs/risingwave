@@ -33,18 +33,7 @@ mod percentile_cont;
 mod percentile_disc;
 mod string_agg;
 
-// wrappers
-// XXX(wrj): should frontend plan these as operators?
-mod distinct;
-mod filter;
-mod orderby;
-mod projection;
-
 pub use self::def::*;
-use self::distinct::Distinct;
-use self::filter::*;
-use self::orderby::ProjectionOrderBy;
-use self::projection::Projection;
 
 /// An `Aggregator` supports `update` data and `output` result.
 #[async_trait::async_trait]
@@ -96,6 +85,9 @@ impl EstimateSize for BoxedAggState {
 }
 
 /// Build an `Aggregator` from `AggCall`.
+///
+/// NOTE: This function ignores argument indices, `column_orders`, `filter` and `distinct` in
+/// `AggCall`. Such operations should be done in batch or streaming executors.
 pub fn build(agg: AggCall) -> Result<BoxedAggState> {
     // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
 
@@ -117,24 +109,5 @@ pub fn build(agg: AggCall) -> Result<BoxedAggState> {
             ))
         })?;
 
-    let mut aggregator = (desc.build)(agg.clone())?;
-
-    if agg.distinct {
-        aggregator = Box::new(Distinct::new(aggregator));
-    }
-    if agg.column_orders.is_empty() {
-        aggregator = Box::new(Projection::new(agg.args.val_indices().to_vec(), aggregator));
-    } else {
-        aggregator = Box::new(ProjectionOrderBy::new(
-            agg.args.arg_types().to_vec(),
-            agg.args.val_indices().to_vec(),
-            agg.column_orders,
-            aggregator,
-        ));
-    }
-    if let Some(expr) = agg.filter {
-        aggregator = Box::new(Filter::new(expr, aggregator));
-    }
-
-    Ok(aggregator)
+    (desc.build)(agg.clone())
 }
