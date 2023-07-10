@@ -86,7 +86,7 @@ impl LogicalScan {
     pub fn create(
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
-        table_catalog: Rc<TableCatalog>,
+        table_catalog: Option<Rc<TableCatalog>>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
@@ -97,7 +97,7 @@ impl LogicalScan {
             false,
             (0..table_desc.columns.len()).collect(),
             table_desc,
-            Some(table_catalog),
+            table_catalog,
             indexes,
             ctx,
             Condition::true_cond(),
@@ -131,8 +131,13 @@ impl LogicalScan {
     }
 
     /// Get a reference to the logical scan's table catalog.
-    pub fn table_catalog(&self) -> &TableCatalog {
-        self.core.table_catalog.as_ref()
+    pub fn table_catalog(&self) -> &Option<TableCatalog> {
+        todo!()
+        // self.core.table_catalog.as_ref()
+    }
+
+    pub fn table_catalog_rc(&self) -> Option<Rc<TableCatalog>> {
+        self.core.table_catalog.clone()
     }
 
     /// Get the descs of the output columns.
@@ -218,7 +223,7 @@ impl LogicalScan {
             let index_scan = self.core.to_index_scan(
                 &index.name,
                 index.index_table.table_desc().into(),
-                index.index_table.into(),
+                (*index.index_table).clone().into(),
                 p2s_mapping,
                 index.function_mapping(),
             );
@@ -296,6 +301,7 @@ impl LogicalScan {
             self.is_sys_table(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
+            self.table_catalog_rc(),
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             predicate,

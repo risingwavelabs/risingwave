@@ -224,7 +224,7 @@ impl Scan {
             false,
             new_output_col_idx,
             index_table_desc,
-            index_table_catalog,
+            Some(index_table_catalog),
             vec![],
             self.ctx.clone(),
             new_predicate,

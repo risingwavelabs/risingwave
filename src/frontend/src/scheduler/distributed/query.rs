@@ -464,6 +464,7 @@ pub(crate) mod tests {
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
+    use crate::TableCatalog;
 
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
@@ -530,7 +531,7 @@ pub(crate) mod tests {
                 watermark_columns: FixedBitSet::with_capacity(3),
                 versioned: false,
             }),
-            table_catalog,
+            table_catalog.into(),
             vec![],
             ctx,
             false,

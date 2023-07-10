@@ -94,7 +94,7 @@ impl Rule for IndexDeltaJoinRule {
                         .to_index_scan(
                             index.index_table.name.as_str(),
                             index.index_table.table_desc().into(),
-                            index.index_table.into(),
+                            (*index.index_table).clone().into(),
                             p2s_mapping,
                             index.function_mapping(),
                             chain_type,
