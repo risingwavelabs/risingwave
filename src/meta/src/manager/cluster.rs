@@ -544,7 +544,7 @@ impl ClusterManagerCore {
             let worker_type = worker.worker_node.get_type().unwrap();
 
             if worker.worker_node.transactional_id.is_none()
-                && worker_type == WorkerType::ComputeNode
+                && (worker_type == WorkerType::ComputeNode || worker_type == WorkerType::Frontend)
             {
                 let worker_id = worker.worker_node.id;
 
