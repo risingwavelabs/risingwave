@@ -758,7 +758,7 @@ pub async fn handle_create_source(
 
     if stmt.source_schema.row_encode == Encode::Json && stmt.columns.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
-            "schema definition is required for ROW FORMAT JSON".to_owned(),
+            "schema definition is required for ENCODE JSON".to_owned(),
         )));
     }
 
