@@ -55,6 +55,15 @@ impl Direction {
     }
 }
 
+impl Direction {
+    fn reverse(self) -> Self {
+        match self {
+            Self::Ascending => Self::Descending,
+            Self::Descending => Self::Ascending,
+        }
+    }
+}
+
 /// Nulls are largest/smallest.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
 enum NullsAre {
@@ -200,6 +209,10 @@ impl OrderType {
 
     pub fn nulls_are_last(&self) -> bool {
         !self.nulls_are_first()
+    }
+
+    pub fn reverse(self) -> Self {
+        Self::new(self.direction.reverse(), self.nulls_are)
     }
 }
 
@@ -590,6 +603,17 @@ mod tests {
         assert!(OrderType::descending_nulls_last().is_descending());
         assert!(OrderType::descending_nulls_last().nulls_are_smallest());
         assert!(OrderType::descending_nulls_last().nulls_are_last());
+
+        assert_eq!(OrderType::ascending().reverse(), OrderType::descending());
+        assert_eq!(OrderType::descending().reverse(), OrderType::ascending());
+        assert_eq!(
+            OrderType::ascending_nulls_first().reverse(),
+            OrderType::descending_nulls_last()
+        );
+        assert_eq!(
+            OrderType::ascending_nulls_last().reverse(),
+            OrderType::descending_nulls_first()
+        );
     }
 
     #[test]

@@ -153,7 +153,7 @@ pub async fn handle_create_function(
         owner: session.user_id(),
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_function(function).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))

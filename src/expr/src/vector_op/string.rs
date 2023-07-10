@@ -161,7 +161,7 @@ pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
 /// query T
 /// select rpad('abc', 5);
 /// ----
-/// abc  
+/// abc
 ///
 /// query T
 /// select rpad('abcdef', 3);
@@ -401,17 +401,24 @@ pub fn quote_ident(s: &str, writer: &mut dyn Write) {
 /// query T
 /// select left('RisingWave', 0)
 /// ----
+/// (empty)
 ///
 /// query T
 /// select left('RisingWave', -4)
 /// ----
 /// Rising
+///
+/// query T
+/// select left('RisingWave', -2147483648);
+/// ----
+/// (empty)
+/// ```
 #[function("left(varchar, int32) -> varchar")]
 pub fn left(s: &str, n: i32, writer: &mut dyn Write) {
     let n = if n >= 0 {
         n as usize
     } else {
-        s.chars().count().saturating_sub(-n as usize)
+        s.chars().count().saturating_add_signed(n as isize)
     };
 
     s.chars()
@@ -438,17 +445,26 @@ pub fn left(s: &str, n: i32, writer: &mut dyn Write) {
 /// query T
 /// select right('RisingWave', 0)
 /// ----
+/// (empty)
 ///
 /// query T
 /// select right('RisingWave', -6)
 /// ----
 /// Wave
+///
+/// # PostgreSQL returns the whole string due to an overflow bug, which we do not follow.
+/// query T
+/// select right('RisingWave', -2147483648);
+/// ----
+/// (empty)
+/// ```
 #[function("right(varchar, int32) -> varchar")]
 pub fn right(s: &str, n: i32, writer: &mut dyn Write) {
     let skip = if n >= 0 {
         s.chars().count().saturating_sub(n as usize)
     } else {
-        -n as usize
+        // `n as usize` is signed extended. This is `-n` without overflow.
+        usize::MAX - (n as usize) + 1
     };
 
     s.chars()

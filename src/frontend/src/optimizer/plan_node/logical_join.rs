@@ -68,8 +68,7 @@ impl Distill for LogicalJoin {
         vec.push(("on", cond));
 
         if verbose {
-            let data = IndicesDisplay::from_join(&self.core, &concat_schema)
-                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            let data = IndicesDisplay::from_join(&self.core, &concat_schema);
             vec.push(("output", data));
         }
 
@@ -668,11 +667,19 @@ fn derive_predicate_from_eq_condition(
     if expr.is_impure() {
         return None;
     }
-    let eq_indices = if expr_is_left {
-        eq_condition.left_eq_indexes()
-    } else {
-        eq_condition.right_eq_indexes()
-    };
+    let eq_indices = eq_condition
+        .eq_indexes_typed()
+        .iter()
+        .filter_map(|(l, r)| {
+            if l.return_type() != r.return_type() {
+                None
+            } else if expr_is_left {
+                Some(l.index())
+            } else {
+                Some(r.index())
+            }
+        })
+        .collect_vec();
     if expr
         .collect_input_refs(col_num)
         .ones()

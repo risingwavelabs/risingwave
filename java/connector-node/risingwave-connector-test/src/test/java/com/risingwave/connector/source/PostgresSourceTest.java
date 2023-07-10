@@ -173,7 +173,7 @@ public class PostgresSourceTest {
                 "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
         SourceTestClient.performQuery(connDbz, query);
         // create a partial publication, check whether error is reported
-        query = "CREATE PUBLICATION dbz_publication FOR TABLE orders (o_key)";
+        query = "CREATE PUBLICATION rw_publication FOR TABLE orders (o_key)";
         SourceTestClient.performQuery(connDbz, query);
         ConnectorServiceProto.TableSchema tableSchema =
                 ConnectorServiceProto.TableSchema.newBuilder()
@@ -208,7 +208,7 @@ public class PostgresSourceTest {
                             "test",
                             "orders");
             assertEquals(
-                    "INVALID_ARGUMENT: The publication 'dbz_publication' does not cover all necessary columns in table orders",
+                    "INVALID_ARGUMENT: The publication 'rw_publication' does not cover all columns of the table 'public.orders'",
                     resp.getError().getErrorMessage());
             query = "DROP PUBLICATION dbz_publication";
             SourceTestClient.performQuery(connDbz, query);
