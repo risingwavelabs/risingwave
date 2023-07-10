@@ -163,7 +163,7 @@ pub async fn handle_grant_privilege(
     };
 
     let privileges = make_prost_privilege(&session, privileges, objects)?;
-    let user_info_writer = session.env().user_info_writer();
+    let user_info_writer = session.user_info_writer()?;
     user_info_writer
         .grant_privilege(users, privileges, with_grant_option, session.user_id())
         .await?;
@@ -207,7 +207,7 @@ pub async fn handle_revoke_privilege(
         }
     };
     let privileges = make_prost_privilege(&session, privileges, objects)?;
-    let user_info_writer = session.env().user_info_writer();
+    let user_info_writer = session.user_info_writer()?;
     user_info_writer
         .revoke_privilege(
             users,
