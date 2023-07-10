@@ -26,6 +26,7 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_json::Value;
 
@@ -182,7 +183,7 @@ impl Sink for KafkaSink {
         ))
     }
 
-    async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {
+    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(

@@ -15,6 +15,8 @@
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::Schema;
+use risingwave_rpc_client::ConnectorClient;
 
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
@@ -25,7 +27,7 @@ pub struct RedisConfig;
 pub struct RedisSink;
 
 impl RedisSink {
-    pub fn new(_cfg: RedisConfig) -> Result<Self> {
+    pub fn new(_cfg: RedisConfig, _schema: Schema) -> Result<Self> {
         todo!()
     }
 }
@@ -39,7 +41,7 @@ impl Sink for RedisSink {
         todo!()
     }
 
-    async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {
+    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         todo!()
     }
 }

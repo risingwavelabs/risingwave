@@ -32,6 +32,7 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, TableSchema};
 use risingwave_rpc_client::error::RpcError;
+use risingwave_rpc_client::ConnectorClient;
 use thiserror::Error;
 pub use tracing;
 
@@ -124,7 +125,7 @@ pub trait Sink {
     type Writer: SinkWriter;
     type Coordinator: SinkCommitCoordinator;
 
-    async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()>;
+    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
@@ -267,7 +268,7 @@ impl Sink for BlackHoleSink {
         Ok(Self)
     }
 
-    async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {
+    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         Ok(())
     }
 }
@@ -365,7 +366,7 @@ macro_rules! dispatch_sink {
 impl SinkImpl {
     pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg)?),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, param.schema())?),
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
                 *cfg,
                 param.schema(),

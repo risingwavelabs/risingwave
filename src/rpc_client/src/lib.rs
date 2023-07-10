@@ -58,7 +58,7 @@ mod tracing;
 
 pub use compactor_client::CompactorClient;
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
-pub use connector_client::ConnectorClient;
+pub use connector_client::{ConnectorClient, SinkWriterStreamHandle};
 pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 pub use meta_client::MetaClient;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};

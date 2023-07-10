@@ -279,14 +279,6 @@ impl FromIterator<Field> for Schema {
     }
 }
 
-impl FromIterator<ColumnDesc> for Schema {
-    fn from_iter<T: IntoIterator<Item = ColumnDesc>>(iter: T) -> Self {
-        Schema {
-            fields: iter.into_iter().map(|col| Field::from(&col)).collect(),
-        }
-    }
-}
-
 impl From<&StructType> for Schema {
     fn from(t: &StructType) -> Self {
         Schema::new(
