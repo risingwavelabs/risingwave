@@ -359,8 +359,8 @@ impl LogicalJoin {
         let order_col_ids = table_desc.order_column_ids();
         let order_key = table_desc.order_column_indices();
         let dist_key = table_desc.distribution_key.clone();
-        // The at least prefix of order key that contains distribution key.
-        let at_least_prefix_len = {
+        // The shortest prefix of order key that contains distribution key.
+        let shortest_prefix_len = {
             let mut max_pos = 0;
             for d in dist_key {
                 max_pos = max(
@@ -375,7 +375,7 @@ impl LogicalJoin {
         };
 
         // Reorder the join equal predicate to match the order key.
-        let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
+        let mut reorder_idx = Vec::with_capacity(shortest_prefix_len);
         for order_col_id in order_col_ids {
             let mut found = false;
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
@@ -389,7 +389,7 @@ impl LogicalJoin {
                 break;
             }
         }
-        if reorder_idx.len() < at_least_prefix_len {
+        if reorder_idx.len() < shortest_prefix_len {
             return None;
         }
         let lookup_prefix_len = reorder_idx.len();
@@ -987,14 +987,14 @@ impl LogicalJoin {
                 .expect("dist_key must in order_key");
             dist_key_in_order_key_pos.push(pos);
         }
-        // The at least prefix of order key that contains distribution key.
-        let at_least_prefix_len = dist_key_in_order_key_pos
+        // The shortest prefix of order key that contains distribution key.
+        let shortest_prefix_len = dist_key_in_order_key_pos
             .iter()
             .max()
             .map_or(0, |pos| pos + 1);
 
         // Reorder the join equal predicate to match the order key.
-        let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
+        let mut reorder_idx = Vec::with_capacity(shortest_prefix_len);
         for order_col_id in order_col_ids {
             let mut found = false;
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
@@ -1008,7 +1008,7 @@ impl LogicalJoin {
                 break;
             }
         }
-        if reorder_idx.len() < at_least_prefix_len {
+        if reorder_idx.len() < shortest_prefix_len {
             // TODO: support index selection for temporal join and refine this error message.
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires the lookup table's primary key contained exactly in the equivalence condition".into(),
