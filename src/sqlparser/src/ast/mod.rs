@@ -1013,7 +1013,7 @@ pub enum Statement {
         constraints: Vec<TableConstraint>,
         with_options: Vec<SqlOption>,
         /// Optional schema of the external source with which the table is created
-        source_schema: Option<SourceSchemaV2>,
+        source_schema: Option<CompatibleSourceSchema>,
         /// The watermark defined on source.
         source_watermarks: Vec<SourceWatermark>,
         /// Append only table.
