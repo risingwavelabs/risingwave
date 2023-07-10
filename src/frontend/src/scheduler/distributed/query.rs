@@ -531,7 +531,7 @@ pub(crate) mod tests {
                 watermark_columns: FixedBitSet::with_capacity(3),
                 versioned: false,
             }),
-            table_catalog.into(),
+            Some(table_catalog.into()),
             vec![],
             ctx,
             false,
