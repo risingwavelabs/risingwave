@@ -790,6 +790,15 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v2) filter((t.v2 < 5:Int32))] }
             └─StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: distinct agg on empty args
+  sql: |
+    create table t(x int, y varchar);
+    select count(distinct *) from t;
+  binder_error: |-
+    Bind error: failed to bind expression: count(DISTINCT *)
+
+    Caused by:
+      Invalid input syntax: DISTINCT is not allowed for aggregate function `count` without args
 - name: only distinct agg
   sql: |
     create table t(a int, b int, c int);
@@ -1445,7 +1454,8 @@
     Bind error: failed to bind expression: percentile_cont(x)
 
     Caused by:
-      Invalid input syntax: arg in percentile_cont must be constant
+      Feature is not yet implemented: non-constant direct arguments for ordered-set aggregation is not supported now
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t (x int, y int);
     select percentile_cont('abc') within group (order by y) from t;
@@ -1453,7 +1463,7 @@
     Bind error: failed to bind expression: percentile_cont('abc')
 
     Caused by:
-      Invalid input syntax: arg in percentile_cont must be float64
+      Invalid input syntax: direct arg in `percentile_cont` must be castable to float64
 - sql: |
     create table t (x int, y int);
     select percentile_cont(1.3) within group (order by y) from t;
@@ -1461,7 +1471,7 @@
     Bind error: failed to bind expression: percentile_cont(1.3)
 
     Caused by:
-      Invalid input syntax: arg in percentile_cont must between 0 and 1
+      Invalid input syntax: direct arg in `percentile_cont` must between 0.0 and 1.0
 - sql: |
     create table t (x int, y int);
     select percentile_cont(0, 0) within group (order by y) from t;
@@ -1469,7 +1479,7 @@
     Bind error: failed to bind expression: percentile_cont(0, 0)
 
     Caused by:
-      Invalid input syntax: only one arg is expected in percentile_cont
+      Invalid input syntax: invalid direct args or within group argument for `percentile_cont` aggregation
 - sql: |
     create table t (x int, y varchar);
     select percentile_cont(0) within group (order by y) from t;
@@ -1477,7 +1487,7 @@
     Bind error: failed to bind expression: percentile_cont(0)
 
     Caused by:
-      Bind error: cannot cast type "varchar" to "double precision" in Implicit context
+      Invalid input syntax: arg in `percentile_cont` must be castable to float64
 - sql: |
     create table t (x int, y int);
     select percentile_cont(0) within group (order by y desc) from t;
@@ -1507,7 +1517,7 @@
     Bind error: failed to bind expression: mode(1)
 
     Caused by:
-      Invalid input syntax: no arguments are expected in mode agg
+      Invalid input syntax: invalid direct args or within group argument for `mode` aggregation
 - sql: |
     create table t (x int, y int);
     select first_value(x) from t;

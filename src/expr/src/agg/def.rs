@@ -428,6 +428,15 @@ pub mod agg_kinds {
         };
     }
     pub use single_value_state_iff_in_append_only;
+
+    /// Ordered-set aggregate functions.
+    #[macro_export]
+    macro_rules! ordered_set {
+        () => {
+            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
+        };
+    }
+    pub use ordered_set;
 }
 
 impl AggKind {

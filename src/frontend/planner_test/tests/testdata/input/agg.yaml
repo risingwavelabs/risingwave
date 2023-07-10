@@ -434,6 +434,12 @@
   expected_outputs:
   - stream_plan
   - batch_plan
+- name: distinct agg on empty args
+  sql: |
+    create table t(x int, y varchar);
+    select count(distinct *) from t;
+  expected_outputs:
+  - binder_error
 - name: only distinct agg
   sql: |
     create table t(a int, b int, c int);
