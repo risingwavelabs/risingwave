@@ -88,11 +88,9 @@ pub(crate) fn do_parse_simd_json_value(
         }
         (DataType::Float64, SourceFormat::CanalJson) => ensure_rust_type!(v, f64).into(),
         (DataType::Float64, _) => simd_json_ensure_float!(v, f64).into(),
-        (DataType::Decimal, SourceFormat::CanalJson | SourceFormat::DebeziumJson) => {
-            Decimal::from_str(ensure_str!(v, "string"))
-                .map_err(|_| anyhow!("parse decimal from string err {}", v))?
-                .into()
-        }
+        (DataType::Decimal, SourceFormat::CanalJson) => Decimal::from_str(ensure_str!(v, "string"))
+            .map_err(|_| anyhow!("parse decimal from string err {}", v))?
+            .into(),
         // FIXME: decimal should have more precision than f64
         (DataType::Decimal, _) => Decimal::try_from(simd_json_ensure_float!(v, Decimal))
             .map_err(|_| anyhow!("expect decimal"))?
