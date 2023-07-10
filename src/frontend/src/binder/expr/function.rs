@@ -322,15 +322,6 @@ impl Binder {
 
         assert!(!matches!(kind, agg_kinds::ordered_set!()));
 
-        if f.distinct && !f.order_by.is_empty() {
-            // <https://www.postgresql.org/docs/current/sql-expressions.html#SYNTAX-AGGREGATES:~:text=the%20DISTINCT%20list.-,Note,-The%20ability%20to>
-            return Err(ErrorCode::InvalidInputSyntax(
-                "DISTINCT and ORDER BY are not supported to appear at the same time now"
-                    .to_string(),
-            )
-            .into());
-        }
-
         if f.within_group.is_some() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "WITHIN GROUP is not allowed for non-ordered-set aggregation `{}`",
@@ -360,6 +351,39 @@ impl Binder {
                 .map(|e| self.bind_order_by_expr(e))
                 .try_collect()?,
         );
+
+        if f.distinct {
+            if args.is_empty() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "DISTINCT is not allowed for aggregate function `{}` without args",
+                    kind
+                ))
+                .into());
+            }
+
+            // restrict arguments[1..] to be constant because we don't support multiple distinct key
+            // indices for now
+            if args.iter().skip(1).any(|arg| arg.as_literal().is_none()) {
+                return Err(ErrorCode::NotImplemented(
+                    "non-constant arguments other than the first one for DISTINCT aggregation is not supported now"
+                        .to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+
+            // restrict ORDER BY to align with PG, which says:
+            // > If DISTINCT is specified in addition to an order_by_clause, then all the ORDER BY
+            // > expressions must match regular arguments of the aggregate; that is, you cannot sort
+            // > on an expression that is not included in the DISTINCT list.
+            if !order_by.sort_exprs.iter().all(|e| args.contains(&e.expr)) {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "ORDER BY expressions must match regular arguments of the aggregate for `{}` when DISTINCT is provided",
+                    kind
+                ))
+                .into());
+            }
+        }
 
         Ok((vec![], args, order_by))
     }
