@@ -27,18 +27,18 @@ use risingwave_common::types::DefaultOrdered;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::function::window::{FrameBounds, WindowFuncCall};
+use risingwave_expr::window_function::{
+    create_window_state, FrameBounds, StateKey, WindowFuncCall, WindowStates,
+};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use self::private::Partition;
 use super::delta_btree_map::{Change, DeltaBTreeMap};
-use super::state::{create_window_state, StateKey};
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::aggregation::ChunkBuilder;
 use crate::executor::over_window::delta_btree_map::PositionType;
-use crate::executor::over_window::window_states::WindowStates;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message,
@@ -51,8 +51,7 @@ mod private {
 
     use risingwave_common::estimate_size::{EstimateSize, KvSize};
     use risingwave_common::row::OwnedRow;
-
-    use crate::executor::over_window::state::StateKey;
+    use risingwave_expr::window_function::StateKey;
 
     pub(super) struct Partition {
         /// Fully synced table cache for the partition. `StateKey (order key, input pk)` -> table
@@ -790,7 +789,7 @@ fn find_affected_ranges(
 mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::agg::{AggArgs, AggKind};
-    use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
+    use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
     use super::*;
 
