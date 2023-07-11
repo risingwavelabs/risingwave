@@ -86,7 +86,6 @@ message SinkWriterResponse {
   oneof response {
     StartResponse start = 1;
     SyncResponse sync = 2;
-
   }
 }
 
