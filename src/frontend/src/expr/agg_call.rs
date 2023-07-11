@@ -68,6 +68,8 @@ impl AggCall {
         Ok(match (agg_kind, inputs) {
             // XXX: some special cases that can not be handled by signature map.
 
+            // min/max allowed for all types except for bool and jsonb (#7981)
+            (AggKind::Min | AggKind::Max, [DataType::Jsonb]) => return Err(err()),
             // may return list or struct type
             (AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue, [input]) => {
                 input.clone()
