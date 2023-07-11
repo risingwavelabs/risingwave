@@ -453,6 +453,9 @@ impl_fold_agg! { I64Array, Int64, TimeArray }
 impl_fold_agg! { I64Array, Int64, DateArray }
 impl_fold_agg! { I64Array, Int64, TimestampArray }
 impl_fold_agg! { I64Array, Int64, TimestamptzArray }
+impl_fold_agg! { I64Array, Int64, BytesArray }
+impl_fold_agg! { I64Array, Int64, JsonbArray }
+impl_fold_agg! { I64Array, Int64, Int256Array }
 // max/min
 impl_fold_agg! { I16Array, Int16, I16Array }
 impl_fold_agg! { I32Array, Int32, I32Array }
@@ -467,6 +470,7 @@ impl_fold_agg! { TimeArray, Time, TimeArray }
 impl_fold_agg! { DateArray, Date, DateArray }
 impl_fold_agg! { TimestampArray, Timestamp, TimestampArray }
 impl_fold_agg! { TimestamptzArray, Timestamptz, TimestamptzArray }
+impl_fold_agg! { Int256Array, Int256, Int256Array }
 // sum
 impl_fold_agg! { DecimalArray, Decimal, I64Array }
 // avg
