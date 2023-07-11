@@ -14,12 +14,12 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::agg::{agg_kinds, AggKind};
 
-use super::generic::{self, agg_kinds, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
@@ -35,7 +35,9 @@ use crate::optimizer::plan_node::{
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, IndexSet, Substitute};
+use crate::utils::{
+    ColIndexMapping, ColIndexMappingRewriteExt, Condition, GroupBy, IndexSet, Substitute,
+};
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
 ///
@@ -262,6 +264,8 @@ struct LogicalAggBuilder {
     input_proj_builder: ProjectBuilder,
     /// the group key column indices in the project's output
     group_key: IndexSet,
+    /// the grouping sets
+    grouping_sets: Vec<IndexSet>,
     /// the agg calls
     agg_calls: Vec<PlanAggCall>,
     /// the error during the expression rewriting
@@ -275,19 +279,50 @@ struct LogicalAggBuilder {
 }
 
 impl LogicalAggBuilder {
-    fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
+    fn new(group_by: GroupBy, input_schema_len: usize) -> Result<Self> {
         let mut input_proj_builder = ProjectBuilder::default();
 
-        let group_key = group_exprs
-            .into_iter()
-            .map(|expr| input_proj_builder.add_expr(&expr))
-            .try_collect()
-            .map_err(|err| {
-                ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
-            })?;
+        let (group_key, grouping_sets) = match group_by {
+            GroupBy::GroupKey(group_key) => {
+                let group_key = group_key
+                    .into_iter()
+                    .map(|expr| input_proj_builder.add_expr(&expr))
+                    .try_collect()
+                    .map_err(|err| {
+                        ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
+                    })?;
+                (group_key, vec![])
+            }
+            GroupBy::GroupingSets(grouping_sets) => {
+                let grouping_sets: Vec<IndexSet> = grouping_sets
+                    .into_iter()
+                    .map(|set| {
+                        set.into_iter()
+                            .map(|expr| input_proj_builder.add_expr(&expr))
+                            .try_collect()
+                            .map_err(|err| {
+                                ErrorCode::NotImplemented(
+                                    format!("{err} inside GROUP BY"),
+                                    None.into(),
+                                )
+                            })
+                    })
+                    .try_collect()?;
+
+                // Construct group key based on grouping sets.
+                let group_key = grouping_sets
+                    .iter()
+                    .fold(FixedBitSet::with_capacity(input_schema_len), |acc, x| {
+                        acc.union(&x.to_bitset()).collect()
+                    });
+
+                (IndexSet::from_iter(group_key.ones()), grouping_sets)
+            }
+        };
 
         Ok(LogicalAggBuilder {
             group_key,
+            grouping_sets,
             agg_calls: vec![],
             error: None,
             input_proj_builder,
@@ -300,7 +335,13 @@ impl LogicalAggBuilder {
         let logical_project = LogicalProject::with_core(self.input_proj_builder.build(input));
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
-        Agg::new(self.agg_calls, self.group_key, logical_project.into()).into()
+        Agg::new_with_grouping_sets(
+            self.agg_calls,
+            self.group_key,
+            self.grouping_sets,
+            logical_project.into(),
+        )
+        .into()
     }
 
     fn rewrite_with_error(&mut self, expr: ExprImpl) -> Result<ExprImpl> {
@@ -323,61 +364,6 @@ impl LogicalAggBuilder {
             }
         }
         None
-    }
-
-    /// syntax check for distinct aggregates.
-    ///
-    /// TODO: we may disable this syntax check in the future because we may use another approach to
-    /// implement distinct aggregates.
-    pub fn syntax_check(&self) -> Result<()> {
-        let mut has_distinct = false;
-        let mut has_order_by = false;
-        // TODO(stonepage): refactor it and unify the 2-phase agg rewriting logic
-        let mut has_non_distinct_string_agg = false;
-        let mut has_non_distinct_array_agg = false;
-        self.agg_calls.iter().for_each(|agg_call| {
-            if agg_call.distinct {
-                has_distinct = true;
-            }
-            if !agg_call.order_by.is_empty() {
-                has_order_by = true;
-            }
-            if !agg_call.distinct && agg_call.agg_kind == AggKind::StringAgg {
-                has_non_distinct_string_agg = true;
-            }
-            if !agg_call.distinct && agg_call.agg_kind == AggKind::ArrayAgg {
-                has_non_distinct_array_agg = true;
-            }
-        });
-
-        // order by is disallowed occur with distinct because we can not directly rewrite agg with
-        // order by into 2-phase agg.
-        if has_distinct && has_order_by {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "Order by aggregates are disallowed to occur with distinct aggregates".into(),
-            )
-            .into());
-        }
-
-        // when there are distinct aggregates, non-distinct aggregates will be rewritten as
-        // two-phase aggregates, while string_agg can not be rewritten as two-phase aggregates, so
-        // we have to ban this case now.
-        if has_distinct && has_non_distinct_string_agg {
-            return Err(ErrorCode::NotImplemented(
-                "Non-distinct string_agg can't appear with distinct aggregates".into(),
-                TrackingIssue::none(),
-            )
-            .into());
-        }
-        if has_distinct && has_non_distinct_array_agg {
-            return Err(ErrorCode::NotImplemented(
-                "Non-distinct array_agg can't appear with distinct aggregates".into(),
-                TrackingIssue::none(),
-            )
-            .into());
-        }
-
-        Ok(())
     }
 
     fn schema_agg_start_offset(&self) -> usize {
@@ -765,11 +751,11 @@ impl LogicalAgg {
     /// results.
     pub fn create(
         select_exprs: Vec<ExprImpl>,
-        group_exprs: Vec<ExprImpl>,
+        group_by: GroupBy,
         having: Option<ExprImpl>,
         input: PlanRef,
     ) -> Result<(PlanRef, Vec<ExprImpl>, Option<ExprImpl>)> {
-        let mut agg_builder = LogicalAggBuilder::new(group_exprs)?;
+        let mut agg_builder = LogicalAggBuilder::new(group_by, input.schema().len())?;
 
         let rewritten_select_exprs = select_exprs
             .into_iter()
@@ -778,8 +764,6 @@ impl LogicalAgg {
         let rewritten_having = having
             .map(|expr| agg_builder.rewrite_with_error(expr))
             .transpose()?;
-
-        agg_builder.syntax_check()?;
 
         Ok((
             agg_builder.build(input).into(),
@@ -798,7 +782,11 @@ impl LogicalAgg {
         &self.core.group_key
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, PlanRef) {
+    pub fn grouping_sets(&self) -> &Vec<IndexSet> {
+        &self.core.grouping_sets
+    }
+
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
         self.core.decompose()
     }
 
@@ -828,7 +816,12 @@ impl LogicalAgg {
             .indices()
             .map(|key| input_col_change.map(key))
             .collect();
-        Agg::new(agg_calls, group_key, input).into()
+        let grouping_sets = self
+            .grouping_sets()
+            .iter()
+            .map(|set| set.indices().map(|key| input_col_change.map(key)).collect())
+            .collect();
+        Agg::new_with_grouping_sets(agg_calls, group_key, grouping_sets, input).into()
     }
 }
 
@@ -838,7 +831,13 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Agg::new(self.agg_calls().to_vec(), self.group_key().clone(), input).into()
+        Agg::new_with_grouping_sets(
+            self.agg_calls().to_vec(),
+            self.group_key().clone(),
+            self.grouping_sets().clone(),
+            input,
+        )
+        .into()
     }
 
     #[must_use]
@@ -1157,8 +1156,13 @@ mod tests {
         let gen_internal_value = |select_exprs: Vec<ExprImpl>,
                                   group_exprs|
          -> (Vec<ExprImpl>, Vec<PlanAggCall>, IndexSet) {
-            let (plan, exprs, _) =
-                LogicalAgg::create(select_exprs, group_exprs, None, input.clone()).unwrap();
+            let (plan, exprs, _) = LogicalAgg::create(
+                select_exprs,
+                GroupBy::GroupKey(group_exprs),
+                None,
+                input.clone(),
+            )
+            .unwrap();
 
             let logical_agg = plan.as_logical_agg().unwrap();
             let agg_calls = logical_agg.agg_calls().to_vec();
