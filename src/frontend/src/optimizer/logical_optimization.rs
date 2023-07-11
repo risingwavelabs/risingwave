@@ -414,6 +414,7 @@ impl LogicalOptimizer {
     }
 
     pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
+        // TODO: if there's no `NOW()` or `PROCTIME()`, we don't need to acquire snapshot.
         let epoch = ctx.session_ctx().pinned_snapshot().epoch();
 
         let plan = plan.rewrite_exprs_recursive(&mut InlineNowProcTime::new(epoch));
