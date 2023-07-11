@@ -322,7 +322,7 @@ pub async fn compute_node_serve(
         opts.connector_rpc_endpoint, opts.connector_rpc_sink_payload_format
     );
 
-    let connector_client = ConnectorClient::try_connect(opts.connector_rpc_endpoint.as_ref()).await;
+    let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
 
     let connector_params = risingwave_connector::ConnectorParams {
         connector_client,
