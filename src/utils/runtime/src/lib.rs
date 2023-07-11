@@ -215,7 +215,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
         let fmt_layer = tracing_subscriber::fmt::layer()
             .with_timer(default_timer.clone())
             .with_ansi(settings.colorful)
-            .with_writer(|| {
+            .with_writer(move || {
                 if settings.stderr {
                     Either::Left(std::io::stderr())
                 } else {
