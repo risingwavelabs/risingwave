@@ -115,6 +115,14 @@ impl Drop for PinnedSnapshot {
     }
 }
 
+/// Returns an invalid snapshot, used for initial values.
+fn invalid_snapshot() -> PbHummockSnapshot {
+    PbHummockSnapshot {
+        committed_epoch: INVALID_EPOCH,
+        current_epoch: INVALID_EPOCH,
+    }
+}
+
 /// Cache of hummock snapshot in meta.
 pub struct HummockSnapshotManager {
     /// Send epoch-related operations to [`UnpinWorker`] for managing the pinned snapshots and
@@ -142,10 +150,7 @@ impl HummockSnapshotManager {
         tokio::spawn(UnpinWorker::new(meta_client, worker_receiver).run());
 
         let latest_snapshot = Arc::new(PinnedSnapshot {
-            value: PbHummockSnapshot {
-                committed_epoch: INVALID_EPOCH,
-                current_epoch: INVALID_EPOCH,
-            },
+            value: invalid_snapshot(),
             unpin_sender: worker_sender.clone(),
         });
 
@@ -265,6 +270,9 @@ struct UnpinWorker {
     /// All snapshots in this map are considered to be pinned by the meta service, those with
     /// [`PinState::Unpinned`] will be unpinned in the next unpin batch through RPC.
     states: BTreeMap<SnapshotKey, PinState>,
+
+    /// The last snapshot that is unpinned by the meta service. Used to reduce the number of RPCs.
+    last_unpinned: SnapshotKey,
 }
 
 impl UnpinWorker {
@@ -276,12 +284,14 @@ impl UnpinWorker {
             meta_client,
             receiver,
             states: Default::default(),
+            last_unpinned: SnapshotKey(invalid_snapshot()),
         }
     }
 
     /// Run the loop of handling operations and unpinning snapshots.
     async fn run(mut self) {
         let mut ticker = tokio::time::interval(Duration::from_secs(UNPIN_INTERVAL_SECS));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
             tokio::select! {
@@ -319,8 +329,8 @@ impl UnpinWorker {
         }
     }
 
-    /// Try to unpin all snapshots with [`PinState::Unpinned`] in a batch through RPC, and clean up
-    /// their entries.
+    /// Try to unpin all continuous snapshots with [`PinState::Unpinned`] in a batch through RPC,
+    /// and clean up their entries.
     async fn unpin_batch(&mut self) {
         // Find the minimum snapshot that is pinned. Unpin all snapshots before it.
         if let Some(min_snapshot) = self
@@ -328,6 +338,7 @@ impl UnpinWorker {
             .iter()
             .find(|(_, s)| matches!(s, PinState::Pinned))
             .map(|(k, _)| k.clone())
+            .filter(|k| k != &self.last_unpinned)
         {
             let min_epoch = min_snapshot.0.committed_epoch;
             tracing::info!(min_epoch, "unpin snapshot with RPC");
@@ -336,6 +347,7 @@ impl UnpinWorker {
                 Ok(()) => {
                     // Remove all snapshots before this one.
                     self.states = self.states.split_off(&min_snapshot);
+                    self.last_unpinned = min_snapshot;
                 }
                 Err(e) => tracing::error!(%e, min_epoch, "unpin snapshot failed"),
             }
