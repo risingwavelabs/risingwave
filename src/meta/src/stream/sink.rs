@@ -18,12 +18,13 @@ use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_connector::sink::{build_sink, Sink, SinkConfig};
 use risingwave_pb::catalog::PbSink;
+use risingwave_rpc_client::ConnectorClient;
 
 use crate::{MetaError, MetaResult};
 
 pub async fn validate_sink(
     prost_sink_catalog: &PbSink,
-    connector_rpc_endpoint: Option<String>,
+    connector_client: Option<ConnectorClient>,
 ) -> MetaResult<()> {
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);
     let properties = sink_catalog.properties.clone();
@@ -38,7 +39,5 @@ pub async fn validate_sink(
         sink_catalog.id,
     )?;
 
-    dispatch_sink!(sink, sink, {
-        Ok(sink.validate(connector_rpc_endpoint).await?)
-    })
+    dispatch_sink!(sink, sink, { Ok(sink.validate(connector_client).await?) })
 }
