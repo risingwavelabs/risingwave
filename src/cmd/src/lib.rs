@@ -41,10 +41,7 @@ macro_rules! main {
 // Entry point functions.
 
 pub fn compute(opts: ComputeNodeOpts, registry: prometheus::Registry) {
-    init_risingwave_logger(
-        LoggerSettings::new("compute").enable_tokio_console(false),
-        registry.clone(),
-    );
+    init_risingwave_logger(LoggerSettings::new("compute"), registry.clone());
     main_okk(risingwave_compute::start(opts, registry));
 }
 
@@ -64,7 +61,7 @@ pub fn compactor(opts: CompactorOpts, registry: prometheus::Registry) {
 }
 
 pub fn ctl(opts: CtlOpts, registry: prometheus::Registry) {
-    init_risingwave_logger(LoggerSettings::new("ctl"), registry);
+    init_risingwave_logger(LoggerSettings::new("ctl").stderr(true), registry);
 
     // Note: Use a simple current thread runtime for ctl.
     // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need
