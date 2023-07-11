@@ -16,24 +16,23 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use futures::StreamExt;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_pb::connector_service::sink_writer_request::write_batch::json_payload::RowOp;
-use risingwave_pb::connector_service::sink_writer_request::write_batch::{
+use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::json_payload::RowOp;
+use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::{
     JsonPayload, Payload, StreamChunkPayload,
 };
+use risingwave_pb::connector_service::SinkPayloadFormat;
 #[cfg(test)]
-use risingwave_pb::connector_service::SinkWriterRequest;
-use risingwave_pb::connector_service::{SinkPayloadFormat, SinkWriterResponse};
+use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
 use risingwave_rpc_client::{ConnectorClient, SinkWriterStreamHandle};
 #[cfg(test)]
-use tokio::sync::mpsc::Sender;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tonic::{Status, Streaming};
+use tokio::sync::mpsc::{Sender, UnboundedReceiver};
+#[cfg(test)]
+use tonic::Status;
 use tracing::error;
 
 use crate::sink::utils::{record_to_json, TimestampHandlingMode};
@@ -197,8 +196,8 @@ impl RemoteSinkWriter {
 
     #[cfg(test)]
     fn for_test(
-        response_receiver: UnboundedReceiver<std::result::Result<SinkWriterResponse, Status>>,
-        request_sender: Sender<SinkWriterRequest>,
+        response_receiver: UnboundedReceiver<std::result::Result<SinkWriterStreamResponse, Status>>,
+        request_sender: Sender<SinkWriterStreamRequest>,
     ) -> Self {
         use risingwave_common::catalog::Field;
         let properties = HashMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
@@ -218,6 +217,7 @@ impl RemoteSinkWriter {
             },
         ]);
 
+        use futures::StreamExt;
         use tokio_stream::wrappers::UnboundedReceiverStream;
 
         let stream_handle = SinkWriterStreamHandle::new(
@@ -305,10 +305,10 @@ mod test {
 
     use risingwave_common::array::StreamChunk;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_pb::connector_service::sink_writer_request::write_batch::Payload;
-    use risingwave_pb::connector_service::sink_writer_request::{Barrier, Request};
-    use risingwave_pb::connector_service::sink_writer_response::{Response, SyncResponse};
-    use risingwave_pb::connector_service::{SinkWriterRequest, SinkWriterResponse};
+    use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::Payload;
+    use risingwave_pb::connector_service::sink_writer_stream_request::{Barrier, Request};
+    use risingwave_pb::connector_service::sink_writer_stream_response::{Response, SyncResponse};
+    use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
     use risingwave_pb::data;
     use tokio::sync::mpsc;
 
@@ -387,7 +387,7 @@ mod test {
         assert_eq!(sink.epoch, Some(2022));
         assert_eq!(sink.batch_id, 1);
         match request_receiver.recv().await {
-            Some(SinkWriterRequest {
+            Some(SinkWriterStreamRequest {
                 request: Some(Request::WriteBatch(write)),
             }) => {
                 assert_eq!(write.epoch, 2022);
@@ -412,7 +412,7 @@ mod test {
 
         // test commit
         response_sender
-            .send(Ok(SinkWriterResponse {
+            .send(Ok(SinkWriterStreamResponse {
                 response: Some(Response::Sync(SyncResponse { epoch: 2022 })),
             }))
             .expect("test failed: failed to sync epoch");
@@ -439,7 +439,7 @@ mod test {
         assert_eq!(sink.epoch, Some(2023));
         assert_eq!(sink.batch_id, 2);
         match request_receiver.recv().await {
-            Some(SinkWriterRequest {
+            Some(SinkWriterStreamRequest {
                 request: Some(Request::WriteBatch(write)),
             }) => {
                 assert_eq!(write.epoch, 2023);

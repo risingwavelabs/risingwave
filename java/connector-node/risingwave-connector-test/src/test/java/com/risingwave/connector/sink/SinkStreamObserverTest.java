@@ -35,13 +35,13 @@ public class SinkStreamObserverTest {
     @Test
     public void testOnNext_StartTaskValidation() {
 
-        StreamObserver<ConnectorServiceProto.SinkWriterResponse> testResponseObserver =
+        StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> testResponseObserver =
                 createNoisyFailResponseObserver();
         SinkStreamObserver sinkStreamObserver = getMockSinkStreamObserver(testResponseObserver);
-        ConnectorServiceProto.SinkWriterRequest firstSync =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest firstSync =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setBarrier(
-                                ConnectorServiceProto.SinkWriterRequest.Barrier.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.Barrier.newBuilder()
                                         .setEpoch(1)
                                         .setIsCheckpoint(true)
                                         .build())
@@ -61,11 +61,11 @@ public class SinkStreamObserverTest {
         }
     }
 
-    private static StreamObserver<ConnectorServiceProto.SinkWriterResponse>
+    private static StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse>
             createNoisyFailResponseObserver() {
         return new StreamObserver<>() {
             @Override
-            public void onNext(ConnectorServiceProto.SinkWriterResponse sinkResponse) {
+            public void onNext(ConnectorServiceProto.SinkWriterStreamResponse sinkResponse) {
                 // response ok
             }
 
@@ -80,7 +80,7 @@ public class SinkStreamObserverTest {
     }
 
     private static SinkStreamObserver getMockSinkStreamObserver(
-            StreamObserver<ConnectorServiceProto.SinkWriterResponse> testResponseObserver) {
+            StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> testResponseObserver) {
         return new SinkStreamObserver(testResponseObserver);
     }
 
@@ -88,26 +88,26 @@ public class SinkStreamObserverTest {
     public void testOnNext_syncValidation() {
         SinkStreamObserver sinkStreamObserver =
                 getMockSinkStreamObserver(createNoisyFailResponseObserver());
-        ConnectorServiceProto.SinkWriterRequest startSink =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest startSink =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setStart(
-                                ConnectorServiceProto.SinkWriterRequest.StartSink.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.StartSink.newBuilder()
                                         .setSinkParam(fileSinkParam)
                                         .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .build())
                         .build();
-        ConnectorServiceProto.SinkWriterRequest firstSync =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest firstSync =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setBarrier(
-                                ConnectorServiceProto.SinkWriterRequest.Barrier.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.Barrier.newBuilder()
                                         .setEpoch(0)
                                         .setIsCheckpoint(true)
                                         .build())
                         .build();
-        ConnectorServiceProto.SinkWriterRequest duplicateSync =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest duplicateSync =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setBarrier(
-                                ConnectorServiceProto.SinkWriterRequest.Barrier.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.Barrier.newBuilder()
                                         .setEpoch(0)
                                         .setIsCheckpoint(true)
                                         .build())
@@ -132,33 +132,35 @@ public class SinkStreamObserverTest {
     public void testOnNext_startEpochValidation() {
 
         SinkStreamObserver sinkStreamObserver;
-        ConnectorServiceProto.SinkWriterRequest startSink =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest startSink =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setStart(
-                                ConnectorServiceProto.SinkWriterRequest.StartSink.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.StartSink.newBuilder()
                                         .setSinkParam(fileSinkParam)
                                         .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .build())
                         .build();
-        ConnectorServiceProto.SinkWriterRequest firstSync =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest firstSync =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setBarrier(
-                                ConnectorServiceProto.SinkWriterRequest.Barrier.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.Barrier.newBuilder()
                                         .setEpoch(0)
                                         .setIsCheckpoint(true)
                                         .build())
                         .build();
-        ConnectorServiceProto.SinkWriterRequest startEpoch =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest startEpoch =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setBeginEpoch(
-                                ConnectorServiceProto.SinkWriterRequest.BeginEpoch.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.BeginEpoch
+                                        .newBuilder()
                                         .setEpoch(0)
                                         .build())
                         .build();
-        ConnectorServiceProto.SinkWriterRequest duplicateStartEpoch =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest duplicateStartEpoch =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setBeginEpoch(
-                                ConnectorServiceProto.SinkWriterRequest.BeginEpoch.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.BeginEpoch
+                                        .newBuilder()
                                         .setEpoch(0)
                                         .build())
                         .build();
@@ -199,33 +201,35 @@ public class SinkStreamObserverTest {
     public void testOnNext_writeValidation() {
         SinkStreamObserver sinkStreamObserver;
 
-        ConnectorServiceProto.SinkWriterRequest startSink =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest startSink =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setStart(
-                                ConnectorServiceProto.SinkWriterRequest.StartSink.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.StartSink.newBuilder()
                                         .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .setSinkParam(fileSinkParam))
                         .build();
-        ConnectorServiceProto.SinkWriterRequest firstStartEpoch =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest firstStartEpoch =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setBeginEpoch(
-                                ConnectorServiceProto.SinkWriterRequest.BeginEpoch.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.BeginEpoch
+                                        .newBuilder()
                                         .setEpoch(0)
                                         .build())
                         .build();
 
-        ConnectorServiceProto.SinkWriterRequest firstWrite =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest firstWrite =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setWriteBatch(
-                                ConnectorServiceProto.SinkWriterRequest.WriteBatch.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch
+                                        .newBuilder()
                                         .setEpoch(0)
                                         .setBatchId(1)
                                         .setJsonPayload(
-                                                ConnectorServiceProto.SinkWriterRequest.WriteBatch
-                                                        .JsonPayload.newBuilder()
+                                                ConnectorServiceProto.SinkWriterStreamRequest
+                                                        .WriteBatch.JsonPayload.newBuilder()
                                                         .addRowOps(
                                                                 ConnectorServiceProto
-                                                                        .SinkWriterRequest
+                                                                        .SinkWriterStreamRequest
                                                                         .WriteBatch.JsonPayload
                                                                         .RowOp.newBuilder()
                                                                         .setOpType(Op.INSERT)
@@ -235,35 +239,37 @@ public class SinkStreamObserverTest {
                                         .build())
                         .build();
 
-        ConnectorServiceProto.SinkWriterRequest firstSync =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest firstSync =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setBarrier(
-                                ConnectorServiceProto.SinkWriterRequest.Barrier.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.Barrier.newBuilder()
                                         .setEpoch(0)
                                         .setIsCheckpoint(true)
                                         .build())
                         .build();
 
-        ConnectorServiceProto.SinkWriterRequest secondStartEpoch =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest secondStartEpoch =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setBeginEpoch(
-                                ConnectorServiceProto.SinkWriterRequest.BeginEpoch.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.BeginEpoch
+                                        .newBuilder()
                                         .setEpoch(1)
                                         .build())
                         .build();
 
-        ConnectorServiceProto.SinkWriterRequest secondWrite =
-                ConnectorServiceProto.SinkWriterRequest.newBuilder()
+        ConnectorServiceProto.SinkWriterStreamRequest secondWrite =
+                ConnectorServiceProto.SinkWriterStreamRequest.newBuilder()
                         .setWriteBatch(
-                                ConnectorServiceProto.SinkWriterRequest.WriteBatch.newBuilder()
+                                ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch
+                                        .newBuilder()
                                         .setEpoch(0)
                                         .setBatchId(2)
                                         .setJsonPayload(
-                                                ConnectorServiceProto.SinkWriterRequest.WriteBatch
-                                                        .JsonPayload.newBuilder()
+                                                ConnectorServiceProto.SinkWriterStreamRequest
+                                                        .WriteBatch.JsonPayload.newBuilder()
                                                         .addRowOps(
                                                                 ConnectorServiceProto
-                                                                        .SinkWriterRequest
+                                                                        .SinkWriterStreamRequest
                                                                         .WriteBatch.JsonPayload
                                                                         .RowOp.newBuilder()
                                                                         .setOpType(Op.INSERT)

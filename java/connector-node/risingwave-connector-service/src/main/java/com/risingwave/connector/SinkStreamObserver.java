@@ -27,7 +27,8 @@ import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.SinkWriterRequest> {
+public class SinkStreamObserver
+        implements StreamObserver<ConnectorServiceProto.SinkWriterStreamRequest> {
     private SinkWriter sink;
 
     private String connectorName;
@@ -41,7 +42,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
     private Long currentBatchId;
 
     private Deserializer deserializer;
-    private final StreamObserver<ConnectorServiceProto.SinkWriterResponse> responseObserver;
+    private final StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> responseObserver;
 
     private static final Logger LOG = LoggerFactory.getLogger(SinkStreamObserver.class);
 
@@ -50,12 +51,12 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
     }
 
     public SinkStreamObserver(
-            StreamObserver<ConnectorServiceProto.SinkWriterResponse> responseObserver) {
+            StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> responseObserver) {
         this.responseObserver = responseObserver;
     }
 
     @Override
-    public void onNext(ConnectorServiceProto.SinkWriterRequest sinkTask) {
+    public void onNext(ConnectorServiceProto.SinkWriterStreamRequest sinkTask) {
         try {
             if (sinkTask.hasStart()) {
                 if (isInitialized()) {
@@ -66,9 +67,9 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                 sinkId = sinkTask.getStart().getSinkParam().getSinkId();
                 bindSink(sinkTask.getStart().getSinkParam(), sinkTask.getStart().getFormat());
                 responseObserver.onNext(
-                        ConnectorServiceProto.SinkWriterResponse.newBuilder()
+                        ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
                                 .setStart(
-                                        ConnectorServiceProto.SinkWriterResponse.StartResponse
+                                        ConnectorServiceProto.SinkWriterStreamResponse.StartResponse
                                                 .newBuilder())
                                 .build());
             } else if (sinkTask.hasBeginEpoch()) {
@@ -97,7 +98,8 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                             .withDescription("Epoch is not started. Invoke `StartEpoch` first.")
                             .asRuntimeException();
                 }
-                ConnectorServiceProto.SinkWriterRequest.WriteBatch batch = sinkTask.getWriteBatch();
+                ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch batch =
+                        sinkTask.getWriteBatch();
                 if (batch.getEpoch() != currentEpoch) {
                     throw INVALID_ARGUMENT
                             .withDescription(
@@ -151,10 +153,10 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                 LOG.debug("Epoch {} barrier {}", currentEpoch, isCheckpoint);
                 if (isCheckpoint) {
                     responseObserver.onNext(
-                            ConnectorServiceProto.SinkWriterResponse.newBuilder()
+                            ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
                                     .setSync(
-                                            ConnectorServiceProto.SinkWriterResponse.SyncResponse
-                                                    .newBuilder()
+                                            ConnectorServiceProto.SinkWriterStreamResponse
+                                                    .SyncResponse.newBuilder()
                                                     .setEpoch(currentEpoch)
                                                     .build())
                                     .build());

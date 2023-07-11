@@ -89,14 +89,14 @@ def load_json_payload(input_file):
         row_ops = []
         for row in batch:
             row_ops.append(
-                connector_service_pb2.SinkWriterRequest.WriteBatch.JsonPayload.RowOp(
+                connector_service_pb2.SinkWriterStreamRequest.WriteBatch.JsonPayload.RowOp(
                     op_type=row["op_type"], line=str(row["line"])
                 )
             )
 
         payloads.append(
             {
-                "json_payload": connector_service_pb2.SinkWriterRequest.WriteBatch.JsonPayload(
+                "json_payload": connector_service_pb2.SinkWriterStreamRequest.WriteBatch.JsonPayload(
                     row_ops=row_ops
                 )
             }
@@ -109,7 +109,7 @@ def load_stream_chunk_payload(input_file):
     sink_input = load_binary_input(input_file)
     payloads.append(
         {
-            "stream_chunk_payload": connector_service_pb2.SinkWriterRequest.WriteBatch.StreamChunkPayload(
+            "stream_chunk_payload": connector_service_pb2.SinkWriterStreamRequest.WriteBatch.StreamChunkPayload(
                 binary_data=sink_input
             )
         }
@@ -120,8 +120,8 @@ def load_stream_chunk_payload(input_file):
 def test_sink(prop, format, payload_input, table_schema):
     # read input, Add StartSink request
     request_list = [
-        connector_service_pb2.SinkWriterRequest(
-            start=connector_service_pb2.SinkWriterRequest.StartSink(
+        connector_service_pb2.SinkWriterStreamRequest(
+            start=connector_service_pb2.SinkWriterStreamRequest.StartSink(
                 format=format,
                 sink_param=connector_service_pb2.SinkParam(
                     sink_id=0,
@@ -141,23 +141,23 @@ def test_sink(prop, format, payload_input, table_schema):
         # construct request
         for payload in payload_input:
             request_list.append(
-                connector_service_pb2.SinkWriterRequest(
-                    begin_epoch=connector_service_pb2.SinkWriterRequest.BeginEpoch(
+                connector_service_pb2.SinkWriterStreamRequest(
+                    begin_epoch=connector_service_pb2.SinkWriterStreamRequest.BeginEpoch(
                         epoch=epoch
                     )
                 )
             )
             request_list.append(
-                connector_service_pb2.SinkWriterRequest(
-                    write_batch=connector_service_pb2.SinkWriterRequest.WriteBatch(
+                connector_service_pb2.SinkWriterStreamRequest(
+                    write_batch=connector_service_pb2.SinkWriterStreamRequest.WriteBatch(
                         batch_id=batch_id, epoch=epoch, **payload
                     )
                 )
             )
 
             request_list.append(
-                connector_service_pb2.SinkWriterRequest(
-                    barrier=connector_service_pb2.SinkWriterRequest.Barrier(
+                connector_service_pb2.SinkWriterStreamRequest(
+                    barrier=connector_service_pb2.SinkWriterStreamRequest.Barrier(
                         epoch=epoch, is_checkpoint=True
                     )
                 )
@@ -166,7 +166,7 @@ def test_sink(prop, format, payload_input, table_schema):
             epoch += 1
             batch_id += 1
         # send request
-        response_iter = stub.SinkStream(iter(request_list))
+        response_iter = stub.SinkWriterStream(iter(request_list))
         for req in request_list:
             print("REQUEST", req)
         for _ in range(response_count):

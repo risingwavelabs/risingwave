@@ -31,7 +31,7 @@ enum SinkPayloadFormat {
   STREAM_CHUNK = 2;
 }
 
-message SinkWriterRequest {
+message SinkWriterStreamRequest {
   message StartSink {
     SinkParam sink_param = 1;
     SinkPayloadFormat format = 2;
@@ -76,7 +76,7 @@ message SinkWriterRequest {
   }
 }
 
-message SinkWriterResponse {
+message SinkWriterStreamResponse {
   message StartResponse {}
 
   message SyncResponse {
@@ -139,7 +139,7 @@ message ValidateSourceResponse {
 }
 
 service ConnectorService {
-  rpc SinkStream(stream SinkWriterRequest) returns (stream SinkWriterResponse);
+  rpc SinkWriterStream(stream SinkWriterStreamRequest) returns (stream SinkWriterStreamResponse);
   rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
