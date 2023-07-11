@@ -6038,6 +6038,7 @@ dependencies = [
  "futures",
  "inquire",
  "itertools",
+ "madsim-etcd-client",
  "madsim-tokio",
  "regex",
  "risingwave_common",

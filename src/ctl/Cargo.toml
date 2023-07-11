@@ -19,6 +19,7 @@ bytes = "1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 comfy-table = "6"
+etcd-client = { version = "0.2", package = "madsim-etcd-client" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 inquire = "0.6.2"
 itertools = "0.10"

@@ -15,6 +15,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use etcd_client::ConnectOptions;
 use risingwave_meta::model::{MetadataModel, TableFragments, Worker};
 use risingwave_meta::storage::meta_store::MetaStore;
 use risingwave_meta::storage::{EtcdMetaStore, WrappedEtcdClient};
@@ -23,57 +24,111 @@ use serde_yaml::Value;
 
 use crate::{DebugCommon, DebugCommonKind, DebugCommonOutputFormat};
 
-macro_rules! fetch_items {
-    ($t:ty, $kind:expr, $snapshot:expr) => {{
-        let result = <$t>::list_at_snapshot::<EtcdMetaStore>($snapshot).await?;
-        result.into_iter().map(|item| {
-            let mut mapping = serde_yaml::Mapping::new();
+const KIND_KEY: &str = "kind";
+const ITEM_KEY: &str = "item";
 
-            mapping.insert(
-                Value::String("kind".to_string()),
-                Value::String($kind.to_string()),
-            );
-
-            let value = serde_yaml::to_value(item.to_protobuf()).unwrap();
-
-            mapping.insert(Value::String("item".to_string()), value);
-
-            Value::Mapping(mapping)
-        })
+macro_rules! yaml_arm {
+    ($kind:tt, $item:expr) => {{
+        let mut mapping = serde_yaml::Mapping::new();
+        mapping.insert(
+            Value::String(KIND_KEY.to_string()),
+            Value::String($kind.to_string()),
+        );
+        mapping.insert(
+            Value::String(ITEM_KEY.to_string()),
+            serde_yaml::to_value($item.to_protobuf()).unwrap(),
+        );
+        serde_yaml::Value::Mapping(mapping)
     }};
+}
+
+macro_rules! json_arm {
+    ($kind:tt, $item:expr) => {{
+        let mut mapping = serde_json::Map::new();
+        mapping.insert(
+            KIND_KEY.to_string(),
+            serde_json::Value::String($kind.to_string()),
+        );
+        mapping.insert(
+            ITEM_KEY.to_string(),
+            serde_json::to_value($item.to_protobuf()).unwrap(),
+        );
+        serde_json::Value::Object(mapping)
+    }};
+}
+
+enum Item {
+    Worker(Worker),
+    User(UserInfo),
+    Table(TableFragments),
 }
 
 pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
     let DebugCommon {
         etcd_endpoints,
+        etcd_username,
+        etcd_password,
+        enable_etcd_auth,
         kinds,
         format,
     } = common;
 
-    let client = WrappedEtcdClient::connect(etcd_endpoints, None, false).await?;
+    let client = if enable_etcd_auth {
+        let options = ConnectOptions::default().with_user(
+            etcd_username.unwrap_or_default(),
+            etcd_password.unwrap_or_default(),
+        );
+        WrappedEtcdClient::connect(etcd_endpoints, Some(options), true).await?
+    } else {
+        WrappedEtcdClient::connect(etcd_endpoints, None, false).await?
+    };
+
     let meta_store = Arc::new(EtcdMetaStore::new(client));
     let snapshot = meta_store.snapshot().await;
     let kinds: BTreeSet<_> = kinds.into_iter().collect();
 
+    let mut items = vec![];
+    for kind in kinds {
+        match kind {
+            DebugCommonKind::Worker => Worker::list_at_snapshot::<EtcdMetaStore>(&snapshot)
+                .await?
+                .into_iter()
+                .for_each(|worker| items.push(Item::Worker(worker))),
+            DebugCommonKind::User => UserInfo::list_at_snapshot::<EtcdMetaStore>(&snapshot)
+                .await?
+                .into_iter()
+                .for_each(|user| items.push(Item::User(user))),
+            DebugCommonKind::Table => TableFragments::list_at_snapshot::<EtcdMetaStore>(&snapshot)
+                .await?
+                .into_iter()
+                .for_each(|table| items.push(Item::Table(table))),
+        };
+    }
+
+    let writer = std::io::stdout();
+
     match format {
         DebugCommonOutputFormat::Yaml => {
-            let mut total = serde_yaml::Sequence::new();
-
-            for kind in kinds {
-                match kind {
-                    DebugCommonKind::Worker => {
-                        total.extend(fetch_items!(Worker, "worker", &snapshot))
-                    }
-                    DebugCommonKind::User => {
-                        total.extend(fetch_items!(UserInfo, "user", &snapshot))
-                    }
-                    DebugCommonKind::Table => {
-                        total.extend(fetch_items!(TableFragments, "table", &snapshot))
-                    }
-                };
+            let mut seq = serde_yaml::Sequence::new();
+            for item in items {
+                seq.push(match item {
+                    Item::Worker(worker) => yaml_arm!("worker", worker),
+                    Item::User(user) => yaml_arm!("user", user),
+                    Item::Table(table) => yaml_arm!("table", table),
+                });
             }
-
-            serde_yaml::to_writer(std::io::stdout(), &total).unwrap();
+            serde_yaml::to_writer(writer, &seq).unwrap();
+        }
+        DebugCommonOutputFormat::Json => {
+            let mut seq = vec![];
+            for item in items {
+                seq.push(match item {
+                    Item::Worker(worker) => json_arm!("worker", worker),
+                    Item::User(user) => json_arm!("user", user),
+                    Item::Table(table) => json_arm!("table", table),
+                });
+            }
+            serde_json::to_writer_pretty(writer, &seq).unwrap();
         }
     }
 
