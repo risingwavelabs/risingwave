@@ -280,6 +280,7 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_CONSTRAINT, vec![0], read_constraint_info },
     { PG_CATALOG, PG_TABLES, vec![], read_pg_tables_info },
     { PG_CATALOG, PG_PROC, vec![0], read_pg_proc_info },
+    { PG_CATALOG, PG_SHADOW, vec![1], read_user_info_shadow },
     { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
     { RW_CATALOG, RW_DATABASES, vec![0], read_rw_database_info },

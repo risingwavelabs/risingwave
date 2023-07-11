@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay};
@@ -65,24 +66,16 @@ pub struct OrderDisplay<'a> {
     pub input_schema: &'a Schema,
 }
 
-impl fmt::Display for OrderDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let that = self.order;
-        write!(f, "[")?;
-        for (i, column_order) in that.column_orders.iter().enumerate() {
-            if i > 0 {
-                write!(f, ", ")?;
-            }
-            write!(
-                f,
-                "{}",
-                ColumnOrderDisplay {
-                    column_order,
-                    input_schema: self.input_schema,
-                }
-            )?;
-        }
-        write!(f, "]")
+impl OrderDisplay<'_> {
+    pub fn distill<'a>(self) -> Pretty<'a> {
+        let iter = self.order.column_orders.iter();
+        let vec = iter.map(|column_order| {
+            Pretty::display(&ColumnOrderDisplay {
+                column_order,
+                input_schema: self.input_schema,
+            })
+        });
+        Pretty::Array(vec.collect())
     }
 }
 

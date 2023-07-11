@@ -20,22 +20,21 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, RwError};
-use tokio::sync::watch::Receiver;
 use tracing::Instrument;
 
 use crate::executor::{BoxedExecutor, Executor};
-use crate::task::ShutdownMsg;
+use crate::task::{ShutdownMsg, ShutdownToken};
 
 /// `ManagedExecutor` build on top of the underlying executor. For now, it does two things:
 /// 1. the duration of performance-critical operations will be traced, such as open/next/close.
 /// 2. receive shutdown signal
 pub struct ManagedExecutor {
     child: BoxedExecutor,
-    shutdown_rx: Receiver<ShutdownMsg>,
+    shutdown_rx: ShutdownToken,
 }
 
 impl ManagedExecutor {
-    pub fn new(child: BoxedExecutor, shutdown_rx: Receiver<ShutdownMsg>) -> Self {
+    pub fn new(child: BoxedExecutor, shutdown_rx: ShutdownToken) -> Self {
         Self { child, shutdown_rx }
     }
 }
@@ -57,14 +56,10 @@ impl Executor for ManagedExecutor {
         let mut child_stream = self.child.execute();
 
         loop {
-            let shutdown = pin!(self.shutdown_rx.changed());
-            let res = select(shutdown, child_stream.next().instrument(span.clone())).await;
+            let shutdown = pin!(self.shutdown_rx.cancelled());
 
-            match res {
-                Either::Left((res, _)) => {
-                    res.expect("shutdown_rx should not drop before task finish");
-                    break;
-                }
+            match select(shutdown, child_stream.next().instrument(span.clone())).await {
+                Either::Left(_) => break,
                 Either::Right((res, _)) => {
                     if let Some(chunk) = res {
                         yield chunk?;
@@ -75,8 +70,7 @@ impl Executor for ManagedExecutor {
             }
         }
 
-        let shutdown_msg = self.shutdown_rx.borrow().clone();
-        match shutdown_msg {
+        match self.shutdown_rx.message() {
             ShutdownMsg::Abort(reason) => {
                 Err(ErrorCode::BatchError(reason.into()))?;
             }

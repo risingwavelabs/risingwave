@@ -282,9 +282,9 @@ impl Distill for StreamSink {
                     .iter()
                     .map(|k| k.column_index)
                     .collect_vec(),
-                input_schema: &self.base.schema,
+                schema: &self.base.schema,
             };
-            vec.push(("pk", Pretty::display(&pk)));
+            vec.push(("pk", pk.distill()));
         }
         childless_record("StreamSink", vec)
     }
