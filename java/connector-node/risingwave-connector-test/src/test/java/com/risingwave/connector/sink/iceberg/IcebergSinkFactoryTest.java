@@ -21,6 +21,7 @@ import com.risingwave.connector.IcebergSink;
 import com.risingwave.connector.IcebergSinkFactory;
 import com.risingwave.connector.TestUtils;
 import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog.SinkType;
 import com.risingwave.proto.Data;
 import java.io.IOException;
@@ -67,17 +68,19 @@ public class IcebergSinkFactoryTest {
         IcebergSinkFactory sinkFactory = new IcebergSinkFactory();
         IcebergSink sink =
                 (IcebergSink)
-                        sinkFactory.createWriter(
-                                TestUtils.getMockTableSchema(),
-                                Map.of(
-                                        "type",
-                                        sinkMode,
-                                        "warehouse.path",
-                                        warehousePath,
-                                        "database.name",
-                                        databaseName,
-                                        "table.name",
-                                        tableName));
+                        ((SinkWriterV1.Adapter)
+                                        sinkFactory.createWriter(
+                                                TestUtils.getMockTableSchema(),
+                                                Map.of(
+                                                        "type",
+                                                        sinkMode,
+                                                        "warehouse.path",
+                                                        warehousePath,
+                                                        "database.name",
+                                                        databaseName,
+                                                        "table.name",
+                                                        tableName)))
+                                .getInner();
         try {
             assertTrue(
                     sink.getHadoopCatalog()

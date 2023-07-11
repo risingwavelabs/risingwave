@@ -33,6 +33,10 @@ public interface SinkWriterV1 {
             this.hasBegun = false;
         }
 
+        public SinkWriterV1 getInner() {
+            return inner;
+        }
+
         @Override
         public void beginEpoch(long epoch) {}
 
