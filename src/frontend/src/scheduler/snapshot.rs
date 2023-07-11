@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
-use risingwave_pb::hummock::{HummockSnapshot, PbHummockSnapshot};
+use risingwave_pb::hummock::PbHummockSnapshot;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::watch;
 
@@ -265,6 +265,8 @@ impl UnpinWorker {
 
     async fn unpin_batch(&mut self) {
         // println!("self.states: {:#?}", self.states);
+
+        // TODO: last unpin
 
         if let Some(min_snapshot) = self
             .states
