@@ -53,6 +53,7 @@ public interface SinkWriterV1 {
             if (isCheckpoint) {
                 if (hasBegun) {
                     this.inner.sync();
+                    this.hasBegun = false;
                 }
             }
         }
