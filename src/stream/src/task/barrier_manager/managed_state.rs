@@ -288,7 +288,15 @@ impl ManagedBarrierState {
                 );
             }
             None => {
-                let remaining_actors = actor_ids_to_collect.into_iter().collect();
+                let remaining_actors: HashSet<ActorId> = actor_ids_to_collect.into_iter().collect();
+                // The failure actors could exit before the barrier is issued, while their
+                // up-downstream actors could be stuck somehow. Return error directly to trigger the
+                // recovery.
+                for (actor_id, err) in &self.failure_actors {
+                    if remaining_actors.contains(actor_id) {
+                        bail!("Actor {actor_id} exit unexpectedly: {:?}", err);
+                    }
+                }
                 ManagedBarrierStateInner::Issued {
                     remaining_actors,
                     collect_notifier: Some(collect_notifier),

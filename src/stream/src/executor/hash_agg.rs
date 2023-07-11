@@ -342,18 +342,22 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             call_visibilities.push(agg_call_filter_res);
         }
 
-        // Materialize input chunk if needed.
-        for (storage, visibility) in this
-            .storages
-            .iter_mut()
+        // Materialize input chunk if needed and possible.
+        let materialized: Bitmap = this
+            .agg_calls
+            .iter()
+            .zip_eq_fast(&mut this.storages)
             .zip_eq_fast(call_visibilities.iter())
-        {
-            if let AggStateStorage::MaterializedInput { table, mapping } = storage {
-                let mut chunk = chunk.clone().project(mapping.upstream_columns());
-                chunk.set_vis(visibility.clone());
-                table.write_chunk(chunk);
-            }
-        }
+            .map(|((call, storage), visibility)| {
+                if let AggStateStorage::MaterializedInput { table, mapping } = storage && !call.distinct {
+                    let mut chunk = chunk.clone().project(mapping.upstream_columns());
+                    chunk.set_vis(visibility.clone());
+                    table.write_chunk(chunk);
+                    true
+                } else {
+                    false
+                }
+            }).collect();
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, visibility) in group_visibilities {
@@ -374,7 +378,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 )
                 .await?;
             agg_group
-                .apply_chunk(&mut this.storages, &chunk, visibilities)
+                .apply_chunk(&mut this.storages, &chunk, visibilities, &materialized)
                 .await?;
             // Mark the group as changed.
             vars.group_change_set.insert(key);

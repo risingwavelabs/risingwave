@@ -68,33 +68,11 @@ impl WrapperExecutor {
     #[allow(clippy::let_and_return)]
     fn wrap_debug(
         info: Arc<ExecutorInfo>,
-        extra: ExtraInfo,
+        _extra: ExtraInfo,
         stream: impl MessageStream + 'static,
     ) -> impl MessageStream + 'static {
-        // Trace
-        let stream = trace::trace(
-            info.clone(),
-            extra.input_pos,
-            extra.actor_id,
-            extra.executor_id,
-            extra.metrics,
-            stream,
-        );
-
         // Update check
         let stream = update_check::update_check(info, stream);
-
-        stream
-    }
-
-    #[allow(clippy::let_and_return)]
-    fn wrap_release(
-        _info: Arc<ExecutorInfo>,
-        extra: ExtraInfo,
-        stream: impl MessageStream + 'static,
-    ) -> impl MessageStream + 'static {
-        // Metrics
-        let stream = trace::metrics(extra.actor_id, extra.executor_id, extra.metrics, stream);
 
         stream
     }
@@ -118,10 +96,20 @@ impl WrapperExecutor {
         // Epoch provide
         let stream = epoch_provide::epoch_provide(stream);
 
+        // Trace
+        let stream = trace::trace(
+            info.clone(),
+            extra.input_pos,
+            extra.actor_id,
+            extra.executor_id,
+            extra.metrics.clone(),
+            stream,
+        );
+
         if cfg!(debug_assertions) {
             Self::wrap_debug(info, extra, stream).boxed()
         } else {
-            Self::wrap_release(info, extra, stream).boxed()
+            stream.boxed()
         }
     }
 }

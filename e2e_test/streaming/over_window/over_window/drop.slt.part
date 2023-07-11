@@ -8,6 +8,9 @@ statement ok
 drop materialized view mv_c;
 
 statement ok
+drop materialized view mv_d;
+
+statement ok
 drop materialized view mv_a_b;
 
 statement ok

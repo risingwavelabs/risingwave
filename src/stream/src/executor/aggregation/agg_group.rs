@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::{Op, StreamChunk, Vis};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
@@ -257,16 +258,18 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         storages: &mut [AggStateStorage<S>],
         chunk: &StreamChunk,
         visibilities: Vec<Vis>,
+        materialized: &Bitmap,
     ) -> StreamExecutorResult<()> {
         let mut chunk = chunk.clone();
-        for ((state, storage), vis) in self
+        for (((state, storage), visibility), materialized) in self
             .states
             .iter_mut()
             .zip_eq_fast(storages)
             .zip_eq_fast(visibilities)
+            .zip_eq_fast(materialized.iter())
         {
-            chunk.set_vis(vis);
-            state.apply_chunk(&chunk, storage).await?;
+            chunk.set_vis(visibility);
+            state.apply_chunk(&chunk, storage, materialized).await?;
         }
         Ok(())
     }

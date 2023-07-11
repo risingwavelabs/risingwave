@@ -27,6 +27,7 @@ use crate::executor::{StreamExecutorError, StreamExecutorResult};
 mod buffer;
 
 mod aggregate;
+mod row_number;
 
 /// Unique and ordered identifier for a row in internal states.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, EstimateSize)]
@@ -114,7 +115,8 @@ pub(super) fn create_window_state(
 
     use WindowFuncKind::*;
     Ok(match call.kind {
-        RowNumber | Rank | DenseRank => {
+        RowNumber => Box::new(row_number::RowNumberState::new(call)),
+        Rank | DenseRank => {
             return Err(StreamExecutorError::not_implemented(
                 format!(
                     "window function `{}` is only supported by converting to TopN",

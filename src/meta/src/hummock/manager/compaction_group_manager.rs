@@ -906,6 +906,12 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::Level0OverlappingSubLevelCompactLevelCount(c) => {
                 target.level0_overlapping_sub_level_compact_level_count = *c;
             }
+            MutableConfig::MaxSpaceReclaimBytes(c) => {
+                target.max_space_reclaim_bytes = *c;
+            }
+            MutableConfig::Level0MaxCompactFileNumber(c) => {
+                target.level0_max_compact_file_number = *c;
+            }
         }
     }
 }

@@ -351,8 +351,26 @@
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: Rank function calls that don't match TopN pattern are not supported yet
+    Feature is not yet implemented: `rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
+- id: row_number with valid over clause
+  sql: |
+    create table t(x int, y int);
+    select row_number() over (PARTITION BY x ORDER BY y) from t;
+  logical_plan: |-
+    LogicalProject { exprs: [row_number] }
+    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  stream_plan: |-
+    StreamMaterialize { columns: [row_number, t._row_id(hidden), t.x(hidden)], stream_key: [t._row_id, t.x], pk_columns: [t._row_id, t.x], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [row_number, t._row_id, t.x] }
+      └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─StreamExchange { dist: HashShard(t.x) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+  batch_error: |-
+    Feature is not yet implemented: Batch over window is not implemented yet
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - id: TopN by row_number with rank output
   sql: |
     create table t(x int);
@@ -366,12 +384,15 @@
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalProject { exprs: [t.x, t._row_id] }
             └─LogicalScan { table: t, columns: [t.x, t._row_id] }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, t._row_id(hidden), rank], stream_key: [t._row_id, x], pk_columns: [t._row_id, x], pk_conflict: NoCheck }
+    └─StreamFilter { predicate: (row_number < 3:Int32) }
+      └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─StreamExchange { dist: HashShard(t.x) }
+          └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
-  stream_error: |-
-    Feature is not yet implemented: Rank function calls that don't match TopN pattern are not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
 - id: TopN by row_number without rank output, 1
   sql: |
     create table t(x int, y int);
@@ -473,7 +494,7 @@
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: Rank function calls that don't match TopN pattern are not supported yet
+    Feature is not yet implemented: `rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
 - sql: |
     create table t(x int, y int);
@@ -559,12 +580,16 @@
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y, t._row_id] }
+      └─StreamFilter { predicate: (3:Int32 < row_number) AND (row_number = 6:Int32) AND (row_number <= 5:Int32) }
+        └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+          └─StreamExchange { dist: HashShard(t.y) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
-  stream_error: |-
-    Feature is not yet implemented: Rank function calls that don't match TopN pattern are not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
 - id: Deduplication (Top1) by row_number
   sql: |
     create table t(x int, y int);
@@ -821,5 +846,5 @@
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: Rank function calls that don't match TopN pattern are not supported yet
+    Feature is not yet implemented: `rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965

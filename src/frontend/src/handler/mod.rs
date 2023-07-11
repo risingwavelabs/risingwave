@@ -249,6 +249,15 @@ pub async fn handle(
                 )
                 .await;
             }
+            let source_schema = source_schema
+                .map(|source_schema| -> Result<SourceSchema> {
+                    let (source_schema, _) = source_schema
+                        .into_source_schema()
+                        .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
+                    Ok(source_schema)
+                })
+                .transpose()?;
+
             create_table::handle_create_table(
                 handler_args,
                 name,

@@ -28,14 +28,12 @@ use risingwave_expr::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use tokio::sync::watch::Receiver;
 
 use crate::executor::join::{concatenate, convert_row_to_chunk, JoinType};
 use crate::executor::{
-    check_shutdown, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
-    ExecutorBuilder,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::{BatchTaskContext, ShutdownMsg};
+use crate::task::{BatchTaskContext, ShutdownToken};
 
 /// Nested loop join executor.
 ///
@@ -68,7 +66,7 @@ pub struct NestedLoopJoinExecutor {
     /// Memory context used for recording memory usage of executor.
     mem_context: MemoryContext,
 
-    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    shutdown_rx: ShutdownToken,
 }
 
 impl Executor for NestedLoopJoinExecutor {
@@ -187,7 +185,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             identity,
             source.context.get_config().developer.chunk_size,
             mem_context,
-            Some(source.shutdown_rx.clone()),
+            source.shutdown_rx.clone(),
         )))
     }
 }
@@ -203,7 +201,7 @@ impl NestedLoopJoinExecutor {
         identity: String,
         chunk_size: usize,
         mem_context: MemoryContext,
-        shutdown_rx: Option<Receiver<ShutdownMsg>>,
+        shutdown_rx: ShutdownToken,
     ) -> Self {
         // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
         let original_schema = match join_type {
@@ -247,7 +245,7 @@ impl NestedLoopJoinExecutor {
         join_expr: BoxedExpression,
         left: Vec<DataChunk>,
         right: BoxedExecutor,
-        shutdown_rx: Option<Receiver<ShutdownMsg>>,
+        shutdown_rx: ShutdownToken,
     ) {
         // 1. Iterate over the right table by chunks.
         #[for_await]
@@ -255,7 +253,7 @@ impl NestedLoopJoinExecutor {
             let right_chunk = right_chunk?;
             // 2. Iterator over the left table by rows.
             for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
-                check_shutdown(&shutdown_rx)?;
+                shutdown_rx.check()?;
                 // 3. Concatenate the left row and right chunk into a single chunk and evaluate the
                 // expression on it.
                 let chunk = Self::concatenate_and_eval(
@@ -282,7 +280,7 @@ impl NestedLoopJoinExecutor {
         join_expr: BoxedExpression,
         left: Vec<DataChunk>,
         right: BoxedExecutor,
-        shutdown_rx: Option<Receiver<ShutdownMsg>>,
+        shutdown_rx: ShutdownToken,
     ) {
         let mut matched = BitmapBuilder::zeroed(left.iter().map(|chunk| chunk.capacity()).sum());
         let right_data_types = right.schema().data_types();
@@ -292,7 +290,7 @@ impl NestedLoopJoinExecutor {
         for right_chunk in right.execute() {
             let right_chunk = right_chunk?;
             for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
-                check_shutdown(&shutdown_rx)?;
+                shutdown_rx.check()?;
                 let chunk = Self::concatenate_and_eval(
                     join_expr.as_ref(),
                     &left_data_types,
@@ -315,7 +313,7 @@ impl NestedLoopJoinExecutor {
             .zip_eq_debug(matched.finish().iter())
             .filter(|(_, matched)| !*matched)
         {
-            check_shutdown(&shutdown_rx)?;
+            shutdown_rx.check()?;
             let row = left_row.chain(repeat_n(Datum::None, right_data_types.len()));
             if let Some(chunk) = chunk_builder.append_one_row(row) {
                 yield chunk
@@ -330,14 +328,14 @@ impl NestedLoopJoinExecutor {
         join_expr: BoxedExpression,
         left: Vec<DataChunk>,
         right: BoxedExecutor,
-        shutdown_rx: Option<Receiver<ShutdownMsg>>,
+        shutdown_rx: ShutdownToken,
     ) {
         let mut matched = BitmapBuilder::zeroed(left.iter().map(|chunk| chunk.capacity()).sum());
         #[for_await]
         for right_chunk in right.execute() {
             let right_chunk = right_chunk?;
             for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
-                check_shutdown(&shutdown_rx)?;
+                shutdown_rx.check()?;
                 if matched.is_set(left_row_idx) {
                     continue;
                 }
@@ -359,7 +357,7 @@ impl NestedLoopJoinExecutor {
             .zip_eq_debug(matched.finish().iter())
             .filter(|(_, matched)| if ANTI_JOIN { !*matched } else { *matched })
         {
-            check_shutdown(&shutdown_rx)?;
+            shutdown_rx.check()?;
             if let Some(chunk) = chunk_builder.append_one_row(left_row) {
                 yield chunk
             }
@@ -373,7 +371,7 @@ impl NestedLoopJoinExecutor {
         join_expr: BoxedExpression,
         left: Vec<DataChunk>,
         right: BoxedExecutor,
-        shutdown_rx: Option<Receiver<ShutdownMsg>>,
+        shutdown_rx: ShutdownToken,
     ) {
         #[for_await]
         for right_chunk in right.execute() {
@@ -381,7 +379,7 @@ impl NestedLoopJoinExecutor {
             // Use a bitmap to track which row of the current right chunk is matched.
             let mut matched = BitmapBuilder::zeroed(right_chunk.capacity()).finish();
             for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
-                check_shutdown(&shutdown_rx)?;
+                shutdown_rx.check()?;
                 let chunk = Self::concatenate_and_eval(
                     join_expr.as_ref(),
                     &left_data_types,
@@ -402,7 +400,7 @@ impl NestedLoopJoinExecutor {
                 .zip_eq_debug(matched.iter())
                 .filter(|(_, matched)| !*matched)
             {
-                check_shutdown(&shutdown_rx)?;
+                shutdown_rx.check()?;
                 let row = repeat_n(Datum::None, left_data_types.len()).chain(right_row);
                 if let Some(chunk) = chunk_builder.append_one_row(row) {
                     yield chunk
@@ -418,14 +416,14 @@ impl NestedLoopJoinExecutor {
         join_expr: BoxedExpression,
         left: Vec<DataChunk>,
         right: BoxedExecutor,
-        shutdown_rx: Option<Receiver<ShutdownMsg>>,
+        shutdown_rx: ShutdownToken,
     ) {
         #[for_await]
         for right_chunk in right.execute() {
             let mut right_chunk = right_chunk?;
             let mut matched = BitmapBuilder::zeroed(right_chunk.capacity()).finish();
             for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
-                check_shutdown(&shutdown_rx)?;
+                shutdown_rx.check()?;
                 let chunk = Self::concatenate_and_eval(
                     join_expr.as_ref(),
                     &left_data_types,
@@ -457,7 +455,7 @@ impl NestedLoopJoinExecutor {
         join_expr: BoxedExpression,
         left: Vec<DataChunk>,
         right: BoxedExecutor,
-        shutdown_rx: Option<Receiver<ShutdownMsg>>,
+        shutdown_rx: ShutdownToken,
     ) {
         let mut left_matched =
             BitmapBuilder::zeroed(left.iter().map(|chunk| chunk.capacity()).sum());
@@ -467,7 +465,7 @@ impl NestedLoopJoinExecutor {
             let right_chunk = right_chunk?;
             let mut right_matched = BitmapBuilder::zeroed(right_chunk.capacity()).finish();
             for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
-                check_shutdown(&shutdown_rx)?;
+                shutdown_rx.check()?;
                 let chunk = Self::concatenate_and_eval(
                     join_expr.as_ref(),
                     &left_data_types,
@@ -489,7 +487,7 @@ impl NestedLoopJoinExecutor {
                 .zip_eq_debug(right_matched.iter())
                 .filter(|(_, matched)| !*matched)
             {
-                check_shutdown(&shutdown_rx)?;
+                shutdown_rx.check()?;
                 let row = repeat_n(Datum::None, left_data_types.len()).chain(right_row);
                 if let Some(chunk) = chunk_builder.append_one_row(row) {
                     yield chunk
@@ -503,7 +501,7 @@ impl NestedLoopJoinExecutor {
             .zip_eq_debug(left_matched.finish().iter())
             .filter(|(_, matched)| !*matched)
         {
-            check_shutdown(&shutdown_rx)?;
+            shutdown_rx.check()?;
             let row = left_row.chain(repeat_n(Datum::None, right_data_types.len()));
             if let Some(chunk) = chunk_builder.append_one_row(row) {
                 yield chunk
@@ -519,13 +517,12 @@ mod tests {
     use risingwave_common::memory::MemoryContext;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_pretty;
-    use tokio::sync::watch::Receiver;
 
     use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
-    use crate::task::ShutdownMsg;
+    use crate::task::ShutdownToken;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -623,10 +620,7 @@ mod tests {
             Box::new(executor)
         }
 
-        fn create_join_executor(
-            &self,
-            shutdown_rx: Option<Receiver<ShutdownMsg>>,
-        ) -> BoxedExecutor {
+        fn create_join_executor(&self, shutdown_rx: ShutdownToken) -> BoxedExecutor {
             let join_type = self.join_type;
 
             let left_child = self.create_left_executor();
@@ -652,27 +646,25 @@ mod tests {
         }
 
         async fn do_test(&self, expected: DataChunk) {
-            let join_executor = self.create_join_executor(None);
+            let join_executor = self.create_join_executor(ShutdownToken::empty());
             let mut expected_mock_exec = MockExecutor::new(join_executor.schema().clone());
             expected_mock_exec.add(expected);
             diff_executor_output(join_executor, Box::new(expected_mock_exec)).await;
         }
 
         async fn do_test_shutdown(&self) {
-            let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
-            let join_executor = self.create_join_executor(Some(shutdown_rx));
-            shutdown_tx.send(ShutdownMsg::Cancel).unwrap();
+            let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
+            let join_executor = self.create_join_executor(shutdown_rx);
+            shutdown_tx.cancel();
             #[for_await]
             for chunk in join_executor.execute() {
                 assert!(chunk.is_err());
                 break;
             }
 
-            let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
-            let join_executor = self.create_join_executor(Some(shutdown_rx));
-            shutdown_tx
-                .send(ShutdownMsg::Abort("Test".to_string()))
-                .unwrap();
+            let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
+            let join_executor = self.create_join_executor(shutdown_rx);
+            shutdown_tx.abort("test");
             #[for_await]
             for chunk in join_executor.execute() {
                 assert!(chunk.is_err());

@@ -167,21 +167,29 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         }
 
         // Calculate the row visibility for every agg call.
-        let mut visibilities = Vec::with_capacity(this.agg_calls.len());
+        let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
             let vis =
                 agg_call_filter_res(&this.actor_ctx, &this.info.identity, agg_call, &chunk).await?;
-            visibilities.push(vis);
+            call_visibilities.push(vis);
         }
 
-        // Materialize input chunk if needed.
-        for (storage, visibility) in this.storages.iter_mut().zip_eq_fast(visibilities.iter()) {
-            if let AggStateStorage::MaterializedInput { table, mapping } = storage {
-                let mut chunk = chunk.clone().project(mapping.upstream_columns());
-                chunk.set_vis(visibility.clone());
-                table.write_chunk(chunk);
-            }
-        }
+        // Materialize input chunk if needed and possible.
+        let materialized: Bitmap = this
+            .agg_calls
+            .iter()
+            .zip_eq_fast(&mut this.storages)
+            .zip_eq_fast(call_visibilities.iter())
+            .map(|((call, storage), visibility)| {
+                if let AggStateStorage::MaterializedInput { table, mapping } = storage && !call.distinct {
+                    let mut chunk = chunk.clone().project(mapping.upstream_columns());
+                    chunk.set_vis(visibility.clone());
+                    table.write_chunk(chunk);
+                    true
+                } else {
+                    false
+                }
+            }).collect();
 
         // Deduplicate for distinct columns.
         let visibilities = vars
@@ -189,7 +197,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             .dedup_chunk(
                 chunk.ops(),
                 chunk.columns(),
-                visibilities,
+                call_visibilities,
                 &mut this.distinct_dedup_tables,
                 None,
                 this.actor_ctx.clone(),
@@ -198,7 +206,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         // Apply chunk to each of the state (per agg_call).
         vars.agg_group
-            .apply_chunk(&mut this.storages, &chunk, visibilities)
+            .apply_chunk(&mut this.storages, &chunk, visibilities, &materialized)
             .await?;
 
         // Mark state as changed.

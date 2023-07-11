@@ -100,6 +100,7 @@ impl<S: StateStore> AggState<S> {
         &mut self,
         chunk: &StreamChunk,
         storage: &mut AggStateStorage<S>,
+        materialized: bool,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => {
@@ -112,7 +113,10 @@ impl<S: StateStore> AggState<S> {
                 state.apply_chunk(chunk)
             }
             Self::MaterializedInput(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::MaterializedInput { .. }));
+                let (table, mapping) = must_match!(storage, AggStateStorage::MaterializedInput { table, mapping } => (table, mapping));
+                if !materialized {
+                    table.write_chunk(chunk.clone().project(mapping.upstream_columns()));
+                }
                 state.apply_chunk(chunk)
             }
         }

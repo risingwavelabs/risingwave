@@ -37,7 +37,6 @@ public abstract class SourceHandlerFactory {
         var config =
                 new DbzConnectorConfig(
                         source, sourceId, startOffset, mutableUserProps, snapshotDone);
-        LOG.info("resolved config for source#{}: {}", sourceId, config.getResolvedDebeziumProps());
         return new DbzSourceHandler(config);
     }
 }
