@@ -219,7 +219,7 @@ where
             .await?,
         );
 
-        let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref());
+        let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
 
         Ok(Self {
             id_gen_manager,
