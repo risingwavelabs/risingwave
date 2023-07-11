@@ -239,3 +239,54 @@
   - batch_plan
   - logical_plan
   - stream_dist_plan
+- id: aggk1_join_aggk1_onk1_force_reshuffle
+  before:
+  - create_tables
+  sql: |
+    with A as (
+      select
+        count(*) as num, k1
+      from A
+      group by k1
+    ), B as (
+      select
+        count(*) as num, k1
+      from B
+      group by k1
+    )
+    select A.num, B.num as Bv from A join B using(k1)
+  expected_outputs:
+  - stream_plan 
+  with_config_map:
+    RW_STREAMING_FORCE_AGG_RESHUFFLE: 'true'
+- id: aggk1_join_aggk1_onk1
+  before:
+  - create_tables
+  sql: |
+    with A as (
+      select
+        count(*) as num, k1
+      from A
+      group by k1
+    ), B as (
+      select
+        count(*) as num, k1
+      from B
+      group by k1
+    )
+    select A.num, B.num as Bv from A join B using(k1)
+  expected_outputs:
+  - stream_plan 
+  with_config_map:
+    RW_STREAMING_FORCE_JOIN_RESHUFFLE: 'true'
+- id: aggk1_from_Ak1_force_reshuffle
+  before:
+  - create_tables
+  sql: |
+    select max(v) as max_v
+    from Ak1 as A
+    group by k1;
+  expected_outputs:
+  - stream_plan 
+  with_config_map:
+    RW_STREAMING_FORCE_AGG_RESHUFFLE: 'true'

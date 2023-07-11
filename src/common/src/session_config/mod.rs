@@ -93,8 +93,8 @@ const RW_ENABLE_JOIN_ORDERING: usize = 22;
 const SERVER_VERSION: usize = 23;
 const SERVER_VERSION_NUM: usize = 24;
 const FORCE_SPLIT_DISTINCT_AGG: usize = 25;
-const STREAMING_FORCE_JOIN_RESHUFFLE: usize = 26;
-const STREAMING_FORCE_AGG_RESHUFFLE: usize = 27;
+const STREAMING_FORCE_AGG_RESHUFFLE: usize = 26;
+const STREAMING_FORCE_JOIN_RESHUFFLE: usize = 27;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;

@@ -1237,3 +1237,74 @@
     ├── distribution key: [ 6 ]
     └── read pk prefix len hint: 3
 
+- id: aggk1_join_aggk1_onk1_force_reshuffle
+  before:
+  - create_tables
+  sql: |
+    with A as (
+      select
+        count(*) as num, k1
+      from A
+      group by k1
+    ), B as (
+      select
+        count(*) as num, k1
+      from B
+      group by k1
+    )
+    select A.num, B.num as Bv from A join B using(k1)
+  stream_plan: |-
+    StreamMaterialize { columns: [num, bv, a.k1(hidden), b.k1(hidden)], stream_key: [a.k1, b.k1], pk_columns: [a.k1, b.k1], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [count, count, a.k1, b.k1] }
+      ├─StreamHashAgg { group_key: [a.k1], aggs: [count] }
+      │ └─StreamExchange { dist: HashShard(a.k1) }
+      │   └─StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+      └─StreamHashAgg { group_key: [b.k1], aggs: [count] }
+        └─StreamExchange { dist: HashShard(b.k1) }
+          └─StreamTableScan { table: b, columns: [b.k1, b._row_id], pk: [b._row_id], dist: UpstreamHashShard(b._row_id) }
+  with_config_map:
+    RW_STREAMING_FORCE_AGG_RESHUFFLE: 'true'
+- id: aggk1_join_aggk1_onk1
+  before:
+  - create_tables
+  sql: |
+    with A as (
+      select
+        count(*) as num, k1
+      from A
+      group by k1
+    ), B as (
+      select
+        count(*) as num, k1
+      from B
+      group by k1
+    )
+    select A.num, B.num as Bv from A join B using(k1)
+  stream_plan: |-
+    StreamMaterialize { columns: [num, bv, a.k1(hidden), b.k1(hidden)], stream_key: [a.k1, b.k1], pk_columns: [a.k1, b.k1], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [count, count, a.k1, b.k1] }
+      ├─StreamExchange { dist: HashShard(a.k1) }
+      │ └─StreamHashAgg { group_key: [a.k1], aggs: [count] }
+      │   └─StreamExchange { dist: HashShard(a.k1) }
+      │     └─StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+      └─StreamExchange { dist: HashShard(b.k1) }
+        └─StreamHashAgg { group_key: [b.k1], aggs: [count] }
+          └─StreamExchange { dist: HashShard(b.k1) }
+            └─StreamTableScan { table: b, columns: [b.k1, b._row_id], pk: [b._row_id], dist: UpstreamHashShard(b._row_id) }
+  with_config_map:
+    RW_STREAMING_FORCE_JOIN_RESHUFFLE: 'true'
+- id: aggk1_from_Ak1_force_reshuffle
+  before:
+  - create_tables
+  sql: |
+    select max(v) as max_v
+    from Ak1 as A
+    group by k1;
+  stream_plan: |-
+    StreamMaterialize { columns: [max_v, ak1.k1(hidden)], stream_key: [ak1.k1], pk_columns: [ak1.k1], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [max(ak1.v), ak1.k1] }
+      └─StreamHashAgg { group_key: [ak1.k1], aggs: [max(ak1.v), count] }
+        └─StreamExchange { dist: HashShard(ak1.k1) }
+          └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+  with_config_map:
+    RW_STREAMING_FORCE_AGG_RESHUFFLE: 'true'
