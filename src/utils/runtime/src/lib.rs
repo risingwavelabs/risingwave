@@ -166,7 +166,12 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
             .with_target("isahc", Level::WARN)
             .with_target("console_subscriber", Level::WARN)
             .with_target("reqwest", Level::WARN)
-            .with_target("sled", Level::INFO);
+            .with_target("sled", Level::INFO)
+            .with_target("foyer", Level::INFO)
+            .with_target("foyer_common", Level::INFO)
+            .with_target("foyer_intrusive", Level::INFO)
+            .with_target("foyer_memory", Level::INFO)
+            .with_target("foyer_storage", Level::INFO);
 
         filter = configure_risingwave_targets_fmt(filter);
 
