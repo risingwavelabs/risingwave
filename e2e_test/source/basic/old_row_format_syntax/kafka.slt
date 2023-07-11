@@ -169,7 +169,7 @@ create table s10 with (
   topic = 'avro_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
-) row format avro row schema location 'file:///risingwave/avro-simple-schema.avsc'
+) row format avro row schema location 'file:///risingwave/avro-complex-schema.avsc'
 
 statement ok
 create table s11 with (
