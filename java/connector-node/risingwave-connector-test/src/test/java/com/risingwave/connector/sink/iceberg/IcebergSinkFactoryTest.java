@@ -67,7 +67,7 @@ public class IcebergSinkFactoryTest {
         IcebergSinkFactory sinkFactory = new IcebergSinkFactory();
         IcebergSink sink =
                 (IcebergSink)
-                        sinkFactory.create(
+                        sinkFactory.createWriter(
                                 TestUtils.getMockTableSchema(),
                                 Map.of(
                                         "type",

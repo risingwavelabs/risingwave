@@ -23,7 +23,7 @@ import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.java.binding.StreamChunkIterator;
 import com.risingwave.java.binding.StreamChunkRow;
 import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.StreamChunkPayload;
+import com.risingwave.proto.ConnectorServiceProto.SinkWriterRequest.WriteBatch.StreamChunkPayload;
 import com.risingwave.proto.Data;
 
 public class StreamChunkDeserializer implements Deserializer {
@@ -236,7 +236,7 @@ public class StreamChunkDeserializer implements Deserializer {
 
     @Override
     public CloseableIterator<SinkRow> deserialize(
-            ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch) {
+            ConnectorServiceProto.SinkWriterRequest.WriteBatch writeBatch) {
         if (!writeBatch.hasStreamChunkPayload()) {
             throw INVALID_ARGUMENT
                     .withDescription(

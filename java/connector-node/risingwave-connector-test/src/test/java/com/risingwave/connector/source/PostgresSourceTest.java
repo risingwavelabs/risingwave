@@ -21,6 +21,7 @@ import static org.junit.Assert.*;
 import com.risingwave.connector.ConnectorServiceImpl;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
+import com.risingwave.proto.PlanCommon;
 import io.grpc.*;
 import java.io.IOException;
 import java.sql.Connection;
@@ -178,17 +179,17 @@ public class PostgresSourceTest {
         ConnectorServiceProto.TableSchema tableSchema =
                 ConnectorServiceProto.TableSchema.newBuilder()
                         .addColumns(
-                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                PlanCommon.ColumnDesc.newBuilder()
                                         .setName("o_key")
-                                        .setDataType(
+                                        .setColumnType(
                                                 Data.DataType.newBuilder()
                                                         .setTypeName(Data.DataType.TypeName.INT64)
                                                         .build())
                                         .build())
                         .addColumns(
-                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                PlanCommon.ColumnDesc.newBuilder()
                                         .setName("o_val")
-                                        .setDataType(
+                                        .setColumnType(
                                                 Data.DataType.newBuilder()
                                                         .setTypeName(Data.DataType.TypeName.INT32)
                                                         .build())

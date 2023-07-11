@@ -15,8 +15,8 @@
 package com.risingwave.connector;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.api.sink.SinkWriterBase;
 import com.risingwave.connector.jdbc.JdbcDialect;
 import com.risingwave.connector.jdbc.JdbcDialectFactory;
 import com.risingwave.proto.Data;
@@ -28,7 +28,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class JDBCSink extends SinkBase {
+public class JDBCSink extends SinkWriterBase {
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
     private final JdbcDialect jdbcDialect;

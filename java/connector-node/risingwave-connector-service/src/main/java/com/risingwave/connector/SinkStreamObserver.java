@@ -14,6 +14,7 @@
 
 package com.risingwave.connector;
 
+import static com.risingwave.connector.SinkUtils.getConnectorName;
 import static io.grpc.Status.*;
 
 import com.risingwave.connector.api.TableSchema;
@@ -22,18 +23,14 @@ import com.risingwave.connector.deserializer.StreamChunkDeserializer;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.metrics.MonitoredRowIterator;
 import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.proto.ConnectorServiceProto.SinkConfig;
-import com.risingwave.proto.ConnectorServiceProto.SinkResponse.StartResponse;
-import com.risingwave.proto.ConnectorServiceProto.SinkResponse.SyncResponse;
-import com.risingwave.proto.ConnectorServiceProto.SinkResponse.WriteResponse;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.SinkStreamRequest> {
-    private SinkBase sink;
+public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.SinkWriterRequest> {
+    private SinkWriter sink;
 
-    private String connectorType;
+    private String connectorName;
 
     private long sinkId;
 
@@ -44,7 +41,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
     private Long currentBatchId;
 
     private Deserializer deserializer;
-    private final StreamObserver<ConnectorServiceProto.SinkResponse> responseObserver;
+    private final StreamObserver<ConnectorServiceProto.SinkWriterResponse> responseObserver;
 
     private static final Logger LOG = LoggerFactory.getLogger(SinkStreamObserver.class);
 
@@ -52,12 +49,13 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
         return sink != null;
     }
 
-    public SinkStreamObserver(StreamObserver<ConnectorServiceProto.SinkResponse> responseObserver) {
+    public SinkStreamObserver(
+            StreamObserver<ConnectorServiceProto.SinkWriterResponse> responseObserver) {
         this.responseObserver = responseObserver;
     }
 
     @Override
-    public void onNext(ConnectorServiceProto.SinkStreamRequest sinkTask) {
+    public void onNext(ConnectorServiceProto.SinkWriterRequest sinkTask) {
         try {
             if (sinkTask.hasStart()) {
                 if (isInitialized()) {
@@ -65,36 +63,30 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                             .withDescription("Sink is already initialized")
                             .asRuntimeException();
                 }
-                sinkId = sinkTask.getStart().getSinkId();
-                bindSink(sinkTask.getStart().getSinkConfig(), sinkTask.getStart().getFormat());
+                sinkId = sinkTask.getStart().getSinkParam().getSinkId();
+                bindSink(sinkTask.getStart().getSinkParam(), sinkTask.getStart().getFormat());
                 responseObserver.onNext(
-                        ConnectorServiceProto.SinkResponse.newBuilder()
-                                .setStart(StartResponse.newBuilder().build())
+                        ConnectorServiceProto.SinkWriterResponse.newBuilder()
+                                .setStart(
+                                        ConnectorServiceProto.SinkWriterResponse.StartResponse
+                                                .newBuilder())
                                 .build());
-            } else if (sinkTask.hasStartEpoch()) {
+            } else if (sinkTask.hasBeginEpoch()) {
                 if (!isInitialized()) {
                     throw FAILED_PRECONDITION
                             .withDescription("sink is not initialized, please call start first")
                             .asRuntimeException();
                 }
-                if (epochStarted && sinkTask.getStartEpoch().getEpoch() <= currentEpoch) {
+                if (epochStarted && sinkTask.getBeginEpoch().getEpoch() <= currentEpoch) {
                     throw INVALID_ARGUMENT
                             .withDescription(
                                     "invalid epoch: new epoch ID should be larger than current epoch")
                             .asRuntimeException();
                 }
                 epochStarted = true;
-                currentEpoch = sinkTask.getStartEpoch().getEpoch();
+                currentEpoch = sinkTask.getBeginEpoch().getEpoch();
                 LOG.debug("Epoch {} started", currentEpoch);
-                responseObserver.onNext(
-                        ConnectorServiceProto.SinkResponse.newBuilder()
-                                .setStartEpoch(
-                                        ConnectorServiceProto.SinkResponse.StartEpochResponse
-                                                .newBuilder()
-                                                .setEpoch(currentEpoch)
-                                                .build())
-                                .build());
-            } else if (sinkTask.hasWrite()) {
+            } else if (sinkTask.hasWriteBatch()) {
                 if (!isInitialized()) {
                     throw FAILED_PRECONDITION
                             .withDescription("Sink is not initialized. Invoke `CreateSink` first.")
@@ -105,42 +97,35 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                             .withDescription("Epoch is not started. Invoke `StartEpoch` first.")
                             .asRuntimeException();
                 }
-                if (sinkTask.getWrite().getEpoch() != currentEpoch) {
+                ConnectorServiceProto.SinkWriterRequest.WriteBatch batch = sinkTask.getWriteBatch();
+                if (batch.getEpoch() != currentEpoch) {
                     throw INVALID_ARGUMENT
                             .withDescription(
                                     "invalid epoch: expected write to epoch "
                                             + currentEpoch
                                             + ", got "
-                                            + sinkTask.getWrite().getEpoch())
+                                            + sinkTask.getWriteBatch().getEpoch())
                             .asRuntimeException();
                 }
-                if (currentBatchId != null && sinkTask.getWrite().getBatchId() <= currentBatchId) {
+                if (currentBatchId != null && batch.getBatchId() <= currentBatchId) {
                     throw INVALID_ARGUMENT
                             .withDescription(
                                     "invalid batch ID: expected batch ID to be larger than "
                                             + currentBatchId
                                             + ", got "
-                                            + sinkTask.getWrite().getBatchId())
+                                            + batch.getBatchId())
                             .asRuntimeException();
                 }
 
-                try (CloseableIterator<SinkRow> rowIter =
-                        deserializer.deserialize(sinkTask.getWrite())) {
+                try (CloseableIterator<SinkRow> rowIter = deserializer.deserialize(batch)) {
                     sink.write(
                             new MonitoredRowIterator(
-                                    rowIter, connectorType, String.valueOf(sinkId)));
+                                    rowIter, connectorName, String.valueOf(sinkId)));
                 }
 
-                currentBatchId = sinkTask.getWrite().getBatchId();
-                LOG.debug(
-                        "Batch {} written to epoch {}",
-                        currentBatchId,
-                        sinkTask.getWrite().getEpoch());
-                responseObserver.onNext(
-                        ConnectorServiceProto.SinkResponse.newBuilder()
-                                .setWrite(WriteResponse.newBuilder().build())
-                                .build());
-            } else if (sinkTask.hasSync()) {
+                currentBatchId = batch.getBatchId();
+                LOG.debug("Batch {} written to epoch {}", currentBatchId, batch.getEpoch());
+            } else if (sinkTask.hasBarrier()) {
                 if (!isInitialized()) {
                     throw FAILED_PRECONDITION
                             .withDescription("Sink is not initialized. Invoke `Start` first.")
@@ -151,22 +136,29 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                             .withDescription("Epoch is not started. Invoke `StartEpoch` first.")
                             .asRuntimeException();
                 }
-                if (sinkTask.getSync().getEpoch() != currentEpoch) {
+                if (sinkTask.getBarrier().getEpoch() != currentEpoch) {
                     throw INVALID_ARGUMENT
                             .withDescription(
                                     "invalid epoch: expected sync to epoch "
                                             + currentEpoch
                                             + ", got "
-                                            + sinkTask.getSync().getEpoch())
+                                            + sinkTask.getBarrier().getEpoch())
                             .asRuntimeException();
                 }
-                sink.sync();
-                currentEpoch = sinkTask.getSync().getEpoch();
-                LOG.debug("Epoch {} synced", currentEpoch);
-                responseObserver.onNext(
-                        ConnectorServiceProto.SinkResponse.newBuilder()
-                                .setSync(SyncResponse.newBuilder().setEpoch(currentEpoch).build())
-                                .build());
+                boolean isCheckpoint = sinkTask.getBarrier().getIsCheckpoint();
+                sink.barrier(isCheckpoint);
+                currentEpoch = sinkTask.getBarrier().getEpoch();
+                LOG.debug("Epoch {} barrier {}", currentEpoch, isCheckpoint);
+                if (isCheckpoint) {
+                    responseObserver.onNext(
+                            ConnectorServiceProto.SinkWriterResponse.newBuilder()
+                                    .setSync(
+                                            ConnectorServiceProto.SinkWriterResponse.SyncResponse
+                                                    .newBuilder()
+                                                    .setEpoch(currentEpoch)
+                                                    .build())
+                                    .build());
+                }
             } else {
                 throw INVALID_ARGUMENT.withDescription("invalid sink task").asRuntimeException();
             }
@@ -194,13 +186,16 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
         if (sink != null) {
             sink.drop();
         }
-        ConnectorNodeMetrics.decActiveSinkConnections(connectorType, "node1");
+        ConnectorNodeMetrics.decActiveSinkConnections(connectorName, "node1");
     }
 
-    private void bindSink(SinkConfig sinkConfig, ConnectorServiceProto.SinkPayloadFormat format) {
-        tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
-        SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getConnectorType());
-        sink = sinkFactory.create(tableSchema, sinkConfig.getPropertiesMap());
+    private void bindSink(
+            ConnectorServiceProto.SinkParam sinkParam,
+            ConnectorServiceProto.SinkPayloadFormat format) {
+        tableSchema = TableSchema.fromProto(sinkParam.getTableSchema());
+        String connectorName = getConnectorName(sinkParam);
+        SinkFactory sinkFactory = SinkUtils.getSinkFactory(connectorName);
+        sink = sinkFactory.createWriter(tableSchema, sinkParam.getPropertiesMap());
         switch (format) {
             case FORMAT_UNSPECIFIED:
             case UNRECOGNIZED:
@@ -214,7 +209,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                 deserializer = new StreamChunkDeserializer(tableSchema);
                 break;
         }
-        connectorType = sinkConfig.getConnectorType().toUpperCase();
-        ConnectorNodeMetrics.incActiveSinkConnections(connectorType, "node1");
+        this.connectorName = connectorName.toUpperCase();
+        ConnectorNodeMetrics.incActiveSinkConnections(connectorName, "node1");
     }
 }

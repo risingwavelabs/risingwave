@@ -20,7 +20,7 @@ import com.google.gson.Gson;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.*;
 import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
+import com.risingwave.proto.ConnectorServiceProto.SinkWriterRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
 import java.math.BigDecimal;
 import java.sql.Date;
@@ -41,7 +41,7 @@ public class JsonDeserializer implements Deserializer {
     // src/connector/src/sink/mod.rs
     @Override
     public CloseableIterator<SinkRow> deserialize(
-            ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch) {
+            ConnectorServiceProto.SinkWriterRequest.WriteBatch writeBatch) {
         if (!writeBatch.hasJsonPayload()) {
             throw INVALID_ARGUMENT
                     .withDescription("expected JsonPayload, got " + writeBatch.getPayloadCase())

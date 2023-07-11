@@ -23,8 +23,8 @@ import io.grpc.stub.StreamObserver;
 public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceImplBase {
 
     @Override
-    public StreamObserver<ConnectorServiceProto.SinkStreamRequest> sinkStream(
-            StreamObserver<ConnectorServiceProto.SinkResponse> responseObserver) {
+    public StreamObserver<ConnectorServiceProto.SinkWriterRequest> sinkStream(
+            StreamObserver<ConnectorServiceProto.SinkWriterResponse> responseObserver) {
         return new SinkStreamObserver(responseObserver);
     }
 

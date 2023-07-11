@@ -149,29 +149,6 @@ impl Sink for RemoteSink {
 }
 
 #[derive(Debug)]
-enum ResponseStreamImpl {
-    Grpc(Streaming<SinkWriterResponse>),
-    Receiver(UnboundedReceiver<SinkWriterResponse>),
-}
-
-impl ResponseStreamImpl {
-    pub async fn next(&mut self) -> Result<SinkWriterResponse> {
-        match self {
-            ResponseStreamImpl::Grpc(ref mut response) => response
-                .next()
-                .await
-                .unwrap_or_else(|| Err(Status::cancelled("response stream closed unexpectedly")))
-                .map_err(|e| SinkError::Remote(e.message().to_string())),
-            ResponseStreamImpl::Receiver(ref mut receiver) => {
-                receiver.recv().await.ok_or_else(|| {
-                    SinkError::Remote("response stream closed unexpectedly".to_string())
-                })
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
 pub struct RemoteSinkWriter {
     pub connector_type: String,
     properties: HashMap<String, String>,
