@@ -35,7 +35,8 @@ pub struct DistinctAggRule {
 impl Rule for DistinctAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
-        let (mut agg_calls, mut agg_group_keys, input) = agg.clone().decompose();
+        let (mut agg_calls, mut agg_group_keys, grouping_sets, input) = agg.clone().decompose();
+        assert!(grouping_sets.is_empty());
 
         if agg_calls.iter().all(|c| !c.distinct) {
             // there's no distinct agg call

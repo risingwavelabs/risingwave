@@ -50,6 +50,7 @@ use crate::TableCatalog;
 pub struct Agg<PlanRef> {
     pub agg_calls: Vec<PlanAggCall>,
     pub group_key: IndexSet,
+    pub grouping_sets: Vec<IndexSet>,
     pub input: PlanRef,
 }
 
@@ -138,6 +139,21 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         Self {
             agg_calls,
             group_key,
+            input,
+            grouping_sets: vec![],
+        }
+    }
+
+    pub fn new_with_grouping_sets(
+        agg_calls: Vec<PlanAggCall>,
+        group_key: IndexSet,
+        grouping_sets: Vec<IndexSet>,
+        input: PlanRef,
+    ) -> Self {
+        Self {
+            agg_calls,
+            group_key,
+            grouping_sets,
             input,
         }
     }
@@ -585,8 +601,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect()
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, PlanRef) {
-        (self.agg_calls, self.group_key, self.input)
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
+        (
+            self.agg_calls,
+            self.group_key,
+            self.grouping_sets,
+            self.input,
+        )
     }
 
     pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
