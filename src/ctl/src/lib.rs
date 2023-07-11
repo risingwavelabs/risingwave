@@ -77,7 +77,7 @@ enum Commands {
     },
 }
 
-#[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq)]
+#[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum DebugCommonKind {
     Worker,
     User,

@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use risingwave_meta::model::{MetadataModel, TableFragments, Worker};
 use risingwave_meta::storage::meta_store::MetaStore;
-use risingwave_meta::storage::{EtcdMetaStore, Snapshot, WrappedEtcdClient};
+use risingwave_meta::storage::{EtcdMetaStore, WrappedEtcdClient};
 use risingwave_pb::user::UserInfo;
 use serde_yaml::Value;
 
-use crate::{DebugCommon, DebugCommonKind};
+use crate::{DebugCommon, DebugCommonKind, DebugCommonOutputFormat};
 
 macro_rules! fetch_items {
     ($t:ty, $kind:expr, $snapshot:expr) => {{
@@ -47,7 +47,7 @@ pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
     let DebugCommon {
         etcd_endpoints,
         kinds,
-        ..
+        format,
     } = common;
 
     let client = WrappedEtcdClient::connect(etcd_endpoints, None, false).await?;
@@ -55,20 +55,27 @@ pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
     let snapshot = meta_store.snapshot().await;
     let kinds: BTreeSet<_> = kinds.into_iter().collect();
 
-    let mut total = serde_yaml::Sequence::new();
+    match format {
+        DebugCommonOutputFormat::Yaml => {
+            let mut total = serde_yaml::Sequence::new();
 
-    for kind in kinds {
-        match kind {
-            DebugCommonKind::Worker => total.extend(fetch_items!(Worker, "worker", &snapshot)),
-            DebugCommonKind::User => total.extend(fetch_items!(UserInfo, "user", &snapshot)),
-            DebugCommonKind::Table => {
-                total.extend(fetch_items!(TableFragments, "table", &snapshot))
+            for kind in kinds {
+                match kind {
+                    DebugCommonKind::Worker => {
+                        total.extend(fetch_items!(Worker, "worker", &snapshot))
+                    }
+                    DebugCommonKind::User => {
+                        total.extend(fetch_items!(UserInfo, "user", &snapshot))
+                    }
+                    DebugCommonKind::Table => {
+                        total.extend(fetch_items!(TableFragments, "table", &snapshot))
+                    }
+                };
             }
-        };
-    }
 
-    serde_yaml::to_writer(std::io::stdout(), &total).unwrap();
+            serde_yaml::to_writer(std::io::stdout(), &total).unwrap();
+        }
+    }
 
     Ok(())
 }
-
