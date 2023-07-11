@@ -231,7 +231,6 @@ def test_jdbc_sink(input_file, param):
         "table.name": "test",
         "type": "upsert",
     }
-    file_name = input_file if use_json else input_binary_file
     test_sink(prop, **param)
     # validate results
     validate_jdbc_sink(input_file)
