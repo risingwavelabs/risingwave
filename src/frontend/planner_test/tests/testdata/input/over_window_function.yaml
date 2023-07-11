@@ -188,6 +188,14 @@
     - logical_plan
     - stream_error
     - batch_error
+- id: row_number with valid over clause
+  sql: |
+    create table t(x int, y int);
+    select row_number() over (PARTITION BY x ORDER BY y) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_error
 
 # TopN pattern
 - id: TopN by row_number with rank output
@@ -198,7 +206,7 @@
     where rank < 3;
   expected_outputs:
     - logical_plan
-    - stream_error
+    - stream_plan
     - batch_error
 - id: TopN by row_number without rank output, 1
   sql: |
@@ -316,7 +324,7 @@
   # TODO(rc): seems this can be optimized
   expected_outputs:
     - logical_plan
-    - stream_error
+    - stream_plan
     - batch_error
 # <<< TopN by row_number, with offset
 - id: Deduplication (Top1) by row_number
