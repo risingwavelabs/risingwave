@@ -89,19 +89,9 @@ impl LevelCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let l0_size = l0.total_file_size
-            - level_handlers[0].get_pending_output_file_size(0) // l0 -> l0 pending
-            - level_handlers[0].get_pending_output_file_size(target_level.level_idx); // l0 -> lbase pending
-
-        // l0 -> lbase  pending
-        let mut base_level_size = target_level.total_file_size
-            - level_handlers[target_level.level_idx as usize]
-                .get_pending_output_file_size(target_level.level_idx);
-        if target_level.level_idx != level_handlers.last().unwrap().get_level() {
-            // lbase -> lbase + 1 pending
-            base_level_size -= level_handlers[target_level.level_idx as usize]
-                .get_pending_output_file_size(target_level.level_idx + 1);
-        }
+        let l0_size = l0.total_file_size - level_handlers[0].get_pending_file_size();
+        let base_level_size = target_level.total_file_size
+            - level_handlers[target_level.level_idx as usize].get_pending_file_size();
 
         if l0_size < base_level_size {
             stats.skip_by_write_amp_limit += 1;
