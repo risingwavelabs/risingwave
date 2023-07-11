@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use auto_enums::auto_enum;
+
 use crate::expr::ExprImpl;
 
 #[derive(Debug, Clone)]
@@ -28,20 +30,20 @@ impl GroupBy {
         }
     }
 
-    pub fn iter(&self) -> Box<dyn Iterator<Item = &ExprImpl> + '_> {
+    #[auto_enum(Iterator)]
+    pub fn iter(&self) -> impl Iterator<Item = &ExprImpl> {
         match self {
-            GroupBy::GroupKey(group_key) => Box::new(group_key.iter()),
-            GroupBy::GroupingSets(grouping_sets) => {
-                Box::new(grouping_sets.iter().flat_map(|v| v.iter()))
-            }
+            GroupBy::GroupKey(group_key) => group_key.iter(),
+            GroupBy::GroupingSets(grouping_sets) => grouping_sets.iter().flat_map(|v| v.iter()),
         }
     }
 
-    pub fn iter_mut(&mut self) -> Box<dyn Iterator<Item = &mut ExprImpl> + '_> {
+    #[auto_enum(Iterator)]
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut ExprImpl> {
         match self {
-            GroupBy::GroupKey(group_key) => Box::new(group_key.iter_mut()),
+            GroupBy::GroupKey(group_key) => group_key.iter_mut(),
             GroupBy::GroupingSets(grouping_sets) => {
-                Box::new(grouping_sets.iter_mut().flat_map(|v| v.iter_mut()))
+                grouping_sets.iter_mut().flat_map(|v| v.iter_mut())
             }
         }
     }
