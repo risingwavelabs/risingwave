@@ -79,7 +79,6 @@ enum Commands {
 
 #[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq)]
 enum DebugCommonKind {
-    All,
     Worker,
     User,
     Table,
@@ -87,9 +86,7 @@ enum DebugCommonKind {
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum DebugCommonOutputFormat {
-    Json,
     Yaml,
-    Wide,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -97,24 +94,16 @@ pub struct DebugCommon {
     #[clap(long, required = true, value_delimiter = ',')]
     etcd_endpoints: Vec<String>,
 
-    #[clap(value_enum, long, short, value_delimiter = ',')]
+    #[clap(value_enum, value_delimiter = ',')]
     kinds: Vec<DebugCommonKind>,
 
-    #[clap(value_enum, long, default_value_t = DebugCommonOutputFormat::Yaml)]
+    #[clap(value_enum, long = "output", short = 'o', default_value_t = DebugCommonOutputFormat::Yaml)]
     format: DebugCommonOutputFormat,
 }
 
 #[derive(Subcommand, Clone, Debug)]
 pub enum DebugCommands {
     Dump {
-        #[command(flatten)]
-        common: DebugCommon,
-    },
-    Edit {
-        #[command(flatten)]
-        common: DebugCommon,
-    },
-    Apply {
         #[command(flatten)]
         common: DebugCommon,
     },
@@ -556,8 +545,6 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
-        Commands::Debug(DebugCommands::Edit { .. }) => {}
-        Commands::Debug(DebugCommands::Apply { .. }) => {}
     }
     Ok(())
 }
