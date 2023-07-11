@@ -46,7 +46,7 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
         _context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<DebeziumSplitEnumerator> {
         tracing::debug!("start validate cdc properties");
-        let connector_client = ConnectorClient::new(&props.connector_node_addr).await?;
+        let connector_client = ConnectorClient::new(&props.connector_node_addr)?;
 
         let server_addrs = props
             .props

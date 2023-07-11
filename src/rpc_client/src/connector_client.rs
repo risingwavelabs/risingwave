@@ -135,14 +135,14 @@ impl SinkWriterStreamHandle {
 }
 
 impl ConnectorClient {
-    pub async fn try_connect(connector_endpoint: Option<&String>) -> Option<Self> {
+    pub fn try_new(connector_endpoint: Option<&String>) -> Option<Self> {
         match connector_endpoint {
             None => None,
-            Some(connector_endpoint) => match ConnectorClient::new(connector_endpoint).await {
+            Some(connector_endpoint) => match ConnectorClient::new(connector_endpoint) {
                 Ok(client) => Some(client),
                 Err(e) => {
                     error!(
-                        "unable to connect to connector endpoint {:?}: {:?}",
+                        "invalid connector endpoint {:?}: {:?}",
                         connector_endpoint, e
                     );
                     None
@@ -151,7 +151,7 @@ impl ConnectorClient {
         }
     }
 
-    pub async fn new(connector_endpoint: &String) -> Result<Self> {
+    pub fn new(connector_endpoint: &String) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", connector_endpoint))
             .map_err(|e| {
                 RpcError::Internal(anyhow!(format!(
@@ -163,8 +163,7 @@ impl ConnectorClient {
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
             .connect_timeout(Duration::from_secs(5))
-            .connect()
-            .await?;
+            .connect_lazy();
         Ok(Self {
             rpc_client: ConnectorServiceClient::new(channel),
             endpoint: connector_endpoint.to_string(),
