@@ -170,3 +170,6 @@ SELECT * FROM m1;
 -- And because 130 in cache on
 
 -- Optimizer limit to Temporal filter (NOW()).
+
+-- Another case, suppose our RHS all less than LHS. In that case, even if RHS bumps up,
+-- There's no change to our state, our cache is always none.
