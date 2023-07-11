@@ -103,22 +103,33 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
+                        // handle range scan
+                        match &self.key_range.1 {
+                            Included(end_key) => {
+                                self.out_of_range = full_key.user_key > end_key.as_ref();
+                            }
+                            Excluded(end_key) => {
+                                self.out_of_range = full_key.user_key >= end_key.as_ref();
+                            }
+                            Unbounded => {}
+                        };
+
+                        // It is better to early return here if the user key is already
+                        // out of range to avoid unneccessary access on the range tomestones
+                        // via `delete_range_iter`.
+                        // For example, if we are iterating with key range [0x0a, 0x0c) and the
+                        // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
+                        // which is a waste of work.
+                        if self.out_of_range {
+                            self.stats.processed_key_count += 1;
+                            return Ok(());
+                        }
+
                         self.delete_range_iter.next_until(full_key.user_key).await?;
                         if self.delete_range_iter.current_epoch() >= epoch {
                             self.stats.skip_delete_key_count += 1;
                         } else {
                             self.last_val = Bytes::copy_from_slice(val);
-
-                            // handle range scan
-                            match &self.key_range.1 {
-                                Included(end_key) => {
-                                    self.out_of_range = full_key.user_key > end_key.as_ref();
-                                }
-                                Excluded(end_key) => {
-                                    self.out_of_range = full_key.user_key >= end_key.as_ref();
-                                }
-                                Unbounded => {}
-                            };
                             self.stats.processed_key_count += 1;
                             return Ok(());
                         }
