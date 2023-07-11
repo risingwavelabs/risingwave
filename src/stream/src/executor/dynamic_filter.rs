@@ -43,6 +43,96 @@ use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
 
+/// # Monotonically Increasing Cache policy
+///
+/// ## Conventions
+/// LHS: Outer side of the join.
+/// RHS: Dynamic Filter (single value), inner side of the join.
+///
+///
+/// ## Description
+///
+/// The cache holds a single value from the LHS, the largest value nearest to current RHS (largest first, then nearest).
+/// N.B. Largest could be minimal or maximal value, depending on the sign of the comparator, and could be inclusive or exclusive as well.
+///
+/// Assuming sign is '>'.
+/// If RHS 100,
+/// and LHS has the following values: 101, 102,
+/// Cached value will be 101.
+/// If LHS has the following values: 98 99,
+/// Cached value will be 99.
+///
+/// On update, we need to do table scan, to decide which rows need to be sent downstream.
+/// This happens because RHS value is dynamic.
+/// So we need to send rows between (old_RHS, current_RHS) downstream for either deletion/insertion.
+/// For monotonically increasing RHS (e.g. NOW()), current_RHS > old_RHS.
+/// The cache_value from LHS partitions the range.
+/// Case 1:
+/// cache_value larger than current_RHS. Need to send all rows between (old_RHS, current_RHS) downstream.
+/// Case 2:
+/// cache_value smaller or same as current_RHS, larger than prev_RHS. Need to send all rows between (prev_RHS, cache_value) downstream.
+/// Case 3:
+/// cache_value smaller than prev_RHS. No need scan any rows, there are no LHS rows between (old_RHS, current_RHS).
+/// Case 4:
+/// No cache_value. Need to send all rows between (old_RHS, current_RHS) downstream, cache value could have been deleted.
+///
+/// ## Initial state
+/// Nothing in cache (None).
+///
+/// ## Updates
+/// 1. Whenever we receive LHS updates, we need to update the cache. `old_value` refers to `old_value` in cache.
+///    `new_value` refers to the new value received from LHS in the update message.
+///    INSERT: if the new value is (RHS, old_value), replace `old_value` in cache. Otherwise, do nothing.
+///    UPDATE: if the new value is (RHS, old_value), OR if has same key as `old_value`,
+///            replace `old_value` in cache. Otherwise, do nothing.
+///    DELETE, if the new value has the same key as `old_value`, empty cache. It is now `None`.
+///
+///    Example A:
+///    FILTER_COL: [1]
+///    Existing cache: Row(1, 3)
+///    RHS_VALUE: Row(1, 1)
+///    LHS_INSERT: Row(1, 2)
+///    Cache update: Row(1, 3) -> Row(1, 2).
+///
+///    Example B:
+///    FILTER_COL: [1]
+///    Existing cache: Row(1, 3)
+///    RHS_VALUE: Row(1, 1)
+///    LHS_DELETE: Row(1, 3)
+///    Cache update: Row(1, 3) -> None.
+///
+///    Example C:
+///    FILTER_COL: [1]
+///    Existing cache: Row(1, 3)
+///    RHS_VALUE: Row(1, 1)
+///    LHS_INSERT: Row(1, 1)
+///    Cache update: No update, assuming condition is LHS > RHS.
+///
+/// 2. Whenever we receive RHS updates to our existing RHS value, we need to empty the cache
+///    if the RHS value is not between existing RHS value and cache value.
+///    Cache now holds `None`.
+///
+///    Example A:
+///    EXISTING_RHS_VALUE: Row(1, 1)
+///    LHS_CACHE: Row(1, 3)
+///    NEW_RHS_VALUE: Row(1, 2)
+///    ---
+///    Cache no update, since LHS value would still be largest, nearest to RHS.
+///
+///    Example B:
+///    RHS_VALUE: Row(1, 3)
+///    LHS_CACHE: Row(1, 2)
+///    NEW_RHS_VALUE: Row(1, 1)
+///    ---
+///    Cache no update. Largest LHS value that is nearest to RHS remains the same.
+///
+///    Example C:
+///    RHS_VALUE: Row(1, 3)
+///    LHS_VALUE: Row(1, 4)
+///    NEW_RHS_VALUE: Row(1, 4)
+///    ---
+///    Cache needs update. Largest LHS value that is nearest to RHS can now be Row(1, 5).
+///
 pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
     source_l: Option<BoxedExecutor>,
@@ -258,6 +348,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let input_r = self.source_r.take().unwrap();
 
         let left_len = input_l.schema().len();
+
+        let mut cache = None;
+
         // Derive the dynamic expression
         let l_data_type = input_l.schema().data_types()[self.key_l].clone();
         let r_data_type = input_r.schema().data_types()[0].clone();
