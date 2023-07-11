@@ -39,7 +39,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .map(|t| self.gen_expr(t, context))
             .collect();
 
-        // see `Binder::bind_normal_agg`
+        // DISTINCT now only works with agg kinds except `ApproxCountDistinct`, and with at least
+        // one argument and only the first being non-constant. See `Binder::bind_normal_agg`
+        // for more details.
         let distinct_allowed = func.func != AggKind::ApproxCountDistinct
             && !exprs.is_empty()
             && exprs.iter().skip(1).all(|e| matches!(e, Expr::Value(_)));
