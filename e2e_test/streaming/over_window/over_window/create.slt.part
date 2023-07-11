@@ -38,6 +38,15 @@ select
     , lead(v2, 2) over (partition by p1, p2 order by v1, v2) as out9
 from t;
 
+# row_number
+statement ok
+create materialized view mv_d as
+select
+    *
+    , row_number() over (partition by p1 order by time, id) as out10
+    , row_number() over (partition by p1 order by p2 desc, id) as out11
+from t;
+
 statement ok
 create materialized view mv_a_b as
 select
