@@ -1508,3 +1508,47 @@
 
     Caused by:
       Invalid input syntax: no arguments are expected in mode agg
+- sql: |
+    create table t (x int, y int);
+    select first_value(x) from t;
+  planner_error: 'Invalid input syntax: Aggregation function first_value requires ORDER BY clause'
+- sql: |
+    create table t (x int, y int);
+    select last_value(x) from t;
+  planner_error: 'Invalid input syntax: Aggregation function last_value requires ORDER BY clause'
+- sql: |
+    create table t (x int, y int);
+    select first_value(x order by y asc) from t;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [first_value(t.x order_by(t.y ASC))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [first_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [first_value(t.x order_by(t.y ASC))] }
+      └─StreamSimpleAgg { aggs: [first_value(t.x order_by(t.y ASC)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    create table t (x int, y int);
+    select last_value(x order by y desc nulls last) from t;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [last_value(t.x order_by(t.y DESC NULLS LAST))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [last_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [last_value(t.x order_by(t.y DESC NULLS LAST))] }
+      └─StreamSimpleAgg { aggs: [last_value(t.x order_by(t.y DESC NULLS LAST)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT count(DISTINCT i) FROM integers;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum0(count(integers.i))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count(integers.i)] }
+        └─BatchHashAgg { group_key: [integers.i], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(integers.i) }
+            └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }

@@ -338,7 +338,7 @@ async fn test_hash_agg_emit_on_window_close() {
               output: []
             - input: !watermark
                 col_idx: 1
-                val: 3
+                val: '3'
               output: []
             - input: !barrier 3
               output:
@@ -348,11 +348,11 @@ async fn test_hash_agg_emit_on_window_close() {
                 +---+---+---+
               - !watermark
                 col_idx: 0
-                val: 3
+                val: '3'
               - !barrier 3
             - input: !watermark
                 col_idx: 1
-                val: 4
+                val: '4'
               output: []
             - input: !barrier 4
               output:
@@ -362,11 +362,11 @@ async fn test_hash_agg_emit_on_window_close() {
                 +---+---+---+
               - !watermark
                 col_idx: 0
-                val: 4
+                val: '4'
               - !barrier 4
             - input: !watermark
                 col_idx: 1
-                val: 10
+                val: '10'
               output: []
             - input: !barrier 5
               output:
@@ -376,17 +376,17 @@ async fn test_hash_agg_emit_on_window_close() {
                 +---+---+---+
               - !watermark
                 col_idx: 0
-                val: 10
+                val: '10'
               - !barrier 5
             - input: !watermark
                 col_idx: 1
-                val: 20
+                val: '20'
               output: []
             - input: !barrier 6
               output:
               - !watermark
                 col_idx: 0
-                val: 20
+                val: '20'
               - !barrier 6
         "#]],
         SnapshotOptions::default().sort_chunk(true),

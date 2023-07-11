@@ -169,7 +169,7 @@ pub async fn handle_alter_user(
         }
     };
 
-    let user_info_writer = session.env().user_info_writer();
+    let user_info_writer = session.user_info_writer()?;
     user_info_writer
         .update_user(user_info, update_fields)
         .await?;

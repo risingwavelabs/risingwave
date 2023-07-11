@@ -25,7 +25,7 @@ use crate::expr::{CollectInputRef, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalAgg, LogicalExpand, LogicalProject, PlanAggCall};
 use crate::optimizer::PlanRef;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, IndexSet};
 
 /// Transform distinct aggregates to `LogicalAgg` -> `LogicalAgg` -> `Expand` -> `Input`.
 pub struct DistinctAggRule {
@@ -37,19 +37,29 @@ impl Rule for DistinctAggRule {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (mut agg_calls, mut agg_group_keys, input) = agg.clone().decompose();
 
-        if self.for_stream && agg_group_keys.count_ones(..) != 0 {
+        if self.for_stream && !agg_group_keys.is_empty() {
             // Due to performance issue, we don't do 2-phase agg for stream distinct agg with group
             // by. See https://github.com/risingwavelabs/risingwave/issues/7271 for more.
             return None;
         }
 
-        let original_group_keys_len = agg_group_keys.count_ones(..);
         let (node, flag_values, has_expand) =
             Self::build_expand(input, &mut agg_group_keys, &mut agg_calls)?;
-        let mid_agg = Self::build_middle_agg(node, agg_group_keys, agg_calls.clone(), has_expand);
+        let mid_agg =
+            Self::build_middle_agg(node, agg_group_keys.clone(), agg_calls.clone(), has_expand);
+
+        // The middle agg will extend some fields for `agg_group_keys`, so we need to find out the
+        // original group key for the final agg.
+        let mut final_agg_group_keys = IndexSet::empty();
+        for (i, v) in mid_agg.group_key.indices().enumerate() {
+            if agg_group_keys.contains(v) {
+                final_agg_group_keys.insert(i);
+            }
+        }
+
         Some(Self::build_final_agg(
             mid_agg,
-            original_group_keys_len,
+            final_agg_group_keys,
             agg_calls,
             flag_values,
             has_expand,
@@ -71,7 +81,7 @@ impl DistinctAggRule {
     /// `Expand` if there is only one `subset`.
     fn build_expand(
         input: PlanRef,
-        group_keys: &mut FixedBitSet,
+        group_keys: &mut IndexSet,
         agg_calls: &mut Vec<PlanAggCall>,
     ) -> Option<(PlanRef, Vec<usize>, bool)> {
         let input_schema_len = input.schema().len();
@@ -94,7 +104,7 @@ impl DistinctAggRule {
                 non_distinct_aggs.iter().for_each(|agg_call| {
                     subset.extend(agg_call.input_indices());
                 });
-                subset.ones().collect_vec()
+                subset.to_vec()
             };
             hash_map.insert(subset.clone(), 0);
             column_subsets.push(subset);
@@ -104,7 +114,7 @@ impl DistinctAggRule {
             let subset = {
                 let mut subset = group_keys.clone();
                 subset.extend(agg_call.input_indices());
-                subset.ones().collect_vec()
+                subset.to_vec()
             };
             if let Some(i) = hash_map.get(&subset) {
                 flag_values.push(*i);
@@ -136,7 +146,7 @@ impl DistinctAggRule {
     fn build_project(
         input_schema_len: usize,
         expand: PlanRef,
-        group_keys: &mut FixedBitSet,
+        group_keys: &mut IndexSet,
         agg_calls: &mut Vec<PlanAggCall>,
     ) -> PlanRef {
         // shift the indices of filter first to make later rewrite more convenient.
@@ -150,7 +160,7 @@ impl DistinctAggRule {
         // collect indices.
         let expand_schema_len = expand.schema().len();
         let mut input_indices = CollectInputRef::with_capacity(expand_schema_len);
-        input_indices.extend(group_keys.ones());
+        input_indices.extend(group_keys.indices());
         for agg_call in agg_calls.iter() {
             input_indices.extend(agg_call.input_indices());
             agg_call.filter.visit_expr(&mut input_indices);
@@ -163,9 +173,9 @@ impl DistinctAggRule {
         );
 
         // remap indices.
-        let mut new_group_keys = FixedBitSet::new();
-        for i in group_keys.ones() {
-            new_group_keys.extend_one(mapping.map(i))
+        let mut new_group_keys = IndexSet::empty();
+        for i in group_keys.indices() {
+            new_group_keys.insert(mapping.map(i))
         }
         *group_keys = new_group_keys;
         for agg_call in agg_calls {
@@ -181,7 +191,7 @@ impl DistinctAggRule {
 
     fn build_middle_agg(
         project: PlanRef,
-        mut group_keys: FixedBitSet,
+        mut group_keys: IndexSet,
         agg_calls: Vec<PlanAggCall>,
         has_expand: bool,
     ) -> Agg<PlanRef> {
@@ -206,20 +216,20 @@ impl DistinctAggRule {
             .collect_vec();
         if has_expand {
             // append `flag`.
-            group_keys.extend_one(project.schema().len() - 1);
+            group_keys.insert(project.schema().len() - 1);
         }
         Agg::new(agg_calls, group_keys, project)
     }
 
     fn build_final_agg(
         mid_agg: Agg<PlanRef>,
-        original_group_keys_len: usize,
+        final_agg_group_keys: IndexSet,
         mut agg_calls: Vec<PlanAggCall>,
         flag_values: Vec<usize>,
         has_expand: bool,
     ) -> PlanRef {
         // the index of `flag` in schema of the middle `LogicalAgg`, if has `Expand`.
-        let pos_of_flag = mid_agg.group_key.count_ones(..) - 1;
+        let pos_of_flag = mid_agg.group_key.len() - 1;
         let mut flag_values = flag_values.into_iter();
 
         // ```ignore
@@ -229,7 +239,7 @@ impl DistinctAggRule {
         // ```
 
         // scan through `count_star_with_filter` or `non-distinct agg`.
-        let mut index_of_middle_agg = mid_agg.group_key.count_ones(..);
+        let mut index_of_middle_agg = mid_agg.group_key.len();
         agg_calls.iter_mut().for_each(|agg_call| {
             let flag_value = if agg_call.distinct {
                 agg_call.distinct = false;
@@ -237,7 +247,7 @@ impl DistinctAggRule {
                 agg_call.inputs.iter_mut().for_each(|input_ref| {
                     input_ref.index = mid_agg
                         .group_key
-                        .ones()
+                        .indices()
                         .position(|x| x == input_ref.index)
                         .unwrap();
                 });
@@ -291,6 +301,7 @@ impl DistinctAggRule {
                     | AggKind::JsonbAgg
                     | AggKind::JsonbObjectAgg
                     | AggKind::FirstValue
+                    | AggKind::LastValue
                     | AggKind::StddevPop
                     | AggKind::StddevSamp
                     | AggKind::VarPop
@@ -325,11 +336,6 @@ impl DistinctAggRule {
             }
         });
 
-        Agg::new(
-            agg_calls,
-            (0..original_group_keys_len).collect(),
-            mid_agg.into(),
-        )
-        .into()
+        Agg::new(agg_calls, final_agg_group_keys, mid_agg.into()).into()
     }
 }

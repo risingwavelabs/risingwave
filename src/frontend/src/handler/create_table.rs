@@ -226,6 +226,11 @@ fn check_default_column_constraints(
         )
         .into());
     }
+    if expr.is_impure() {
+        return Err(
+            ErrorCode::BindError("impure default expr is not supported.".to_string()).into(),
+        );
+    }
     Ok(())
 }
 
@@ -669,6 +674,12 @@ pub async fn handle_create_table(
         Ok(_) => {}
     };
 
+    if source_schema == Some(SourceSchema::Json) && columns.is_empty() {
+        return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+            "schema definition is required for ENCODE JSON".to_owned(),
+        )));
+    }
+
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
@@ -713,7 +724,7 @@ pub async fn handle_create_table(
         serde_json::to_string_pretty(&graph).unwrap()
     );
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_table(source, table, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))

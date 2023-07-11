@@ -27,7 +27,9 @@ use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
-use risingwave_connector::source::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
+use risingwave_connector::source::{
+    ConnectorProperties, SourceEnumeratorContext, SplitEnumeratorImpl, SplitImpl,
+};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
@@ -264,7 +266,11 @@ impl SourceScanInfo {
                 unreachable!("Never call complete when SourceScanInfo is already complete")
             }
         };
-        let mut enumerator = SplitEnumeratorImpl::create(fetch_info.connector).await?;
+        let mut enumerator = SplitEnumeratorImpl::create(
+            fetch_info.connector,
+            SourceEnumeratorContext::default().into(),
+        )
+        .await?;
         let kafka_enumerator = match enumerator {
             SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
             _ => {

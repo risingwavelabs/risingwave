@@ -132,7 +132,7 @@ create table msrc (v int) with (
     fields.v.end  = '10',
     datagen.rows.per.second='15',
     datagen.split.num = '1'
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 statement error Use `DROP TABLE`
 drop materialized view msrc;
@@ -160,7 +160,7 @@ create source src (v int) with (
     fields.v.end  = '10',
     datagen.rows.per.second='15',
     datagen.split.num = '1'
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 # FIXME: improve the error message
 statement error not found
@@ -370,7 +370,7 @@ create table err_t1 (v int) with (
     fields.v.end  = '10',
     datagen.rows.per.second='15',
     datagen.split.num = '1'
-) row format debezium_json;
+) FORMAT DEBEZIUM ENCODE JSON;
 
 # cleanup
 

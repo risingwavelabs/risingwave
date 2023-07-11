@@ -660,26 +660,33 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
         └── StreamSimpleAgg [append_only] { aggs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-            ├── result table: 0
-            ├── state tables: []
+            ├── result table: 1
+            ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamProject { exprs: [ao.s, ',':Varchar, ao.o, ao._row_id] }
     └── Chain { table: ao, columns: [ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
-        ├── state table: 1
+        ├── state table: 2
         ├── Upstream
         └── BatchPlanNode
 
     Table 0
+    ├── columns: [ ao_o, ao__row_id, ao_s, ',':Varchar ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
+
+    Table 1
     ├── columns: [ string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count ]
     ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
-    Table 1
+    Table 2
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
@@ -913,26 +920,33 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
         └── StreamSimpleAgg [append_only] { aggs: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-            ├── result table: 0
-            ├── state tables: []
+            ├── result table: 1
+            ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamProject { exprs: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id] }
     └── Chain { table: ao, columns: [ao.v, ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
-        ├── state table: 1
+        ├── state table: 2
         ├── Upstream
         └── BatchPlanNode
 
     Table 0
+    ├── columns: [ ao_o, ao__row_id, ao_s, ',':Varchar ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
+
+    Table 1
     ├── columns: [ count(ao_v), string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count ]
     ├── primary key: []
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
-    Table 1
+    Table 2
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
@@ -1036,26 +1050,33 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
         └── StreamSimpleAgg [append_only] { aggs: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-            ├── result table: 0
-            ├── state tables: []
+            ├── result table: 1
+            ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamProject { exprs: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id] }
     └── Chain { table: ao, columns: [ao.v, ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
-        ├── state table: 1
+        ├── state table: 2
         ├── Upstream
         └── BatchPlanNode
 
     Table 0
+    ├── columns: [ ao_o, ao__row_id, ao_s, ',':Varchar ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
+
+    Table 1
     ├── columns: [ max(ao_v), string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count ]
     ├── primary key: []
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
-    Table 1
+    Table 2
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
@@ -1941,26 +1962,33 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), ao.k] }
         └── StreamHashAgg [append_only] { group_key: [ao.k], aggs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-            ├── result table: 0
-            ├── state tables: []
+            ├── result table: 1
+            ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
     StreamProject { exprs: [ao.k, ao.s, ',':Varchar, ao.o, ao._row_id] }
     └── Chain { table: ao, columns: [ao.k, ao.o, ao.s, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
-        ├── state table: 1
+        ├── state table: 2
         ├── Upstream
         └── BatchPlanNode
 
     Table 0
+    ├── columns: [ ao_k, ao_o, ao__row_id, ao_s, ',':Varchar ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 1
     ├── columns: [ ao_k, string_agg(ao_s, ',':Varchar order_by(ao_o ASC)), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 1
+    Table 2
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]

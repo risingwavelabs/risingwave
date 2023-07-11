@@ -26,6 +26,7 @@ use prometheus::{
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables;
+use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
@@ -148,6 +149,7 @@ pub struct MetaMetrics {
     /// ********************************** Source ************************************
     /// supervisor for which source is still up.
     pub source_is_up: IntGaugeVec,
+    pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     /// ********************************** Fragment ************************************
     /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
@@ -484,6 +486,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::new(registry.clone()));
 
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
@@ -614,6 +617,7 @@ impl MetaMetrics {
             level_compact_task_cnt,
             object_store_metric,
             source_is_up,
+            source_enumerator_metrics,
             actor_info,
             table_info,
             mv_info,

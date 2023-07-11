@@ -26,6 +26,7 @@ use risingwave_pb::stream_service::{
 };
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, RwLock};
+use tracing::Instrument;
 use uuid::Uuid;
 
 use super::Locations;
@@ -218,7 +219,7 @@ where
         self.creating_job_info.add_job(execution).await;
 
         let stream_manager = self.clone();
-        tokio::spawn(async move {
+        let fut = async move {
             let mut revert_funcs = vec![];
             let res = stream_manager
                 .create_streaming_job_impl(&mut revert_funcs, table_fragments, ctx)
@@ -244,7 +245,9 @@ where
                         });
                 }
             }
-        });
+        }
+        .in_current_span();
+        tokio::spawn(fut);
 
         let res = try {
             while let Some(state) = receiver.recv().await {

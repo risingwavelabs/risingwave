@@ -84,6 +84,8 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
 
+  # The timeout should be strictly more than timeout in `pull-request.yml`.
+  # This ensures our `main-cron` workflow will be stable.
   - label: "unit test"
     command: "ci/scripts/unit-test.sh"
     plugins:
@@ -96,7 +98,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 16
 
   - label: "unit test (deterministic simulation)"
     command: "MADSIM_TEST_NUM=100 timeout 15m ci/scripts/deterministic-unit-test.sh"
@@ -255,7 +257,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 35
+    timeout_in_minutes: 60
 
   - label: "upload micro-benchmark"
     command:
@@ -285,7 +287,8 @@ steps:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 20
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 30
 
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"

@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -37,7 +36,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::Order;
 use crate::planner::Planner;
-use crate::utils::Condition;
+use crate::utils::{Condition, IndexSet};
 
 impl Planner {
     pub(super) fn plan_select(
@@ -201,7 +200,7 @@ impl Planner {
     /// Helper to create an `EXISTS` boolean operator with the given `input`.
     /// It is represented by `Project([$0 >= 1]) -> Agg(count(*)) -> input`
     fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
-        let count_star = Agg::new(vec![PlanAggCall::count_star()], FixedBitSet::new(), input);
+        let count_star = Agg::new(vec![PlanAggCall::count_star()], IndexSet::empty(), input);
         let ge = FunctionCall::new(
             ExprType::GreaterThanOrEqual,
             vec![

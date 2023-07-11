@@ -827,3 +827,23 @@
       └─LogicalDedup { dedup_cols: [t1.b, t1.a] }
         └─LogicalProject { exprs: [t1.b, t1.a] }
           └─LogicalScan { table: t1, columns: [t1.a, t1.b], predicate: IsNotNull(t1.b) }
+- name: Separate the project from joins before pushing the apply operator down joins. https://github.com/risingwavelabs/risingwave/issues/10662
+  sql: |
+    create table t1 (a int, b int, other int);
+    create table t2 (c int, d int, other int);
+    create table t3 (e int, f int, other int);
+    select * from t1 where exists (select t2.d, t3.f from t2 join t3 on t2.c = t3.e and t1.a = t2.c and t1.b = t3.e);
+  optimized_logical_plan_for_batch: |-
+    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t1.a, t2.c) AND IsNotDistinctFrom(t1.b, t2.c), output: all }
+    ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.other] }
+    └─LogicalProject { exprs: [t2.c, t2.c] }
+      └─LogicalJoin { type: Inner, on: (t2.c = t3.e) AND IsNotDistinctFrom(t2.c, t3.e), output: all }
+        ├─LogicalScan { table: t2, columns: [t2.c], predicate: IsNotNull(t2.c) }
+        └─LogicalScan { table: t3, columns: [t3.e], predicate: IsNotNull(t3.e) }
+  optimized_logical_plan_for_stream: |-
+    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t1.a, t2.c) AND IsNotDistinctFrom(t1.b, t2.c), output: all }
+    ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.other] }
+    └─LogicalProject { exprs: [t2.c, t2.c] }
+      └─LogicalJoin { type: Inner, on: (t2.c = t3.e) AND IsNotDistinctFrom(t2.c, t3.e), output: all }
+        ├─LogicalScan { table: t2, columns: [t2.c], predicate: IsNotNull(t2.c) }
+        └─LogicalScan { table: t3, columns: [t3.e], predicate: IsNotNull(t3.e) }

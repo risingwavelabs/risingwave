@@ -696,10 +696,10 @@ where
                 if let Some(fragment_create_actors) = applied_reschedules.get(fragment_id) {
                     table_fragments
                         .actor_status
-                        .drain_filter(|actor_id, _| fragment_create_actors.contains(actor_id));
+                        .retain(|actor_id, _| !fragment_create_actors.contains(actor_id));
                     fragment
                         .actors
-                        .drain_filter(|actor| fragment_create_actors.contains(&actor.actor_id));
+                        .retain(|actor| !fragment_create_actors.contains(&actor.actor_id));
                 }
             }
         }

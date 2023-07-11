@@ -222,7 +222,7 @@ pub async fn handle_alter_table_column(
             .collect(),
     );
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
         .replace_table(table, graph, col_index_mapping)

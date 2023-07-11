@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use risingwave_pb::task_service::permits;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{mpsc, AcquireError, Semaphore, SemaphorePermit};
 
 use crate::executor::Message;
 
@@ -87,6 +87,24 @@ impl Permits {
             permits::Value::Barrier(p) => self.barriers.add_permits(p as usize),
         }
     }
+
+    /// Acquire permits from the semaphores.
+    ///
+    /// This function is cancellation-safe except for the fairness of waking.
+    async fn acquire_permits(&self, permits: &permits::Value) -> Result<(), AcquireError> {
+        match permits {
+            permits::Value::Record(p) => self.records.acquire_many(*p as _),
+            permits::Value::Barrier(p) => self.barriers.acquire_many(*p as _),
+        }
+        .await
+        .map(SemaphorePermit::forget)
+    }
+
+    /// Close the semaphores so that all pending `acquire` will fail immediately.
+    fn close(&self) {
+        self.records.close();
+        self.barriers.close();
+    }
 }
 
 /// The sender of the exchange service with permit-based back-pressure.
@@ -112,20 +130,17 @@ impl Sender {
                 if card == self.max_chunk_permits {
                     tracing::warn!(cardinality = c.cardinality(), "large chunk in exchange")
                 }
-                self.permits
-                    .records
-                    .acquire_many(card as _)
-                    .await
-                    .unwrap()
-                    .forget();
                 Some(permits::Value::Record(card as _))
             }
-            Message::Barrier(_) => {
-                self.permits.barriers.acquire().await.unwrap().forget();
-                Some(permits::Value::Barrier(1))
-            }
+            Message::Barrier(_) => Some(permits::Value::Barrier(1)),
             Message::Watermark(_) => None,
         };
+
+        if let Some(permits) = &permits {
+            if self.permits.acquire_permits(permits).await.is_err() {
+                return Err(mpsc::error::SendError(message));
+            }
+        }
 
         self.tx
             .send(MessageWithPermits { message, permits })
@@ -180,5 +195,46 @@ impl Receiver {
     /// Get a reference to the inner [`Permits`] to manually add permits.
     pub fn permits(&self) -> Arc<Permits> {
         self.permits.clone()
+    }
+}
+
+impl Drop for Receiver {
+    fn drop(&mut self) {
+        // Close the `permits` semaphores so that all pending `acquire` on the sender side will fail
+        // immediately.
+        self.permits.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::assert_matches::assert_matches;
+    use std::pin::pin;
+
+    use futures::FutureExt;
+
+    use super::*;
+    use crate::executor::Barrier;
+
+    #[test]
+    fn test_channel_close() {
+        let (tx, mut rx) = channel(0, 0, 1);
+
+        let send = || {
+            tx.send(Message::Barrier(Barrier::with_prev_epoch_for_test(
+                514, 114,
+            )))
+        };
+
+        assert_matches!(send().now_or_never(), Some(Ok(_))); // send successfully
+        assert_matches!(rx.recv().now_or_never(), Some(Some(Message::Barrier(_)))); // recv successfully
+
+        assert_matches!(send().now_or_never(), Some(Ok(_))); // send successfully
+                                                             // do not recv, so that the channel is full
+
+        let mut send_fut = pin!(send());
+        assert_matches!((&mut send_fut).now_or_never(), None); // would block due to no permits
+        drop(rx);
+        assert_matches!(send_fut.now_or_never(), Some(Err(_))); // channel closed
     }
 }

@@ -1401,9 +1401,8 @@ where
                     if let Some(upstream_actors_to_remove) =
                         fragment_actors_to_remove.get(upstream_fragment_id)
                     {
-                        upstream_actor_ids.drain_filter(|actor_id| {
-                            upstream_actors_to_remove.contains_key(actor_id)
-                        });
+                        upstream_actor_ids
+                            .retain(|actor_id| !upstream_actors_to_remove.contains_key(actor_id));
                     }
 
                     if let Some(upstream_actors_to_create) =
@@ -1662,7 +1661,7 @@ where
         }
 
         fragment_worker_changes
-            .drain_filter(|worker_id, _| no_shuffle_target_fragment_ids.contains(worker_id));
+            .retain(|worker_id, _| !no_shuffle_target_fragment_ids.contains(worker_id));
 
         for (
             fragment_id,
