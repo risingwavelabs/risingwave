@@ -338,7 +338,7 @@ impl UnpinWorker {
             .iter()
             .find(|(_, s)| matches!(s, PinState::Pinned))
             .map(|(k, _)| k.clone())
-            .filter(|k| k != &self.last_unpinned)
+            .filter(|k| k.0.committed_epoch != self.last_unpinned.0.committed_epoch)
         {
             let min_epoch = min_snapshot.0.committed_epoch;
             tracing::info!(min_epoch, "unpin snapshot with RPC");
