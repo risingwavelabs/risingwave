@@ -23,8 +23,8 @@ use super::generic::{self, agg_kinds, Agg, GenericPlanRef, PlanAggCall, ProjectB
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
-    StreamStatelessSimpleAgg, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, StreamExchange, StreamHashAgg, StreamProject,
+    StreamSimpleAgg, StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
@@ -169,9 +169,22 @@ impl LogicalAgg {
     }
 
     fn gen_shuffle_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        let input =
+        let force_reshuffle = self
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_streaming_force_agg_reshuffle();
+
+        let input = if force_reshuffle {
+            StreamExchange::new(
+                stream_input,
+                Distribution::HashShard(self.group_key().to_vec()),
+            )
+            .into()
+        } else {
             RequiredDist::shard_by_key(stream_input.schema().len(), &self.group_key().to_vec())
-                .enforce_if_not_satisfies(stream_input, &Order::any())?;
+                .enforce_if_not_satisfies(stream_input, &Order::any())?
+        };
         let mut logical = self.core.clone();
         logical.input = input;
         Ok(new_stream_hash_agg(logical, None).into())

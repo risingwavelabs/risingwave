@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 26] = [
+const CONFIG_KEYS: [&str; 28] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -61,6 +61,8 @@ const CONFIG_KEYS: [&str; 26] = [
     "SERVER_VERSION",
     "SERVER_VERSION_NUM",
     "RW_FORCE_SPLIT_DISTINCT_AGG",
+    "RW_STREAMING_FORCE_AGG_RESHUFFLE",
+    "RW_STREAMING_FORCE_JOIN_RESHUFFLE",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -91,6 +93,8 @@ const RW_ENABLE_JOIN_ORDERING: usize = 22;
 const SERVER_VERSION: usize = 23;
 const SERVER_VERSION_NUM: usize = 24;
 const FORCE_SPLIT_DISTINCT_AGG: usize = 25;
+const STREAMING_FORCE_JOIN_RESHUFFLE: usize = 26;
+const STREAMING_FORCE_AGG_RESHUFFLE: usize = 27;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -288,6 +292,8 @@ type Timezone = ConfigString<TIMEZONE>;
 type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
 type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
 type StreamingEnableBushyJoin = ConfigBool<STREAMING_ENABLE_BUSHY_JOIN, true>;
+type StreamingForceJoinReshuffle = ConfigBool<STREAMING_FORCE_JOIN_RESHUFFLE, false>;
+type StreamingForceAggReshuffle = ConfigBool<STREAMING_FORCE_AGG_RESHUFFLE, false>;
 type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
 type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
 type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
@@ -364,6 +370,11 @@ pub struct ConfigMap {
 
     /// Enable bushy join for streaming queries. Defaults to true.
     streaming_enable_bushy_join: StreamingEnableBushyJoin,
+
+    /// Force insert an exchange before the stream join executor. Defaults to false.
+    streaming_force_join_reshuffle: StreamingForceJoinReshuffle,
+    /// Force insert an exchange before the stream agg executor. Defaults to false.
+    streaming_force_agg_reshuffle: StreamingForceAggReshuffle,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     enable_join_ordering: EnableJoinOrdering,
@@ -447,6 +458,10 @@ impl ConfigMap {
             self.streaming_enable_delta_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             self.streaming_enable_bushy_join = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingForceJoinReshuffle::entry_name()) {
+            self.streaming_force_join_reshuffle = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingForceAggReshuffle::entry_name()) {
+            self.streaming_force_agg_reshuffle = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
             self.enable_join_ordering = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
@@ -509,6 +524,10 @@ impl ConfigMap {
             Ok(self.streaming_enable_delta_join.to_string())
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             Ok(self.streaming_enable_bushy_join.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingForceJoinReshuffle::entry_name()) {
+            Ok(self.streaming_force_join_reshuffle.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingForceAggReshuffle::entry_name()) {
+            Ok(self.streaming_force_agg_reshuffle.to_string())
         } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
             Ok(self.enable_join_ordering.to_string())
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
@@ -615,6 +634,16 @@ impl ConfigMap {
                 name : StreamingEnableBushyJoin::entry_name().to_lowercase(),
                 setting : self.streaming_enable_bushy_join.to_string(),
                 description: String::from("Enable bushy join in streaming queries.")
+            },
+            VariableInfo{
+                name : StreamingForceJoinReshuffle::entry_name().to_lowercase(),
+                setting : self.streaming_force_join_reshuffle.to_string(),
+                description: String::from("Force to insert a exchange operator before the stream join, which brings more shuffle but allow more fine-grained schedule.")
+            },
+            VariableInfo{
+                name : StreamingForceAggReshuffle::entry_name().to_lowercase(),
+                setting : self.streaming_force_agg_reshuffle.to_string(),
+                description: String::from("Force to insert a exchange operator before the stream agg, which brings more shuffle but allow more fine-grained schedule.")
             },
             VariableInfo{
                 name : EnableJoinOrdering::entry_name().to_lowercase(),
@@ -736,6 +765,14 @@ impl ConfigMap {
 
     pub fn get_streaming_enable_bushy_join(&self) -> bool {
         *self.streaming_enable_bushy_join
+    }
+
+    pub fn get_streaming_force_agg_reshuffle(&self) -> bool {
+        *self.streaming_force_agg_reshuffle
+    }
+
+    pub fn get_streaming_force_join_reshuffle(&self) -> bool {
+        *self.streaming_force_join_reshuffle
     }
 
     pub fn get_enable_join_ordering(&self) -> bool {
