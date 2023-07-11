@@ -126,7 +126,6 @@ impl Progress {
 
     /// `progress` = `consumed_rows` / `upstream_total_key_count`
     fn calculate_progress(&self) -> f64 {
-        println!("{:?}", self);
         if self.is_done() || self.states.is_empty() {
             return 1.0;
         }
