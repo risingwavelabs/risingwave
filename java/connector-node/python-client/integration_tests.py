@@ -121,9 +121,7 @@ def test_sink(prop, format, payload_input, table_schema):
     request_list = [
         connector_service_pb2.SinkStreamRequest(
             start=connector_service_pb2.SinkStreamRequest.StartSink(
-                format=connector_service_pb2.SinkPayloadFormat.JSON
-                if use_json
-                else connector_service_pb2.SinkPayloadFormat.STREAM_CHUNK,
+                format=format,
                 sink_config=connector_service_pb2.SinkConfig(
                     connector_type=prop["connector"],
                     properties=prop,
@@ -228,7 +226,6 @@ def test_jdbc_sink(input_file, param):
         "table.name": "test",
         "type": "upsert",
     }
-    file_name = input_file if use_json else input_binary_file
     test_sink(prop, **param)
     # validate results
     validate_jdbc_sink(input_file)
