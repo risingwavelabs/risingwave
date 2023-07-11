@@ -445,8 +445,11 @@ pub fn parse_source_shcema(p: &mut Parser) -> Result<CompatibleSourceSchema, Par
                 impl_parse_to!(avro_schema: DebeziumAvroSchema, p);
                 SourceSchema::DebeziumAvro(avro_schema)
             }
+            "BYTES" => {
+                SourceSchema::Bytes
+            }
             _ => return Err(ParserError::ParserError(
-                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
+                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON | BYTES after ROW FORMAT".to_string(),
             ))
 
         }    ;
