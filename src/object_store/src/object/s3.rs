@@ -566,32 +566,6 @@ impl S3ObjectStore {
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
-        // The following code is for compatibility.
-        if std::env::var("S3_COMPATIBLE_REGION").is_ok() {
-            std::env::set_var("AWS_REGION", std::env::var("S3_COMPATIBLE_REGION").unwrap())
-        }
-
-        if std::env::var("S3_COMPATIBLE_ENDPOINT").is_ok() {
-            std::env::set_var(
-                "RW_S3_ENDPOINT",
-                std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap(),
-            )
-        }
-
-        if std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").is_ok() {
-            std::env::set_var(
-                "AWS_ACCESS_KEY_ID",
-                std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").unwrap(),
-            )
-        }
-
-        if std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY").is_ok() {
-            std::env::set_var(
-                "AWS_SECRET_ACCESS_KEY",
-                std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY").unwrap(),
-            )
-        }
-
         // Customize http connector to set keepalive.
         let native_tls = || -> NativeTls {
             let mut tls = hyper_tls::native_tls::TlsConnector::builder();
