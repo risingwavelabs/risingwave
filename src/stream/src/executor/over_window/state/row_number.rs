@@ -55,9 +55,9 @@ impl WindowState for RowNumberState {
 
     fn curr_output(&self) -> StreamExecutorResult<Datum> {
         if self.curr_window().is_ready {
-            return Ok(Some(self.curr_row_number.into()));
+            Ok(Some(self.curr_row_number.into()))
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 
