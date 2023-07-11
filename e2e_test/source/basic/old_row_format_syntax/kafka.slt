@@ -193,7 +193,7 @@ WITH (
     topic = 'json_c',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest')
-row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
+ROW format JSON
 
 # we cannot create maxwell source without pk
 statement error
@@ -234,7 +234,7 @@ create table s14 (
   connector = 'kafka',
   topic = 'cannal_json',
   properties.bootstrap.server = 'message_queue:29092'
-) ROW FORMAT CANAL;
+) ROW FORMAT CANAL_JSON;
 
 statement ok
 create table s15 (
@@ -245,7 +245,7 @@ create table s15 (
   connector = 'kafka',
   topic = 'canal_json_double_field',
   properties.bootstrap.server = 'message_queue:29092'
-) ROW FORMAT CANAL;
+) ROW FORMAT CANAL_JSON;
 
 statement ok
 create table s16 (v1 int, v2 varchar) with (
