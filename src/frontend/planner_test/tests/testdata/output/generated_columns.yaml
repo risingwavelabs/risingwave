@@ -11,7 +11,7 @@
             └─StreamSource
 - name: source with generated columns
   sql: |
-    create source s1 (v1 int as v2-1, v2 int, v3 int as v2+1) with (connector = 'kinesis') ROW FORMAT JSON;
+    create source s1 (v1 int as v2-1, v2 int, v3 int as v2+1) with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
     select v3 from s1
   batch_plan: |-
     BatchExchange { order: [], dist: Single }

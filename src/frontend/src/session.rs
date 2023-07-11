@@ -15,17 +15,17 @@
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use parking_lot::{RwLock, RwLockReadGuard};
+use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Format;
 use rand::RngCore;
-use risingwave_common::array::DataChunk;
+use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
@@ -41,7 +41,6 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
-use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
@@ -77,7 +76,6 @@ use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
-use crate::scheduler::SchedulerError::QueryCancelError;
 use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
 };
@@ -87,6 +85,8 @@ use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
 use crate::{FrontendOpts, PgResponseStream};
+
+pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
 #[derive(Clone)]
@@ -346,7 +346,10 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's catalog writer.
-    pub fn catalog_writer(&self) -> &dyn CatalogWriter {
+    ///
+    /// This method is intentionally private, and a write guard is required for the caller to
+    /// prove that the write operations are permitted in the current transaction.
+    fn catalog_writer(&self, _guard: transaction::WriteGuard) -> &dyn CatalogWriter {
         &*self.catalog_writer
     }
 
@@ -356,7 +359,10 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's user info writer.
-    pub fn user_info_writer(&self) -> &dyn UserInfoWriter {
+    ///
+    /// This method is intentionally private, and a write guard is required for the caller to
+    /// prove that the write operations are permitted in the current transaction.
+    fn user_info_writer(&self, _guard: transaction::WriteGuard) -> &dyn UserInfoWriter {
         &*self.user_info_writer
     }
 
@@ -458,10 +464,15 @@ pub struct SessionImpl {
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
 
+    /// Transaction state.
+    // TODO: get rid of the `Mutex` here as a workaround if the `Send` requirement of
+    // async functions, there should actually be no contention.
+    txn: Arc<Mutex<transaction::State>>,
+
     /// Query cancel flag.
     /// This flag is set only when current query is executed in local mode, and used to cancel
     /// local query.
-    current_query_cancel_flag: Mutex<Option<Trigger>>,
+    current_query_cancel_flag: Mutex<Option<ShutdownSender>>,
 }
 
 #[derive(Error, Debug)]
@@ -494,6 +505,7 @@ impl SessionImpl {
             user_authenticator,
             config_map: Default::default(),
             id,
+            txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
         }
@@ -512,6 +524,7 @@ impl SessionImpl {
             config_map: Default::default(),
             // Mock session use non-sense id.
             id: (0, 0),
+            txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
         }
@@ -663,15 +676,15 @@ impl SessionImpl {
     }
 
     pub fn clear_cancel_query_flag(&self) {
-        let mut flag = self.current_query_cancel_flag.lock().unwrap();
+        let mut flag = self.current_query_cancel_flag.lock();
         *flag = None;
     }
 
-    pub fn reset_cancel_query_flag(&self) -> Tripwire<std::result::Result<DataChunk, BoxedError>> {
-        let mut flag = self.current_query_cancel_flag.lock().unwrap();
-        let (trigger, tripwire) = stream_tripwire(|| Err(Box::new(QueryCancelError) as BoxedError));
-        *flag = Some(trigger);
-        tripwire
+    pub fn reset_cancel_query_flag(&self) -> ShutdownToken {
+        let mut flag = self.current_query_cancel_flag.lock();
+        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
+        *flag = Some(shutdown_tx);
+        shutdown_rx
     }
 
     fn clear_notices(&self) {
@@ -679,11 +692,11 @@ impl SessionImpl {
     }
 
     pub fn cancel_current_query(&self) {
-        let mut flag_guard = self.current_query_cancel_flag.lock().unwrap();
-        if let Some(trigger) = flag_guard.take() {
+        let mut flag_guard = self.current_query_cancel_flag.lock();
+        if let Some(sender) = flag_guard.take() {
             info!("Trying to cancel query in local mode.");
             // Current running query is in local mode
-            trigger.abort();
+            sender.cancel();
             info!("Cancel query request sent.");
         } else {
             info!("Trying to cancel query in distributed mode.");
@@ -860,7 +873,7 @@ impl SessionManager for SessionManagerImpl {
 
     /// Used when cancel request happened.
     fn cancel_queries_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.lock().unwrap();
+        let guard = self.env.sessions_map.lock();
         if let Some(session) = guard.get(&session_id) {
             session.cancel_current_query()
         } else {
@@ -869,7 +882,7 @@ impl SessionManager for SessionManagerImpl {
     }
 
     fn cancel_creating_jobs_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.lock().unwrap();
+        let guard = self.env.sessions_map.lock();
         if let Some(session) = guard.get(&session_id) {
             session.cancel_current_creating_job()
         } else {
@@ -894,12 +907,12 @@ impl SessionManagerImpl {
     }
 
     fn insert_session(&self, session: Arc<SessionImpl>) {
-        let mut write_guard = self.env.sessions_map.lock().unwrap();
+        let mut write_guard = self.env.sessions_map.lock();
         write_guard.insert(session.id(), session);
     }
 
     fn delete_session(&self, session_id: &SessionId) {
-        let mut write_guard = self.env.sessions_map.lock().unwrap();
+        let mut write_guard = self.env.sessions_map.lock();
         write_guard.remove(session_id);
     }
 }

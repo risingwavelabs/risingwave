@@ -12,14 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector.api.sink;
-
-import java.util.Iterator;
-
-public interface Sink {
-    void write(Iterator<SinkRow> rows);
-
-    void sync();
-
-    void drop();
-}
+pub mod arrangement_backfill;
+pub mod no_shuffle_backfill;
+pub mod utils;

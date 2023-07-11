@@ -16,10 +16,10 @@ package com.risingwave.connector.api.sink;
 
 import com.risingwave.connector.api.TableSchema;
 
-public abstract class SinkBase implements Sink {
+public abstract class SinkWriterBase implements SinkWriterV1 {
     TableSchema tableSchema;
 
-    public SinkBase(TableSchema tableSchema) {
+    public SinkWriterBase(TableSchema tableSchema) {
         this.tableSchema = tableSchema;
     }
 

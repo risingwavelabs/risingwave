@@ -21,6 +21,7 @@ import static org.junit.Assert.*;
 import com.risingwave.connector.ConnectorServiceImpl;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
+import com.risingwave.proto.PlanCommon;
 import io.grpc.*;
 import java.io.IOException;
 import java.sql.Connection;
@@ -173,22 +174,22 @@ public class PostgresSourceTest {
                 "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
         SourceTestClient.performQuery(connDbz, query);
         // create a partial publication, check whether error is reported
-        query = "CREATE PUBLICATION dbz_publication FOR TABLE orders (o_key)";
+        query = "CREATE PUBLICATION rw_publication FOR TABLE orders (o_key)";
         SourceTestClient.performQuery(connDbz, query);
         ConnectorServiceProto.TableSchema tableSchema =
                 ConnectorServiceProto.TableSchema.newBuilder()
                         .addColumns(
-                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                PlanCommon.ColumnDesc.newBuilder()
                                         .setName("o_key")
-                                        .setDataType(
+                                        .setColumnType(
                                                 Data.DataType.newBuilder()
                                                         .setTypeName(Data.DataType.TypeName.INT64)
                                                         .build())
                                         .build())
                         .addColumns(
-                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                PlanCommon.ColumnDesc.newBuilder()
                                         .setName("o_val")
-                                        .setDataType(
+                                        .setColumnType(
                                                 Data.DataType.newBuilder()
                                                         .setTypeName(Data.DataType.TypeName.INT32)
                                                         .build())
@@ -208,7 +209,7 @@ public class PostgresSourceTest {
                             "test",
                             "orders");
             assertEquals(
-                    "INVALID_ARGUMENT: The publication 'dbz_publication' does not cover all necessary columns in table orders",
+                    "INVALID_ARGUMENT: The publication 'rw_publication' does not cover all columns of the table 'public.orders'",
                     resp.getError().getErrorMessage());
             query = "DROP PUBLICATION dbz_publication";
             SourceTestClient.performQuery(connDbz, query);

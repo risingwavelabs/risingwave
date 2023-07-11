@@ -40,7 +40,7 @@ pub async fn handle_drop_user(
         .cloned();
     match user {
         Some(user) => {
-            let user_info_writer = session.env().user_info_writer();
+            let user_info_writer = session.user_info_writer()?;
             user_info_writer.drop_user(user.id).await?;
         }
         None => {

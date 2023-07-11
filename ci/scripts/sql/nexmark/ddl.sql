@@ -30,7 +30,7 @@ connector = 'kafka',
 topic = 'nexmark',
 properties.bootstrap.server = 'localhost:9092',
 kafka.scan.startup.mode = 'earliest'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;
 
 CREATE VIEW bid
 AS

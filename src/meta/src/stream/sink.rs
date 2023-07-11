@@ -12,33 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use itertools::Itertools;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_connector::sink::{build_sink, Sink, SinkConfig};
+use risingwave_connector::sink::{build_sink, Sink, SinkParam};
 use risingwave_pb::catalog::PbSink;
+use risingwave_rpc_client::ConnectorClient;
 
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 pub async fn validate_sink(
     prost_sink_catalog: &PbSink,
-    connector_rpc_endpoint: Option<String>,
+    connector_client: Option<ConnectorClient>,
 ) -> MetaResult<()> {
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);
-    let properties = sink_catalog.properties.clone();
-    let sink_config = SinkConfig::from_hashmap(properties)
-        .map_err(|err| MetaError::from(anyhow!(err.to_string())))?;
+    let param = SinkParam::from(sink_catalog);
 
-    let sink = build_sink(
-        sink_config,
-        &sink_catalog.visible_columns().cloned().collect_vec(),
-        sink_catalog.downstream_pk_indices(),
-        sink_catalog.sink_type,
-        sink_catalog.id,
-    )?;
+    let sink = build_sink(param)?;
 
-    dispatch_sink!(sink, sink, {
-        Ok(sink.validate(connector_rpc_endpoint).await?)
-    })
+    dispatch_sink!(sink, sink, { Ok(sink.validate(connector_client).await?) })
 }

@@ -26,9 +26,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_connector::sink::{
-    build_sink, BuildSinkParam, Sink, SinkCommitCoordinator, SinkConfig, SinkError, SinkImpl,
-};
+use risingwave_connector::sink::{build_sink, Sink, SinkCommitCoordinator, SinkImpl, SinkParam};
 use risingwave_pb::connector_service::sink_coordinator_to_writer_msg::{
     CommitResponse, StartCoordinationResponse,
 };
@@ -59,7 +57,7 @@ type SinkCoordinatorResponseSender = UnboundedSender<Result<SinkCoordinatorToWri
 struct NewSinkWriterRequest {
     request_stream: SinkWriterInputStream,
     response_tx: SinkCoordinatorResponseSender,
-    param: BuildSinkParam,
+    param: SinkParam,
     vnode_bitmap: Bitmap,
 }
 
@@ -102,10 +100,7 @@ impl SinkManager {
                         param: Some(param),
                         vnode_bitmap: Some(vnode_bitmap),
                     })),
-            }) => (
-                BuildSinkParam::from_proto(param),
-                Bitmap::from(&vnode_bitmap),
-            ),
+            }) => (SinkParam::from_proto(param), Bitmap::from(&vnode_bitmap)),
             msg => {
                 return Err(Status::invalid_argument(format!(
                     "expected SinkWriterToCoordinatorMsg::StartRequest in the first request, get {:?}",
@@ -339,7 +334,7 @@ enum SinkCoordinatorWorkerRequest {
 
 struct SinkCoordinatorWorker {
     sink: Option<SinkImpl>,
-    param: BuildSinkParam,
+    param: SinkParam,
     request_streams: Vec<SinkWriterInputStream>,
     response_response_senders: Vec<SinkCoordinatorResponseSender>,
     request_rx: UnboundedReceiver<SinkCoordinatorWorkerRequest>,
@@ -352,17 +347,7 @@ impl SinkCoordinatorWorker {
     ) -> Option<SinkCoordinatorWorker> {
         let param = first_writer_request.param;
         let sink = {
-            let build_sink_result: Result<SinkImpl, SinkError> = try {
-                let config = SinkConfig::from_hashmap(param.properties.clone())?;
-                build_sink(
-                    config,
-                    &param.columns,
-                    param.pk_indices.clone(),
-                    param.sink_type,
-                    param.sink_id,
-                )?
-            };
-            match build_sink_result {
+            match build_sink(param.clone()) {
                 Ok(sink) => sink,
                 Err(e) => {
                     error!("failed to build sink with param {:?}: {:?}", param, e);
@@ -517,7 +502,7 @@ impl SinkCoordinatorWorker {
 
     async fn execute_inner(
         mut coordinator: impl SinkCommitCoordinator,
-        param: BuildSinkParam,
+        param: SinkParam,
         mut request_streams: Vec<SinkWriterInputStream>,
         response_response_senders: Vec<SinkCoordinatorResponseSender>,
     ) {

@@ -71,7 +71,7 @@ impl DmlManager {
     ) -> Result<TableDmlHandleRef> {
         let mut table_readers = self.table_readers.write();
         // Clear invalid table readers.
-        table_readers.drain_filter(|_, r| r.handle.strong_count() == 0);
+        table_readers.retain(|_, r| r.handle.strong_count() > 0);
 
         macro_rules! new_handle {
             ($entry:ident) => {{

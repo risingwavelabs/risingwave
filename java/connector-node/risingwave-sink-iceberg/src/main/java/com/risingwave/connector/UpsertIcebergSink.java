@@ -18,8 +18,8 @@ import static io.grpc.Status.INTERNAL;
 import static io.grpc.Status.UNIMPLEMENTED;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.grpc.Status;
 import java.io.IOException;
 import java.util.Arrays;
@@ -46,7 +46,7 @@ import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.types.Types;
 
-public class UpsertIcebergSink extends SinkBase {
+public class UpsertIcebergSink extends SinkWriterBase {
     private final HadoopCatalog hadoopCatalog;
     private final Table icebergTable;
     private final FileFormat fileFormat;

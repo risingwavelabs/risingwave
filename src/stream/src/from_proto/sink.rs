@@ -14,12 +14,12 @@
 
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::{SinkConfig, SinkWriterParam};
+use risingwave_connector::sink::SinkWriterParam;
 use risingwave_pb::stream_plan::SinkNode;
 
 use super::*;
 use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
-use crate::executor::{SinkExecutor, StreamExecutorError};
+use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
 
@@ -50,13 +50,11 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .into_iter()
             .map(ColumnCatalog::from)
             .collect_vec();
-        let config = SinkConfig::from_hashmap(properties).map_err(StreamExecutorError::from)?;
 
         Ok(Box::new(
             SinkExecutor::new(
                 materialize_executor,
                 stream.streaming_metrics.clone(),
-                config,
                 SinkWriterParam {
                     connector_params: params.env.connector_params(),
                     executor_id: params.executor_id,
@@ -64,6 +62,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     meta_client: params.env.meta_client(),
                 },
                 columns,
+                properties,
                 pk_indices,
                 sink_type,
                 sink_id,

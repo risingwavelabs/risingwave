@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayRef, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::estimate_size::collections::VecDeque;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{ToDatumRef, ToOwnedDatum};
@@ -27,16 +28,15 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{must_match, row};
-use risingwave_expr::function::window::WindowFuncCall;
+use risingwave_expr::window_function::{
+    create_window_state, StateEvictHint, StateKey, WindowFuncCall, WindowStates,
+};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::state::{create_window_state, EstimatedVecDeque};
-use super::window_states::WindowStates;
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
-use crate::executor::over_window::state::{StateEvictHint, StateKey};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
     ExecutorInfo, Message, PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
@@ -45,7 +45,7 @@ use crate::task::AtomicU64Ref;
 
 struct Partition {
     states: WindowStates,
-    curr_row_buffer: EstimatedVecDeque<OwnedRow>,
+    curr_row_buffer: VecDeque<OwnedRow>,
 }
 
 impl EstimateSize for Partition {

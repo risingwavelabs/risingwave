@@ -16,4 +16,7 @@ if [ $BUILDKITE_COMMAND_EXIT_STATUS -ne 0 ]; then
 
   echo "--- docker compose meta node logs"
   docker compose -f integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yml logs meta-node-0
+
+  echo "--- docker compose connector node logs"
+  docker compose -f integration_tests/${INTEGRATION_TEST_CASE}/docker-compose.yml logs connector-node
 fi

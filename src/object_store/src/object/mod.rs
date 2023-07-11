@@ -262,6 +262,21 @@ impl ObjectStoreImpl {
         }
     }
 
+    pub fn support_streaming_upload(&self) -> bool {
+        match self {
+            ObjectStoreImpl::InMem(_) => true,
+            ObjectStoreImpl::Opendal(store) => {
+                store
+                    .inner
+                    .op
+                    .info()
+                    .capability()
+                    .write_without_content_length
+            }
+            ObjectStoreImpl::S3(_) => true,
+        }
+    }
+
     pub fn set_opts(
         &mut self,
         streaming_read_timeout_ms: u64,

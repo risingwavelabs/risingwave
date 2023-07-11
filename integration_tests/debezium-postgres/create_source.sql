@@ -3,4 +3,4 @@ CREATE TABLE orders (PRIMARY KEY(order_id)) with (
     kafka.topic = 'postgres.public.orders',
     kafka.brokers = 'message_queue:29092',
     kafka.scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_AVRO (schema.registry = 'http://message_queue:8081');
+) FORMAT DEBEZIUM ENCODE AVRO (schema.registry = 'http://message_queue:8081');

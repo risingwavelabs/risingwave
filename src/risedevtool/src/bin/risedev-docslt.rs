@@ -36,15 +36,14 @@ fn extract_slt(filepath: &Path) -> Vec<SltBlock> {
 
     let mut blocks = vec![];
     let mut iter = content.lines().enumerate();
-    'block: while let Some((i, line)) = iter.next() {
+    while let Some((i, line)) = iter.next() {
         if !line.trim_end().ends_with("```slt") {
             continue;
         }
         let mut content = String::new();
         loop {
             let Some((i, mut line)) = iter.next() else {
-                error!("unexpected end of file at {}", filepath.display());
-                break 'block;
+                panic!("unexpected end of file at {}", filepath.display());
             };
             line = line.trim();
             // skip empty lines
@@ -52,8 +51,7 @@ fn extract_slt(filepath: &Path) -> Vec<SltBlock> {
                 continue;
             }
             if !(line.starts_with("///") || line.starts_with("//!")) {
-                error!("expect /// or //! at {}:{}", filepath.display(), i + 1);
-                continue 'block;
+                panic!("expect /// or //! at {}:{}", filepath.display(), i + 1);
             }
             line = line[3..].trim();
             if line == "```" {

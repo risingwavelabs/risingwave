@@ -249,7 +249,7 @@ impl StatementType {
             Statement::SetVariable { .. } => Ok(StatementType::SET_VARIABLE),
             Statement::ShowVariable { .. } => Ok(StatementType::SHOW_VARIABLE),
             Statement::StartTransaction { .. } => Ok(StatementType::START_TRANSACTION),
-            Statement::BEGIN { .. } => Ok(StatementType::BEGIN),
+            Statement::Begin { .. } => Ok(StatementType::BEGIN),
             Statement::Abort => Ok(StatementType::ABORT),
             Statement::Commit { .. } => Ok(StatementType::COMMIT),
             Statement::Rollback { .. } => Ok(StatementType::ROLLBACK),
