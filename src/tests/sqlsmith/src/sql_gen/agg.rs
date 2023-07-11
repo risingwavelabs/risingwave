@@ -30,6 +30,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             Some(funcs) => funcs,
         };
         let func = funcs.choose(&mut self.rng).unwrap();
+        if matches!(
+            (func.func, func.inputs_type.as_slice()),
+            (
+                AggKind::Min | AggKind::Max,
+                [DataType::Boolean | DataType::Jsonb]
+            )
+        ) {
+            return self.gen_simple_scalar(ret);
+        }
 
         let context = SqlGeneratorContext::new();
         let context = context.set_inside_agg();
