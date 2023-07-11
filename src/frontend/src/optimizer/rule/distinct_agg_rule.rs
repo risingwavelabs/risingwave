@@ -18,7 +18,7 @@ use std::mem;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::agg::{agg_kinds, AggKind};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{CollectInputRef, ExprType, FunctionCall, InputRef, Literal};
@@ -37,14 +37,34 @@ impl Rule for DistinctAggRule {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (mut agg_calls, mut agg_group_keys, input) = agg.clone().decompose();
 
+        if agg_calls.iter().all(|c| !c.distinct) {
+            // there's no distinct agg call
+            return None;
+        }
+
         if self.for_stream && !agg_group_keys.is_empty() {
             // Due to performance issue, we don't do 2-phase agg for stream distinct agg with group
             // by. See https://github.com/risingwavelabs/risingwave/issues/7271 for more.
             return None;
         }
 
+        if !agg_calls.iter().all(|c| {
+            assert!(
+                !matches!(c.agg_kind, agg_kinds::rewritten!()),
+                "We shouldn't see agg kind {} here",
+                c.agg_kind
+            );
+            let agg_kind_ok = !matches!(c.agg_kind, agg_kinds::simply_cannot_two_phase!());
+            let order_ok = matches!(c.agg_kind, agg_kinds::result_unaffected_by_order_by!())
+                || c.order_by.is_empty();
+            agg_kind_ok && order_ok
+        }) {
+            tracing::warn!("DistinctAggRule: unsupported agg kind, fallback to backend impl");
+            return None;
+        }
+
         let (node, flag_values, has_expand) =
-            Self::build_expand(input, &mut agg_group_keys, &mut agg_calls)?;
+            Self::build_expand(input, &mut agg_group_keys, &mut agg_calls);
         let mid_agg =
             Self::build_middle_agg(node, agg_group_keys.clone(), agg_calls.clone(), has_expand);
 
@@ -83,7 +103,7 @@ impl DistinctAggRule {
         input: PlanRef,
         group_keys: &mut IndexSet,
         agg_calls: &mut Vec<PlanAggCall>,
-    ) -> Option<(PlanRef, Vec<usize>, bool)> {
+    ) -> (PlanRef, Vec<usize>, bool) {
         let input_schema_len = input.schema().len();
         // each `subset` in `column_subsets` consists of `group_keys`, `agg_call`'s input indices
         // and the input indices of `agg_call`'s `filter`.
@@ -94,9 +114,7 @@ impl DistinctAggRule {
         let mut hash_map = HashMap::new();
         let (distinct_aggs, non_distinct_aggs): (Vec<_>, Vec<_>) =
             agg_calls.iter().partition(|agg_call| agg_call.distinct);
-        if distinct_aggs.is_empty() {
-            return None;
-        }
+        assert!(!distinct_aggs.is_empty());
 
         if !non_distinct_aggs.is_empty() {
             let subset = {
@@ -133,13 +151,13 @@ impl DistinctAggRule {
         assert_ne!(n_different_distinct, 0); // since `distinct_aggs` is not empty here
         if n_different_distinct == 1 {
             // no need to have expand if there is only one distinct aggregates.
-            return Some((input, flag_values, false));
+            return (input, flag_values, false);
         }
 
         let expand = LogicalExpand::create(input, column_subsets);
         // manual version of column pruning for expand.
         let project = Self::build_project(input_schema_len, expand, group_keys, agg_calls);
-        Some((project, flag_values, true))
+        (project, flag_values, true)
     }
 
     /// Used to do column pruning for `Expand`.
@@ -281,42 +299,9 @@ impl DistinctAggRule {
                 agg_call.filter = Condition::true_cond();
 
                 // change final agg's agg_kind just like two-phase agg.
-                //
-                // future `AggKind` may or may not be able to use the same agg call for mid and
-                // final agg so we use exhaustive match here to make compiler remind
-                // people adding new `AggKind` to update it.
-                match agg_call.agg_kind {
-                    AggKind::BitAnd
-                    | AggKind::BitOr
-                    | AggKind::BitXor
-                    | AggKind::BoolAnd
-                    | AggKind::BoolOr
-                    | AggKind::Min
-                    | AggKind::Max
-                    | AggKind::Sum
-                    | AggKind::Sum0
-                    | AggKind::Avg
-                    | AggKind::StringAgg
-                    | AggKind::ArrayAgg
-                    | AggKind::JsonbAgg
-                    | AggKind::JsonbObjectAgg
-                    | AggKind::FirstValue
-                    | AggKind::LastValue
-                    | AggKind::StddevPop
-                    | AggKind::StddevSamp
-                    | AggKind::VarPop
-                    | AggKind::VarSamp
-                    | AggKind::PercentileCont
-                    | AggKind::PercentileDisc
-                    | AggKind::Mode => (),
-                    AggKind::Count => {
-                        agg_call.agg_kind = AggKind::Sum0;
-                    }
-                    // TODO: fix it as a real 2-phase plan of ApproxCountDistinct
-                    AggKind::ApproxCountDistinct => {
-                        agg_call.agg_kind = AggKind::Sum0;
-                    }
-                }
+                agg_call.agg_kind = agg_call.agg_kind.partial_to_total().expect(
+                    "we should get a valid total phase agg kind here since unsupported cases have been filtered out"
+                );
 
                 // the index of non-distinct aggs' subset in `column_subsets` is always 0 if it
                 // exists.

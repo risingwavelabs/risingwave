@@ -14,12 +14,12 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::agg::{agg_kinds, AggKind};
 
-use super::generic::{self, agg_kinds, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
@@ -323,61 +323,6 @@ impl LogicalAggBuilder {
             }
         }
         None
-    }
-
-    /// syntax check for distinct aggregates.
-    ///
-    /// TODO: we may disable this syntax check in the future because we may use another approach to
-    /// implement distinct aggregates.
-    pub fn syntax_check(&self) -> Result<()> {
-        let mut has_distinct = false;
-        let mut has_order_by = false;
-        // TODO(stonepage): refactor it and unify the 2-phase agg rewriting logic
-        let mut has_non_distinct_string_agg = false;
-        let mut has_non_distinct_array_agg = false;
-        self.agg_calls.iter().for_each(|agg_call| {
-            if agg_call.distinct {
-                has_distinct = true;
-            }
-            if !agg_call.order_by.is_empty() {
-                has_order_by = true;
-            }
-            if !agg_call.distinct && agg_call.agg_kind == AggKind::StringAgg {
-                has_non_distinct_string_agg = true;
-            }
-            if !agg_call.distinct && agg_call.agg_kind == AggKind::ArrayAgg {
-                has_non_distinct_array_agg = true;
-            }
-        });
-
-        // order by is disallowed occur with distinct because we can not directly rewrite agg with
-        // order by into 2-phase agg.
-        if has_distinct && has_order_by {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "Order by aggregates are disallowed to occur with distinct aggregates".into(),
-            )
-            .into());
-        }
-
-        // when there are distinct aggregates, non-distinct aggregates will be rewritten as
-        // two-phase aggregates, while string_agg can not be rewritten as two-phase aggregates, so
-        // we have to ban this case now.
-        if has_distinct && has_non_distinct_string_agg {
-            return Err(ErrorCode::NotImplemented(
-                "Non-distinct string_agg can't appear with distinct aggregates".into(),
-                TrackingIssue::none(),
-            )
-            .into());
-        }
-        if has_distinct && has_non_distinct_array_agg {
-            return Err(ErrorCode::NotImplemented(
-                "Non-distinct array_agg can't appear with distinct aggregates".into(),
-                TrackingIssue::none(),
-            )
-            .into());
-        }
-
-        Ok(())
     }
 
     fn schema_agg_start_offset(&self) -> usize {
@@ -778,8 +723,6 @@ impl LogicalAgg {
         let rewritten_having = having
             .map(|expr| agg_builder.rewrite_with_error(expr))
             .transpose()?;
-
-        agg_builder.syntax_check()?;
 
         Ok((
             agg_builder.build(input).into(),
