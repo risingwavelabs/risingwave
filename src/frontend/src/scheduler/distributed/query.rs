@@ -346,7 +346,7 @@ impl QueryRunner {
                     }
                 }
                 QueryMessage::CancelQuery => {
-                    self.clean_all_stages(Some(SchedulerError::QueryCancelError))
+                    self.clean_all_stages(Some(SchedulerError::QueryCancelled))
                         .await;
                     // One stage failed, not necessary to execute schedule stages.
                     break;
