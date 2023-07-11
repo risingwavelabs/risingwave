@@ -69,7 +69,9 @@ impl AggCall {
             // XXX: some special cases that can not be handled by signature map.
 
             // may return list or struct type
-            (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
+            (AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue, [input]) => {
+                input.clone()
+            }
             (AggKind::ArrayAgg, [input]) => List(Box::new(input.clone())),
             // functions that are rewritten in the frontend and don't exist in the expr crate
             (AggKind::Avg, [input]) => match input {

@@ -19,6 +19,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
@@ -156,6 +157,12 @@ enum HummockCommands {
         level0_stop_write_threshold_sub_level_number: Option<u64>,
         #[clap(long)]
         level0_sub_level_compact_level_count: Option<u32>,
+        #[clap(long)]
+        max_space_reclaim_bytes: Option<u64>,
+        #[clap(long)]
+        level0_max_compact_file_number: Option<u64>,
+        #[clap(long)]
+        level0_overlapping_sub_level_compact_level_count: Option<u32>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -410,6 +417,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             max_sub_compaction,
             level0_stop_write_threshold_sub_level_number,
             level0_sub_level_compact_level_count,
+            max_space_reclaim_bytes,
+            level0_max_compact_file_number,
+            level0_overlapping_sub_level_compact_level_count,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -425,6 +435,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     max_sub_compaction,
                     level0_stop_write_threshold_sub_level_number,
                     level0_sub_level_compact_level_count,
+                    max_space_reclaim_bytes,
+                    level0_max_compact_file_number,
+                    level0_overlapping_sub_level_compact_level_count,
                 ),
             )
             .await?
@@ -489,10 +502,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::scale::resize(context, resize).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
-            cmd_impl::scale::update_schedulability(context, workers, true).await?
+            cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
+                .await?
         }
         Commands::Scale(ScaleCommands::Uncordon { workers }) => {
-            cmd_impl::scale::update_schedulability(context, workers, false).await?
+            cmd_impl::scale::update_schedulability(context, workers, Schedulability::Schedulable)
+                .await?
         }
     }
     Ok(())

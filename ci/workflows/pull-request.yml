@@ -188,6 +188,9 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
 
+  # The timeout should be strictly less than timeout in `main-cron.yml`.
+  # It should be as conservative as possible.
+  # This ensures our `main-cron` workflow will be stable.
   - label: "unit test"
     command: "ci/scripts/pr-unit-test.sh"
     plugins:
@@ -200,7 +203,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 13
+    timeout_in_minutes: 14
 
   - label: "fuzz test"
     command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
@@ -387,7 +390,8 @@ steps:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 20
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
 
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"

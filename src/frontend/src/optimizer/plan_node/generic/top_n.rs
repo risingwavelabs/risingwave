@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::fmt;
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
@@ -122,46 +121,17 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
             group_key: vec![],
         }
     }
-
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.fmt_with_name_and_force(f, name, false).finish()
-    }
-
-    pub(crate) fn fmt_with_name_and_force<'a, 'b>(
-        &self,
-        f: &'b mut fmt::Formatter<'a>,
-        name: &str,
-        force_group_keys: bool,
-    ) -> fmt::DebugStruct<'b, 'a> {
-        let mut builder = f.debug_struct(name);
-        let input_schema = self.input.schema();
-        let ord = OrderDisplay {
-            order: &self.order,
-            input_schema,
-        };
-        builder.field("order", &format!("{}", ord));
-        builder
-            .field("limit", &self.limit_attr.limit())
-            .field("offset", &self.offset);
-        if self.limit_attr.with_ties() {
-            builder.field("with_ties", &true);
-        }
-        if force_group_keys || !self.group_key.is_empty() {
-            builder.field("group_key", &self.group_key);
-        }
-        builder
-    }
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for TopN<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let mut vec = Vec::with_capacity(5);
         let input_schema = self.input.schema();
-        let order_d = Pretty::display(&OrderDisplay {
+        let order_d = OrderDisplay {
             order: &self.order,
             input_schema,
-        });
-        vec.push(("order", order_d));
+        };
+        vec.push(("order", order_d.distill()));
         vec.push(("limit", Pretty::debug(&self.limit_attr.limit())));
         vec.push(("offset", Pretty::debug(&self.offset)));
         if self.limit_attr.with_ties() {

@@ -91,6 +91,10 @@ pub struct StreamingMetrics {
     pub backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
     pub backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
 
+    // Arrangement Backfill
+    pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
+    pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
+
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
     /// to flow through the graph.
@@ -549,6 +553,23 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let arrangement_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
+            "stream_arrangement_backfill_snapshot_read_row_count",
+            "Total number of rows that have been read from the arrangement_backfill snapshot",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let arrangement_backfill_upstream_output_row_count =
+            register_int_counter_vec_with_registry!(
+                "stream_arrangement_backfill_upstream_output_row_count",
+                "Total number of rows that have been output from the arrangement_backfill upstream",
+                &["table_id", "actor_id"],
+                registry
+            )
+            .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -707,6 +728,8 @@ impl StreamingMetrics {
             temporal_join_cached_entry_count,
             backfill_snapshot_read_row_count,
             backfill_upstream_output_row_count,
+            arrangement_backfill_snapshot_read_row_count,
+            arrangement_backfill_upstream_output_row_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,

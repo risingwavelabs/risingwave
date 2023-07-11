@@ -9,7 +9,8 @@
     └─BatchProject { exprs: [id, value] }
       └─BatchSource { source: s, columns: [id, value, _rw_kafka_timestamp, _row_id], filter: (None, None) }
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |-
       syntax = "proto3";

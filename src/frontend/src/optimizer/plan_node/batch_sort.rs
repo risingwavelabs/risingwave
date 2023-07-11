@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use pretty_xmlish::{Pretty, XmlNode};
+use pretty_xmlish::XmlNode;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortNode;
@@ -42,26 +40,13 @@ impl BatchSort {
     }
 }
 
-impl fmt::Display for BatchSort {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchSort {{ order: {} }}",
-            OrderDisplay {
-                order: self.order(),
-                input_schema: self.input.schema()
-            }
-        )
-    }
-}
-
 impl Distill for BatchSort {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let data = Pretty::display(&OrderDisplay {
+        let data = OrderDisplay {
             order: self.order(),
             input_schema: self.input.schema(),
-        });
-        childless_record("BatchSort", vec![("order", data)])
+        };
+        childless_record("BatchSort", vec![("order", data.distill())])
     }
 }
 

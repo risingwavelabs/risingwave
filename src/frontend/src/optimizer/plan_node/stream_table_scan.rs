@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fmt;
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -25,7 +24,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
-use super::utils::{childless_record, formatter_debug_plan_node, Distill};
+use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
@@ -177,11 +176,11 @@ impl Distill for StreamTableScan {
         vec.push(("columns", self.logical.columns_pretty(verbose)));
 
         if verbose {
-            let pk = Pretty::display(&IndicesDisplay {
+            let pk = IndicesDisplay {
                 indices: self.logical_pk(),
-                input_schema: &self.base.schema,
-            });
-            vec.push(("pk", pk));
+                schema: &self.base.schema,
+            };
+            vec.push(("pk", pk.distill()));
             let dist = Pretty::display(&DistributionDisplay {
                 distribution: self.distribution(),
                 input_schema: &self.base.schema,
@@ -190,40 +189,6 @@ impl Distill for StreamTableScan {
         }
 
         childless_record("StreamTableScan", vec)
-    }
-}
-impl fmt::Display for StreamTableScan {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = formatter_debug_plan_node!(f, "StreamTableScan");
-
-        let v = match verbose {
-            false => self.logical.column_names(),
-            true => self.logical.column_names_with_table_prefix(),
-        }
-        .join(", ");
-        builder
-            .field("table", &format_args!("{}", self.logical.table_name))
-            .field("columns", &format_args!("[{}]", v));
-
-        if verbose {
-            builder.field(
-                "pk",
-                &IndicesDisplay {
-                    indices: self.logical_pk(),
-                    input_schema: &self.base.schema,
-                },
-            );
-            builder.field(
-                "dist",
-                &DistributionDisplay {
-                    distribution: self.distribution(),
-                    input_schema: &self.base.schema,
-                },
-            );
-        }
-
-        builder.finish()
     }
 }
 
@@ -322,7 +287,7 @@ impl StreamTableScan {
             stream_key,
             operator_id: self.base.id.0 as u64,
             identity: {
-                let s = format!("{}", self);
+                let s = self.distill_to_string();
                 s.replace("StreamTableScan", "Chain")
             },
             append_only: self.append_only(),

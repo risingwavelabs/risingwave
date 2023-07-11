@@ -1,10 +1,15 @@
 - id: create_source_without_with_clause
   sql: |
-    create source s() row format json;
+    create source s() FORMAT PLAIN ENCODE JSON;
   expected_outputs:
   - planner_error
 - id: create_source_without_connector
   sql: |
-    create source s() with(a=1) row format json;
+    create source s() with(a=1) FORMAT PLAIN ENCODE JSON;
+  expected_outputs:
+  - planner_error
+- id: create_source_without_schema_in_json
+  sql: |
+    create source s with(connector='kafka') FORMAT PLAIN ENCODE JSON;
   expected_outputs:
   - planner_error

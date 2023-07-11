@@ -40,6 +40,13 @@ pub enum ParserError {
     ParserError(String),
 }
 
+impl ParserError {
+    pub fn inner_msg(self) -> String {
+        match self {
+            ParserError::TokenizerError(s) | ParserError::ParserError(s) => s,
+        }
+    }
+}
 // Use `Parser::expected` instead, if possible
 #[macro_export]
 macro_rules! parser_err {
@@ -519,6 +526,10 @@ impl Parser {
                 Keyword::ARRAY => {
                     self.expect_token(&Token::LBracket)?;
                     self.parse_array_expr(true)
+                }
+                // `LEFT` and `RIGHT` are reserved as identifier but okay as function
+                Keyword::LEFT | Keyword::RIGHT => {
+                    self.parse_function(ObjectName(vec![w.to_ident()?]))
                 }
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
                     parser_err!(format!("syntax error at or near \"{w}\""))
@@ -2231,7 +2242,7 @@ impl Parser {
         };
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
-        let mut with_options = self.parse_with_properties()?;
+        let with_options = self.parse_with_properties()?;
 
         let option = with_options
             .iter()
@@ -2242,38 +2253,44 @@ impl Parser {
         // default row format for datagen source is native
         let source_schema = if let Some(connector) = connector {
             if connector.contains("-cdc") {
-                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                if (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
+                    || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
                 {
                     return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
                 }
-                Some(SourceSchema::DebeziumJson)
+                Some(SourceSchemaV2 {
+                    format: Format::Debezium,
+                    row_encode: Encode::Json,
+                    row_options: Default::default(),
+                })
             } else if connector.contains("nexmark") {
-                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                if (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
+                    || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
                 {
                     return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to internal native format".to_string()));
                 }
-                Some(SourceSchema::Native)
+                Some(SourceSchemaV2 {
+                    format: Format::Native,
+                    row_encode: Encode::Native,
+                    row_options: Default::default(),
+                })
             } else if connector.contains("datagen") {
-                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                if (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
+                    || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
                 {
-                    self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
-                    let schema = SourceSchemaV2::parse_to(self)?;
-                    let (schema, mut row_format_options) = schema.into_source_schema()?;
-                    with_options.append(&mut row_format_options);
-                    Some(schema)
+                    Some(SourceSchemaV2::parse_to(self)?)
                 } else {
-                    Some(SourceSchema::Native)
+                    Some(SourceSchemaV2 {
+                        format: Format::Native,
+                        row_encode: Encode::Native,
+                        row_options: Default::default(),
+                    })
                 }
             } else {
-                // other connectors
-                self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
-                let schema = SourceSchemaV2::parse_to(self)?;
-                let (schema, mut row_format_options) = schema.into_source_schema()?;
-                with_options.append(&mut row_format_options);
-                Some(schema)
+                Some(SourceSchemaV2::parse_to(self)?)
             }
         } else {
             // Table is NOT created with an external connector.
@@ -3774,6 +3791,9 @@ impl Parser {
                         return self.expected("from after indexes", self.peek_token());
                     }
                 }
+                Keyword::CLUSTERS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Cluster));
+                }
                 _ => {}
             }
         }
@@ -4380,7 +4400,7 @@ impl Parser {
 
     pub fn parse_begin(&mut self) -> Result<Statement, ParserError> {
         let _ = self.parse_one_of_keywords(&[Keyword::TRANSACTION, Keyword::WORK]);
-        Ok(Statement::BEGIN {
+        Ok(Statement::Begin {
             modes: self.parse_transaction_modes()?,
         })
     }

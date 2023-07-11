@@ -23,13 +23,11 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::agg::{build as build_agg, AggCall, BoxedAggState};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use tokio::sync::watch::Receiver;
 
-use super::check_shutdown;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::{BatchTaskContext, ShutdownMsg};
+use crate::task::{BatchTaskContext, ShutdownToken};
 
 /// `SortAggExecutor` implements the sort aggregate algorithm, which assumes
 /// that the input chunks has already been sorted by group columns.
@@ -45,7 +43,7 @@ pub struct SortAggExecutor {
     schema: Schema,
     identity: String,
     output_size_limit: usize, // make unit test easy
-    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    shutdown_rx: ShutdownToken,
 }
 
 #[async_trait::async_trait]
@@ -87,7 +85,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
             output_size_limit: source.context.get_config().developer.chunk_size,
-            shutdown_rx: Some(source.shutdown_rx.clone()),
+            shutdown_rx: source.shutdown_rx.clone(),
         }))
     }
 }
@@ -123,7 +121,7 @@ impl SortAggExecutor {
             let child_chunk = child_chunk?.compact();
             let mut group_columns = Vec::with_capacity(self.group_key.len());
             for expr in &mut self.group_key {
-                check_shutdown(&self.shutdown_rx)?;
+                self.shutdown_rx.check()?;
                 let result = expr.eval(&child_chunk).await?;
                 group_columns.push(result);
             }
@@ -139,7 +137,7 @@ impl SortAggExecutor {
             };
 
             for Range { start, end } in groups.ranges() {
-                check_shutdown(&self.shutdown_rx)?;
+                self.shutdown_rx.check()?;
                 let group: Vec<_> = group_columns
                     .iter()
                     .map(|col| col.datum_at(start))
@@ -371,6 +369,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
+    use crate::task::ShutdownToken;
 
     #[tokio::test]
     async fn execute_count_star_int32() -> Result<()> {
@@ -424,7 +423,7 @@ mod tests {
             schema: Schema { fields },
             identity: "SortAggExecutor".to_string(),
             output_size_limit: 3,
-            shutdown_rx: None,
+            shutdown_rx: ShutdownToken::empty(),
         });
 
         let fields = &executor.schema().fields;
@@ -508,7 +507,7 @@ mod tests {
             schema: Schema { fields },
             identity: "SortAggExecutor".to_string(),
             output_size_limit: 3,
-            shutdown_rx: None,
+            shutdown_rx: ShutdownToken::empty(),
         });
 
         let fields = &executor.schema().fields;
@@ -600,7 +599,7 @@ mod tests {
             schema: Schema { fields },
             identity: "SortAggExecutor".to_string(),
             output_size_limit: 4,
-            shutdown_rx: None,
+            shutdown_rx: ShutdownToken::empty(),
         });
 
         let mut stream = executor.execute();
@@ -672,7 +671,7 @@ mod tests {
             schema: Schema { fields },
             identity: "SortAggExecutor".to_string(),
             output_size_limit,
-            shutdown_rx: None,
+            shutdown_rx: ShutdownToken::empty(),
         });
 
         let fields = &executor.schema().fields;
@@ -763,7 +762,7 @@ mod tests {
             schema: Schema { fields },
             identity: "SortAggExecutor".to_string(),
             output_size_limit: 3,
-            shutdown_rx: None,
+            shutdown_rx: ShutdownToken::empty(),
         });
 
         let fields = &executor.schema().fields;
@@ -850,7 +849,7 @@ mod tests {
             .collect::<Vec<Field>>();
 
         let output_size_limit = 4;
-        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
+        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
         let executor = Box::new(SortAggExecutor {
             agg_states,
             group_key: group_exprs,
@@ -858,9 +857,9 @@ mod tests {
             schema: Schema { fields },
             identity: "SortAggExecutor".to_string(),
             output_size_limit,
-            shutdown_rx: Some(shutdown_rx),
+            shutdown_rx,
         });
-        shutdown_tx.send(ShutdownMsg::Cancel).unwrap();
+        shutdown_tx.cancel();
         #[for_await]
         for data in executor.execute() {
             assert!(data.is_err());

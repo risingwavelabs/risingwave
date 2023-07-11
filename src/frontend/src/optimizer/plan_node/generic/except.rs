@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 
@@ -45,14 +43,6 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Except<PlanRef> {
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
         FunctionalDependencySet::new(self.inputs[0].schema().len())
-    }
-}
-
-impl<PlanRef: GenericPlanRef> Except<PlanRef> {
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field("all", &self.all);
-        builder.finish()
     }
 }
 

@@ -55,7 +55,7 @@ pub async fn handle_drop_view(
         view.id
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_view(view_id).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_VIEW))

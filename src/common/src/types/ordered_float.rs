@@ -53,7 +53,7 @@ use core::str::FromStr;
 pub use num_traits::Float;
 use num_traits::{
     Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Pow,
-    Signed, Zero,
+    Zero,
 };
 
 // masks for the parts of the IEEE 754 float
@@ -467,32 +467,6 @@ impl<'a, T: Float + Product + 'a> Product<&'a OrderedFloat<T>> for OrderedFloat<
     #[inline]
     fn product<I: Iterator<Item = &'a OrderedFloat<T>>>(iter: I) -> Self {
         iter.cloned().product()
-    }
-}
-
-impl<T: Float + Signed> Signed for OrderedFloat<T> {
-    #[inline]
-    fn abs(&self) -> Self {
-        OrderedFloat(self.0.abs())
-    }
-
-    fn abs_sub(&self, other: &Self) -> Self {
-        OrderedFloat(Signed::abs_sub(&self.0, &other.0))
-    }
-
-    #[inline]
-    fn signum(&self) -> Self {
-        OrderedFloat(self.0.signum())
-    }
-
-    #[inline]
-    fn is_positive(&self) -> bool {
-        self.0.is_positive()
-    }
-
-    #[inline]
-    fn is_negative(&self) -> bool {
-        self.0.is_negative()
     }
 }
 
@@ -1042,8 +1016,8 @@ mod tests {
         let nan = OrderedFloat::<f64>::from(nan_prim);
         assert_eq!(nan, nan);
 
-        use num_traits::Signed as _;
-        assert_eq!(nan.abs(), nan.abs());
+        use crate::types::FloatExt as _;
+        assert_eq!(nan.round(), nan.round());
     }
 
     fn test_into_f32(expected: [u8; 4], v: impl Into<OrderedFloat<f32>>) {

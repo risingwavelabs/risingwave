@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::hash::Hash;
 
 use educe::Educe;
@@ -56,21 +55,6 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
         }
     }
 
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ table: {}, exprs: {:?}{} }}",
-            name,
-            self.table_name,
-            self.exprs,
-            if self.returning {
-                ", returning: true"
-            } else {
-                ""
-            }
-        )
-    }
-
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.exprs = self
             .exprs
@@ -83,7 +67,7 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
 impl<PlanRef: Eq + Hash> DistillUnit for Update<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let mut vec = Vec::with_capacity(if self.returning { 3 } else { 2 });
-        vec.push(("table", Pretty::Text(self.table_name.clone().into())));
+        vec.push(("table", Pretty::from(self.table_name.clone())));
         vec.push(("exprs", Pretty::debug(&self.exprs)));
         if self.returning {
             vec.push(("returning", Pretty::display(&true)));

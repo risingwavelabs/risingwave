@@ -8,7 +8,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_avro_json')
-ROW FORMAT UPSERT_AVRO (schema.registry = 'http://message_queue:8081');
+FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
 
 # key schema should be a subset of value schema
@@ -18,7 +18,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_student_key_not_subset_of_value_avro_json')
-ROW FORMAT UPSERT_AVRO (schema.registry = 'http://message_queue:8081');
+FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
 
 statement ok
@@ -27,7 +27,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_student_avro_json')
-ROW FORMAT UPSERT_AVRO (schema.registry = 'http://message_queue:8081');
+FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
 
 statement ok
@@ -38,7 +38,7 @@ WITH (
 connector = 'kafka',
  properties.bootstrap.server = 'message_queue:29092',
 topic = 'upsert_avro_json')
-ROW FORMAT UPSERT_AVRO (schema.registry = 'http://message_queue:8081');
+FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
 # Just ignore the kafka key, it works
 statement ok
@@ -49,7 +49,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_avro_json')
-ROW FORMAT UPSERT_AVRO (schema.registry = 'http://message_queue:8081');
+FORMAT UPSERT ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
 statement ok
 CREATE TABLE debezium_non_compact (PRIMARY KEY(order_id)) with (
@@ -57,7 +57,7 @@ CREATE TABLE debezium_non_compact (PRIMARY KEY(order_id)) with (
     kafka.topic = 'debezium_non_compact_avro_json',
     kafka.brokers = 'message_queue:29092',
     kafka.scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_AVRO (schema.registry = 'http://message_queue:8081');
+) FORMAT DEBEZIUM ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
 
 statement ok
@@ -66,7 +66,7 @@ CREATE TABLE debezium_compact (PRIMARY KEY(order_id)) with (
     kafka.topic = 'debezium_compact_avro_json',
     kafka.brokers = 'message_queue:29092',
     kafka.scan.startup.mode = 'earliest'
-) ROW FORMAT DEBEZIUM_AVRO (schema.registry = 'http://message_queue:8081');
+) FORMAT DEBEZIUM ENCODE AVRO (schema.registry = 'http://message_queue:8081');
 
 statement ok
 flush;

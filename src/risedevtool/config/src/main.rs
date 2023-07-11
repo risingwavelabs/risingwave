@@ -72,6 +72,7 @@ pub enum Components {
     AllInOne,
     Sanitizer,
     DynamicLinking,
+    HummockTrace,
 }
 
 impl Components {
@@ -92,6 +93,7 @@ impl Components {
             Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
             Self::DynamicLinking => "[Build] Enable dynamic linking",
+            Self::HummockTrace => "[Build] Hummock Trace",
         }
         .into()
     }
@@ -176,6 +178,9 @@ building Rust components. This can speed up the build process,
 but you might need the expertise to install dependencies correctly.
                 "
             }
+            Self::HummockTrace => {
+            "With this option enabled, RiseDev will enable tracing for Hummock. See storage/hummock_trace for details."
+            }
         }
         .into()
     }
@@ -197,6 +202,7 @@ but you might need the expertise to install dependencies correctly.
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
             "ENABLE_BUILD_RW_CONNECTOR" => Some(Self::BuildConnectorNode),
+            "ENABLE_HUMMOCK_TRACE" => Some(Self::HummockTrace),
             _ => None,
         }
     }
@@ -218,6 +224,7 @@ but you might need the expertise to install dependencies correctly.
             Self::Sanitizer => "ENABLE_SANITIZER",
             Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
             Self::DynamicLinking => "ENABLE_DYNAMIC_LINKING",
+            Self::HummockTrace => "ENABLE_HUMMOCK_TRACE",
         }
         .into()
     }

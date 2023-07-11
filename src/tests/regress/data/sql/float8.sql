@@ -100,7 +100,7 @@ select ceiling(f1) as ceiling_f1 from float8_tbl f;
 select floor(f1) as floor_f1 from float8_tbl f;
 
 -- sign
---@ select sign(f1) as sign_f1 from float8_tbl f;
+select sign(f1) as sign_f1 from float8_tbl f;
 
 -- avoid bit-exact output here because operations may not be bit-exact.
 SET extra_float_digits = 0;

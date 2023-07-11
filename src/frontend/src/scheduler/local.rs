@@ -14,6 +14,7 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -23,13 +24,13 @@ use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
 use rand::seq::SliceRandom;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
-use risingwave_batch::task::{ShutdownMsg, TaskId};
+use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::stream_cancel::{cancellable_stream, Tripwire};
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -42,7 +43,7 @@ use risingwave_pb::common::WorkerNode;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
-use uuid::Uuid;
+use tracing_futures::Instrument;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
 use crate::catalog::{FragmentId, TableId};
@@ -50,7 +51,7 @@ use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
-use crate::scheduler::{PinnedHummockSnapshot, SchedulerError, SchedulerResult};
+use crate::scheduler::{PinnedHummockSnapshotRef, SchedulerError, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
@@ -60,9 +61,10 @@ pub struct LocalQueryExecution {
     query: Query,
     front_env: FrontendEnv,
     // The snapshot will be released when LocalQueryExecution is dropped.
-    snapshot: PinnedHummockSnapshot,
+    // TODO
+    snapshot: PinnedHummockSnapshotRef,
     auth_context: Arc<AuthContext>,
-    cancel_flag: Option<Tripwire<Result<DataChunk, BoxedError>>>,
+    shutdown_rx: ShutdownToken,
     worker_node_manager: WorkerNodeSelector,
 }
 
@@ -71,31 +73,30 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: PinnedHummockSnapshot,
+        snapshot: PinnedHummockSnapshotRef,
         auth_context: Arc<AuthContext>,
-        cancel_flag: Tripwire<Result<DataChunk, BoxedError>>,
+        shutdown_rx: ShutdownToken,
     ) -> Self {
+        let sql = sql.into();
         let worker_node_manager = WorkerNodeSelector::new(
             front_env.worker_node_manager_ref(),
             snapshot.support_barrier_read(),
         );
+
         Self {
-            sql: sql.into(),
+            sql,
             query,
             front_env,
             snapshot,
             auth_context,
-            cancel_flag: Some(cancel_flag),
+            shutdown_rx,
             worker_node_manager,
         }
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
     pub async fn run_inner(self) {
-        debug!(
-            "Starting to run query: {:?}, sql: '{}'",
-            self.query.query_id, self.sql
-        );
+        debug!(%self.query.query_id, self.sql, "Starting to run query");
 
         let context =
             FrontendBatchTaskContext::new(self.front_env.clone(), self.auth_context.clone());
@@ -109,15 +110,12 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
 
-        // TODO(ZENOTME): For now this rx is only used as placehodler, it didn't take effect.
-        // Refactor later to make use it.
-        let (_tx, rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
             context,
             self.snapshot.get_batch_query_epoch(),
-            rx,
+            self.shutdown_rx.clone(),
         );
         let executor = executor.build().await?;
 
@@ -127,31 +125,33 @@ impl LocalQueryExecution {
         }
     }
 
-    pub fn run(self) -> BoxedDataChunkStream {
-        Box::pin(self.run_inner())
+    fn run(self) -> BoxedDataChunkStream {
+        let span = tracing::info_span!(
+            "local_execute",
+            query_id = self.query.query_id.id,
+            epoch = ?self.snapshot.get_batch_query_epoch(),
+        );
+        Box::pin(self.run_inner().instrument(span))
     }
 
-    pub fn stream_rows(mut self) -> LocalQueryStream {
+    pub fn stream_rows(self) -> LocalQueryStream {
+        let compute_runtime = self.front_env.compute_runtime();
         let (sender, receiver) = mpsc::channel(10);
-        let tripwire = self.cancel_flag.take().unwrap();
+        let shutdown_rx = self.shutdown_rx.clone();
 
-        let mut data_stream = {
-            let s = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
-            Box::pin(cancellable_stream(s, tripwire))
-        };
-
-        let future = async move {
-            while let Some(r) = data_stream.next().await {
-                if (sender.send(r).await).is_err() {
+        compute_runtime.spawn(async move {
+            let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
+            while let Some(mut r) = data_stream.next().await {
+                // append a query cancelled error if the query is cancelled.
+                if r.is_err() && shutdown_rx.is_cancelled() {
+                    r = Err(Box::new(SchedulerError::QueryCancelled) as BoxedError);
+                }
+                if sender.send(r).await.is_err() {
                     tracing::info!("Receiver closed.");
+                    return;
                 }
             }
-        };
-
-        #[cfg(madsim)]
-        tokio::spawn(future);
-        #[cfg(not(madsim))]
-        tokio::task::spawn_blocking(move || futures::executor::block_on(future));
+        });
 
         ReceiverStream::new(receiver)
     }
@@ -167,6 +167,7 @@ impl LocalQueryExecution {
     /// from the the root of the plan to the leaves. The first exchange operator contains
     /// the pushed-down plan fragment.
     fn create_plan_fragment(&self) -> SchedulerResult<PlanFragment> {
+        let next_executor_id = Arc::new(AtomicU32::new(0));
         let root_stage_id = self.query.root_stage_id();
         let root_stage = self.query.stage_graph.stages.get(&root_stage_id).unwrap();
         assert_eq!(root_stage.parallelism.unwrap(), 1);
@@ -174,14 +175,14 @@ impl LocalQueryExecution {
         let plan_node_prost = match second_stage_id {
             None => {
                 debug!("Local execution mode converts a plan with a single stage");
-                self.convert_plan_node(&root_stage.root, &mut None, None)?
+                self.convert_plan_node(&root_stage.root, &mut None, None, next_executor_id)?
             }
             Some(second_stage_ids) => {
                 debug!("Local execution mode converts a plan with two stages");
                 if second_stage_ids.is_empty() {
                     // This branch is defensive programming. The semantics should be the same as
                     // `None`.
-                    self.convert_plan_node(&root_stage.root, &mut None, None)?
+                    self.convert_plan_node(&root_stage.root, &mut None, None, next_executor_id)?
                 } else {
                     let mut second_stages = HashMap::new();
                     for second_stage_id in second_stage_ids {
@@ -190,8 +191,12 @@ impl LocalQueryExecution {
                         second_stages.insert(*second_stage_id, second_stage.clone());
                     }
                     let mut stage_id_to_plan = Some(second_stages);
-                    let res =
-                        self.convert_plan_node(&root_stage.root, &mut stage_id_to_plan, None)?;
+                    let res = self.convert_plan_node(
+                        &root_stage.root,
+                        &mut stage_id_to_plan,
+                        None,
+                        next_executor_id,
+                    )?;
                     assert!(
                         stage_id_to_plan.as_ref().unwrap().is_empty(),
                         "We expect that all the child stage plan fragments have been used"
@@ -215,7 +220,13 @@ impl LocalQueryExecution {
         execution_plan_node: &ExecutionPlanNode,
         second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
         partition: Option<PartitionInfo>,
+        next_executor_id: Arc<AtomicU32>,
     ) -> SchedulerResult<PlanNodePb> {
+        let identity = format!(
+            "{:?}-{}",
+            execution_plan_node.plan_node_type,
+            next_executor_id.fetch_add(1, Ordering::Relaxed)
+        );
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
                 let exchange_source_stage_id = execution_plan_node
@@ -241,6 +252,8 @@ impl LocalQueryExecution {
                 };
                 assert!(sources.is_empty());
 
+                let tracing_context = TracingContext::from_current_span().to_protobuf();
+
                 if let Some(table_scan_info) = second_stage.table_scan_info.clone()
                     && let Some(vnode_bitmaps) = table_scan_info.partitions()
                 {
@@ -257,6 +270,7 @@ impl LocalQueryExecution {
                             &second_stage.root,
                             &mut None,
                             Some(PartitionInfo::Table(partition)),
+                            next_executor_id.clone(),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {
                             root: Some(second_stage_plan_node),
@@ -268,6 +282,7 @@ impl LocalQueryExecution {
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
+                            tracing_context: tracing_context.clone(),
                         };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
@@ -289,6 +304,7 @@ impl LocalQueryExecution {
                             &second_stage.root,
                             &mut None,
                             Some(PartitionInfo::Source(split.clone())),
+                            next_executor_id.clone(),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {
                             root: Some(second_stage_plan_node),
@@ -300,6 +316,7 @@ impl LocalQueryExecution {
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
+                            tracing_context: tracing_context.clone(),
                         };
                         // NOTE: select a random work node here.
                         let worker_node = self.worker_node_manager.next_random_worker()?;
@@ -319,7 +336,7 @@ impl LocalQueryExecution {
                     }
                 } else {
                     let second_stage_plan_node =
-                        self.convert_plan_node(&second_stage.root, &mut None, None)?;
+                        self.convert_plan_node(&second_stage.root, &mut None, None, next_executor_id)?;
                     let second_stage_plan_fragment = PlanFragment {
                         root: Some(second_stage_plan_node),
                         exchange_info: Some(ExchangeInfo {
@@ -331,6 +348,7 @@ impl LocalQueryExecution {
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
                         epoch: Some(self.snapshot.get_batch_query_epoch()),
+                        tracing_context,
                     };
 
                     let workers = self.choose_worker(&second_stage)?;
@@ -359,7 +377,7 @@ impl LocalQueryExecution {
                     /// Since all the rest plan is embedded into the exchange node,
                     /// there is no children any more.
                     children: vec![],
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(node_body),
                 })
             }
@@ -381,8 +399,7 @@ impl LocalQueryExecution {
 
                 Ok(PlanNodePb {
                     children: vec![],
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(node_body),
                 })
             }
@@ -402,8 +419,7 @@ impl LocalQueryExecution {
 
                 Ok(PlanNodePb {
                     children: vec![],
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(node_body),
                 })
             }
@@ -430,11 +446,12 @@ impl LocalQueryExecution {
                     &execution_plan_node.children[0],
                     second_stages,
                     partition,
+                    next_executor_id,
                 )?;
 
                 Ok(PlanNodePb {
                     children: vec![left_child],
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(node_body),
                 })
             }
@@ -442,13 +459,19 @@ impl LocalQueryExecution {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, second_stages, partition.clone()))
+                    .map(|e| {
+                        self.convert_plan_node(
+                            e,
+                            second_stages,
+                            partition.clone(),
+                            next_executor_id.clone(),
+                        )
+                    })
                     .collect::<SchedulerResult<Vec<PlanNodePb>>>()?;
 
                 Ok(PlanNodePb {
                     children,
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(execution_plan_node.node.clone()),
                 })
             }

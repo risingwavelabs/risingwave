@@ -26,6 +26,7 @@ use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tracing::log::warn;
+use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
@@ -138,7 +139,7 @@ where
     pub(crate) async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
         let ctrl = self.clone();
-        let handler = tokio::spawn(async move {
+        let fut = async move {
             match command {
                 DdlCommand::CreateDatabase(database) => ctrl.create_database(database).await,
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
@@ -168,8 +169,9 @@ where
                     ctrl.drop_connection(connection_id).await
                 }
             }
-        });
-        handler.await.unwrap()
+        }
+        .in_current_span();
+        tokio::spawn(fut).await.unwrap()
     }
 
     pub(crate) async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
