@@ -24,6 +24,7 @@ pub mod json;
 pub mod maxwell;
 pub mod upsert;
 pub mod util;
+pub mod protobuf;
 
 pub type AccessResult = std::result::Result<Datum, AccessError>;
 

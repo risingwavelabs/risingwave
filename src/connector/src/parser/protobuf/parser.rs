@@ -265,7 +265,7 @@ impl ByteStreamSourceParser for ProtobufParser {
     }
 }
 
-fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
+pub fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
     let v = match value {
         Value::Bool(v) => ScalarImpl::Bool(*v),
         Value::I32(i) => ScalarImpl::Int32(*i),
