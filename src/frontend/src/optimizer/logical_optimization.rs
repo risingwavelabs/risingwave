@@ -414,10 +414,7 @@ impl LogicalOptimizer {
     }
 
     pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
-        let epoch = ctx
-            .session_ctx()
-            .pinned_snapshot()
-            .batch_query_epoch_value();
+        let epoch = ctx.session_ctx().pinned_snapshot().epoch();
 
         let plan = plan.rewrite_exprs_recursive(&mut InlineNowProcTime::new(epoch));
 

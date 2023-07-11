@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use more_asserts::{assert_le, assert_lt};
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::PbHummockSnapshot;
@@ -26,10 +27,13 @@ use tokio::sync::watch;
 
 use crate::meta_client::FrontendMetaClient;
 
+/// The interval between two unpin batches.
 const UNPIN_INTERVAL_SECS: u64 = 10;
 
+/// The storage snapshot to read from in a query, which can be freely cloned.
 #[derive(Clone)]
 pub enum ReadSnapshot {
+    /// A frontend-pinned snapshot.
     FrontendPinned {
         snapshot: PinnedSnapshotRef,
         // It's embedded here because we always use it together with snapshot.
@@ -43,6 +47,7 @@ pub enum ReadSnapshot {
 }
 
 impl ReadSnapshot {
+    /// Get the [`BatchQueryEpoch`] for this snapshot.
     pub fn batch_query_epoch(&self) -> BatchQueryEpoch {
         match self {
             ReadSnapshot::FrontendPinned {
@@ -55,7 +60,8 @@ impl ReadSnapshot {
         }
     }
 
-    pub fn batch_query_epoch_value(&self) -> Epoch {
+    /// Get the [`Epoch`] value for this snapshot.
+    pub fn epoch(&self) -> Epoch {
         match self.batch_query_epoch().epoch.unwrap() {
             batch_query_epoch::Epoch::Committed(epoch)
             | batch_query_epoch::Epoch::Current(epoch)
@@ -63,6 +69,7 @@ impl ReadSnapshot {
         }
     }
 
+    /// Returns true if this snapshot is a barrier read.
     pub fn support_barrier_read(&self) -> bool {
         match self {
             ReadSnapshot::FrontendPinned {
@@ -74,15 +81,25 @@ impl ReadSnapshot {
     }
 }
 
+/// A frontend-pinned snapshot that notifies the [`UnpinWorker`] when it's dropped.
+// DO NOT implement `Clone` for `PinnedSnapshot` because it's a "resource" that should always be a
+// singleton for each snapshot. Use `PinnedSnapshotRef` instead.
 pub struct PinnedSnapshot {
     value: PbHummockSnapshot,
     unpin_sender: UnboundedSender<Operation>,
 }
 
+impl std::fmt::Debug for PinnedSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value.fmt(f)
+    }
+}
+
+/// A reference to a frontend-pinned snapshot.
 pub type PinnedSnapshotRef = Arc<PinnedSnapshot>;
 
 impl PinnedSnapshot {
-    pub fn batch_query_epoch(&self, is_barrier_read: bool) -> BatchQueryEpoch {
+    fn batch_query_epoch(&self, is_barrier_read: bool) -> BatchQueryEpoch {
         let epoch = if is_barrier_read {
             batch_query_epoch::Epoch::Current(self.value.current_epoch)
         } else {
@@ -100,7 +117,8 @@ impl Drop for PinnedSnapshot {
 
 /// Cache of hummock snapshot in meta.
 pub struct HummockSnapshotManager {
-    /// Send epoch-related operations to `HummockSnapshotManagerCore` for async batch handling.
+    /// Send epoch-related operations to [`UnpinWorker`] for managing the pinned snapshots and
+    /// unpin them in a batch through RPC.
     worker_sender: UnboundedSender<Operation>,
 
     /// The latest snapshot synced from the meta service.
@@ -124,7 +142,7 @@ impl HummockSnapshotManager {
         tokio::spawn(UnpinWorker::new(meta_client, worker_receiver).run());
 
         let latest_snapshot = Arc::new(PinnedSnapshot {
-            value: HummockSnapshot {
+            value: PbHummockSnapshot {
                 committed_epoch: INVALID_EPOCH,
                 current_epoch: INVALID_EPOCH,
             },
@@ -139,22 +157,38 @@ impl HummockSnapshotManager {
         }
     }
 
+    /// Acquire the latest snapshot by increasing its reference count.
     pub fn acquire(&self) -> PinnedSnapshotRef {
         self.latest_snapshot.borrow().clone()
     }
 
+    /// Update the latest snapshot. Panics if the new snapshot is older than the current one.
+    ///
+    /// Should only be called by the observer manager.
     pub fn update(&self, snapshot: PbHummockSnapshot) {
+        // First tell the worker that a new snapshot is going to be pinned.
         self.worker_sender
             .send(Operation::Pin(snapshot.clone()))
             .unwrap();
 
+        // Then swap the latest snapshot.
         let snapshot = Arc::new(PinnedSnapshot {
             value: snapshot,
             unpin_sender: self.worker_sender.clone(),
         });
-        let _ = self.latest_snapshot.send_replace(snapshot);
+        let old_snapshot = self.latest_snapshot.send_replace(snapshot.clone());
+
+        assert_le!(
+            old_snapshot.value.committed_epoch,
+            snapshot.value.committed_epoch
+        );
+        assert_lt!(
+            old_snapshot.value.current_epoch,
+            snapshot.value.current_epoch
+        );
     }
 
+    /// Wait until the latest snapshot is newer than the given one.
     pub async fn wait(&self, snapshot: PbHummockSnapshot) {
         let mut rx = self.latest_snapshot.subscribe();
         while rx.borrow_and_update().value.committed_epoch < snapshot.committed_epoch {
@@ -163,19 +197,30 @@ impl HummockSnapshotManager {
     }
 }
 
+/// The pin state of a snapshot.
 #[derive(Debug)]
 enum PinState {
+    /// The snapshot is currently pinned by some sessions in this frontend.
     Pinned,
+
+    /// The snapshot is no longer pinned by any session in this frontend, but it's still considered
+    /// to be pinned by the meta service. It will be unpinned by the [`UnpinWorker`] in the next
+    /// unpin batch through RPC, and the entry will be removed then.
     Unpinned,
 }
 
+/// The operation handled by the [`UnpinWorker`].
 #[derive(Debug)]
 enum Operation {
+    /// Mark the snapshot as pinned, sent when a new snapshot is pinned with `update`.
     Pin(PbHummockSnapshot),
+
+    /// Mark the snapshot as unpinned, sent when all references to a [`PinnedSnapshot`] is dropped.
     Unpin(PbHummockSnapshot),
 }
 
 impl Operation {
+    /// Returns whether the operation is for an invalid snapshot, which should be ignored.
     fn is_invalid(&self) -> bool {
         match self {
             Operation::Pin(s) | Operation::Unpin(s) => s,
@@ -185,6 +230,9 @@ impl Operation {
     }
 }
 
+/// The key for the states map in [`UnpinWorker`].
+///
+/// The snapshot will be first sorted by `committed_epoch`, then by `current_epoch`.
 #[derive(Debug, PartialEq, Clone)]
 struct SnapshotKey(PbHummockSnapshot);
 
@@ -192,10 +240,8 @@ impl Eq for SnapshotKey {}
 
 impl Ord for SnapshotKey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.0
-            .committed_epoch
-            .cmp(&other.0.committed_epoch)
-            .then_with(|| self.0.current_epoch.cmp(&other.0.current_epoch))
+        (self.0.committed_epoch, self.0.current_epoch)
+            .cmp(&(other.0.committed_epoch, other.0.current_epoch))
     }
 }
 
@@ -205,11 +251,19 @@ impl PartialOrd for SnapshotKey {
     }
 }
 
+/// The worker that manages the pin states of snapshots and unpins them periodically in a batch
+/// through RPC to the meta service.
 struct UnpinWorker {
     meta_client: Arc<dyn FrontendMetaClient>,
 
+    /// The receiver of operations from snapshot updating in [`HummockSnapshotManager`] and
+    /// dropping of [`PinnedSnapshot`].
     receiver: UnboundedReceiver<Operation>,
 
+    /// The pin states of existing snapshots in this frontend.
+    ///
+    /// All snapshots in this map are considered to be pinned by the meta service, those with
+    /// [`PinState::Unpinned`] will be unpinned in the next unpin batch through RPC.
     states: BTreeMap<SnapshotKey, PinState>,
 }
 
@@ -225,13 +279,14 @@ impl UnpinWorker {
         }
     }
 
+    /// Run the loop of handling operations and unpinning snapshots.
     async fn run(mut self) {
         let mut ticker = tokio::time::interval(Duration::from_secs(UNPIN_INTERVAL_SECS));
 
         loop {
             tokio::select! {
                 operation = self.receiver.recv() => {
-                    let Some(operation) = operation else { return };
+                    let Some(operation) = operation else { return }; // manager dropped
                     self.handle_operation(operation);
                 }
 
@@ -242,6 +297,7 @@ impl UnpinWorker {
         }
     }
 
+    /// Handle an operation and manipulate the states.
     fn handle_operation(&mut self, operation: Operation) {
         if operation.is_invalid() {
             return;
@@ -254,7 +310,7 @@ impl UnpinWorker {
                     .unwrap();
             }
             Operation::Unpin(snapshot) => match self.states.entry(SnapshotKey(snapshot)) {
-                Entry::Vacant(_v) => unreachable!(),
+                Entry::Vacant(_v) => unreachable!("unpin a snapshot that is not pinned"),
                 Entry::Occupied(o) => {
                     assert_matches!(o.get(), PinState::Pinned);
                     *o.into_mut() = PinState::Unpinned;
@@ -263,11 +319,10 @@ impl UnpinWorker {
         }
     }
 
+    /// Try to unpin all snapshots with [`PinState::Unpinned`] in a batch through RPC, and clean up
+    /// their entries.
     async fn unpin_batch(&mut self) {
-        // println!("self.states: {:#?}", self.states);
-
-        // TODO: last unpin
-
+        // Find the minimum snapshot that is pinned. Unpin all snapshots before it.
         if let Some(min_snapshot) = self
             .states
             .iter()
@@ -275,13 +330,14 @@ impl UnpinWorker {
             .map(|(k, _)| k.clone())
         {
             let min_epoch = min_snapshot.0.committed_epoch;
-            tracing::info!("Unpin epoch {:?} with RPC", min_epoch);
+            tracing::info!(min_epoch, "unpin snapshot with RPC");
 
             match self.meta_client.unpin_snapshot_before(min_epoch).await {
                 Ok(()) => {
+                    // Remove all snapshots before this one.
                     self.states = self.states.split_off(&min_snapshot);
                 }
-                Err(e) => tracing::error!("Request meta to unpin snapshot failed {:?}!", e),
+                Err(e) => tracing::error!(%e, min_epoch, "unpin snapshot failed"),
             }
         }
     }
