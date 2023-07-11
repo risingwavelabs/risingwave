@@ -6137,6 +6137,7 @@ dependencies = [
  "assert_matches",
  "async-recursion",
  "async-trait",
+ "auto_enums",
  "bk-tree",
  "bytes",
  "clap",

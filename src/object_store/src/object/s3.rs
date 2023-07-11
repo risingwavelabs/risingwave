@@ -582,18 +582,38 @@ impl S3ObjectStore {
             .hyper_builder(hyper::client::Builder::default())
             .connector_settings(ConnectorSettings::builder().build())
             .build(native_tls());
-
-        // Retry 3 times if we get server-side errors or throttling errors
         let sdk_config_loader = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
             .http_connector(hyper_adapter);
 
-        let sdk_config = match std::env::var("RW_S3_ENDPOINT") {
-            Ok(endpoint) => sdk_config_loader.endpoint_url(endpoint).load().await,
-            Err(_) => sdk_config_loader.load().await,
-        };
+        // Retry 3 times if we get server-side errors or throttling errors
+        let client = match std::env::var("RW_S3_ENDPOINT") {
+            Ok(endpoint) => {
+                // s3 compatible storage
+                let is_force_path_style = match std::env::var("RW_IS_FORCE_PATH_STYLE") {
+                    Ok(value) => value == "true",
+                    Err(_) => false,
+                };
 
-        let client = Client::new(&sdk_config);
+                let sdk_config: aws_config::SdkConfig = sdk_config_loader.load().await;
+                #[cfg(madsim)]
+                let client = Client::new(&sdk_config);
+                #[cfg(not(madsim))]
+                let client = Client::from_conf(
+                    aws_sdk_s3::config::Builder::from(&sdk_config)
+                        .endpoint_url(endpoint)
+                        .force_path_style(is_force_path_style)
+                        .build(),
+                );
+                client
+            }
+            Err(_) => {
+                // s3
+
+                let sdk_config = sdk_config_loader.load().await;
+                Client::new(&sdk_config)
+            }
+        };
 
         Self {
             client,

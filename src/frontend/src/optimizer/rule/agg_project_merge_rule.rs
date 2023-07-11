@@ -24,7 +24,8 @@ pub struct AggProjectMergeRule {}
 impl Rule for AggProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_logical_agg()?;
-        let (mut agg_calls, agg_group_keys, input) = agg.clone().decompose();
+        let (mut agg_calls, agg_group_keys, grouping_sets, input) = agg.clone().decompose();
+        assert!(grouping_sets.is_empty());
         let proj = input.as_logical_project()?;
 
         // only apply when the input proj is all input-ref

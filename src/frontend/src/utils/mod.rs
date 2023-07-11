@@ -29,6 +29,8 @@ mod rewrite_index;
 pub use rewrite_index::*;
 mod index_set;
 pub use index_set::*;
+pub(crate) mod group_by;
+pub use group_by::*;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 
