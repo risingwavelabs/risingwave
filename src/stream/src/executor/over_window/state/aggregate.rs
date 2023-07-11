@@ -156,7 +156,7 @@ impl BatchAggregatorWrapper<'_> {
             .collect::<Vec<_>>();
         let chunk = StreamChunk::from(DataChunk::new(columns, n_values));
 
-        let mut aggregator = builg_agg(self.agg_call.clone())?;
+        let mut aggregator = builg_agg(self.agg_call)?;
         aggregator
             .update(&chunk)
             .now_or_never()

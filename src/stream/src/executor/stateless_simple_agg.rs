@@ -77,10 +77,7 @@ impl StatelessSimpleAggExecutor {
         } = self;
         let input = input.execute();
         let mut is_dirty = false;
-        let mut aggregators: Vec<_> = agg_calls
-            .iter()
-            .map(|agg_call| build(agg_call.clone()))
-            .try_collect()?;
+        let mut aggregators: Vec<_> = agg_calls.iter().map(build).try_collect()?;
 
         #[for_await]
         for msg in input {

@@ -20,14 +20,15 @@ use risingwave_common::array::{Array, ArrayBuilderImpl, ArrayImpl, DataChunk, St
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build as build_agg, AggCall, BoxedAggState};
+use risingwave_expr::agg::{AggCall, BoxedAggState};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use tokio::sync::watch::Receiver;
 
-use super::check_shutdown;
+use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    check_shutdown, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder,
 };
 use crate::task::{BatchTaskContext, ShutdownMsg};
 
@@ -64,7 +65,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
         let agg_states: Vec<_> = sort_agg_node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(build_agg))
+            .map(|agg| AggCall::from_protobuf(agg).and_then(|agg| build_agg(&agg)))
             .try_collect()?;
 
         let group_key: Vec<_> = sort_agg_node
@@ -404,7 +405,7 @@ mod tests {
              4 5 9",
         ));
 
-        let count_star = build_agg(AggCall::from_pretty("(count:int8)"))?;
+        let count_star = build_agg(&AggCall::from_pretty("(count:int8)"))?;
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![count_star];
 
@@ -485,7 +486,7 @@ mod tests {
              5 8 9",
         ));
 
-        let count_star = build_agg(AggCall::from_pretty("(count:int8)"))?;
+        let count_star = build_agg(&AggCall::from_pretty("(count:int8)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -582,7 +583,7 @@ mod tests {
              10",
         ));
 
-        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
+        let sum_agg = build_agg(&AggCall::from_pretty("(sum:int8 $0:int4)"))?;
 
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![sum_agg];
@@ -648,7 +649,7 @@ mod tests {
              4 5 9",
         ));
 
-        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
+        let sum_agg = build_agg(&AggCall::from_pretty("(sum:int8 $0:int4)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -740,7 +741,7 @@ mod tests {
               2  7 12",
         ));
 
-        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
+        let sum_agg = build_agg(&AggCall::from_pretty("(sum:int8 $0:int4)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();
@@ -833,7 +834,7 @@ mod tests {
             Schema::new(vec![Field::unnamed(DataType::Int32)]),
         );
 
-        let sum_agg = build_agg(AggCall::from_pretty("(sum:int8 $0:int4)"))?;
+        let sum_agg = build_agg(&AggCall::from_pretty("(sum:int8 $0:int4)"))?;
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| build_from_pretty(format!("${idx}:int4")))
             .collect();

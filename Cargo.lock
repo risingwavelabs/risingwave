@@ -5644,6 +5644,7 @@ dependencies = [
  "either",
  "futures",
  "futures-async-stream",
+ "futures-util",
  "hashbrown 0.13.2",
  "hytra",
  "itertools",

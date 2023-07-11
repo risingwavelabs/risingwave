@@ -19,9 +19,8 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
-
-use super::{Aggregator, BoxedAggState};
-use crate::Result;
+use risingwave_expr::agg::{Aggregator, BoxedAggState};
+use risingwave_expr::Result;
 
 /// `Distinct` is a wrapper of `Aggregator` that only keeps distinct rows.
 #[derive(Clone)]
@@ -96,5 +95,108 @@ impl Aggregator for Distinct {
             + self.inner.estimated_size()
             + self.exists.capacity() * std::mem::size_of::<OwnedRow>()
             + self.exists_estimated_heap_size
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::FutureExt;
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::{Datum, Decimal};
+    use risingwave_expr::agg::AggCall;
+
+    use super::super::build;
+
+    #[test]
+    fn distinct_sum_int32() {
+        let input = StreamChunk::from_pretty(
+            " i
+            + 1
+            + 1
+            + 3",
+        );
+        test_agg("(sum:int8 $0:int4 distinct)", input, Some(4i64.into()));
+    }
+
+    #[test]
+    fn distinct_sum_int64() {
+        let input = StreamChunk::from_pretty(
+            " I
+            + 1
+            + 1
+            + 3",
+        );
+        test_agg(
+            "(sum:decimal $0:int8 distinct)",
+            input,
+            Some(Decimal::from(4).into()),
+        );
+    }
+
+    #[test]
+    fn distinct_min_float32() {
+        let input = StreamChunk::from_pretty(
+            " f
+            + 1.0
+            + 2.0
+            + 3.0",
+        );
+        test_agg(
+            "(min:float4 $0:float4 distinct)",
+            input,
+            Some(1.0f32.into()),
+        );
+    }
+
+    #[test]
+    fn distinct_min_char() {
+        let input = StreamChunk::from_pretty(
+            " T
+            + b
+            + aa",
+        );
+        test_agg(
+            "(min:varchar $0:varchar distinct)",
+            input,
+            Some("aa".into()),
+        );
+    }
+
+    #[test]
+    fn distinct_max_char() {
+        let input = StreamChunk::from_pretty(
+            " T
+            + b
+            + aa",
+        );
+        test_agg("(max:varchar $0:varchar distinct)", input, Some("b".into()));
+    }
+
+    #[test]
+    fn distinct_count_int32() {
+        let input = StreamChunk::from_pretty(
+            " i
+            + 1
+            + 1
+            + 3",
+        );
+        test_agg("(count:int8 $0:int4 distinct)", input, Some(2i64.into()));
+
+        let input = StreamChunk::from_pretty("i");
+        test_agg("(count:int8 $0:int4 distinct)", input, Some(0i64.into()));
+
+        let input = StreamChunk::from_pretty(
+            " i
+            + .",
+        );
+        test_agg("(count:int8 $0:int4 distinct)", input, Some(0i64.into()));
+    }
+
+    fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
+        let mut agg_state = build(&AggCall::from_pretty(pretty)).unwrap();
+        agg_state.update(&input).now_or_never().unwrap().unwrap();
+        let actual = agg_state.output().unwrap();
+        assert_eq!(actual, expected);
     }
 }

@@ -130,7 +130,7 @@ impl MaterializedInputState {
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
-        let aggregator = build(agg_call.clone())?;
+        let aggregator = build(agg_call)?;
         let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
             AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue => {
                 Box::new(GenericAggStateCache::new(

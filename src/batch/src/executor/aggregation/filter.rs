@@ -12,25 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-
-use super::{Aggregator, BoxedAggState};
-use crate::expr::ExpressionRef;
-use crate::Result;
+use risingwave_expr::agg::{Aggregator, BoxedAggState};
+use risingwave_expr::expr::Expression;
+use risingwave_expr::Result;
 
 /// A special aggregator that filters out rows that do not satisfy the given _condition_
 /// and feeds the rows that satisfy to the _inner_ aggregator.
 #[derive(Clone)]
 pub struct Filter {
-    condition: ExpressionRef,
+    condition: Arc<dyn Expression>,
     inner: BoxedAggState,
 }
 
 impl Filter {
-    pub fn new(condition: ExpressionRef, inner: BoxedAggState) -> Self {
+    pub fn new(condition: Arc<dyn Expression>, inner: BoxedAggState) -> Self {
         assert_eq!(condition.return_type(), DataType::Boolean);
         Self { condition, inner }
     }
@@ -118,9 +119,9 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_expr::expr::{build_from_pretty, Expression, LiteralExpression};
 
     use super::*;
-    use crate::expr::{build_from_pretty, Expression, LiteralExpression};
 
     #[derive(Clone)]
     struct MockAgg {
@@ -167,11 +168,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_selective_agg_always_true() -> Result<()> {
-        let condition =
-            Arc::from(LiteralExpression::new(DataType::Boolean, Some(true.into())).boxed());
+        let condition = LiteralExpression::new(DataType::Boolean, Some(true.into())).boxed();
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
-            condition,
+            condition.into(),
             Box::new(MockAgg {
                 count: agg_count.clone(),
             }),
@@ -200,10 +200,9 @@ mod tests {
     #[tokio::test]
     async fn test_selective_agg() -> Result<()> {
         let expr = build_from_pretty("(greater_than:boolean $0:int8 5:int8)");
-        let condition = Arc::from(expr);
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
-            condition,
+            expr.into(),
             Box::new(MockAgg {
                 count: agg_count.clone(),
             }),
@@ -237,7 +236,7 @@ mod tests {
         let expr = build_from_pretty("(equal:boolean $0:int8 null:int8)");
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
-            Arc::from(expr),
+            expr.into(),
             Box::new(MockAgg {
                 count: agg_count.clone(),
             }),

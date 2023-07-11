@@ -23,14 +23,15 @@ use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build as build_agg, AggCall, BoxedAggState};
+use risingwave_expr::agg::{AggCall, BoxedAggState};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 use tokio::sync::watch::Receiver;
 
-use super::check_shutdown;
+use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    check_shutdown, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder,
 };
 use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
 
@@ -85,7 +86,7 @@ impl HashAggExecutorBuilder {
         let agg_init_states: Vec<_> = hash_agg_node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(build_agg))
+            .map(|agg| AggCall::from_protobuf(agg).and_then(|agg| build_agg(&agg)))
             .try_collect()?;
 
         let group_key_columns = hash_agg_node

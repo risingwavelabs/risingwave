@@ -21,9 +21,8 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-
-use super::{Aggregator, BoxedAggState};
-use crate::{ExprError, Result};
+use risingwave_expr::agg::{Aggregator, BoxedAggState};
+use risingwave_expr::{ExprError, Result};
 
 /// `ProjectionOrderBy` is a wrapper of `Aggregator` that sorts rows by given columns and then
 /// projects columns.
@@ -141,5 +140,59 @@ impl Aggregator for ProjectionOrderBy {
             + self.inner.estimated_size()
             + self.unordered_values.capacity() * std::mem::size_of::<(OrderKey, OwnedRow)>()
             + self.unordered_values_estimated_heap_size
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::{ListValue, StreamChunk};
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_expr::agg::AggCall;
+
+    use super::super::build;
+
+    #[tokio::test]
+    async fn array_agg_with_order() {
+        let chunk = StreamChunk::from_pretty(
+            " i    i
+            + 123  3
+            + 456  2
+            + 789  2
+            + 321  9",
+        );
+        let mut agg = build(&AggCall::from_pretty(
+            "(array_agg:int4[] $0:int4 orderby $1:asc $0:desc)",
+        ))
+        .unwrap();
+        agg.update(&chunk).await.unwrap();
+        assert_eq!(
+            agg.output().unwrap(),
+            Some(
+                ListValue::new(vec![
+                    Some(789.into()),
+                    Some(456.into()),
+                    Some(123.into()),
+                    Some(321.into()),
+                ])
+                .into()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn string_agg_with_order() {
+        let chunk = StreamChunk::from_pretty(
+            " T   T i i
+            + aaa _ 1 3
+            + bbb _ 0 4
+            + ccc _ 0 8
+            + ddd _ 1 3",
+        );
+        let mut agg = build(&AggCall::from_pretty(
+            "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $3:desc $0:desc)",
+        ))
+        .unwrap();
+        agg.update(&chunk).await.unwrap();
+        assert_eq!(agg.output().unwrap(), Some("ccc_bbb_ddd_aaa".into()));
     }
 }

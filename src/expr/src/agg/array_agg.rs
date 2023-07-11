@@ -79,32 +79,4 @@ mod tests {
         assert_eq!(agg.output()?, Some(ListValue::new(vec![None]).into()));
         Ok(())
     }
-
-    #[tokio::test]
-    async fn test_array_agg_with_order() -> Result<()> {
-        let chunk = StreamChunk::from_pretty(
-            " i    i
-            + 123  3
-            + 456  2
-            + 789  2
-            + 321  9",
-        );
-        let mut agg = crate::agg::build(&AggCall::from_pretty(
-            "(array_agg:int4[] $0:int4 orderby $1:asc $0:desc)",
-        ))?;
-        agg.update(&chunk).await?;
-        assert_eq!(
-            agg.output()?,
-            Some(
-                ListValue::new(vec![
-                    Some(789.into()),
-                    Some(456.into()),
-                    Some(123.into()),
-                    Some(321.into()),
-                ])
-                .into()
-            )
-        );
-        Ok(())
-    }
 }

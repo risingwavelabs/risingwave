@@ -14,9 +14,8 @@
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};
-
-use super::{Aggregator, BoxedAggState};
-use crate::Result;
+use risingwave_expr::agg::{Aggregator, BoxedAggState};
+use risingwave_expr::Result;
 
 #[derive(Clone)]
 pub struct Projection {

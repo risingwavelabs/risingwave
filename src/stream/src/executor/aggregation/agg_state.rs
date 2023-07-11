@@ -74,7 +74,7 @@ impl<S: StateStore> AggState<S> {
     ) -> StreamExecutorResult<Self> {
         Ok(match storage {
             AggStateStorage::ResultValue => {
-                let mut state = build(agg_call.clone())?;
+                let mut state = build(agg_call)?;
                 if let Some(prev) = prev_output {
                     state.set(prev.clone());
                 }
