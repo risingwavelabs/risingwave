@@ -38,7 +38,7 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
-    self, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema,
+    self, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema, Encode,
     ProtobufSchema, SourceSchema, SourceWatermark,
 };
 
@@ -761,6 +761,12 @@ pub async fn handle_create_source(
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
             "missing WITH clause".to_string(),
+        )));
+    }
+
+    if stmt.source_schema.row_encode == Encode::Json && stmt.columns.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(
+            "schema definition is required for ENCODE JSON".to_owned(),
         )));
     }
 

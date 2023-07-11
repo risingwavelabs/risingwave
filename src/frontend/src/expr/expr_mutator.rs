@@ -42,7 +42,7 @@ pub trait ExprMutator {
     }
     fn visit_agg_call(&mut self, agg_call: &mut AggCall) {
         agg_call
-            .inputs_mut()
+            .args_mut()
             .iter_mut()
             .for_each(|expr| self.visit_expr(expr));
         agg_call.order_by_mut().visit_expr_mut(self);

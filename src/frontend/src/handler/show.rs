@@ -465,7 +465,7 @@ mod tests {
     async fn test_show_source() {
         let frontend = LocalFrontend::new(Default::default()).await;
 
-        let sql = r#"CREATE SOURCE t1
+        let sql = r#"CREATE SOURCE t1 (column1 varchar)
         WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
         FORMAT PLAIN ENCODE JSON"#;
         frontend.run_sql(sql).await.unwrap();
