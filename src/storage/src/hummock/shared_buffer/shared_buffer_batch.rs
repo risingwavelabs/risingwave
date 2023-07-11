@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, 
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
-    HummockIteratorDirection,
+    HummockIteratorDirection, HummockIteratorSeekable,
 };
 use crate::hummock::store::memtable::ImmId;
 use crate::hummock::utils::{range_overlap, MemoryTracker};
@@ -676,8 +676,6 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     type Direction = D;
 
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
@@ -722,6 +720,13 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
         self.current_version_idx >= 0
             && self.current_version_idx < self.current_versions().len() as i32
     }
+
+    fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
+}
+
+impl<D: HummockIteratorDirection> HummockIteratorSeekable for SharedBufferBatchIterator<D> {
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
@@ -809,8 +814,6 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
             Ok(())
         }
     }
-
-    fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
 }
 
 pub struct SharedBufferDeleteRangeIterator {

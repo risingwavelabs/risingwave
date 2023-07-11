@@ -19,7 +19,9 @@ use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 
 use super::DeleteRangeIterator;
-use crate::hummock::iterator::{Forward, ForwardMergeRangeIterator, HummockIterator};
+use crate::hummock::iterator::{
+    Forward, ForwardMergeRangeIterator, HummockIterator, HummockIteratorSeekable,
+};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -160,6 +162,20 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         &self.last_val
     }
 
+    /// Indicates whether the iterator can be used.
+    pub fn is_valid(&self) -> bool {
+        // Handle range scan
+        // key >= begin_key is guaranteed by seek/rewind function
+        (!self.out_of_range) && self.iterator.is_valid()
+    }
+
+    pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats);
+        self.iterator.collect_local_statistic(stats);
+    }
+}
+
+impl<I: HummockIterator<Direction = Forward> + HummockIteratorSeekable> UserIterator<I> {
     /// Resets the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // Handle range scan
@@ -213,18 +229,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         // Handle range scan when key > end_key
 
         self.next().await
-    }
-
-    /// Indicates whether the iterator can be used.
-    pub fn is_valid(&self) -> bool {
-        // Handle range scan
-        // key >= begin_key is guaranteed by seek/rewind function
-        (!self.out_of_range) && self.iterator.is_valid()
-    }
-
-    pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        stats.add(&self.stats);
-        self.iterator.collect_local_statistic(stats);
     }
 }
 

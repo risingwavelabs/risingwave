@@ -19,7 +19,9 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{
+    DirectionEnum, HummockIterator, HummockIteratorDirection, HummockIteratorSeekable,
+};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStoreRef};
@@ -108,8 +110,6 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     type Direction = TI::Direction;
 
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
@@ -137,6 +137,20 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         self.sstable_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats);
+        if let Some(iter) = &self.sstable_iter {
+            iter.collect_local_statistic(stats);
+        }
+    }
+}
+
+impl<TI: SstableIteratorType + HummockIteratorSeekable> HummockIteratorSeekable
+    for ConcatIteratorInner<TI>
+{
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move { self.seek_idx(0, None).await }
     }
@@ -145,18 +159,21 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         async move {
             let table_idx = self
                 .tables
-                .partition_point(|table| match Self::Direction::direction() {
-                    DirectionEnum::Forward => {
-                        let ord = FullKey::decode(smallest_key(table)).cmp(&key);
+                .partition_point(
+                    |table| match <Self as HummockIterator>::Direction::direction() {
+                        DirectionEnum::Forward => {
+                            let ord = FullKey::decode(smallest_key(table)).cmp(&key);
 
-                        ord == Less || ord == Equal
-                    }
-                    DirectionEnum::Backward => {
-                        let ord = FullKey::decode(largest_key(table)).cmp(&key);
-                        ord == Greater
-                            || (ord == Equal && !table.key_range.as_ref().unwrap().right_exclusive)
-                    }
-                })
+                            ord == Less || ord == Equal
+                        }
+                        DirectionEnum::Backward => {
+                            let ord = FullKey::decode(largest_key(table)).cmp(&key);
+                            ord == Greater
+                                || (ord == Equal
+                                    && !table.key_range.as_ref().unwrap().right_exclusive)
+                        }
+                    },
+                )
                 .saturating_sub(1); // considering the boundary of 0
 
             self.seek_idx(table_idx, Some(key)).await?;
@@ -165,13 +182,6 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
                 self.seek_idx(table_idx + 1, None).await?;
             }
             Ok(())
-        }
-    }
-
-    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        stats.add(&self.stats);
-        if let Some(iter) = &self.sstable_iter {
-            iter.collect_local_statistic(stats);
         }
     }
 }

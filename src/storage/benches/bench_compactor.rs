@@ -29,7 +29,7 @@ use risingwave_storage::hummock::compactor::{
     Compactor, ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
 };
 use risingwave_storage::hummock::iterator::{
-    ConcatIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
+    ConcatIterator, Forward, HummockIterator, HummockIteratorSeekable, UnorderedMergeIteratorInner,
 };
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
@@ -173,7 +173,10 @@ fn bench_table_scan(c: &mut Criterion) {
     });
 }
 
-async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store: SstableStoreRef) {
+async fn compact<I: HummockIterator<Direction = Forward> + HummockIteratorSeekable>(
+    iter: I,
+    sstable_store: SstableStoreRef,
+) {
     let opt = SstableBuilderOptions {
         capacity: 32 * 1024 * 1024,
         block_capacity: 64 * 1024,

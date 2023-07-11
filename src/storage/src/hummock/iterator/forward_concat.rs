@@ -27,7 +27,7 @@ mod tests {
         default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::iterator::{HummockIterator, HummockIteratorSeekable};
     use crate::hummock::sstable::SstableIteratorReadOptions;
 
     #[tokio::test]

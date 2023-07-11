@@ -28,7 +28,9 @@ use super::TaskConfig;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
-use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
+use crate::hummock::iterator::{
+    Forward, HummockIterator, HummockIteratorSeekable, UnorderedMergeIteratorInner,
+};
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::{
     CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, HummockResult,
@@ -140,7 +142,7 @@ impl CompactorRunner {
     fn build_sst_iter(
         &self,
         task_progress: Arc<TaskProgress>,
-    ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
+    ) -> HummockResult<impl HummockIterator<Direction = Forward> + HummockIteratorSeekable> {
         let mut table_iters = Vec::new();
 
         for level in &self.compact_task.input_ssts {

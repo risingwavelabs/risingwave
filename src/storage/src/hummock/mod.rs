@@ -29,6 +29,8 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tracing::log::error;
 
+use crate::hummock::iterator::HummockIteratorSeekable;
+
 mod block_cache;
 pub use block_cache::*;
 

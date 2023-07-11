@@ -36,7 +36,9 @@ use crate::hummock::compactor::context::CompactorContext;
 use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::event_handler::uploader::UploadTaskPayload;
 use crate::hummock::event_handler::LocalInstanceId;
-use crate::hummock::iterator::{Forward, HummockIterator, OrderedMergeIteratorInner};
+use crate::hummock::iterator::{
+    Forward, HummockIterator, HummockIteratorSeekable, OrderedMergeIteratorInner,
+};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
 };
@@ -468,7 +470,7 @@ impl SharedBufferCompactRunner {
 
     pub async fn run(
         self,
-        iter: impl HummockIterator<Direction = Forward>,
+        iter: impl HummockIterator<Direction = Forward> + HummockIteratorSeekable,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         del_agg: Arc<CompactionDeleteRanges>,
     ) -> HummockResult<CompactOutput> {

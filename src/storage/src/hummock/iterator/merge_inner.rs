@@ -21,7 +21,9 @@ use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
-use crate::hummock::iterator::{DirectionEnum, Forward, HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{
+    DirectionEnum, Forward, HummockIterator, HummockIteratorDirection, HummockIteratorSeekable,
+};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -380,8 +382,6 @@ where
     type Direction = I::Direction;
 
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         self.next_inner()
@@ -398,6 +398,20 @@ where
     fn is_valid(&self) -> bool {
         self.heap.peek().map_or(false, |n| n.iter.is_valid())
     }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.collect_local_statistic_impl(stats);
+    }
+}
+
+impl<I: HummockIterator + HummockIteratorSeekable, NE: NodeExtraOrderInfo> HummockIteratorSeekable
+    for MergeIteratorInner<I, NE>
+where
+    NE: 'static,
+    Node<I, NE>: Ord,
+{
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
@@ -417,9 +431,5 @@ where
             self.build_heap();
             Ok(())
         }
-    }
-
-    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        self.collect_local_statistic_impl(stats);
     }
 }
