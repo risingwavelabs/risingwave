@@ -230,6 +230,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Expr::Exists(Box::new(subquery))
     }
 
+    /// Generate ORDER BY expressions by choosing from available bound columns.
     pub(crate) fn gen_order_by(&mut self) -> Vec<OrderByExpr> {
         if self.bound_columns.is_empty() {
             return vec![];
@@ -254,6 +255,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         order_by
     }
 
+    /// Generate ORDER BY expressions by choosing from given expressions.
     pub(crate) fn gen_order_by_within(&mut self, exprs: &[Expr]) -> Vec<OrderByExpr> {
         let exprs = exprs
             .iter()
