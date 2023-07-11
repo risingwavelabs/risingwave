@@ -616,7 +616,7 @@ impl S3ObjectStore {
         let client = match std::env::var("RW_S3_ENDPOINT") {
             Ok(endpoint) => {
                 // s3 compatible storage
-                let is_force_path_style = match std::env::var("IS_FORCE_PATH_STYLE") {
+                let is_force_path_style = match std::env::var("RW_IS_FORCE_PATH_STYLE") {
                     Ok(value) => value == "true",
                     Err(_) => false,
                 };
