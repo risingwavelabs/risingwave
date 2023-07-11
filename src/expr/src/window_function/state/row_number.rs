@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::estimate_size::collections::VecDeque;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::Datum;
-use risingwave_expr::function::window::WindowFuncCall;
 use smallvec::SmallVec;
 
-use super::{EstimatedVecDeque, StateEvictHint, StateKey, StatePos, WindowState};
-use crate::executor::StreamExecutorResult;
+use super::{StateEvictHint, StateKey, StatePos, WindowState};
+use crate::function::window::WindowFuncCall;
+use crate::Result;
 
 #[derive(EstimateSize)]
-pub(super) struct RowNumberState {
+pub struct RowNumberState {
     first_key: Option<StateKey>,
-    buffer: EstimatedVecDeque<StateKey>,
+    buffer: VecDeque<StateKey>,
     curr_row_number: i64,
 }
 
@@ -53,7 +54,7 @@ impl WindowState for RowNumberState {
         }
     }
 
-    fn curr_output(&self) -> StreamExecutorResult<Datum> {
+    fn curr_output(&self) -> Result<Datum> {
         if self.curr_window().is_ready {
             Ok(Some(self.curr_row_number.into()))
         } else {
@@ -79,10 +80,10 @@ impl WindowState for RowNumberState {
 mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
-    use risingwave_expr::agg::AggArgs;
-    use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 
     use super::*;
+    use crate::agg::AggArgs;
+    use crate::function::window::{Frame, FrameBound, WindowFuncKind};
 
     fn create_state_key(pk: i64) -> StateKey {
         StateKey {
