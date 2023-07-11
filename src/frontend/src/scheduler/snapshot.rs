@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use more_asserts::{assert_le, assert_lt};
+use more_asserts::assert_le;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::PbHummockSnapshot;
@@ -187,7 +187,7 @@ impl HummockSnapshotManager {
             old_snapshot.value.committed_epoch,
             snapshot.value.committed_epoch
         );
-        assert_lt!(
+        assert_le!(
             old_snapshot.value.current_epoch,
             snapshot.value.current_epoch
         );
