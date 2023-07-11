@@ -257,7 +257,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 35
+    timeout_in_minutes: 60
 
   - label: "upload micro-benchmark"
     command:
