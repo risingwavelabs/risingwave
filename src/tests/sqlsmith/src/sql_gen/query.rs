@@ -290,6 +290,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             new_bound_columns.extend(group_by_cols);
         }
         if grouping_sets.is_empty() {
+            self.bound_columns = vec![];
             vec![]
         } else {
             let grouping_sets = Expr::GroupingSets(grouping_sets);
