@@ -115,7 +115,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                         };
 
                         // It is better to early return here if the user key is already
-                        // out of range to avoid unneccessary access on the range tomestones
+                        // out of range to avoid unnecessary access on the range tomestones
                         // via `delete_range_iter`.
                         // For example, if we are iterating with key range [0x0a, 0x0c) and the
                         // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
