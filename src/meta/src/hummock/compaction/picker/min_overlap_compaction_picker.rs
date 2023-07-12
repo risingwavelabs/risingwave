@@ -213,7 +213,7 @@ impl NonOverlapSubLevelPicker {
                     .iter()
                     .filter(|ssts| !ssts.is_empty())
                     .count()
-                    < MAX_LEVEL_COUNT
+                    > MAX_LEVEL_COUNT
             {
                 break;
             }

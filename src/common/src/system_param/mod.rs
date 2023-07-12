@@ -342,6 +342,7 @@ mod tests {
             (BARRIER_INTERVAL_MS_KEY, "1"),
             (CHECKPOINT_FREQUENCY_KEY, "1"),
             (SSTABLE_SIZE_MB_KEY, "1"),
+            (PARALLEL_COMPACT_SIZE_MB_KEY, "2"),
             (BLOCK_SIZE_KB_KEY, "1"),
             (BLOOM_FALSE_POSITIVE_KEY, "1"),
             (STATE_STORE_KEY, "a"),
