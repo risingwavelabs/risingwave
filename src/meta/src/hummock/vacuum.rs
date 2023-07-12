@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
 
 use super::CompactorManagerRef;
@@ -134,7 +134,7 @@ where
 
             // 2. Send task.
             match compactor
-                .send_task(Task::VacuumTask(VacuumTask {
+                .send_event(ResponseEvent::VacuumTask(VacuumTask {
                     // The SST id doesn't necessarily have a counterpart SST file in S3, but
                     // it's OK trying to delete it.
                     sstable_object_ids: delete_batch.clone(),
@@ -232,7 +232,7 @@ where
             Some(compactor) => compactor,
         };
         compactor
-            .send_task(Task::FullScanTask(FullScanTask {
+            .send_event(ResponseEvent::FullScanTask(FullScanTask {
                 sst_retention_time_sec: sst_retention_time.as_secs(),
             }))
             .await
@@ -357,6 +357,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+    use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
     use risingwave_pb::hummock::VacuumTask;
 
     use crate::backup_restore::BackupManager;
@@ -473,8 +474,8 @@ mod tests {
             ))
             .await
             .unwrap());
-        let full_scan_task = match receiver.recv().await.unwrap().unwrap().task.unwrap() {
-            Task::FullScanTask(task) => task,
+        let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
+            ResponseEvent::FullScanTask(task) => task,
             _ => {
                 panic!()
             }
@@ -491,8 +492,8 @@ mod tests {
             ))
             .await
             .unwrap());
-        let full_scan_task = match receiver.recv().await.unwrap().unwrap().task.unwrap() {
-            Task::FullScanTask(task) => task,
+        let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
+            ResponseEvent::FullScanTask(task) => task,
             _ => {
                 panic!()
             }

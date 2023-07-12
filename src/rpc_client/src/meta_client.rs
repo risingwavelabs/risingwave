@@ -50,6 +50,7 @@ use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
+use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -73,17 +74,18 @@ use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{unbounded_channel, Receiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Endpoint;
-use tonic::{Code, Streaming};
+use tonic::{Code, Request, Streaming};
 
 use crate::error::{Result, RpcError};
-use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
+use crate::hummock_meta_client::HummockMetaClient;
 use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
@@ -1114,18 +1116,6 @@ impl HummockMetaClient for MetaClient {
         panic!("Only meta service can update_current_epoch in production.")
     }
 
-    async fn subscribe_compact_tasks(
-        &self,
-        cpu_core_num: u32,
-    ) -> Result<BoxStream<'static, CompactTaskItem>> {
-        let req = SubscribeCompactTasksRequest {
-            context_id: self.worker_id(),
-            cpu_core_num,
-        };
-        let stream = self.inner.subscribe_compact_tasks(req).await?;
-        Ok(Box::pin(stream))
-    }
-
     async fn compactor_heartbeat(
         &self,
         progress: Vec<CompactTaskProgress>,
@@ -1183,6 +1173,34 @@ impl HummockMetaClient for MetaClient {
             })
             .await?;
         Ok(())
+    }
+
+    async fn subscribe_compaction_event(
+        &self,
+    ) -> Result<(
+        UnboundedSender<SubscribeCompactionEventRequest>,
+        Streaming<SubscribeCompactionEventResponse>,
+    )> {
+        let (request_sender, request_receiver) =
+            unbounded_channel::<SubscribeCompactionEventRequest>();
+        request_sender
+            .send(SubscribeCompactionEventRequest {
+                event: Some(subscribe_compaction_event_request::Event::Register(
+                    Register {
+                        context_id: self.worker_id(),
+                    },
+                )),
+            })
+            .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;
+
+        let stream = self
+            .inner
+            .subscribe_compaction_event(Request::new(UnboundedReceiverStream::new(
+                request_receiver,
+            )))
+            .await?;
+
+        Ok((request_sender, stream))
     }
 }
 
@@ -1635,7 +1653,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
-            ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, compactor_heartbeat, CompactorHeartbeatRequest, CompactorHeartbeatResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
@@ -1651,6 +1668,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
+            ,{ hummock_client, subscribe_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeCompactionEventRequest>, Streaming<SubscribeCompactionEventResponse> }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

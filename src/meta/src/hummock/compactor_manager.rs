@@ -21,14 +21,12 @@ use fail::fail_point;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compact::estimate_state_for_compaction;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
-use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress,
-    SubscribeCompactTasksResponse,
+    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress, SubscribeCompactionEventResponse,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use super::compaction_scheduler::ScheduleStatus;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
@@ -45,7 +43,7 @@ pub const TASK_NORMAL: &str = "task is normal, please wait some time";
 #[derive(Debug)]
 pub struct Compactor {
     context_id: HummockContextId,
-    sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
+    sender: Sender<MetaResult<SubscribeCompactionEventResponse>>,
     // state
     pub cpu_ratio: AtomicU32,
     pub total_cpu_core: u32,
@@ -65,7 +63,7 @@ struct TaskHeartbeat {
 impl Compactor {
     pub fn new(
         context_id: HummockContextId,
-        sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
+        sender: Sender<MetaResult<SubscribeCompactionEventResponse>>,
         cpu_core_num: u32,
     ) -> Self {
         Self {
@@ -76,14 +74,14 @@ impl Compactor {
         }
     }
 
-    pub async fn send_task(&self, task: Task) -> MetaResult<()> {
+    pub async fn send_event(&self, event: ResponseEvent) -> MetaResult<()> {
         fail_point!("compaction_send_task_fail", |_| Err(anyhow::anyhow!(
             "compaction_send_task_fail"
         )
         .into()));
 
         self.sender
-            .send(Ok(SubscribeCompactTasksResponse { task: Some(task) }))
+            .send(Ok(SubscribeCompactionEventResponse { event: Some(event) }))
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
 
@@ -92,8 +90,8 @@ impl Compactor {
 
     pub async fn cancel_task(&self, task_id: u64) -> MetaResult<()> {
         self.sender
-            .send(Ok(SubscribeCompactTasksResponse {
-                task: Some(Task::CancelCompactTask(CancelCompactTask {
+            .send(Ok(SubscribeCompactionEventResponse {
+                event: Some(ResponseEvent::CancelCompactTask(CancelCompactTask {
                     context_id: self.context_id,
                     task_id,
                 })),
@@ -228,7 +226,7 @@ impl CompactorManagerInner {
         &mut self,
         context_id: HummockContextId,
         cpu_core_num: u32,
-    ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
+    ) -> Receiver<MetaResult<SubscribeCompactionEventResponse>> {
         const STREAM_BUFFER_SIZE: usize = 4;
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         self.compactors.retain(|c| *c != context_id);
@@ -245,6 +243,20 @@ impl CompactorManagerInner {
         );
         rx
     }
+
+    // pub fn add_compactor_event_stream(
+    //     &self,
+    //     context_id: HummockContextId,
+    //     event_stream: Streaming<SubscribeCompactionEventRequest>,
+    // ) {
+    //     const STREAM_BUFFER_SIZE: usize = 4;
+    //     let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
+    //     self.compactors.retain(|c| *c != context_id);
+    //     self.compactors.push(context_id);
+    //     self.compactor_map
+    //         .insert(context_id, Arc::new(Compactor::new(context_id, tx, 0)));
+
+    // }
 
     /// Used when meta exiting to support graceful shutdown.
     pub fn abort_all_compactors(&mut self) {
@@ -428,39 +440,6 @@ impl CompactorManagerInner {
         self.compactors.len()
     }
 
-    pub fn update_compactor_pending_task(
-        &mut self,
-        context_id: HummockContextId,
-        pull_task_count: Option<u32>,
-        check_exist: bool,
-    ) {
-        use std::collections::hash_map::Entry::{Occupied, Vacant};
-        // update_compactor_pending_task is called by two paths
-        // 1. compactor heartbeat will pass in pull_task_count, which is not processed when
-        // pull_task_count is None, and inserted into memory when it is not zero
-        // 2. `CompactorPullTaskHandle` returns the count when it is
-        // resolved, and we need to clean up the corresponding item when the count is 0
-        //
-        // The above restriction ensures that the selected `compactor_pending_io_count` must not be
-        // 0. This restriction is also reflected in the `CompactorPullTaskHandle`.
-        if let Some(pull_task_count) = pull_task_count {
-            if pull_task_count == 0 {
-                let _ = self.compactor_pending_io_counts.remove(&context_id);
-            } else {
-                match self.compactor_pending_io_counts.entry(context_id) {
-                    Occupied(mut value) => *value.get_mut() = pull_task_count,
-                    Vacant(entry) => {
-                        if !check_exist {
-                            // Avoid `CompactorPullTaskHandle` incorrectly updating the state of a
-                            // deprecated compactor
-                            entry.insert(pull_task_count);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     pub fn get_progress(&self) -> Vec<CompactTaskProgress> {
         self.task_heartbeats
             .values()
@@ -498,21 +477,21 @@ impl CompactorManager {
         }
     }
 
-    pub fn next_idle_compactor(&self) -> Option<CompactorPullTaskHandle> {
-        if let Some((compactor, pending_pull_task_count)) = self.inner.read().next_idle_compactor()
-        {
-            assert!(pending_pull_task_count > 0);
-            // `update_compactor_pending_task` ensures that the compactor that can be
-            // selected must exist and that the value of pending_pull_task_count is not 0.
-            Some(CompactorPullTaskHandle {
-                compactor_manager: self.inner.clone(),
-                compactor,
-                pending_pull_task_count,
-            })
-        } else {
-            None
-        }
-    }
+    // pub fn next_idle_compactor(&self) -> Option<CompactorPullTaskHandle> {
+    //     if let Some((compactor, pending_pull_task_count)) = self.inner.read().next_idle_compactor()
+    //     {
+    //         assert!(pending_pull_task_count > 0);
+    //         // `update_compactor_pending_task` ensures that the compactor that can be
+    //         // selected must exist and that the value of pending_pull_task_count is not 0.
+    //         Some(CompactorPullTaskHandle {
+    //             compactor_manager: self.inner.clone(),
+    //             compactor,
+    //             pending_pull_task_count,
+    //         })
+    //     } else {
+    //         None
+    //     }
+    // }
 
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
         self.inner.read().next_compactor()
@@ -522,7 +501,7 @@ impl CompactorManager {
         &self,
         context_id: HummockContextId,
         cpu_core_num: u32,
-    ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
+    ) -> Receiver<MetaResult<SubscribeCompactionEventResponse>> {
         self.inner.write().add_compactor(context_id, cpu_core_num)
     }
 
@@ -575,85 +554,8 @@ impl CompactorManager {
         self.inner.read().compactor_num()
     }
 
-    pub fn update_compactor_pending_task(
-        &self,
-        context_id: HummockContextId,
-        pull_task_count: Option<u32>,
-        check_exist: bool,
-    ) {
-        self.inner
-            .write()
-            .update_compactor_pending_task(context_id, pull_task_count, check_exist)
-    }
-
     pub fn get_progress(&self) -> Vec<CompactTaskProgress> {
         self.inner.read().get_progress()
-    }
-}
-
-pub struct CompactorPullTaskHandle {
-    compactor_manager: Arc<RwLock<CompactorManagerInner>>,
-
-    pub compactor: Arc<Compactor>,
-
-    pub pending_pull_task_count: u32,
-}
-
-impl CompactorPullTaskHandle {
-    pub async fn consume_task(&mut self, compact_task: &CompactTask) -> ScheduleStatus {
-        // By design, it is guaranteed that no `CompactorPullTaskHandle` with
-        // `pending_pull_task_count` < 1 will be constructed and that the
-        // `CompactorPullTaskHandle` will not be over-consumed on the usage side. This is a
-        // defensive logic, and when the `CompactorPullTaskHandle` is misused, we return an Error
-        // and rely on expire to recycle the task
-        if self.pending_pull_task_count < 1 {
-            tracing::warn!(
-                "WARN: CompactorPullTaskHandle is used incorrectly context_id {}",
-                self.compactor.context_id
-            );
-            return ScheduleStatus::SendFailure(Box::new(compact_task.clone()));
-        }
-
-        // 2. Send the compaction task.
-        if let Err(e) = self
-            .compactor
-            .send_task(Task::CompactTask(compact_task.clone()))
-            .await
-        {
-            tracing::warn!(
-                "Failed to send task {} to {}. {:#?}",
-                compact_task.task_id,
-                self.compactor.context_id(),
-                e
-            );
-
-            // try cancel on compactor
-            let _ = self.compactor.cancel_task(compact_task.task_id).await;
-
-            self.compactor_manager
-                .write()
-                .pause_compactor(self.compactor.context_id());
-
-            self.pending_pull_task_count = 0;
-            return ScheduleStatus::SendFailure(Box::new(compact_task.clone()));
-        }
-
-        self.pending_pull_task_count -= 1;
-        ScheduleStatus::Ok
-    }
-}
-
-impl Drop for CompactorPullTaskHandle {
-    fn drop(&mut self) {
-        // When destructing the `CompactorPullTaskHandle`, we need to reclaim count. and remove the
-        // item when count is 0
-        self.compactor_manager
-            .write()
-            .update_compactor_pending_task(
-                self.compactor.context_id,
-                Some(self.pending_pull_task_count),
-                true, // check exist
-            );
     }
 }
 

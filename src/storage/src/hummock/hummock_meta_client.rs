@@ -20,10 +20,12 @@ use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo, SstObjectIdRange};
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot, HummockVersion,
-    VacuumTask,
+    SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
-use risingwave_rpc_client::{CompactTaskItem, HummockMetaClient, MetaClient};
+use risingwave_rpc_client::{HummockMetaClient, MetaClient};
+use tokio::sync::mpsc::UnboundedSender;
+use tonic::Streaming;
 
 use crate::hummock::{HummockEpoch, HummockVersionId};
 use crate::monitor::HummockMetrics;
@@ -120,13 +122,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
-    async fn subscribe_compact_tasks(
-        &self,
-        cpu_core_num: u32,
-    ) -> Result<BoxStream<'static, CompactTaskItem>> {
-        self.meta_client.subscribe_compact_tasks(cpu_core_num).await
-    }
-
     async fn compactor_heartbeat(
         &self,
         progress: Vec<CompactTaskProgress>,
@@ -165,5 +160,14 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         self.meta_client.update_current_epoch(epoch).await
+    }
+
+    async fn subscribe_compaction_event(
+        &self,
+    ) -> Result<(
+        UnboundedSender<SubscribeCompactionEventRequest>,
+        Streaming<SubscribeCompactionEventResponse>,
+    )> {
+        self.meta_client.subscribe_compaction_event().await
     }
 }

@@ -6636,6 +6636,7 @@ dependencies = [
  "lz4",
  "mach2",
  "madsim-tokio",
+ "madsim-tonic",
  "memcomparable",
  "moka",
  "nix 0.25.1",

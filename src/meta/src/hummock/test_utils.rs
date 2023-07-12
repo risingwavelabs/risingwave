@@ -46,6 +46,7 @@ pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
         .collect_vec()
 }
 
+#[cfg(test)]
 pub async fn add_test_tables<S>(
     hummock_manager: &HummockManager<S>,
     context_id: HummockContextId,
@@ -83,9 +84,9 @@ where
         hummock_manager
             .compactor_manager_ref_for_test()
             .add_compactor(context_id, core_num);
-        hummock_manager
-            .compactor_manager
-            .update_compactor_pending_task(context_id, Some(core_num), false);
+        // hummock_manager
+        //     .compactor_manager
+        //     .update_compactor_pending_task(context_id, Some(core_num), false);
         temp_compactor = true;
     }
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
@@ -317,12 +318,16 @@ pub async fn setup_compute_env_with_config(
 
     let compactor_manager = Arc::new(CompactorManager::for_test());
 
+    let (compactor_streams_change_tx, _compactor_streams_change_rx) =
+        tokio::sync::mpsc::unbounded_channel();
+
     let hummock_manager = HummockManager::with_config(
         env.clone(),
         cluster_manager.clone(),
         Arc::new(MetaMetrics::new()),
         compactor_manager,
         config,
+        compactor_streams_change_tx,
     )
     .await;
     let fake_host_address = HostAddress {

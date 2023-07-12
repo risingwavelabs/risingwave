@@ -20,13 +20,12 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot, HummockVersion,
-    VacuumTask,
+    SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
 };
+use tokio::sync::mpsc::UnboundedSender;
+use tonic::Streaming;
 
 use crate::error::Result;
-
-pub type CompactTaskItem =
-    std::result::Result<risingwave_pb::hummock::SubscribeCompactTasksResponse, tonic::Status>;
 
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
@@ -55,11 +54,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()>;
     async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()>;
-
-    async fn subscribe_compact_tasks(
-        &self,
-        cpu_core_num: u32,
-    ) -> Result<BoxStream<'static, CompactTaskItem>>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
     async fn trigger_manual_compaction(
         &self,
@@ -69,4 +63,11 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     ) -> Result<()>;
     async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()>;
     async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()>;
+
+    async fn subscribe_compaction_event(
+        &self,
+    ) -> Result<(
+        UnboundedSender<SubscribeCompactionEventRequest>,
+        Streaming<SubscribeCompactionEventResponse>,
+    )>;
 }

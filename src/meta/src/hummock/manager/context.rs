@@ -21,7 +21,6 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::{
     ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
 };
-use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{HummockVersion, ValidationTask};
 
 use crate::hummock::error::{Error, Result};
@@ -123,6 +122,8 @@ where
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
     ) -> Result<()> {
+        use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
+
         for (sst_id, context_id) in sst_to_context {
             #[cfg(test)]
             {
@@ -163,7 +164,7 @@ where
                 .map(|ExtendedSstableInfo { sst_info, .. }| sst_info.clone())
                 .collect_vec();
             if compactor
-                .send_task(Task::ValidationTask(ValidationTask {
+                .send_event(ResponseEvent::ValidationTask(ValidationTask {
                     sst_infos,
                     sst_id_to_worker_id: sst_to_context.clone(),
                     epoch,
