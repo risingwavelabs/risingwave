@@ -3,5 +3,23 @@
 version = 3
 
 [[package]]
+name = "coredump"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7b12ca865ce2c375a629bc88221bdcdfaf9bdf6d8e966d7a6dbd2f6c4ceb335"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "crash"
 version = "1.0.0-alpha"
+dependencies = [
+ "coredump",
+]
+
+[[package]]
+name = "libc"
+version = "0.2.147"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4668fb0ea861c1df094127ac5f1da3409a82116a4ba74fca2e58ef927159bb3"

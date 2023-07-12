@@ -69,7 +69,16 @@ watch kubectl get pods -A -o wide
 k apply -f k8s_resources/capture_ds.yaml 
 ```
 
+Is my rust application actually core dumpling? 
+    I don't think so
+what is the ulimit -c ? 
+    unlimited
+
+Would capture catch core dumps work? 
+    Create files in the core dump dir and see if it will be picked up on
+    -> Works fine
 
 
-
+ulimit -c 1024000000
+mkdir /var/coredump
 

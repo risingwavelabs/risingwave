@@ -22,29 +22,29 @@ spec:
             type: DirectoryOrCreate
       restartPolicy: Always
       initContainers:
-        - name: set-coredump-path
-          image: busybox:1.28
-          command:
-            [
-              "sh",
-              "-c",
-              'echo "/var/coredump/core.%e.sig%s.%p.%t" > /proc/sys/kernel/core_pattern',
-            ]
-          securityContext:
-            privileged: true
-        - name: set-coredump-size-limit
-          image: busybox:1.28
-          command: ["sh", "-c", "ulimit -c 1024000000"]
-          securityContext:
-            privileged: true
-        - name: set-coredump-permissions
-          image: busybox:1.28
-          command: ["sh", "-c", "chown -R 1000:1000 /var/coredump"]
-          securityContext:
-            privileged: true
-          volumeMounts:
-            - name: coredump
-              mountPath: /var/coredump
+        # - name: set-coredump-path
+        #   image: busybox:1.28
+        #   command:
+        #     [
+        #       "sh",
+        #       "-c",
+        #       'echo "/var/coredump/core.%e.sig%s.%p.%t" > /proc/sys/kernel/core_pattern',
+        #     ]
+        #   securityContext:
+        #     privileged: true
+        # - name: set-coredump-size-limit # TODO: not working?
+        #   image: busybox:1.28
+        #   command: ["sh", "-c", "ulimit -c 1024000000"]
+        #   securityContext:
+        #     privileged: true
+        # - name: set-coredump-permissions
+        #   image: busybox:1.28
+        #   command: ["sh", "-c", "chown -R 1000:1000 /var/coredump"]
+        #   securityContext:
+        #     privileged: true
+        #   volumeMounts:
+        #     - name: coredump
+        #       mountPath: /var/coredump
       containers:
         - name: crash
           image: crash

@@ -18,12 +18,35 @@ spec:
         - name: capture
           imagePullPolicy: Never
           image: capture:latest
-          # resources: # TODO
-          # TODO: add volume mound
-          # volumeMounts:
-          #   - name: varlog
-          #     mountPath: /var/log
-      # volumes:
-      #   - name: varlog
-      #     hostPath:
-      #       path: /var/log
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: LOCAL_PATH
+              value: "/var/coredump"
+            - name: S3_BUCKET
+              value: "myorg-coredump"
+            - name: CLUSTER_NAME
+              value: __CLUSTER_NAME__``
+          resources:
+            limits:
+              memory: 100Mi
+            requests:
+              cpu: 100m
+          securityContext:
+            runAsUser: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - all
+          volumeMounts:
+            - name: coredump
+              mountPath: /var/coredump
+      volumes:
+        - name: coredump
+          hostPath:
+            path: /var/coredump
+            type: DirectoryOrCreate

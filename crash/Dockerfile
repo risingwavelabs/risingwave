@@ -36,5 +36,7 @@ LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwa
 
 COPY --from=builder /crash/target/debug/crash /crash/target/debug/crash
 
+RUN ulimit -c 1024000000
+
 ENTRYPOINT [ "/crash/target/debug/crash" ]
 
