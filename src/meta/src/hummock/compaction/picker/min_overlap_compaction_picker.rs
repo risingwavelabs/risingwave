@@ -23,7 +23,7 @@ use risingwave_pb::hummock::{InputLevel, Level, LevelType, SstableInfo};
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::level_handler::LevelHandler;
-const MAX_LEVEL_COUNT: usize = 32;
+pub const MAX_LEVEL_COUNT: usize = 32;
 
 pub struct MinOverlappingPicker {
     level: usize,
