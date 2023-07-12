@@ -1300,7 +1300,10 @@ where
                 branched_ssts.commit_memory();
                 current_version.apply_version_delta(&version_delta);
 
-                let mv_id_to_all_table_ids = self.fragment_manager.get_mv_id_to_internal_table_ids_mapping().await;
+                let mv_id_to_all_table_ids = self
+                    .fragment_manager
+                    .get_mv_id_to_internal_table_ids_mapping()
+                    .await;
 
                 trigger_version_stat(
                     &self.metrics,
@@ -1614,7 +1617,10 @@ where
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
 
-        let mv_id_to_all_table_ids = self.fragment_manager.get_mv_id_to_internal_table_ids_mapping().await;
+        let mv_id_to_all_table_ids = self
+            .fragment_manager
+            .get_mv_id_to_internal_table_ids_mapping()
+            .await;
         trigger_version_stat(
             &self.metrics,
             &versioning.current_version,
