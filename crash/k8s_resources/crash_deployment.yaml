@@ -15,6 +15,7 @@ spec:
       labels:
         app: crash
     spec:
+      restartPolicy: Always
       containers:
         - name: crash
           image: crash
