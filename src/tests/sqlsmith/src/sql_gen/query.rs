@@ -289,19 +289,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             );
             new_bound_columns.extend(group_by_cols);
         }
-        // Add an empty set when there is no set.
         if grouping_sets.is_empty() {
-            grouping_sets.push(vec![]);
-        }
-        let grouping_sets = Expr::GroupingSets(grouping_sets);
-        self.bound_columns = new_bound_columns
-            .into_iter()
-            .sorted_by(|a, b| Ord::cmp(&a.name, &b.name))
-            .dedup_by(|a, b| a.name == b.name)
-            .collect();
+            vec![]
+        } else {
+            let grouping_sets = Expr::GroupingSets(grouping_sets);
+            self.bound_columns = new_bound_columns
+                .into_iter()
+                .sorted_by(|a, b| Ord::cmp(&a.name, &b.name))
+                .dedup_by(|a, b| a.name == b.name)
+                .collect();
 
-        // Currently, grouping sets only support one set.
-        vec![grouping_sets]
+            // Currently, grouping sets only support one set.
+            vec![grouping_sets]
+        }
     }
 
     fn gen_random_bound_columns(&mut self) -> Vec<Column> {
