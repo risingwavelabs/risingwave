@@ -432,7 +432,7 @@ dependencies = [
  "derive_builder",
  "flexstr",
  "indextree",
- "itertools",
+ "itertools 0.10.5",
  "parking_lot 0.12.1",
  "pin-project",
  "tokio",
@@ -1585,7 +1585,7 @@ dependencies = [
  "criterion-plot",
  "futures",
  "is-terminal",
- "itertools",
+ "itertools 0.10.5",
  "num-traits",
  "once_cell",
  "oorandom",
@@ -1607,7 +1607,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
 dependencies = [
  "cast",
- "itertools",
+ "itertools 0.10.5",
 ]
 
 [[package]]
@@ -3147,6 +3147,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3623,7 +3632,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8263075bb86c5a1b1427b5ae862e8889656f126e9f77c484496e8b47cf5c5558"
 dependencies = [
- "regex-automata",
+ "regex-automata 0.1.10",
 ]
 
 [[package]]
@@ -4156,7 +4165,7 @@ dependencies = [
  "base64 0.13.1",
  "chrono",
  "http",
- "itertools",
+ "itertools 0.10.5",
  "log",
  "num-bigint",
  "oauth2",
@@ -4581,7 +4590,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bdbb7b706f2afc610f3853550cdbbf6372fd324824a087806bd4480ea4996e24"
 dependencies = [
  "heck 0.4.1",
- "itertools",
+ "itertools 0.10.5",
  "prost",
  "prost-types",
 ]
@@ -4639,7 +4648,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "futures",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "openssl",
  "panic-message",
@@ -4902,7 +4911,7 @@ checksum = "59230a63c37f3e18569bdb90e4a89cbf5bf8b06fea0b84e65ea10cc4df47addd"
 dependencies = [
  "difflib",
  "float-cmp",
- "itertools",
+ "itertools 0.10.5",
  "normalize-line-endings",
  "predicates-core",
  "regex",
@@ -5081,7 +5090,7 @@ checksum = "119533552c9a7ffacc21e099c24a0ac8bb19c2a2a3f363de84cd9b844feab270"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools",
+ "itertools 0.10.5",
  "lazy_static",
  "log",
  "multimap",
@@ -5102,7 +5111,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5d2d8d10f3c6ded6da8b05b5fb3b8a5082514344d56c9f871412d29b4e075b4"
 dependencies = [
  "anyhow",
- "itertools",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -5418,13 +5427,14 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.8.1"
+version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af83e617f331cc6ae2da5443c602dfa5af81e517212d9d611a5b3ba1777b5370"
+checksum = "b2eae68fc220f7cf2532e4494aded17545fce192d59cd996e0fe7887f4ceb575"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-syntax 0.7.1",
+ "regex-automata 0.3.2",
+ "regex-syntax 0.7.4",
 ]
 
 [[package]]
@@ -5437,6 +5447,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-automata"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83d3daa6976cffb758ec878f108ba0e062a45b2d6ca3a2cca965338855476caf"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-syntax 0.7.4",
+]
+
+[[package]]
 name = "regex-syntax"
 version = "0.6.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5444,9 +5465,9 @@ checksum = "f162c6dd7b008981e4d40210aca20b4bd0f9b60ca9271061b07f78537722f2e1"
 
 [[package]]
 name = "regex-syntax"
-version = "0.7.1"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5996294f19bd3aae0453a862ad728f60e6600695733dd5df01da90c54363a3c"
+checksum = "e5ea92a5b6195c6ef2a0295ea818b312502c6fc94dde986c5553242e18fd4ce2"
 
 [[package]]
 name = "rend"
@@ -5569,7 +5590,7 @@ dependencies = [
  "glob",
  "google-cloud-pubsub",
  "indicatif",
- "itertools",
+ "itertools 0.10.5",
  "madsim-rdkafka",
  "madsim-tokio",
  "redis",
@@ -5596,7 +5617,7 @@ dependencies = [
  "dialoguer",
  "enum-iterator",
  "fs-err",
- "itertools",
+ "itertools 0.10.5",
 ]
 
 [[package]]
@@ -5606,7 +5627,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
- "itertools",
+ "itertools 0.10.5",
  "parking_lot 0.12.1",
  "prost",
  "risingwave_common",
@@ -5646,7 +5667,7 @@ dependencies = [
  "futures-async-stream",
  "hashbrown 0.13.2",
  "hytra",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
@@ -5689,7 +5710,7 @@ dependencies = [
  "futures",
  "hdrhistogram",
  "isahc",
- "itertools",
+ "itertools 0.10.5",
  "libc",
  "madsim-tokio",
  "nix 0.25.1",
@@ -5790,7 +5811,7 @@ dependencies = [
  "http",
  "humantime",
  "hytra",
- "itertools",
+ "itertools 0.10.5",
  "itoa",
  "libc",
  "lru 0.7.6",
@@ -5936,7 +5957,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "hyper",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -5990,7 +6011,7 @@ dependencies = [
  "futures-async-stream",
  "glob",
  "google-cloud-pubsub",
- "itertools",
+ "itertools 0.10.5",
  "madsim-rdkafka",
  "madsim-tokio",
  "madsim-tonic",
@@ -6037,7 +6058,7 @@ dependencies = [
  "comfy-table",
  "futures",
  "inquire",
- "itertools",
+ "itertools 0.10.5",
  "madsim-etcd-client",
  "madsim-tokio",
  "regex",
@@ -6098,7 +6119,7 @@ dependencies = [
  "futures-async-stream",
  "futures-util",
  "hex",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "md5",
  "num-traits",
@@ -6125,7 +6146,7 @@ dependencies = [
 name = "risingwave_expr_macro"
 version = "0.1.0"
 dependencies = [
- "itertools",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -6154,7 +6175,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "iana-time-zone",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -6201,7 +6222,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "bytes",
  "hex",
- "itertools",
+ "itertools 0.10.5",
  "parse-display",
  "risingwave_common",
  "risingwave_pb",
@@ -6221,7 +6242,7 @@ dependencies = [
  "fail",
  "futures",
  "futures-async-stream",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "rand",
@@ -6251,7 +6272,7 @@ dependencies = [
  "bytes",
  "futures",
  "futures-async-stream",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.1",
@@ -6269,7 +6290,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "futures",
- "itertools",
+ "itertools 0.10.5",
  "jni",
  "madsim-tokio",
  "prost",
@@ -6307,7 +6328,7 @@ dependencies = [
  "futures",
  "hex",
  "hyper",
- "itertools",
+ "itertools 0.10.5",
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
@@ -6366,7 +6387,7 @@ dependencies = [
  "futures",
  "hyper",
  "hyper-tls",
- "itertools",
+ "itertools 0.10.5",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
@@ -6399,7 +6420,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "expect-test",
- "itertools",
+ "itertools 0.10.5",
  "libtest-mimic",
  "madsim-tokio",
  "paste",
@@ -6437,7 +6458,7 @@ dependencies = [
  "either",
  "futures",
  "hyper",
- "itertools",
+ "itertools 0.10.5",
  "lru 0.10.0",
  "madsim-tokio",
  "madsim-tonic",
@@ -6490,7 +6511,7 @@ dependencies = [
  "console",
  "futures",
  "glob",
- "itertools",
+ "itertools 0.10.5",
  "lru 0.7.6",
  "madsim",
  "madsim-aws-sdk-s3",
@@ -6532,7 +6553,7 @@ dependencies = [
  "easy-ext",
  "futures",
  "futures-async-stream",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "rand",
@@ -6548,7 +6569,7 @@ dependencies = [
 name = "risingwave_sqlparser"
 version = "1.0.0-alpha"
 dependencies = [
- "itertools",
+ "itertools 0.10.5",
  "matches",
  "serde",
  "tracing",
@@ -6579,7 +6600,7 @@ dependencies = [
  "chrono",
  "clap",
  "expect-test",
- "itertools",
+ "itertools 0.10.5",
  "libtest-mimic",
  "madsim-tokio",
  "rand",
@@ -6637,7 +6658,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "hex",
- "itertools",
+ "itertools 0.10.5",
  "libc",
  "lz4",
  "mach2",
@@ -6699,7 +6720,7 @@ dependencies = [
  "futures-async-stream",
  "hytra",
  "iter-chunks",
- "itertools",
+ "itertools 0.10.5",
  "local_stats_alloc",
  "lru 0.7.6",
  "madsim-tokio",
@@ -7543,9 +7564,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.11.2"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71378f7ef90bc4d448f2d84c11898adca45ced916d95df16d233a0e6da39f118"
+checksum = "43c4e6422d7c801de4897553c0a9be42d28dfe5c3deec7387855f258d16eb9dd"
 dependencies = [
  "async-trait",
  "educe",
@@ -7553,7 +7574,7 @@ dependencies = [
  "futures",
  "glob",
  "humantime",
- "itertools",
+ "itertools 0.11.0",
  "libtest-mimic",
  "md-5",
  "owo-colors",
@@ -8987,7 +9008,7 @@ dependencies = [
  "hashbrown 0.12.3",
  "hashbrown 0.13.2",
  "hyper",
- "itertools",
+ "itertools 0.10.5",
  "lexical-core",
  "lexical-parse-float",
  "lexical-parse-integer",
@@ -9018,7 +9039,8 @@ dependencies = [
  "rand_chacha",
  "rand_core",
  "regex",
- "regex-syntax 0.7.1",
+ "regex-automata 0.3.2",
+ "regex-syntax 0.7.4",
  "reqwest",
  "rust_decimal",
  "rustls 0.20.8",
