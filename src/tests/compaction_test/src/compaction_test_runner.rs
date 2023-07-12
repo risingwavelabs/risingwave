@@ -652,11 +652,11 @@ async fn open_hummock_iters(
 pub async fn check_compaction_results(
     version_id: u64,
     mut expect_results: BTreeMap<HummockEpoch, StateStoreIterType>,
-    mut actual_resutls: BTreeMap<HummockEpoch, StateStoreIterType>,
+    mut actual_results: BTreeMap<HummockEpoch, StateStoreIterType>,
 ) -> anyhow::Result<()> {
     let combined = expect_results
         .iter_mut()
-        .zip_eq_fast(actual_resutls.iter_mut());
+        .zip_eq_fast(actual_results.iter_mut());
     for ((e1, expect_iter), (e2, actual_iter)) in combined {
         assert_eq!(e1, e2);
         tracing::info!(

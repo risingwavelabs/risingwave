@@ -99,6 +99,17 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
 
             if self.last_key.user_key.as_ref() != full_key.user_key {
+                // It is better to early return here if the user key is already
+                // out of range to avoid unnecessary access on the range tomestones
+                // via `delete_range_iter`.
+                // For example, if we are iterating with key range [0x0a, 0x0c) and the
+                // current key is 0xff, we will access range tombstones in [0x0c, 0xff],
+                // which is a waste of work.
+                if self.key_out_of_range() {
+                    self.out_of_range = true;
+                    return Ok(());
+                }
+
                 self.last_key = full_key.copy_into();
                 // handle delete operation
                 match self.iterator.value() {
@@ -108,17 +119,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                             self.stats.skip_delete_key_count += 1;
                         } else {
                             self.last_val = Bytes::copy_from_slice(val);
-
-                            // handle range scan
-                            match &self.key_range.1 {
-                                Included(end_key) => {
-                                    self.out_of_range = full_key.user_key > end_key.as_ref();
-                                }
-                                Excluded(end_key) => {
-                                    self.out_of_range = full_key.user_key >= end_key.as_ref();
-                                }
-                                Unbounded => {}
-                            };
                             self.stats.processed_key_count += 1;
                             return Ok(());
                         }
@@ -162,6 +162,9 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
     /// Resets the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
+        // Reset
+        self.out_of_range = false;
+
         // Handle range scan
         match &self.key_range.0 {
             Included(begin_key) => {
@@ -170,11 +173,24 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     epoch: self.read_epoch,
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
+                if !self.iterator.is_valid() {
+                    return Ok(());
+                }
+
+                if self.key_out_of_range() {
+                    self.out_of_range = true;
+                    return Ok(());
+                }
+
                 self.delete_range_iter.seek(begin_key.as_ref()).await?;
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => {
                 self.iterator.rewind().await?;
+                if !self.iterator.is_valid() {
+                    return Ok(());
+                }
+
                 self.delete_range_iter.rewind().await?;
             }
         };
@@ -187,6 +203,9 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
     /// Resets the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
+        // Reset
+        self.out_of_range = false;
+
         // Handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
             Included(begin_key) => {
@@ -206,6 +225,15 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             epoch: self.read_epoch,
         };
         self.iterator.seek(full_key).await?;
+        if !self.iterator.is_valid() {
+            return Ok(());
+        }
+
+        if self.key_out_of_range() {
+            self.out_of_range = true;
+            return Ok(());
+        }
+
         self.delete_range_iter.seek(full_key.user_key).await?;
 
         // Handle multi-version
@@ -225,6 +253,18 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats);
         self.iterator.collect_local_statistic(stats);
+    }
+
+    // Validate whether the current key is already out of range.
+    fn key_out_of_range(&self) -> bool {
+        assert!(self.iterator.is_valid());
+        let current_user_key = self.iterator.key().user_key;
+        // handle range scan
+        match &self.key_range.1 {
+            Included(end_key) => current_user_key > end_key.as_ref(),
+            Excluded(end_key) => current_user_key >= end_key.as_ref(),
+            Unbounded => false,
+        }
     }
 }
 
