@@ -552,21 +552,23 @@ where
             self.in_flight_barrier_nums,
         );
 
-        let mut state = BarrierManagerState::create(self.env.meta_store()).await;
+        let mut state = BarrierManagerState::new();
         if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
             // may need to avoid this when we have more state persisted in meta store.
 
-            // XXX(bugen): why we need this?
-            let new_epoch = state.in_flight_prev_epoch().next();
+            let latest_snapshot = self.hummock_manager.latest_snapshot();
+            assert_eq!(
+                latest_snapshot.committed_epoch,
+                latest_snapshot.current_epoch,
+            );
+            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into());
 
             self.set_status(BarrierManagerStatus::Recovering).await;
-            let span = tracing::info_span!("bootstrap_recovery", new_epoch = new_epoch.value().0);
-            let new_epoch = self.recovery(new_epoch).instrument(span).await;
-            state
-                .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)
-                .await
-                .unwrap();
+            let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+            let new_epoch = self.recovery(prev_epoch).instrument(span).await;
+
+            state.update_inflight_prev_epoch(new_epoch);
         } else if self.fragment_manager.has_any_table_fragments().await {
             panic!(
                 "Some streaming jobs already exist in meta, please start with recovery enabled \
@@ -645,10 +647,7 @@ where
         let prev_epoch = state.in_flight_prev_epoch();
 
         let new_epoch = prev_epoch.next();
-        state
-            .update_inflight_prev_epoch(self.env.meta_store(), new_epoch.clone())
-            .await
-            .unwrap();
+        state.update_inflight_prev_epoch(new_epoch.clone());
 
         // Tracing related stuff
         prev_epoch.span().in_scope(|| {
@@ -872,6 +871,7 @@ where
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
         checkpoint_control.clear_changes();
+
         for node in fail_nodes {
             if let Some(timer) = node.timer {
                 timer.observe_duration();
@@ -883,22 +883,23 @@ where
                 .into_iter()
                 .for_each(|notifier| notifier.notify_collection_failed(err.clone()));
         }
+
         if self.enable_recovery {
             // If failed, enter recovery mode.
             self.set_status(BarrierManagerStatus::Recovering).await;
             let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::new();
-            let prev_epoch = state.in_flight_prev_epoch();
+
+            let latest_snapshot = self.hummock_manager.latest_snapshot();
+            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into());
             let span = tracing::info_span!(
                 "failure_recovery",
                 %err,
                 prev_epoch = prev_epoch.value().0
             );
             let new_epoch = self.recovery(prev_epoch).instrument(span).await;
-            state
-                .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)
-                .await
-                .unwrap();
+
+            state.update_inflight_prev_epoch(new_epoch);
             self.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);

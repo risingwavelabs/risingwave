@@ -127,7 +127,6 @@ where
             async {
                 let recovery_result: MetaResult<(TracedEpoch, Vec<BarrierCompleteResponse>)> = try {
                     let mut info = self.resolve_actor_info_for_recovery().await;
-                    let mut new_epoch = prev_epoch.next();
 
                     // Migrate actors in expired CN to newly joined one.
                     let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
@@ -159,15 +158,14 @@ where
                         actor_splits: build_actor_connector_splits(&source_split_assignments),
                     })));
 
-                    let prev_epoch = new_epoch;
-                    new_epoch = prev_epoch.next();
+                    let new_epoch = prev_epoch.next();
 
                     // checkpoint, used as init barrier to initialize all executors.
                     let command_ctx = Arc::new(CommandContext::new(
                         self.fragment_manager.clone(),
                         self.env.stream_client_pool_ref(),
                         info,
-                        prev_epoch,
+                        prev_epoch.clone(),
                         new_epoch.clone(),
                         command,
                         true,

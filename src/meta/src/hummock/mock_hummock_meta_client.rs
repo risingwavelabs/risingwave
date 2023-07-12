@@ -114,7 +114,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     }
 
     async fn get_epoch(&self) -> Result<HummockSnapshot> {
-        self.hummock_manager.get_last_epoch().map_err(mock_err)
+        Ok(self.hummock_manager.latest_snapshot())
     }
 
     async fn unpin_snapshot(&self) -> Result<()> {

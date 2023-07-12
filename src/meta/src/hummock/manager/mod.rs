@@ -652,9 +652,9 @@ where
         Ok(HummockSnapshot::clone(&snapshot))
     }
 
-    pub fn get_last_epoch(&self) -> Result<HummockSnapshot> {
+    pub fn latest_snapshot(&self) -> HummockSnapshot {
         let snapshot = self.latest_snapshot.load();
-        Ok(HummockSnapshot::clone(&snapshot))
+        HummockSnapshot::clone(&snapshot)
     }
 
     #[named]
