@@ -12,6 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module defines utilities to work with system parameters ([`PbSystemParams`] in
+//! `meta.proto`).
+//!
+//! To add a new system parameter:
+//! - Add a new field to [`PbSystemParams`] in `meta.proto`.
+//! - Add a new entry to [`for_all_undeprecated_params`] in this file.
+//! - Add a new method to [`reader::SystemParamsReader`].
+
 pub mod local_manager;
 pub mod reader;
 
@@ -19,7 +27,7 @@ use std::fmt::Debug;
 use std::ops::RangeBounds;
 
 use paste::paste;
-use risingwave_pb::meta::SystemParams;
+use risingwave_pb::meta::PbSystemParams;
 
 pub type SystemParamsError = String;
 
@@ -70,7 +78,7 @@ macro_rules! key_of {
     };
 }
 
-/// Define key constants for fields in `SystemParams` for use of other modules.
+/// Define key constants for fields in `PbSystemParams` for use of other modules.
 macro_rules! def_key {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         paste! {
@@ -101,7 +109,7 @@ for_all_undeprecated_params!(def_default);
 macro_rules! impl_check_missing_fields {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         /// Check if any undeprecated fields are missing.
-        pub fn check_missing_params(params: &SystemParams) -> Result<()> {
+        pub fn check_missing_params(params: &PbSystemParams) -> Result<()> {
             $(
                 if params.$field.is_none() {
                     return Err(format!("missing system param {:?}", key_of!($field)));
@@ -118,7 +126,7 @@ macro_rules! impl_system_params_to_kv {
         /// The returned map only contains undeprecated fields.
         /// Return error if there are missing fields.
         #[allow(clippy::vec_init_then_push)]
-        pub fn system_params_to_kv(params: &SystemParams) -> Result<Vec<(String, String)>> {
+        pub fn system_params_to_kv(params: &PbSystemParams) -> Result<Vec<(String, String)>> {
             check_missing_params(params)?;
             let mut ret = Vec::new();
             $(ret.push((
@@ -132,7 +140,7 @@ macro_rules! impl_system_params_to_kv {
 
 macro_rules! impl_derive_missing_fields {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
-        fn derive_missing_fields(params: &mut SystemParams) {
+        fn derive_missing_fields(params: &mut PbSystemParams) {
             $(
                 if params.$field.is_none() && let Some(v) = OverrideFromParams::$field(params) {
                     params.$field = Some(v);
@@ -147,12 +155,12 @@ macro_rules! impl_system_params_from_kv {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         /// Try to deserialize deprecated fields as well.
         /// Return error if there are unrecognized fields.
-        pub fn system_params_from_kv<K, V>(mut kvs: Vec<(K, V)>) -> Result<SystemParams>
+        pub fn system_params_from_kv<K, V>(mut kvs: Vec<(K, V)>) -> Result<PbSystemParams>
         where
             K: AsRef<[u8]> + Debug,
             V: AsRef<[u8]> + Debug,
         {
-            let mut ret = SystemParams::default();
+            let mut ret = PbSystemParams::default();
             kvs.retain(|(k,v)| {
                 let k = std::str::from_utf8(k.as_ref()).unwrap();
                 let v = std::str::from_utf8(v.as_ref()).unwrap();
@@ -219,7 +227,7 @@ macro_rules! impl_default_validation_on_set {
 ///
 /// ```ignore
 /// impl FromParams for OverrideFromParams {
-///     fn interval_ms(params: &SystemParams) -> Option<u64> {
+///     fn interval_ms(params: &PbSystemParams) -> Option<u64> {
 ///         if let Some(sec) = params.interval_sec {
 ///             Some(sec * 1000)
 ///         } else {
@@ -234,7 +242,7 @@ macro_rules! impl_default_from_other_params {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         trait FromParams {
             $(
-                fn $field(_params: &SystemParams) -> Option<$type> {
+                fn $field(_params: &PbSystemParams) -> Option<$type> {
                     None
                 }
             )*
@@ -244,7 +252,7 @@ macro_rules! impl_default_from_other_params {
 
 macro_rules! impl_set_system_param {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
-        pub fn set_system_param(params: &mut SystemParams, key: &str, value: Option<String>) -> Result<()> {
+        pub fn set_system_param(params: &mut PbSystemParams, key: &str, value: Option<String>) -> Result<()> {
              match key {
                 $(
                     key_of!($field) => {
@@ -285,8 +293,8 @@ macro_rules! impl_is_mutable {
 macro_rules! impl_system_params_for_test {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         #[allow(clippy::needless_update)]
-        pub fn system_params_for_test() -> SystemParams {
-            let mut ret = SystemParams {
+        pub fn system_params_for_test() -> PbSystemParams {
+            let mut ret = PbSystemParams {
                 $(
                     $field: $default,
                 )*
@@ -355,7 +363,7 @@ mod tests {
         ];
 
         // To kv - missing field.
-        let p = SystemParams::default();
+        let p = PbSystemParams::default();
         assert!(system_params_to_kv(&p).is_err());
 
         // From kv - unrecognized field.
@@ -371,7 +379,7 @@ mod tests {
 
     #[test]
     fn test_set() {
-        let mut p = SystemParams::default();
+        let mut p = PbSystemParams::default();
         // Unrecognized param.
         assert!(set_system_param(&mut p, "?", Some("?".to_string())).is_err());
         // Value out of range.
