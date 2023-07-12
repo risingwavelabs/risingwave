@@ -37,7 +37,6 @@ use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range}
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
 
-use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{
@@ -46,6 +45,7 @@ use crate::row_serde::row_serde_util::{
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{PrefetchOptions, ReadOptions};
+use crate::table::merge_sort::merge_sort;
 use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
 use crate::StateStore;
 
@@ -497,7 +497,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             // Concat all iterators if not to preserve order.
             _ if !ordered => futures::stream::iter(iterators).flatten(),
             // Merge all iterators if to preserve order.
-            _ => iter_utils::merge_sort(iterators.into_iter().map(Box::pin).collect()),
+            _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
         };
 
         Ok(iter)

@@ -76,7 +76,7 @@ create table s1 (v1 struct<v2 int>)  with (
     fields.v1.v2.end = '100',
     datagen.rows.per.second = '10',
     datagen.split.num = '5'
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
@@ -117,7 +117,7 @@ create table s1 (v1 struct<v2 int>, t1 timestamp, c1 varchar) with (
     fields.c1.seed = '3',
     datagen.rows.per.second = '10',
     datagen.split.num = '5'
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
@@ -152,7 +152,7 @@ create table s1 (v1 struct<v2 int> [], c1 varchar []) with (
     fields.c1._.seed = '3',
     datagen.rows.per.second = '10',
     datagen.split.num = '5'
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
@@ -176,15 +176,15 @@ create table s1 (v1 int) with (
     fields.v1.start = '1',
     fields.v1.end = '100',
     datagen.split.num = '5',
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 drop table s1;
 
 # Do NOT allow With clause to contain a comma only.
 statement error QueryError: sql parser error: Expected identifier.*
-create table s1 (v1 int) with (,) row format json;
+create table s1 (v1 int) with (,) FORMAT PLAIN ENCODE JSON;
 
 # Do NOT allow an empty With clause.
 statement error QueryError: sql parser error: Expected identifier.*
-create table s1 (v1 int) with () row format json;
+create table s1 (v1 int) with () FORMAT PLAIN ENCODE JSON;

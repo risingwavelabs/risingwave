@@ -45,8 +45,8 @@ pub enum SchedulerError {
     TaskRunningOutOfMemory,
 
     /// Used when receive cancel request (ctrl-c) from user.
-    #[error("Canceled by user")]
-    QueryCancelError,
+    #[error("Cancelled by user")]
+    QueryCancelled,
 
     #[error("Reject query: the {0} query number reaches the limit: {1}")]
     QueryReachLimit(QueryMode, u64),

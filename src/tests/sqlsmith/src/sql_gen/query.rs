@@ -164,7 +164,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_limit(&mut self, has_order_by: bool) -> Option<String> {
         if (!self.is_mview || has_order_by) && self.flip_coin() {
-            Some(self.rng.gen_range(0..=100).to_string())
+            let start = if self.is_mview { 1 } else { 0 };
+            Some(self.rng.gen_range(start..=100).to_string())
         } else {
             None
         }
@@ -258,17 +259,60 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// GROUP BY will constrain the generated columns.
     fn gen_group_by(&mut self) -> Vec<Expr> {
+        // 90% generate simple group by.
+        // 10% generate grouping sets.
+        match self.rng.gen_range(0..=9) {
+            0 => self.gen_grouping_sets(),
+            1..=9 => {
+                let group_by_cols = self.gen_random_bound_columns();
+                self.bound_columns = group_by_cols.clone();
+                group_by_cols
+                    .into_iter()
+                    .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))
+                    .collect_vec()
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// GROUPING SETS will constrain the generated columns.
+    fn gen_grouping_sets(&mut self) -> Vec<Expr> {
+        let grouping_num = self.rng.gen_range(0..=5);
+        let mut grouping_sets = vec![];
+        let mut new_bound_columns = vec![];
+        for _i in 0..grouping_num {
+            let group_by_cols = self.gen_random_bound_columns();
+            grouping_sets.push(
+                group_by_cols
+                    .iter()
+                    .map(|c| Expr::Identifier(Ident::new_unchecked(c.name.clone())))
+                    .collect_vec(),
+            );
+            new_bound_columns.extend(group_by_cols);
+        }
+        if grouping_sets.is_empty() {
+            self.bound_columns = vec![];
+            vec![]
+        } else {
+            let grouping_sets = Expr::GroupingSets(grouping_sets);
+            self.bound_columns = new_bound_columns
+                .into_iter()
+                .sorted_by(|a, b| Ord::cmp(&a.name, &b.name))
+                .dedup_by(|a, b| a.name == b.name)
+                .collect();
+
+            // Currently, grouping sets only support one set.
+            vec![grouping_sets]
+        }
+    }
+
+    fn gen_random_bound_columns(&mut self) -> Vec<Column> {
         let mut available = self.bound_columns.clone();
         if !available.is_empty() {
             available.shuffle(self.rng);
             let upper_bound = (available.len() + 1) / 2;
             let n = self.rng.gen_range(1..=upper_bound);
-            let group_by_cols = available.drain(..n).collect_vec();
-            self.bound_columns = group_by_cols.clone();
-            group_by_cols
-                .into_iter()
-                .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))
-                .collect_vec()
+            available.drain(..n).collect_vec()
         } else {
             vec![]
         }

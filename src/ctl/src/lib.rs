@@ -64,6 +64,9 @@ enum Commands {
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
+    /// Commands for Debug
+    #[clap(subcommand)]
+    Debug(DebugCommands),
     /// Commands for tracing the compute nodes
     Trace,
     // TODO(yuhao): profile other nodes
@@ -71,6 +74,55 @@ enum Commands {
     Profile {
         #[clap(short, long = "sleep")]
         sleep: u64,
+    },
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum DebugCommonKind {
+    Worker,
+    User,
+    Table,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum DebugCommonOutputFormat {
+    Json,
+    Yaml,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct DebugCommon {
+    /// The address of the etcd cluster
+    #[clap(long, value_delimiter = ',', default_value = "localhost:2388")]
+    etcd_endpoints: Vec<String>,
+
+    /// The username for etcd authentication, used if `--enable-etcd-auth` is set
+    #[clap(long)]
+    etcd_username: Option<String>,
+
+    /// The password for etcd authentication, used if `--enable-etcd-auth` is set
+    #[clap(long)]
+    etcd_password: Option<String>,
+
+    /// Whether to enable etcd authentication
+    #[clap(long, default_value_t = false, requires_all = &["etcd_username", "etcd_password"])]
+    enable_etcd_auth: bool,
+
+    /// Kinds of debug info to dump
+    #[clap(value_enum, value_delimiter = ',')]
+    kinds: Vec<DebugCommonKind>,
+
+    /// The output format
+    #[clap(value_enum, long = "output", short = 'o', default_value_t = DebugCommonOutputFormat::Yaml)]
+    format: DebugCommonOutputFormat,
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum DebugCommands {
+    /// Dump debug info from the raw state store
+    Dump {
+        #[command(flatten)]
+        common: DebugCommon,
     },
 }
 
@@ -157,6 +209,12 @@ enum HummockCommands {
         level0_stop_write_threshold_sub_level_number: Option<u64>,
         #[clap(long)]
         level0_sub_level_compact_level_count: Option<u32>,
+        #[clap(long)]
+        max_space_reclaim_bytes: Option<u64>,
+        #[clap(long)]
+        level0_max_compact_file_number: Option<u64>,
+        #[clap(long)]
+        level0_overlapping_sub_level_compact_level_count: Option<u32>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -411,6 +469,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             max_sub_compaction,
             level0_stop_write_threshold_sub_level_number,
             level0_sub_level_compact_level_count,
+            max_space_reclaim_bytes,
+            level0_max_compact_file_number,
+            level0_overlapping_sub_level_compact_level_count,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -426,6 +487,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     max_sub_compaction,
                     level0_stop_write_threshold_sub_level_number,
                     level0_sub_level_compact_level_count,
+                    max_space_reclaim_bytes,
+                    level0_max_compact_file_number,
+                    level0_overlapping_sub_level_compact_level_count,
                 ),
             )
             .await?
@@ -497,6 +561,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Schedulable)
                 .await?
         }
+        Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
     }
     Ok(())
 }

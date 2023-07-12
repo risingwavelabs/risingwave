@@ -17,6 +17,15 @@ statement ok
 create materialized view mv3 as select string_agg(a, '' order by b) filter (where c != 0) as res from t;
 
 statement ok
+create materialized view mv4 as
+select
+    string_agg(distinct a, ',' order by a) as out1,
+    count(a) as out2,
+    count(*) as out3,
+    count(distinct a) as out4
+from t;
+
+statement ok
 flush;
 
 query T
@@ -56,6 +65,19 @@ select * from mv3;
 ----
 acb
 
+query TIII
+select * from mv4;
+----
+a,b,c,d  4  5  4
+
+statement ok
+insert into t values ('c', 8, 10), ('e', 9, 7);
+
+query TIII
+select * from mv4;
+----
+a,b,c,d,e  6  7  5
+
 statement ok
 drop materialized view mv1;
 
@@ -64,6 +86,9 @@ drop materialized view mv2;
 
 statement ok
 drop materialized view mv3;
+
+statement ok
+drop materialized view mv4;
 
 statement ok
 drop table t;

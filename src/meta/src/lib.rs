@@ -43,7 +43,7 @@ mod dashboard;
 mod error;
 pub mod hummock;
 pub mod manager;
-mod model;
+pub mod model;
 mod rpc;
 pub(crate) mod serving;
 pub mod storage;

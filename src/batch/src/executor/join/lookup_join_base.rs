@@ -27,7 +27,6 @@ use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_expr::expr::BoxedExpression;
-use tokio::sync::watch::Receiver;
 
 use crate::executor::join::chunked_data::ChunkedData;
 use crate::executor::{
@@ -35,7 +34,7 @@ use crate::executor::{
     HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId,
 };
 use crate::risingwave_common::estimate_size::EstimateSize;
-use crate::task::ShutdownMsg;
+use crate::task::ShutdownToken;
 
 /// Lookup Join Base.
 /// Used by `LocalLookupJoinExecutor` and `DistributedLookupJoinExecutor`.
@@ -55,7 +54,7 @@ pub struct LookupJoinBase<K> {
     pub output_indices: Vec<usize>,
     pub chunk_size: usize,
     pub identity: String,
-    pub shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    pub shutdown_rx: ShutdownToken,
     pub mem_ctx: MemoryContext,
     pub _phantom: PhantomData<K>,
 }

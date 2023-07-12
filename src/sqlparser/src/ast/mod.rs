@@ -1013,7 +1013,7 @@ pub enum Statement {
         constraints: Vec<TableConstraint>,
         with_options: Vec<SqlOption>,
         /// Optional schema of the external source with which the table is created
-        source_schema: Option<SourceSchema>,
+        source_schema: Option<CompatibleSourceSchema>,
         /// The watermark defined on source.
         source_watermarks: Vec<SourceWatermark>,
         /// Append only table.
@@ -1433,7 +1433,7 @@ impl fmt::Display for Statement {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
                 if let Some(source_schema) = source_schema {
-                    write!(f, " ROW FORMAT {}", source_schema)?;
+                    write!(f, " {}", source_schema)?;
                 }
                 if let Some(query) = query {
                     write!(f, " AS {}", query)?;

@@ -89,7 +89,7 @@ create source t4 (
   fields.v.end  = '5',
   datagen.rows.per.second='10000',
   datagen.split.num = '1'
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 CREATE MATERIALIZED VIEW mv AS SELECT * FROM t4;
@@ -123,4 +123,4 @@ CREATE TABLE t (v INT, t timestamptz as now()) WITH (
   fields.v.end  = '10',
   datagen.rows.per.second='15',
   datagen.split.num = '1'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;
