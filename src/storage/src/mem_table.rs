@@ -47,7 +47,7 @@ pub enum KeyOp {
 pub struct MemTable {
     pub(crate) buffer: BTreeMap<Bytes, KeyOp>,
     pub(crate) is_consistent_op: bool,
-    pub mem_table_size: usize,
+    pub(crate) mem_table_size: usize,
 }
 
 #[derive(Error, Debug)]
