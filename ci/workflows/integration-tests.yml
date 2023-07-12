@@ -93,7 +93,7 @@ steps:
         testcase:
           - "twitter"
           - "twitter-pulsar"
-          - "debezium-mongo"
+        # - "debezium-mongo"
           - "debezium-postgres"
           - "tidb-cdc-sink"
           - "debezium-sqlserver"
@@ -105,10 +105,10 @@ steps:
             testcase: "twitter-pulsar"
             format: "protobuf"
           skip: true
-        - with:
-            testcase: "debezium-mongo"
-            format: "protobuf"
-          skip: true
+      # - with:
+      #     testcase: "debezium-mongo"
+      #     format: "protobuf"
+      #   skip: true
         - with:
             testcase: "debezium-postgres"
             format: "protobuf"

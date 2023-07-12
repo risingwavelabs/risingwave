@@ -40,10 +40,6 @@ public final class ValidatorUtils {
         return Status.INTERNAL.withDescription(description).asRuntimeException();
     }
 
-    public static RuntimeException internalError(Throwable cause) {
-        return Status.INTERNAL.withCause(cause).asRuntimeException();
-    }
-
     private static final Properties storedSqls;
 
     static {

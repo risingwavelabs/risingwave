@@ -465,9 +465,9 @@ mod tests {
     async fn test_show_source() {
         let frontend = LocalFrontend::new(Default::default()).await;
 
-        let sql = r#"CREATE SOURCE t1
+        let sql = r#"CREATE SOURCE t1 (column1 varchar)
         WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-        ROW FORMAT JSON"#;
+        FORMAT PLAIN ENCODE JSON"#;
         frontend.run_sql(sql).await.unwrap();
 
         let mut rows = frontend.query_formatted_result("SHOW SOURCES").await;
@@ -481,7 +481,7 @@ mod tests {
         let sql = format!(
             r#"CREATE SOURCE t
     WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
+    FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;

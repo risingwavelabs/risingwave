@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::config::DefaultParallelism;
 use risingwave_pb::meta::SystemParams;
-use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
+use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
 
 use super::{SystemParamsManager, SystemParamsManagerRef};
 use crate::manager::{
@@ -60,6 +60,9 @@ where
 
     /// Whether the cluster is launched for the first time.
     cluster_first_launch: bool,
+
+    /// Client to connector node. `None` if endpoint unspecified or unable to connect.
+    connector_client: Option<ConnectorClient>,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -215,6 +218,9 @@ where
             )
             .await?,
         );
+
+        let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
+
         Ok(Self {
             id_gen_manager,
             meta_store,
@@ -224,6 +230,7 @@ where
             system_params_manager,
             cluster_id,
             cluster_first_launch,
+            connector_client,
             opts: opts.into(),
         })
     }
@@ -283,6 +290,10 @@ where
     pub fn cluster_first_launch(&self) -> bool {
         self.cluster_first_launch
     }
+
+    pub fn connector_client(&self) -> Option<ConnectorClient> {
+        self.connector_client.clone()
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -320,6 +331,7 @@ impl MetaSrvEnv<MemStore> {
             system_params_manager,
             cluster_id,
             cluster_first_launch,
+            connector_client: None,
             opts,
         }
     }

@@ -351,3 +351,13 @@
       │     └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t2.v2) }
         └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: eq-predicate derived condition is banned for mismatching types
+  sql: |
+    create table t1(v1 int, v2 int);
+    create table t2(v1 bigint, v2 int);
+    select * from t1 cross join t2 where t1.v1 = t2.v1 and substr('abcde', t1.v1) > 'a';
+  optimized_logical_plan_for_batch: |-
+    LogicalJoin { type: Inner, on: ($expr1 = t2.v1), output: [t1.v1, t1.v2, t2.v1, t2.v2] }
+    ├─LogicalProject { exprs: [t1.v1, t1.v2, t1.v1::Int64 as $expr1] }
+    │ └─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (Substr('abcde':Varchar, t1.v1) > 'a':Varchar) }
+    └─LogicalScan { table: t2, columns: [t2.v1, t2.v2] }

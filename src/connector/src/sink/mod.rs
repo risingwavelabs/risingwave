@@ -23,19 +23,14 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use base64::engine::general_purpose;
-use base64::Engine as _;
 use bytes::Bytes;
-use chrono::{Datelike, Timelike};
 use enum_as_inner::EnumAsInner;
-use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
-use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
+use risingwave_common::array::StreamChunk;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_rpc_client::error::RpcError;
-use serde_json::{json, Map, Value};
+use risingwave_rpc_client::ConnectorClient;
 use thiserror::Error;
 pub use tracing;
 
@@ -54,13 +49,19 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
+pub struct SinkWriterParam {
+    pub connector_params: ConnectorParams,
+    pub executor_id: u64,
+    pub vnode_bitmap: Option<Bitmap>,
+}
+
 #[async_trait]
 pub trait Sink {
     type Writer: SinkWriter;
     type Coordinator: SinkCommitCoordinator;
 
-    async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()>;
-    async fn new_writer(&self, connector_params: ConnectorParams) -> Result<Self::Writer>;
+    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
+    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
         _connector_rpc_endpoint: Option<String>,
@@ -70,7 +71,27 @@ pub trait Sink {
 }
 
 #[async_trait]
-pub trait SinkWriter {
+pub trait SinkWriter: Send {
+    /// Begin a new epoch
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
+
+    /// Write a stream chunk to sink
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
+
+    /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
+    /// writer should commit the current epoch.
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()>;
+
+    /// Clean up
+    async fn abort(&mut self) -> Result<()>;
+
+    /// Update the vnode bitmap of current sink writer
+    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> Result<()>;
+}
+
+#[async_trait]
+// An old version of SinkWriter for backward compatibility
+pub trait SinkWriterV1: Send {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
@@ -83,6 +104,56 @@ pub trait SinkWriter {
     // aborts the current transaction because some error happens. we should rollback to the last
     // commit point.
     async fn abort(&mut self) -> Result<()>;
+}
+
+pub struct SinkWriterV1Adapter<W: SinkWriterV1> {
+    is_empty: bool,
+    epoch: u64,
+    inner: W,
+}
+
+impl<W: SinkWriterV1> SinkWriterV1Adapter<W> {
+    pub(crate) fn new(inner: W) -> Self {
+        Self {
+            inner,
+            is_empty: true,
+            epoch: u64::MIN,
+        }
+    }
+}
+
+#[async_trait]
+impl<W: SinkWriterV1> SinkWriter for SinkWriterV1Adapter<W> {
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.epoch = epoch;
+        Ok(())
+    }
+
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        if self.is_empty {
+            self.is_empty = false;
+            self.inner.begin_epoch(self.epoch).await?;
+        }
+        self.inner.write_batch(chunk).await
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if is_checkpoint {
+            if !self.is_empty {
+                self.inner.commit().await?
+            }
+            self.is_empty = true;
+        }
+        Ok(())
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        self.inner.abort().await
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -128,11 +199,11 @@ impl Sink for BlackHoleSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = Self;
 
-    async fn new_writer(&self, _connector_params: ConnectorParams) -> Result<Self::Writer> {
+    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
         Ok(Self)
     }
 
-    async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {
+    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         Ok(())
     }
 }
@@ -147,11 +218,15 @@ impl SinkWriter for BlackHoleSink {
         Ok(())
     }
 
-    async fn commit(&mut self) -> Result<()> {
+    async fn abort(&mut self) -> Result<()> {
         Ok(())
     }
 
-    async fn abort(&mut self) -> Result<()> {
+    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
+        Ok(())
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }
@@ -288,248 +363,5 @@ impl From<RpcError> for SinkError {
 impl From<SinkError> for RwError {
     fn from(e: SinkError) -> Self {
         ErrorCode::SinkError(Box::new(e)).into()
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum TimestampHandlingMode {
-    Milli,
-    String,
-}
-
-pub fn record_to_json(
-    row: RowRef<'_>,
-    schema: &[Field],
-    timestamp_handling_mode: TimestampHandlingMode,
-) -> Result<Map<String, Value>> {
-    let mut mappings = Map::with_capacity(schema.len());
-    for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
-        let key = field.name.clone();
-        let value = datum_to_json_object(field, datum_ref, timestamp_handling_mode)
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
-        mappings.insert(key, value);
-    }
-    Ok(mappings)
-}
-
-fn datum_to_json_object(
-    field: &Field,
-    datum: DatumRef<'_>,
-    timestamp_handling_mode: TimestampHandlingMode,
-) -> ArrayResult<Value> {
-    let scalar_ref = match datum {
-        None => return Ok(Value::Null),
-        Some(datum) => datum,
-    };
-
-    let data_type = field.data_type();
-
-    tracing::debug!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
-
-    let value = match (data_type, scalar_ref) {
-        (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
-            json!(v)
-        }
-        (DataType::Int16, ScalarRefImpl::Int16(v)) => {
-            json!(v)
-        }
-        (DataType::Int32, ScalarRefImpl::Int32(v)) => {
-            json!(v)
-        }
-        (DataType::Int64, ScalarRefImpl::Int64(v)) => {
-            json!(v)
-        }
-        (DataType::Float32, ScalarRefImpl::Float32(v)) => {
-            json!(f32::from(v))
-        }
-        (DataType::Float64, ScalarRefImpl::Float64(v)) => {
-            json!(f64::from(v))
-        }
-        (DataType::Varchar, ScalarRefImpl::Utf8(v)) => {
-            json!(v)
-        }
-        (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
-            json!(v.to_text())
-        }
-        (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
-            // risingwave's timestamp with timezone is stored in UTC and does not maintain the
-            // timezone info and the time is in microsecond.
-            let parsed = v.to_datetime_utc().naive_utc();
-            let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
-            json!(v)
-        }
-        (DataType::Time, ScalarRefImpl::Time(v)) => {
-            // todo: just ignore the nanos part to avoid leap second complex
-            json!(v.0.num_seconds_from_midnight() as i64 * 1000)
-        }
-        (DataType::Date, ScalarRefImpl::Date(v)) => {
-            json!(v.0.num_days_from_ce())
-        }
-        (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => match timestamp_handling_mode {
-            TimestampHandlingMode::Milli => json!(v.0.timestamp_millis()),
-            TimestampHandlingMode::String => json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
-        },
-        (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {
-            json!(general_purpose::STANDARD_NO_PAD.encode(v))
-        }
-        // P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
-        (DataType::Interval, ScalarRefImpl::Interval(v)) => {
-            json!(v.as_iso_8601())
-        }
-        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => {
-            json!(jsonb_ref.to_string())
-        }
-        (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
-            let elems = list_ref.iter();
-            let mut vec = Vec::with_capacity(elems.len());
-            let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
-            for sub_datum_ref in elems {
-                let value =
-                    datum_to_json_object(&inner_field, sub_datum_ref, timestamp_handling_mode)?;
-                vec.push(value);
-            }
-            json!(vec)
-        }
-        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(st.len());
-            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
-                st.iter()
-                    .map(|(name, dt)| Field::with_name(dt.clone(), name)),
-            ) {
-                let value =
-                    datum_to_json_object(&sub_field, sub_datum_ref, timestamp_handling_mode)?;
-                map.insert(sub_field.name.clone(), value);
-            }
-            json!(map)
-        }
-        (data_type, scalar_ref) => {
-            return Err(ArrayError::internal(
-                format!("datum_to_json_object: unsupported data type: field name: {:?}, logical type: {:?}, physical type: {:?}", field.name, data_type, scalar_ref),
-            ));
-        }
-    };
-
-    Ok(value)
-}
-
-#[cfg(test)]
-mod tests {
-
-    use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
-
-    use super::*;
-    #[test]
-    fn test_to_json_basic_type() {
-        let mock_field = Field {
-            data_type: DataType::Boolean,
-            name: Default::default(),
-            sub_fields: Default::default(),
-            type_name: Default::default(),
-        };
-        let boolean_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Boolean,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Bool(false).as_scalar_ref_impl()),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(boolean_value, json!(false));
-
-        let int16_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Int16,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Int16(16).as_scalar_ref_impl()),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(int16_value, json!(16));
-
-        let int64_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Int64,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(
-            serde_json::to_string(&int64_value).unwrap(),
-            std::i64::MAX.to_string()
-        );
-
-        // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
-        let tstz_inner = "2018-01-26T18:30:09.453Z".parse().unwrap();
-        let tstz_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Timestamptz,
-                ..mock_field.clone()
-            },
-            Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
-
-        let ts_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Timestamp,
-                ..mock_field.clone()
-            },
-            Some(
-                ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(1000, 0))
-                    .as_scalar_ref_impl(),
-            ),
-            TimestampHandlingMode::Milli,
-        )
-        .unwrap();
-        assert_eq!(ts_value, json!(1000 * 1000));
-
-        let ts_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Timestamp,
-                ..mock_field.clone()
-            },
-            Some(
-                ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(1000, 0))
-                    .as_scalar_ref_impl(),
-            ),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(ts_value, json!("1970-01-01 00:16:40.000000".to_string()));
-
-        // Represents the number of microseconds past midnigh, io.debezium.time.Time
-        let time_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Time,
-                ..mock_field.clone()
-            },
-            Some(
-                ScalarImpl::Time(Time::from_num_seconds_from_midnight_uncheck(1000, 0))
-                    .as_scalar_ref_impl(),
-            ),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(time_value, json!(1000 * 1000));
-
-        let interval_value = datum_to_json_object(
-            &Field {
-                data_type: DataType::Interval,
-                ..mock_field
-            },
-            Some(
-                ScalarImpl::Interval(Interval::from_month_day_usec(13, 2, 1000000))
-                    .as_scalar_ref_impl(),
-            ),
-            TimestampHandlingMode::String,
-        )
-        .unwrap();
-        assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
     }
 }

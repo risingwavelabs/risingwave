@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::ArrayImpl;
+use risingwave_common::array::{ArrayImpl, ArrayRef, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
@@ -110,22 +110,36 @@ impl<S: StateStore> AggState<S> {
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl],
+        columns: &[ArrayRef],
         storage: &mut AggStateStorage<S>,
+        materialized: bool,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(verify_chunk(ops, visibility, columns));
+        let column_refs: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
+        debug_assert!(verify_chunk(ops, visibility, &column_refs));
         match self {
             Self::Value(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::ResultValue));
-                state.apply_chunk(ops, visibility, columns)
+                state.apply_chunk(ops, visibility, &column_refs)
             }
             Self::Table(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
-                state.apply_chunk(ops, visibility, columns)
+                state.apply_chunk(ops, visibility, &column_refs)
             }
             Self::MaterializedInput(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::MaterializedInput { .. }));
-                state.apply_chunk(ops, visibility, columns)
+                let (table, mapping) = must_match!(storage, AggStateStorage::MaterializedInput { table, mapping } => (table, mapping));
+                if !materialized {
+                    let needed_columns = mapping
+                        .upstream_columns()
+                        .iter()
+                        .map(|col_idx| columns[*col_idx].clone())
+                        .collect();
+                    table.write_chunk(StreamChunk::new(
+                        ops.to_vec(),
+                        needed_columns,
+                        visibility.cloned(),
+                    ));
+                }
+                state.apply_chunk(ops, visibility, &column_refs)
             }
         }
     }

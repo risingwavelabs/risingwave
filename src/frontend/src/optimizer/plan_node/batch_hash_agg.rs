@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -27,7 +26,7 @@ use super::{
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::utils::ColIndexMappingRewriteExt;
+use crate::utils::{ColIndexMappingRewriteExt, IndexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHashAgg {
@@ -37,14 +36,12 @@ pub struct BatchHashAgg {
 
 impl BatchHashAgg {
     pub fn new(logical: generic::Agg<PlanRef>) -> Self {
+        assert!(!logical.group_key.is_empty());
         let input = logical.input.clone();
         let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => logical
-                .i2o_col_mapping()
-                .rewrite_provided_distribution(input_dist),
-            d => d.clone(),
-        };
+        let dist = logical
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(input_dist);
         let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
         BatchHashAgg { base, logical }
     }
@@ -53,7 +50,7 @@ impl BatchHashAgg {
         &self.logical.agg_calls
     }
 
-    pub fn group_key(&self) -> &FixedBitSet {
+    pub fn group_key(&self) -> &IndexSet {
         &self.logical.group_key
     }
 
@@ -65,7 +62,7 @@ impl BatchHashAgg {
         // insert exchange
         let exchange = RequiredDist::shard_by_key(
             partial_agg.schema().len(),
-            &(0..self.group_key().count_ones(..)).collect_vec(),
+            &(0..self.group_key().len()).collect_vec(),
         )
         .enforce_if_not_satisfies(partial_agg, &Order::any())?;
 
@@ -76,13 +73,12 @@ impl BatchHashAgg {
             .iter()
             .enumerate()
             .map(|(partial_output_idx, agg_call)| {
-                agg_call
-                    .partial_to_total_agg_call(partial_output_idx + self.group_key().count_ones(..))
+                agg_call.partial_to_total_agg_call(partial_output_idx + self.group_key().len())
             })
             .collect();
         let total_agg_logical = generic::Agg::new(
             total_agg_types,
-            (0..self.group_key().count_ones(..)).collect(),
+            (0..self.group_key().len()).collect(),
             exchange,
         );
         Ok(BatchHashAgg::new(total_agg_logical).into())
@@ -92,7 +88,7 @@ impl BatchHashAgg {
         let input = self.input();
         let required_dist = RequiredDist::shard_by_key(
             input.schema().len(),
-            &self.group_key().ones().collect_vec(),
+            &self.group_key().indices().collect_vec(),
         );
         let new_input = input.to_distributed_with_required(&Order::any(), &required_dist)?;
         Ok(self.clone_with_input(new_input).into())
@@ -144,7 +140,7 @@ impl ToBatchPb for BatchHashAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            group_key: self.group_key().ones().map(|index| index as u32).collect(),
+            group_key: self.group_key().to_vec_as_u32(),
         })
     }
 }

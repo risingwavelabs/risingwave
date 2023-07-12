@@ -87,6 +87,9 @@ public class SourceValidateHandler {
         switch (request.getSourceType()) {
             case POSTGRES:
                 ensurePropNotNull(props, DbzConnectorConfig.PG_SCHEMA_NAME);
+                ensurePropNotNull(props, DbzConnectorConfig.PG_SLOT_NAME);
+                ensurePropNotNull(props, DbzConnectorConfig.PG_PUB_NAME);
+                ensurePropNotNull(props, DbzConnectorConfig.PG_PUB_CREATE);
                 try (var validator = new PostgresValidator(props, tableSchema)) {
                     validator.validateAll();
                 }

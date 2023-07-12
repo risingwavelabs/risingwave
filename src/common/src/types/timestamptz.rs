@@ -17,6 +17,7 @@ use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
 use chrono::{DateTime, TimeZone, Utc};
+use chrono_tz::Tz;
 use postgres_types::ToSql;
 use serde::{Deserialize, Serialize};
 
@@ -107,6 +108,14 @@ impl Timestamptz {
 
     pub fn to_datetime_utc(self) -> chrono::DateTime<Utc> {
         self.into()
+    }
+
+    pub fn to_datetime_in_zone(self, tz: Tz) -> chrono::DateTime<Tz> {
+        self.to_datetime_utc().with_timezone(&tz)
+    }
+
+    pub fn lookup_time_zone(time_zone: &str) -> std::result::Result<Tz, String> {
+        Tz::from_str_insensitive(time_zone)
     }
 
     pub fn from_protobuf(timestamp_micros: i64) -> ArrayResult<Self> {

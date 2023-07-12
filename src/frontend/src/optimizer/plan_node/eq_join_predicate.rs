@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 
 use crate::expr::{
@@ -265,6 +266,43 @@ impl EqJoinPredicate {
         Self::new(
             self.other_cond,
             new_eq_keys,
+            self.left_cols_num,
+            self.right_cols_num,
+        )
+    }
+
+    /// Retain the prefix of `eq_keys` based on the `prefix_len`. The other part is moved to the
+    /// other condition.
+    pub fn retain_prefix_eq_key(self, prefix_len: usize) -> Self {
+        assert!(prefix_len <= self.eq_keys.len());
+        let (retain_eq_key, other_eq_key) = self.eq_keys.split_at(prefix_len);
+        let mut new_other_conjunctions = self.other_cond.conjunctions;
+        new_other_conjunctions.extend(
+            other_eq_key
+                .iter()
+                .cloned()
+                .map(|(l, r, null_safe)| {
+                    FunctionCall::new(
+                        if null_safe {
+                            ExprType::IsNotDistinctFrom
+                        } else {
+                            ExprType::Equal
+                        },
+                        vec![l.into(), r.into()],
+                    )
+                    .unwrap()
+                    .into()
+                })
+                .collect_vec(),
+        );
+
+        let new_other_cond = Condition {
+            conjunctions: new_other_conjunctions,
+        };
+
+        Self::new(
+            new_other_cond,
+            retain_eq_key.to_owned(),
             self.left_cols_num,
             self.right_cols_num,
         )

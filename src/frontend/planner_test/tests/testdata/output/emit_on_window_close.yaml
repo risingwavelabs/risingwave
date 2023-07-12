@@ -12,7 +12,7 @@
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
     HINT: Please make sure there is one and only one watermark column in GROUP BY
 - sql: |
-    create source t (v1 int, v2 int, v3 int, watermark for v1 as v1 - 10) with (connector = 'kinesis') ROW FORMAT JSON;
+    create source t (v1 int, v2 int, v3 int, watermark for v1 as v1 - 10) with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
     select v1, min(v2), count(distinct v3) as agg from t group by v1;
   stream_plan: |-
     StreamMaterialize { columns: [v1, min, agg], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck, watermark_columns: [v1] }
@@ -124,7 +124,7 @@
     Table 4294967294 { columns: [ window_start, max ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
 - sql: |
-    create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') ROW FORMAT JSON;
+    create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
     select lag(a, 2) over (partition by b order by tm) from t;
   eowc_stream_plan: |-
     StreamMaterialize { columns: [lag, _row_id(hidden), b(hidden)], stream_key: [_row_id, b], pk_columns: [_row_id, b], pk_conflict: NoCheck }

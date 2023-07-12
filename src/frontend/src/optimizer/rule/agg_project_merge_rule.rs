@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::generic::Agg;
+use crate::utils::IndexSet;
 
 /// Merge [`LogicalAgg`] <- [`LogicalProject`] to [`LogicalAgg`].
 pub struct AggProjectMergeRule {}
 impl Rule for AggProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_logical_agg()?;
-        let (mut agg_calls, agg_group_keys, input) = agg.clone().decompose();
+        let (mut agg_calls, agg_group_keys, grouping_sets, input) = agg.clone().decompose();
+        assert!(grouping_sets.is_empty());
         let proj = input.as_logical_project()?;
 
         // only apply when the input proj is all input-ref
@@ -41,17 +42,19 @@ impl Rule for AggProjectMergeRule {
             .for_each(|x| x.rewrite_input_index(proj_o2i.clone()));
 
         // modify group key according to projection
-        let new_agg_group_keys_in_vec: Vec<usize> =
-            agg_group_keys.ones().map(|x| proj_o2i.map(x)).collect_vec();
+        let new_agg_group_keys_in_vec = agg_group_keys
+            .indices()
+            .map(|x| proj_o2i.map(x))
+            .collect_vec();
 
-        let new_agg_group_keys = FixedBitSet::from_iter(new_agg_group_keys_in_vec.iter().cloned());
+        let new_agg_group_keys = IndexSet::from_iter(new_agg_group_keys_in_vec.clone());
 
-        if new_agg_group_keys.ones().collect_vec() != new_agg_group_keys_in_vec {
+        if new_agg_group_keys.to_vec() != new_agg_group_keys_in_vec {
             // Need a project
-            let new_agg_group_keys_cardinality = new_agg_group_keys.count_ones(..);
+            let new_agg_group_keys_cardinality = new_agg_group_keys.len();
             let out_col_idx = new_agg_group_keys_in_vec
                 .into_iter()
-                .map(|x| new_agg_group_keys.ones().position(|y| y == x).unwrap())
+                .map(|x| new_agg_group_keys.indices().position(|y| y == x).unwrap())
                 .chain(
                     new_agg_group_keys_cardinality
                         ..new_agg_group_keys_cardinality + agg_calls.len(),
