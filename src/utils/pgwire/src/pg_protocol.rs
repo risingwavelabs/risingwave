@@ -363,14 +363,19 @@ where
         let result = self.inner_process_query_msg(sql, session).await;
 
         let mills = start.elapsed().as_millis();
-        let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
+        let truncated = sql.len() > 1024;
+
         tracing::info!(
             target: PGWIRE_QUERY_LOG,
             mode = %"(simple query)",
             session = %session_id,
             status = %if result.is_ok() { "ok" } else { "err" },
-            time = %format!("{}ms", mills),
-            sql = %truncated_sql,
+            time = %format_args!("{}ms", mills),
+            sql = %format_args!(
+                "{}{}",
+                if truncated { &sql[..1024] } else { sql },
+                if truncated { "...(truncated)" } else { "" }
+            )
         );
 
         result
@@ -388,7 +393,11 @@ where
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
-            let span = tracing::info_span!("run_stmt", %stmt, session_id = session.id().0);
+            let span = tracing::info_span!(
+                "process_query_msg_one_stmt",
+                session_id = session.id().0,
+                stmt = format_args!("{:?}", truncated_fmt::TruncatedFmt(&stmt, 1024)),
+            );
 
             self.inner_process_query_msg_one_stmt(stmt, session.clone())
                 .instrument(span)
@@ -479,14 +488,13 @@ where
         let result = self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids);
 
         let mills = start.elapsed().as_millis();
-        let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
         tracing::info!(
             target: PGWIRE_QUERY_LOG,
             mode = %"(extended query parse)",
             session = %session_id,
             status = %if result.is_ok() { "ok" } else { "err" },
-            time = %format!("{}ms", mills),
-            sql = %truncated_sql,
+            time = %format_args!("{}ms", mills),
+            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
         );
 
         result
@@ -618,7 +626,6 @@ where
             let start = Instant::now();
             let portal = self.get_portal(&portal_name)?;
             let sql = format!("{}", portal);
-            let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
 
             let result = session.execute(portal).await;
 
@@ -629,8 +636,8 @@ where
                 mode = %"(extended query execute)",
                 session = %session_id,
                 status = %if result.is_ok() { "ok" } else { "err" },
-                time = %format!("{}ms", mills),
-                sql = %truncated_sql,
+                time = %format_args!("{}ms", mills),
+                sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
             );
 
             let pg_response = result.map_err(PsqlError::ExecuteError)?;
@@ -959,4 +966,62 @@ fn build_ssl_ctx_from_config(tls_config: &TlsConfig) -> PsqlResult<SslContext> {
     let acceptor = acceptor.build();
 
     Ok(acceptor.into_context())
+}
+
+mod truncated_fmt {
+    use std::fmt::*;
+
+    struct TruncatedFormatter<'a, 'b> {
+        remaining: usize,
+        finished: bool,
+        f: &'a mut Formatter<'b>,
+    }
+    impl<'a, 'b> Write for TruncatedFormatter<'a, 'b> {
+        fn write_str(&mut self, s: &str) -> Result {
+            if self.finished {
+                return Ok(());
+            }
+
+            if self.remaining < s.len() {
+                self.remaining = 0;
+                self.f.write_str(&s[0..self.remaining])?;
+                self.f.write_str("...(truncated)")?;
+                self.finished = true; // so that ...(truncated) is printed exactly once
+                Ok(())
+            } else {
+                self.remaining -= s.len();
+                self.f.write_str(s)
+            }
+        }
+    }
+
+    pub struct TruncatedFmt<'a, T>(pub &'a T, pub usize);
+
+    impl<'a, T> Debug for TruncatedFmt<'a, T>
+    where
+        T: Debug,
+    {
+        fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+            TruncatedFormatter {
+                remaining: self.1,
+                finished: false,
+                f,
+            }
+            .write_fmt(format_args!("{:?}", self.0))
+        }
+    }
+
+    impl<'a, T> Display for TruncatedFmt<'a, T>
+    where
+        T: Display,
+    {
+        fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+            TruncatedFormatter {
+                remaining: self.1,
+                finished: false,
+                f,
+            }
+            .write_fmt(format_args!("{}", self.0))
+        }
+    }
 }
