@@ -164,7 +164,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_limit(&mut self, has_order_by: bool) -> Option<String> {
         if (!self.is_mview || has_order_by) && self.flip_coin() {
-            Some(self.rng.gen_range(0..=100).to_string())
+            let start = if self.is_mview { 1 } else { 0 };
+            Some(self.rng.gen_range(start..=100).to_string())
         } else {
             None
         }
