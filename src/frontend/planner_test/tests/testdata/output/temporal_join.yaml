@@ -152,3 +152,55 @@
       │     └─StreamTableScan { table: version1, columns: [version1.id1, version1.x1], pk: [version1.id1], dist: UpstreamHashShard(version1.id1) }
       └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version2.id2) }
         └─StreamTableScan { table: version2, columns: [version2.id2, version2.x2], pk: [version2.id2], dist: UpstreamHashShard(version2.id2) }
+- name: temporal join with an index (distribution key size = 1)
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    create index idx2 on version (a2, b2) distributed by (a2);
+    select id1, a1, id2, a2 from stream left join idx2 FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
+  stream_plan: |-
+    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden), stream.b1(hidden)], stream_key: [stream._row_id, id2, a1, stream.b1], pk_columns: [stream._row_id, id2, a1, stream.b1], pk_conflict: NoCheck }
+    └─StreamTemporalJoin { type: LeftOuter, predicate: stream.a1 = idx2.a2 AND stream.b1 = idx2.b2, output: [stream.id1, stream.a1, idx2.id2, idx2.a2, stream._row_id, stream.b1] }
+      ├─StreamExchange { dist: HashShard(stream.a1) }
+      │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.b1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
+      └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx2.a2) }
+        └─StreamTableScan { table: idx2, columns: [idx2.a2, idx2.b2, idx2.id2], pk: [idx2.id2], dist: UpstreamHashShard(idx2.a2) }
+- name: temporal join with an index (distribution key size = 2)
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    create index idx2 on version (a2, b2);
+    select id1, a1, id2, a2 from stream left join idx2 FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
+  stream_plan: |-
+    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden), stream.b1(hidden)], stream_key: [stream._row_id, id2, a1, stream.b1], pk_columns: [stream._row_id, id2, a1, stream.b1], pk_conflict: NoCheck }
+    └─StreamTemporalJoin { type: LeftOuter, predicate: stream.a1 = idx2.a2 AND stream.b1 = idx2.b2, output: [stream.id1, stream.a1, idx2.id2, idx2.a2, stream._row_id, stream.b1] }
+      ├─StreamExchange { dist: HashShard(stream.a1, stream.b1) }
+      │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.b1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
+      └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx2.a2, idx2.b2) }
+        └─StreamTableScan { table: idx2, columns: [idx2.a2, idx2.b2, idx2.id2], pk: [idx2.id2], dist: UpstreamHashShard(idx2.a2, idx2.b2) }
+- name: temporal join with an index (index column size = 1)
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    create index idx2 on version (b2);
+    select id1, a1, id2, a2 from stream left join idx2 FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
+  stream_plan: |-
+    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden), stream.b1(hidden)], stream_key: [stream._row_id, id2, stream.b1, a1], pk_columns: [stream._row_id, id2, stream.b1, a1], pk_conflict: NoCheck }
+    └─StreamTemporalJoin { type: LeftOuter, predicate: stream.b1 = idx2.b2 AND (stream.a1 = idx2.a2), output: [stream.id1, stream.a1, idx2.id2, idx2.a2, stream._row_id, stream.b1] }
+      ├─StreamExchange { dist: HashShard(stream.b1) }
+      │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.b1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
+      └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx2.b2) }
+        └─StreamTableScan { table: idx2, columns: [idx2.b2, idx2.id2, idx2.a2], pk: [idx2.id2], dist: UpstreamHashShard(idx2.b2) }
+- name: temporal join with singleton table
+  sql: |
+    create table t (a int) append only;
+    create materialized view v as select count(*) from t;
+    select * from t left join v FOR SYSTEM_TIME AS OF PROCTIME() on a = count;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, count, t._row_id(hidden), $expr1(hidden)], stream_key: [t._row_id, $expr1], pk_columns: [t._row_id, $expr1], pk_conflict: NoCheck }
+    └─StreamTemporalJoin { type: LeftOuter, predicate:  AND ($expr1 = v.count), output: [t.a, v.count, t._row_id, $expr1] }
+      ├─StreamExchange { dist: Single }
+      │ └─StreamProject { exprs: [t.a, t.a::Int64 as $expr1, t._row_id] }
+      │   └─StreamTableScan { table: t, columns: [t.a, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamExchange [no_shuffle] { dist: Single }
+        └─StreamTableScan { table: v, columns: [v.count], pk: [], dist: Single }
