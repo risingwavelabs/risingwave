@@ -23,7 +23,8 @@ use risingwave_hummock_sdk::compact::estimate_state_for_compaction;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress, SubscribeCompactionEventResponse,
+    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress,
+    SubscribeCompactionEventResponse,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -135,8 +136,6 @@ pub struct CompactorManagerInner {
     //     RwLock<HashMap<HummockContextId, HashMap<HummockCompactionTaskId, TaskHeartbeat>>>,
     task_heartbeats: HashMap<HummockCompactionTaskId, TaskHeartbeat>,
 
-    pub compactor_pending_io_counts: HashMap<HummockContextId, u32>,
-
     /// The context ids of compactors.
     pub compactors: Vec<HummockContextId>,
 
@@ -152,7 +151,6 @@ impl CompactorManagerInner {
         let mut manager = Self {
             task_expiry_seconds: env.opts.compaction_task_max_heartbeat_interval_secs,
             task_heartbeats: Default::default(),
-            compactor_pending_io_counts: Default::default(),
             compactors: Default::default(),
             compactor_map: Default::default(),
         };
@@ -168,43 +166,15 @@ impl CompactorManagerInner {
         Self {
             task_expiry_seconds: 1,
             task_heartbeats: Default::default(),
-            compactor_pending_io_counts: Default::default(),
             compactors: Default::default(),
             compactor_map: Default::default(),
         }
-    }
-
-    pub fn next_idle_compactor(&self) -> Option<(Arc<Compactor>, u32)> {
-        if self.compactors.is_empty() || self.compactor_pending_io_counts.is_empty() {
-            return None;
-        }
-
-        use rand::Rng;
-        let rand_index = rand::thread_rng().gen_range(0..self.compactors.len());
-
-        for context_id in self.compactors[rand_index..]
-            .iter()
-            .chain(self.compactors[..rand_index].iter())
-        {
-            if let Some(pending_pull_task_count) = self.compactor_pending_io_counts.get(context_id)
-            {
-                // Avoid picking compactors that have not yet executed heartbeat
-                let compactor = self.compactor_map.get(context_id).unwrap().clone();
-                return Some((compactor, *pending_pull_task_count));
-            }
-        }
-
-        None
     }
 
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
         use rand::Rng;
 
         if self.compactors.is_empty() {
-            return None;
-        }
-
-        if self.compactor_pending_io_counts.is_empty() {
             return None;
         }
 
@@ -244,20 +214,6 @@ impl CompactorManagerInner {
         rx
     }
 
-    // pub fn add_compactor_event_stream(
-    //     &self,
-    //     context_id: HummockContextId,
-    //     event_stream: Streaming<SubscribeCompactionEventRequest>,
-    // ) {
-    //     const STREAM_BUFFER_SIZE: usize = 4;
-    //     let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
-    //     self.compactors.retain(|c| *c != context_id);
-    //     self.compactors.push(context_id);
-    //     self.compactor_map
-    //         .insert(context_id, Arc::new(Compactor::new(context_id, tx, 0)));
-
-    // }
-
     /// Used when meta exiting to support graceful shutdown.
     pub fn abort_all_compactors(&mut self) {
         while let Some(compactor) = self.next_compactor() {
@@ -273,7 +229,6 @@ impl CompactorManagerInner {
     pub fn remove_compactor(&mut self, context_id: HummockContextId) {
         self.compactors.retain(|c| *c != context_id);
         self.compactor_map.remove(&context_id);
-        self.compactor_pending_io_counts.remove(&context_id);
 
         // To remove the heartbeats, they need to be forcefully purged,
         // which is only safe when the context has been completely removed from meta.
@@ -478,8 +433,8 @@ impl CompactorManager {
     }
 
     // pub fn next_idle_compactor(&self) -> Option<CompactorPullTaskHandle> {
-    //     if let Some((compactor, pending_pull_task_count)) = self.inner.read().next_idle_compactor()
-    //     {
+    //     if let Some((compactor, pending_pull_task_count)) =
+    // self.inner.read().next_idle_compactor()     {
     //         assert!(pending_pull_task_count > 0);
     //         // `update_compactor_pending_task` ensures that the compactor that can be
     //         // selected must exist and that the value of pending_pull_task_count is not 0.
