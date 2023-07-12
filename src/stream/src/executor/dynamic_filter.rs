@@ -22,7 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{once, OwnedRow as RowData, Row};
+use risingwave_common::row::{once, OwnedRow as RowData, OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
@@ -154,6 +154,32 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 ///    NEW_RHS_VALUE: Row(1, 4)
 ///    ---
 ///    Cache needs update. Largest LHS value that is nearest to RHS can now be Row(1, 5).
+struct DynamicFilterCache {
+    value: Option<OwnedRow>,
+    /// LHS key column index.
+    key_l: usize,
+}
+
+impl DynamicFilterCache {
+    fn new(key_l: usize) -> Self {
+        Self { value: None, key_l }
+    }
+
+    fn handle_lhs_chunk(&mut self, lhs_chunk: &OwnedRow, rhs: &OwnedRow) {
+        if new_value[self.key_l] == self.rhs_value[self.key_r] {
+            self.value = Some(new_value.clone());
+        }
+    }
+
+    fn handle_rhs_chunk(&mut self, new_value: &OwnedRow) {
+        if self.value.is_some() {
+            if new_value[self.key_r] > self.rhs_value[self.key_r] {
+                self.value = None;
+            }
+        }
+    }
+}
+
 pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
     source_l: Option<BoxedExecutor>,
