@@ -44,6 +44,11 @@ use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
 
 /// # Monotonically Increasing Cache policy
+/// Requirements:
+/// 1. RHS must be monotonically increasing.
+/// 2. Comparator must be >. i.e. LHS > RHS. e.g. v1 > NOW().
+///
+/// TODO: Remove both restrictions in the future.
 ///
 /// ## Conventions
 /// LHS: Outer side of the join.
@@ -59,11 +64,6 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 /// B) Or if there LHS cache value is same or smaller than current RHS.
 ///    None are larger than LHS cache value and current RHS value.
 ///
-/// N.B. Largest could be minimal or maximal value,
-/// depending on the sign of the comparator (< / >),
-/// and could be inclusive or exclusive as well (<= / >=).
-///
-/// Assuming sign is '>'.
 /// If RHS 100,
 /// and LHS has the following values: 101, 102,
 /// Cached value will be 101.
