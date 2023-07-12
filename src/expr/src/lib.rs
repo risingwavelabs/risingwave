@@ -29,6 +29,7 @@ pub mod function;
 pub mod sig;
 pub mod table_function;
 pub mod vector_op;
+pub mod window_function;
 
 pub use error::{ExprError, Result};
 use risingwave_common::{bail, ensure};

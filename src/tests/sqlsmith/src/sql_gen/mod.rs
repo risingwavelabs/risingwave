@@ -134,12 +134,6 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
     /// Relation ID used to generate table names and aliases
     relation_id: u32,
 
-    /// is_distinct_allowed - Distinct and Orderby/Approx.. cannot be generated together among agg
-    ///                       having and
-    /// When this variable is true, it means distinct only
-    /// When this variable is false, it means orderby and approx only.
-    is_distinct_allowed: bool,
-
     /// Relations bound in generated query.
     /// We might not read from all tables.
     bound_relations: Vec<Table>,
@@ -165,12 +159,10 @@ pub(crate) struct SqlGenerator<'a, R: Rng> {
 /// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
-        let is_distinct_allowed = rng.gen_bool(0.5);
         SqlGenerator {
             tables,
             rng,
             relation_id: 0,
-            is_distinct_allowed,
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: false,
@@ -184,7 +176,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             tables,
             rng,
             relation_id: 0,
-            is_distinct_allowed: false,
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: true,

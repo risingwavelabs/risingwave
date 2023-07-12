@@ -56,7 +56,7 @@ pub trait ExprVisitor<R: Default> {
     }
     fn visit_agg_call(&mut self, agg_call: &AggCall) -> R {
         let mut r = agg_call
-            .inputs()
+            .args()
             .iter()
             .map(|expr| self.visit_expr(expr))
             .reduce(Self::merge)

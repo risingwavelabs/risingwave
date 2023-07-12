@@ -73,6 +73,18 @@ fn encrypt_default(name: &str, password: &str) -> AuthInfo {
     }
 }
 
+/// Encrypted raw password from auth info.
+pub fn encrypted_raw_password(info: &AuthInfo) -> String {
+    let encrypted_pwd = String::from_utf8(info.encrypted_value.clone()).unwrap();
+    let prefix = match info.get_encryption_type().unwrap() {
+        EncryptionType::Unspecified => unreachable!(),
+        EncryptionType::Plaintext => "",
+        EncryptionType::Sha256 => SHA256_ENCRYPTED_PREFIX,
+        EncryptionType::Md5 => MD5_ENCRYPTED_PREFIX,
+    };
+    format!("{}{}", prefix, encrypted_pwd)
+}
+
 /// Encrypt the stored password with given salt, used for user authentication.
 #[inline(always)]
 pub fn md5_hash_with_salt(encrypted_value: &[u8], salt: &[u8; 4]) -> Vec<u8> {

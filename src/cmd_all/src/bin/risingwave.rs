@@ -190,7 +190,6 @@ fn main() -> Result<()> {
 
 fn playground(opts: PlaygroundOpts, registry: prometheus::Registry) {
     let settings = risingwave_rt::LoggerSettings::new("playground")
-        .enable_tokio_console(false)
         .with_target("risingwave_storage", Level::WARN);
     risingwave_rt::init_risingwave_logger(settings, registry);
     risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
