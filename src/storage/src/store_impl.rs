@@ -27,7 +27,7 @@ use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    FileCache, FoyerStoreConfig, HummockError, HummockStorage, MemoryLimiter,
+    FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError, HummockStorage, MemoryLimiter,
     SstableObjectIdManagerRef, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
@@ -544,7 +544,7 @@ impl StateStoreImpl {
         } else {
             const MB: usize = 1024 * 1024;
 
-            let config = FoyerStoreConfig {
+            let foyer_store_config = FoyerStoreConfig {
                 dir: opts.file_cache_dir.clone(),
                 capacity: opts.file_cache_capacity_mb * MB,
                 file_capacity: opts.file_cache_file_capacity_mb * MB,
@@ -559,7 +559,14 @@ impl StateStoreImpl {
                 recover_concurrency: opts.file_cache_recover_concurrency,
                 prometheus_registry: Some(state_store_metrics.registry().clone()),
             };
-            FileCache::foyer(config)
+            let config = FoyerRuntimeConfig {
+                foyer_store_config,
+                runtime_worker_threads: None,
+            };
+            // FileCache::foyer(foyer_store_config)
+            //     .await
+            //     .map_err(HummockError::file_cache)?
+            FileCache::foyer_runtime(config)
                 .await
                 .map_err(HummockError::file_cache)?
         };

@@ -23,7 +23,9 @@ use foyer::storage::admission::rated_random::RatedRandom;
 use foyer::storage::admission::AdmissionPolicy;
 use foyer::storage::LfuFsStoreConfig;
 use prometheus::Registry;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use tokio::sync::{mpsc, oneshot};
 
 use super::Block;
 
@@ -31,6 +33,8 @@ use super::Block;
 pub enum FileCacheError {
     #[error("foyer error: {0}")]
     Foyer(#[from] foyer::storage::error::Error),
+    #[error("other {0}")]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl FileCacheError {
@@ -62,7 +66,29 @@ pub struct FoyerStoreConfig {
     pub prometheus_registry: Option<Registry>,
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+pub struct FoyerRuntimeConfig {
+    pub foyer_store_config: FoyerStoreConfig,
+    pub runtime_worker_threads: Option<usize>,
+}
+
+#[derive(Debug)]
+pub enum FoyerRuntimeTask {
+    Insert {
+        key: SstableBlockIndex,
+        value: Box<Block>,
+        tx: oneshot::Sender<Result<()>>,
+    },
+    Remove {
+        key: SstableBlockIndex,
+        tx: oneshot::Sender<Result<()>>,
+    },
+    Lookup {
+        key: SstableBlockIndex,
+        tx: oneshot::Sender<Result<Option<Box<Block>>>>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct SstableBlockIndex {
     pub sst_id: HummockSstableObjectId,
     pub block_idx: u64,
@@ -105,6 +131,10 @@ impl Value for Box<Block> {
 pub enum FileCache {
     None,
     Foyer(Arc<FoyerStore>),
+    FoyerRuntime {
+        runtime: Arc<BackgroundShutdownRuntime>,
+        task_tx: Arc<mpsc::UnboundedSender<FoyerRuntimeTask>>,
+    },
 }
 
 impl FileCache {
@@ -152,46 +182,142 @@ impl FileCache {
         Ok(Self::Foyer(store))
     }
 
+    pub async fn foyer_runtime(config: FoyerRuntimeConfig) -> Result<Self> {
+        let mut builder = tokio::runtime::Builder::new_multi_thread();
+        if let Some(runtime_worker_threads) = config.runtime_worker_threads {
+            builder.worker_threads(runtime_worker_threads);
+        }
+        let runtime = builder
+            .thread_name("risingwave-foyer-storage")
+            .enable_all()
+            .build()
+            .map_err(|e| FileCacheError::Other(e.into()))?;
+        let (task_tx, mut task_rx) = mpsc::unbounded_channel();
+
+        let (tx, rx) = oneshot::channel();
+        runtime.spawn(async move {
+            let foyer_store_config = config.foyer_store_config;
+
+            let file_capacity = foyer_store_config.file_capacity;
+            let capacity = foyer_store_config.capacity;
+            let capacity = capacity - (capacity % file_capacity);
+
+            let mut admissions: Vec<
+                Arc<dyn AdmissionPolicy<Key = SstableBlockIndex, Value = Box<Block>>>,
+            > = vec![];
+            if foyer_store_config.rated_random_rate > 0 {
+                let rr = RatedRandom::new(
+                    foyer_store_config.rated_random_rate * 1024 * 1024,
+                    Duration::from_millis(100),
+                );
+                admissions.push(Arc::new(rr));
+            }
+
+            let c = LfuFsStoreConfig {
+                eviction_config: EvictionConfig {
+                    window_to_cache_size_ratio: foyer_store_config.lfu_window_to_cache_size_ratio,
+                    tiny_lru_capacity_ratio: foyer_store_config.lfu_tiny_lru_capacity_ratio,
+                },
+                device_config: DeviceConfig {
+                    dir: PathBuf::from(foyer_store_config.dir.clone()),
+                    capacity,
+                    file_capacity,
+                    align: foyer_store_config.device_align,
+                    io_size: foyer_store_config.device_io_size,
+                },
+                admissions,
+                reinsertions: vec![],
+                buffer_pool_size: foyer_store_config.buffer_pool_size,
+                flushers: foyer_store_config.flushers,
+                reclaimers: foyer_store_config.reclaimers,
+                recover_concurrency: foyer_store_config.recover_concurrency,
+                prometheus_registry: foyer_store_config.prometheus_registry,
+            };
+            match FoyerStore::open(c).await.map_err(FileCacheError::foyer) {
+                Err(e) => tx.send(Err(e)).unwrap(),
+                Ok(store) => {
+                    tx.send(Ok(())).unwrap();
+                    while let Some(task) = task_rx.recv().await {
+                        match task {
+                            FoyerRuntimeTask::Insert { key, value, tx } => {
+                                let res = store
+                                    .insert(key, value)
+                                    .await
+                                    .map(|_| ())
+                                    .map_err(FileCacheError::foyer);
+                                tx.send(res).unwrap();
+                            }
+                            FoyerRuntimeTask::Remove { key, tx } => {
+                                store.remove(&key);
+                                tx.send(Ok(())).unwrap();
+                            }
+                            FoyerRuntimeTask::Lookup { key, tx } => {
+                                let res = store.lookup(&key).await.map_err(FileCacheError::foyer);
+                                tx.send(res).unwrap();
+                            }
+                        }
+                    }
+                }
+            };
+        });
+
+        rx.await.unwrap()?;
+
+        Ok(Self::FoyerRuntime {
+            runtime: Arc::new(runtime.into()),
+            task_tx: Arc::new(task_tx),
+        })
+    }
+
+    #[tracing::instrument(skip(self, value))]
     pub async fn insert(&self, key: SstableBlockIndex, value: Box<Block>) -> Result<()> {
         match self {
             FileCache::None => Ok(()),
-            FileCache::Foyer(store) => {
-                let len = value.serialized_len();
-
-                let time = std::time::Instant::now();
-                let res = store
-                    .insert(key.clone(), value)
-                    .await
-                    .map(|_| ())
-                    .map_err(FileCacheError::foyer);
-                let elapsed = time.elapsed();
-
-                if elapsed.as_millis() > 100 {
-                    tracing::warn!(
-                        "slow file cache insertion, key: {:?}, value len: {:?}",
-                        key,
-                        len
-                    );
-                }
-                res
+            FileCache::Foyer(store) => store
+                .insert(key.clone(), value)
+                .await
+                .map(|_| ())
+                .map_err(FileCacheError::foyer),
+            FileCache::FoyerRuntime { task_tx, .. } => {
+                let (tx, rx) = oneshot::channel();
+                task_tx
+                    .send(FoyerRuntimeTask::Insert { key, value, tx })
+                    .unwrap();
+                rx.await.unwrap()
             }
         }
     }
 
-    pub fn remove(&self, key: &SstableBlockIndex) -> Result<()> {
+    #[tracing::instrument(skip(self))]
+    pub async fn remove(&self, key: &SstableBlockIndex) -> Result<()> {
         match self {
             FileCache::None => Ok(()),
             FileCache::Foyer(store) => {
                 store.remove(key);
                 Ok(())
             }
+            FileCache::FoyerRuntime { task_tx, .. } => {
+                let (tx, rx) = oneshot::channel();
+                task_tx
+                    .send(FoyerRuntimeTask::Remove { key: *key, tx })
+                    .unwrap();
+                rx.await.unwrap()
+            }
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn lookup(&self, key: &SstableBlockIndex) -> Result<Option<Box<Block>>> {
         match self {
             FileCache::None => Ok(None),
             FileCache::Foyer(store) => store.lookup(key).await.map_err(FileCacheError::foyer),
+            FileCache::FoyerRuntime { task_tx, .. } => {
+                let (tx, rx) = oneshot::channel();
+                task_tx
+                    .send(FoyerRuntimeTask::Lookup { key: *key, tx })
+                    .unwrap();
+                rx.await.unwrap()
+            }
         }
     }
 }

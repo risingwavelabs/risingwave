@@ -1621,12 +1621,8 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({metric('file_cache_latency_count')}[$__rate_interval])) by (op, instance)",
-                    "file cache {{op}} @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
-                    "file cache miss @ {{instance}}",
+                    f"sum(rate({metric('foyer_storage_latency_count')}[$__rate_interval])) by (op, extra, instance)",
+                    "file cache {{op}} {{extra}} @ {{instance}}",
                 ),
             ],
         ),
@@ -2105,16 +2101,8 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('file_cache_latency_count')}[$__rate_interval])) by (op, instance)",
-                            "file cache {{op}} @ {{instance}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
-                            "file cache miss @ {{instance}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('file_cache_disk_latency_count')}[$__rate_interval])) by (op, instance)",
-                            "file cache disk {{op}} @ {{instance}}",
+                            f"sum(rate({metric('foyer_storage_latency_count')}[$__rate_interval])) by (op, extra, instance)",
+                            "file cache {{op}} {{extra}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -2124,17 +2112,9 @@ def section_hummock_tiered_cache(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('file_cache_latency_bucket')}[$__rate_interval])) by (le, op, instance))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_latency_bucket')}[$__rate_interval])) by (le, op, extra, instance))",
                                 f"p{legend} - file cache" +
-                                " - {{op}} @ {{instance}}",
-                            ),
-                            [50, 90, 99, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('file_cache_disk_latency_bucket')}[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - file cache disk" +
-                                " - {{op}} @ {{instance}}",
+                                " - {{op}} {{extra}} @ {{instance}}",
                             ),
                             [50, 90, 99, "max"],
                         ),
@@ -2145,31 +2125,17 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('file_cache_disk_bytes')}[$__rate_interval])) by (op, instance)",
-                            "disk {{op}} @ {{instance}}",
+                            f"sum(rate({metric('foyer_storage_bytes')}[$__rate_interval])) by (op, extra, instance)",
+                            "disk {{op}} {{extra}} @ {{instance}}",
                         ),
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Disk IO Size",
+                    "Size",
                     "",
                     [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('file_cache_disk_io_size_bucket')}[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - file cache disk" +
-                                " - {{op}} @ {{instance}}",
-                            ),
-                            [50, 90, 99, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('file_cache_disk_read_entry_size_bucket')}[$__rate_interval])) by (le, op, instance))",
-                                f"p{legend} - file cache disk read entry" +
-                                " - {{op}} @ {{instance}}",
-                            ),
-                            [50, 90, 99, "max"],
-                        ),
+                        panels.target(
+                            f"{metric('foyer_storage_size')}", "size @ {{instance}}"),
                     ],
                 ),
             ],
