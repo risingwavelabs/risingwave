@@ -81,7 +81,7 @@ pub struct CreateSourceStatement {
     pub constraints: Vec<TableConstraint>,
     pub source_name: ObjectName,
     pub with_properties: WithProperties,
-    pub source_schema: SourceSchemaV2,
+    pub source_schema: CompatibleSourceSchema,
     pub source_watermarks: Vec<SourceWatermark>,
 }
 
@@ -351,36 +351,113 @@ pub struct SourceSchemaV2 {
     pub row_options: Vec<SqlOption>,
 }
 
-impl ParseTo for SourceSchemaV2 {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        if p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
-            p.expect_keyword(Keyword::FORMAT)?;
-            let id = p.parse_identifier()?;
-            let s = id.value.to_ascii_uppercase();
-            let format = Format::from_keyword(&s)?;
-            p.expect_keyword(Keyword::ENCODE)?;
-            let id = p.parse_identifier()?;
-            let s = id.value.to_ascii_uppercase();
-            let row_encode = Encode::from_keyword(&s)?;
-            let row_options = p.parse_options()?;
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CompatibleSourceSchema {
+    RowFormat(SourceSchema),
+    V2(SourceSchemaV2),
+}
 
-            Ok(SourceSchemaV2 {
-                format,
-                row_encode,
-                row_options,
-            })
-        } else if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-            && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
-        {
-            // TODO(st1page): do compatible logic here
-            Err(ParserError::ParserError(
-                "The syntax ROW FORMAT has been deprecated, please use FORMAT [...] ENCODE [...] instead".to_string(),
-            ))
-        } else {
-            Err(ParserError::ParserError(
-                "expect description of the format".to_string(),
-            ))
+impl fmt::Display for CompatibleSourceSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CompatibleSourceSchema::RowFormat(inner) => {
+                write!(f, "{}", inner)
+            }
+            CompatibleSourceSchema::V2(inner) => {
+                write!(f, "{}", inner)
+            }
         }
+    }
+}
+
+impl CompatibleSourceSchema {
+    pub fn into_source_schema(
+        self,
+    ) -> Result<(SourceSchema, Vec<SqlOption>, Option<String>), ParserError> {
+        match self {
+            CompatibleSourceSchema::RowFormat(inner) => Ok((
+                inner,
+                vec![],
+                Some("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.".to_string()),
+            )),
+            CompatibleSourceSchema::V2(inner) => {
+                inner.into_source_schema().map(|(s, ops)| (s, ops, None))
+            }
+        }
+    }
+}
+
+impl From<SourceSchemaV2> for CompatibleSourceSchema {
+    fn from(value: SourceSchemaV2) -> Self {
+        Self::V2(value)
+    }
+}
+
+pub fn parse_source_shcema(p: &mut Parser) -> Result<CompatibleSourceSchema, ParserError> {
+    if p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
+        p.expect_keyword(Keyword::FORMAT)?;
+        let id = p.parse_identifier()?;
+        let s = id.value.to_ascii_uppercase();
+        let format = Format::from_keyword(&s)?;
+        p.expect_keyword(Keyword::ENCODE)?;
+        let id = p.parse_identifier()?;
+        let s = id.value.to_ascii_uppercase();
+        let row_encode = Encode::from_keyword(&s)?;
+        let row_options = p.parse_options()?;
+
+        Ok(CompatibleSourceSchema::V2(SourceSchemaV2 {
+            format,
+            row_encode,
+            row_options,
+        }))
+    } else if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+        && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+    {
+        p.expect_keyword(Keyword::ROW)?;
+        p.expect_keyword(Keyword::FORMAT)?;
+        let id = p.parse_identifier()?;
+        let value = id.value.to_ascii_uppercase();
+        let schema = match &value[..] {
+            "JSON" => SourceSchema::Json,
+            "UPSERT_JSON" => SourceSchema::UpsertJson,
+            "PROTOBUF" => {
+                impl_parse_to!(protobuf_schema: ProtobufSchema, p);
+                SourceSchema::Protobuf(protobuf_schema)
+            }
+            "DEBEZIUM_JSON" => SourceSchema::DebeziumJson,
+            "DEBEZIUM_MONGO_JSON" => SourceSchema::DebeziumMongoJson,
+            "AVRO" => {
+                impl_parse_to!(avro_schema: AvroSchema, p);
+                SourceSchema::Avro(avro_schema)
+            }
+            "UPSERT_AVRO" => {
+                impl_parse_to!(avro_schema: AvroSchema, p);
+                SourceSchema::UpsertAvro(avro_schema)
+            }
+            "MAXWELL" => SourceSchema::Maxwell,
+            "CANAL_JSON" => SourceSchema::CanalJson,
+            "CSV" => {
+                impl_parse_to!(csv_info: CsvInfo, p);
+                SourceSchema::Csv(csv_info)
+            }
+            "DEBEZIUM_AVRO" => {
+                impl_parse_to!(avro_schema: DebeziumAvroSchema, p);
+                SourceSchema::DebeziumAvro(avro_schema)
+            }
+            "BYTES" => {
+                SourceSchema::Bytes
+            }
+            _ => return Err(ParserError::ParserError(
+                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON | BYTES after ROW FORMAT".to_string(),
+            ))
+
+        }    ;
+        Ok(CompatibleSourceSchema::RowFormat(schema))
+    } else {
+        Err(ParserError::ParserError(
+            "expect description of the format".to_string(),
+        ))
     }
 }
 
@@ -528,6 +605,21 @@ pub struct ProtobufSchema {
     pub use_schema_registry: bool,
 }
 
+impl ParseTo for ProtobufSchema {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!([Keyword::MESSAGE], p);
+        impl_parse_to!(message_name: AstString, p);
+        impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
+        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
+        impl_parse_to!(row_schema_location: AstString, p);
+        Ok(Self {
+            message_name,
+            row_schema_location,
+            use_schema_registry,
+        })
+    }
+}
+
 impl fmt::Display for ProtobufSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
@@ -549,6 +641,17 @@ impl fmt::Display for ProtobufSchema {
 pub struct AvroSchema {
     pub row_schema_location: AstString,
     pub use_schema_registry: bool,
+}
+impl ParseTo for AvroSchema {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
+        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
+        impl_parse_to!(row_schema_location: AstString, p);
+        Ok(Self {
+            row_schema_location,
+            use_schema_registry,
+        })
+    }
 }
 
 impl fmt::Display for AvroSchema {
@@ -586,11 +689,51 @@ impl fmt::Display for DebeziumAvroSchema {
     }
 }
 
+impl ParseTo for DebeziumAvroSchema {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(
+            [
+                Keyword::ROW,
+                Keyword::SCHEMA,
+                Keyword::LOCATION,
+                Keyword::CONFLUENT,
+                Keyword::SCHEMA,
+                Keyword::REGISTRY
+            ],
+            p
+        );
+        impl_parse_to!(row_schema_location: AstString, p);
+        Ok(Self {
+            row_schema_location,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CsvInfo {
     pub delimiter: u8,
     pub has_header: bool,
+}
+
+impl ParseTo for CsvInfo {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(without_header => [Keyword::WITHOUT, Keyword::HEADER], p);
+        impl_parse_to!([Keyword::DELIMITED, Keyword::BY], p);
+        impl_parse_to!(delimiter: AstString, p);
+        let mut chars = delimiter.0.chars().collect_vec();
+        if chars.len() != 1 {
+            return Err(ParserError::ParserError(format!(
+                "The delimiter should be a char, but got {:?}",
+                chars
+            )));
+        }
+        let delimiter = chars.remove(0) as u8;
+        Ok(Self {
+            delimiter,
+            has_header: !without_header,
+        })
+    }
 }
 
 impl fmt::Display for CsvInfo {
@@ -635,6 +778,7 @@ impl ParseTo for CreateSourceStatement {
                 row_encode: Encode::Json,
                 row_options: Default::default(),
             }
+            .into()
         } else if connector.contains("nexmark") {
             if (p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                 && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
@@ -647,21 +791,23 @@ impl ParseTo for CreateSourceStatement {
                 row_encode: Encode::Native,
                 row_options: Default::default(),
             }
+            .into()
         } else if connector.contains("datagen") {
             if (p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                 && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
                 || p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
             {
-                SourceSchemaV2::parse_to(p)?
+                parse_source_shcema(p)?
             } else {
                 SourceSchemaV2 {
                     format: Format::Native,
                     row_encode: Encode::Native,
                     row_options: Default::default(),
                 }
+                .into()
             }
         } else {
-            SourceSchemaV2::parse_to(p)?
+            parse_source_shcema(p)?
         };
 
         Ok(Self {
