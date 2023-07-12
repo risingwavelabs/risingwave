@@ -272,6 +272,7 @@ impl StateStore for HummockStorage {
     fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
         self.min_current_epoch
             .store(HummockEpoch::MAX, MemOrdering::SeqCst);
+        self.seal_epoch.store(INVALID_EPOCH, MemOrdering::SeqCst);
         async move {
             let (tx, rx) = oneshot::channel();
             self.hummock_event_sender
