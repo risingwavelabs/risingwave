@@ -37,10 +37,13 @@ pub struct LocalPickerStatistic {
     pub skip_by_pending_files: u64,
     pub skip_by_overlapping: u64,
 }
+
+#[derive(Default)]
 pub struct CompactionInput {
     pub input_levels: Vec<InputLevel>,
     pub target_level: usize,
     pub target_sub_level_id: u64,
+    pub partial_compact_overlapping: bool,
 }
 
 impl CompactionInput {

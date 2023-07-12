@@ -80,6 +80,7 @@ pub struct CompactionTask {
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
     pub enable_split_by_table: bool,
+    pub partial_compact_overlapping: bool,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -152,6 +153,7 @@ impl CompactStatus {
             task_type: ret.compaction_task_type as i32,
             split_by_state_table: group.compaction_config.split_by_state_table,
             split_weight_by_vnode: group.compaction_config.split_weight_by_vnode,
+            partial_compact_overlapping: ret.partial_compact_overlapping,
         };
         Some(compact_task)
     }
@@ -307,6 +309,7 @@ pub fn create_compaction_task(
     };
 
     CompactionTask {
+        partial_compact_overlapping: input.partial_compact_overlapping,
         compression_algorithm: get_compression_algorithm(
             compaction_config,
             base_level,

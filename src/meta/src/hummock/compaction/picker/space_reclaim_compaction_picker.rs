@@ -94,6 +94,7 @@ impl SpaceReclaimCompactionPicker {
                         ],
                         target_level: level.level_idx as usize,
                         target_sub_level_id: level.sub_level_id,
+                        ..Default::default()
                     });
                 }
             }
@@ -149,6 +150,7 @@ impl SpaceReclaimCompactionPicker {
                     ],
                     target_level: state.last_level,
                     target_sub_level_id: 0,
+                    ..Default::default()
                 });
             }
             state.last_level += 1;

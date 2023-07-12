@@ -101,6 +101,7 @@ impl ManualCompactionPicker {
             input_levels,
             target_level: 0,
             target_sub_level_id: sub_level_id,
+            ..Default::default()
         })
     }
 
@@ -170,6 +171,7 @@ impl ManualCompactionPicker {
             input_levels,
             target_level: self.target_level,
             target_sub_level_id: 0,
+            ..Default::default()
         })
     }
 
@@ -315,6 +317,7 @@ impl CompactionPicker for ManualCompactionPicker {
             ],
             target_level,
             target_sub_level_id: 0,
+            ..Default::default()
         })
     }
 }

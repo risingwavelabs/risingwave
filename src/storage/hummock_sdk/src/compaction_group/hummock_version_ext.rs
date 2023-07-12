@@ -468,7 +468,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                 }
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
-                levels.apply_compact_ssts(summary);
+                levels.apply_compact_ssts(summary, version_delta.partial_compact_overlapping);
             }
             if has_destroy {
                 self.levels.remove(compaction_group_id);
@@ -519,7 +519,11 @@ pub trait HummockLevelsExt {
     fn get_level(&self, idx: usize) -> &Level;
     fn get_level_mut(&mut self, idx: usize) -> &mut Level;
     fn count_ssts(&self) -> usize;
-    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary);
+    fn apply_compact_ssts(
+        &mut self,
+        summary: GroupDeltasSummary,
+        partial_compact_overlapping: bool,
+    );
     fn check_deleted_sst_exist(
         &self,
         delete_sst_levels: &[u32],
@@ -549,7 +553,11 @@ impl HummockLevelsExt for Levels {
             .sum()
     }
 
-    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary) {
+    fn apply_compact_ssts(
+        &mut self,
+        summary: GroupDeltasSummary,
+        partial_compact_overlapping: bool,
+    ) {
         let GroupDeltasSummary {
             delete_sst_levels,
             delete_sst_ids_set,
@@ -595,12 +603,27 @@ impl HummockLevelsExt for Levels {
                 let index = l0
                     .sub_levels
                     .partition_point(|level| level.sub_level_id < insert_sub_level_id);
-                assert!(
-                    index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id == insert_sub_level_id,
-                    "should find the level to insert into when applying compaction generated delta. sub level idx: {},  removed sst ids: {:?}, sub levels: {:?},",
-                    insert_sub_level_id, delete_sst_ids_set, l0.sub_levels.iter().map(|level| level.sub_level_id).collect_vec()
-                );
-                level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
+                if partial_compact_overlapping {
+                    assert!(
+                        index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id != insert_sub_level_id,
+                        "insert new sub level because it only compacts partial of a sub-level. sub level id: {},  removed sst ids: {:?}, sub levels: {:?},",
+                        insert_sub_level_id, delete_sst_ids_set, l0.sub_levels.iter().map(|level| level.sub_level_id).collect_vec()
+                    );
+                    insert_new_sub_level(
+                        l0,
+                        insert_sub_level_id,
+                        LevelType::Nonoverlapping,
+                        insert_table_infos,
+                        Some(index),
+                    );
+                } else {
+                    assert!(
+                        index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id == insert_sub_level_id,
+                        "should find the level to insert into when applying compaction generated delta. sub level idx: {},  removed sst ids: {:?}, sub levels: {:?},",
+                        insert_sub_level_id, delete_sst_ids_set, l0.sub_levels.iter().map(|level| level.sub_level_id).collect_vec()
+                    );
+                    level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
+                }
             } else {
                 let idx = insert_sst_level_id as usize - 1;
                 level_insert_ssts(&mut self.levels[idx], insert_table_infos);
@@ -883,6 +906,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         max_committed_epoch: version.max_committed_epoch,
         group_deltas: Default::default(),
         gc_object_ids: vec![],
+        partial_compact_overlapping: false,
     }
 }
 

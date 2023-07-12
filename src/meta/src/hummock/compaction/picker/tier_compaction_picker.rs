@@ -68,6 +68,7 @@ impl TierCompactionPicker {
                     input_levels: vec![input_level],
                     target_level: 0,
                     target_sub_level_id: level.sub_level_id,
+                    ..Default::default()
                 });
             }
 
@@ -92,7 +93,7 @@ impl TierCompactionPicker {
             };
 
             for other in &l0.sub_levels[idx + 1..] {
-                if compaction_bytes > max_compaction_bytes {
+                if compaction_bytes + other.total_file_size > max_compaction_bytes {
                     waiting_enough_files = false;
                     break;
                 }
@@ -131,12 +132,39 @@ impl TierCompactionPicker {
                 continue;
             }
 
+            let mut target_sub_level_id = level.sub_level_id;
+            let mut patial_compact_overlapping = false;
+            let level0_tier_compact_file_number =
+                self.config.level0_tier_compact_file_number as usize;
+
+            if select_level_inputs.len() == 1
+                && compaction_bytes > max_compaction_bytes
+                && select_level_inputs[0].table_infos.len() > level0_tier_compact_file_number
+            {
+                if idx == 0 || level.sub_level_id > l0.sub_levels[idx - 1].sub_level_id + 1 {
+                    while compaction_bytes > max_compaction_bytes
+                        && select_level_inputs[0].table_infos.len()
+                            > level0_tier_compact_file_number
+                    {
+                        let sst = select_level_inputs[0].table_infos.pop().unwrap();
+                        compaction_bytes -= sst.file_size;
+                    }
+                    if idx == 0 {
+                        target_sub_level_id = 1;
+                    } else {
+                        target_sub_level_id = l0.sub_levels[idx - 1].sub_level_id + 1;
+                    }
+                    patial_compact_overlapping = true;
+                }
+            }
+
             select_level_inputs.reverse();
 
             return Some(CompactionInput {
                 input_levels: select_level_inputs,
                 target_level: 0,
-                target_sub_level_id: level.sub_level_id,
+                target_sub_level_id,
+                partial_compact_overlapping: patial_compact_overlapping,
             });
         }
         None

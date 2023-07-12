@@ -209,6 +209,7 @@ impl LevelCompactionPicker {
                 input_levels: select_level_inputs,
                 target_level: self.target_level,
                 target_sub_level_id: 0,
+                ..Default::default()
             });
         }
         stats.skip_by_write_amp_limit += 1;
@@ -310,6 +311,7 @@ impl LevelCompactionPicker {
                     input_levels: select_level_inputs,
                     target_level: 0,
                     target_sub_level_id: level.sub_level_id,
+                    ..Default::default()
                 });
             }
 
@@ -394,6 +396,7 @@ impl LevelCompactionPicker {
                 input_levels,
                 target_level: 0,
                 target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
+                ..Default::default()
             });
         }
         None
@@ -832,6 +835,7 @@ pub mod tests {
             }],
             target_level: 1,
             target_sub_level_id: pending_level.sub_level_id,
+            ..Default::default()
         };
         assert!(!levels_handler[0].is_level_pending_compact(&pending_level));
         tier_task_input.add_pending_task(1, &mut levels_handler);
