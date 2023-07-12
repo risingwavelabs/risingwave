@@ -255,8 +255,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         self.iterator.collect_local_statistic(stats);
     }
 
-    // Validate whether the current key is already out of range and set `out_of_range`.
-    // Return true if `out_of_range` is set to true.
+    // Validate whether the current key is already out of range.
     fn key_out_of_range(&self) -> bool {
         assert!(self.iterator.is_valid());
         let current_user_key = self.iterator.key().user_key;
