@@ -29,12 +29,14 @@ connection other
 statement ok
 flush;
 
+# inserts are visible in the `other` connection,
 connection other
 query I
 select count(*) from t;
 ----
 3
 
+# ...but not in the read-only transaction
 query I
 select count(*) from t;
 ----
@@ -43,6 +45,7 @@ select count(*) from t;
 statement ok
 flush;
 
+# still invisible even after flush
 query I
 select count(*) from t;
 ----
@@ -51,6 +54,7 @@ select count(*) from t;
 statement ok
 commit;
 
+# now visible outside the transaction
 query I
 select count(*) from t;
 ----
