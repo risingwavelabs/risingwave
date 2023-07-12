@@ -19,8 +19,6 @@ docker run crash
 cd capture 
 docker build . -t capture
 docker image ls | head -2 
-# REPOSITORY             TAG                  IMAGE ID       CREATED          SIZE
-# capture                latest               20b2fac56491   3 seconds ago    132MB
 ```
 
 # Setting up local kind cluster
@@ -64,6 +62,13 @@ watch kubectl get pods -A -o wide
 # You should see the crash pods being created and restarting every few seconds
 # You may observe that the crash pods are located on different worker nodes
 ```
+
+# Setting up capture infrastructure 
+
+```bash 
+k apply -f k8s_resources/capture_ds.yaml 
+```
+
 
 
 

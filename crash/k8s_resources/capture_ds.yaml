@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: capture
+  namespace: default
+  labels:
+    k8s-app: capture-ds
+spec:
+  selector:
+    matchLabels:
+      name: capture
+  template:
+    metadata:
+      labels:
+        name: capture
+    spec:
+      containers:
+        - name: capture
+          imagePullPolicy: Never
+          image: capture:latest
+          # resources: # TODO
+          # TODO: add volume mound
+          # volumeMounts:
+          #   - name: varlog
+          #     mountPath: /var/log
+      # volumes:
+      #   - name: varlog
+      #     hostPath:
+      #       path: /var/log
