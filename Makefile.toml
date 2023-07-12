@@ -1052,7 +1052,7 @@ description = "Kill cluster, dump logs and check logs"
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.14.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.15.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ] }
 command = "sqllogictest"
