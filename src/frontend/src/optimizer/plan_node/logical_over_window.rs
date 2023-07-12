@@ -23,9 +23,9 @@ use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamOverWindow, StreamSort,
-    ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, LogicalProject,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
+    StreamOverWindow, StreamSort, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, WindowFunction};
 use crate::optimizer::plan_node::{
@@ -658,11 +658,47 @@ impl PredicatePushdown for LogicalOverWindow {
 
 impl ToBatch for LogicalOverWindow {
     fn to_batch(&self) -> Result<PlanRef> {
-        Err(ErrorCode::NotImplemented(
-            "Batch over window is not implemented yet".to_string(),
-            9124.into(),
-        )
-        .into())
+        if self
+            .window_functions()
+            .iter()
+            .any(|x| matches!(x.kind, WindowFuncKind::Rank | WindowFuncKind::DenseRank))
+        {
+            return Err(ErrorCode::NotImplemented(
+                "`rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet"
+                    .to_string(),
+                8965.into(),
+            )
+            .into());
+        }
+
+        if !self.core.funcs_have_same_partition_and_order() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
+            )
+            .into());
+        }
+
+        // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
+        // empty PARTITION BY by simply removing the following check.
+        let partition_key_indices = self.window_functions()[0]
+            .partition_by
+            .iter()
+            .map(|e| e.index())
+            .collect_vec();
+        if partition_key_indices.is_empty() {
+            return Err(ErrorCode::NotImplemented(
+                "Window function with empty PARTITION BY is not supported yet".to_string(),
+                None.into(),
+            )
+            .into());
+        }
+
+        let input = self.input().to_batch()?;
+        let new_logical = OverWindow {
+            input,
+            ..self.core.clone()
+        };
+        Ok(BatchOverWindow::new(new_logical).into())
     }
 }
 
