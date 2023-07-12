@@ -79,13 +79,13 @@ message SinkWriterStreamRequest {
 message SinkWriterStreamResponse {
   message StartResponse {}
 
-  message SyncResponse {
+  message CommitResponse {
     uint64 epoch = 1;
   }
 
   oneof response {
     StartResponse start = 1;
-    SyncResponse sync = 2;
+    CommitResponse commit = 2;
   }
 }
 
