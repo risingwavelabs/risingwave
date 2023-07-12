@@ -278,12 +278,12 @@ impl Compactor {
         // until the compact task end.
         let memory_holder = context
             .output_memory_limiter
-            .try_require_memory(input_memory as u64);
+            .try_require_memory(input_memory);
         if memory_holder.is_none() {
             tracing::warn!(
                 "Not enough memory to serve the task {} which need memory {}, current memory_usage {} memory_quota {}",
                 compact_task.task_id,
-                parallelism,
+                input_memory,
                 context.output_memory_limiter.get_memory_usage(),
                 context.output_memory_limiter.quota()
             );
