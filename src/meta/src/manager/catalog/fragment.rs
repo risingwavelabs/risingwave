@@ -155,6 +155,16 @@ where
         map.values().cloned().collect()
     }
 
+    pub async fn get_mv_id_to_internal_table_ids_mapping(&self) -> Vec<(u32, Vec<u32>)> {
+        self.core
+            .read()
+            .await
+            .table_fragments
+            .values()
+            .map(|tf| (tf.table_id().table_id(), tf.all_table_ids().collect_vec()))
+            .collect_vec()
+    }
+
     pub async fn get_revision(&self) -> TableRevision {
         self.core.read().await.table_revision
     }

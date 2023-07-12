@@ -1299,13 +1299,8 @@ where
                 )?;
                 branched_ssts.commit_memory();
                 current_version.apply_version_delta(&version_delta);
-                let table_fragments: Vec<crate::model::TableFragments> =
-                    self.fragment_manager.list_table_fragments().await;
 
-                let mv_id_to_all_table_ids = table_fragments
-                    .iter()
-                    .map(|tf| (tf.table_id().table_id(), tf.all_table_ids().collect_vec()))
-                    .collect_vec();
+                let mv_id_to_all_table_ids = self.fragment_manager.get_mv_id_to_internal_table_ids_mapping().await;
 
                 trigger_version_stat(
                     &self.metrics,
@@ -1618,12 +1613,8 @@ where
         let prev_snapshot = self.latest_snapshot.swap(snapshot.clone().into());
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
-        let table_fragments: Vec<crate::model::TableFragments> =
-            self.fragment_manager.list_table_fragments().await;
-        let mv_id_to_all_table_ids = table_fragments
-            .iter()
-            .map(|tf| (tf.table_id().table_id(), tf.all_table_ids().collect_vec()))
-            .collect_vec();
+
+        let mv_id_to_all_table_ids = self.fragment_manager.get_mv_id_to_internal_table_ids_mapping().await;
         trigger_version_stat(
             &self.metrics,
             &versioning.current_version,
