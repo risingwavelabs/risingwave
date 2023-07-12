@@ -160,7 +160,8 @@ async fn compaction_test(
         .await?;
 
     let system_params = SystemParams {
-        sstable_size_mb: Some(256),
+        sstable_size_mb: Some(128),
+        parallel_compact_size_mb: Some(512),
         block_size_kb: Some(1024),
         bloom_false_positive: Some(0.001),
         data_directory: Some("hummock_001".to_string()),

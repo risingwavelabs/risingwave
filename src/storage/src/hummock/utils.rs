@@ -175,6 +175,10 @@ impl MemoryLimiterInner {
         self.notify.notify_waiters();
     }
 
+    fn add_memory(&self, quota: u64) {
+        self.total_size.fetch_add(quota, AtomicOrdering::SeqCst);
+    }
+
     fn try_require_memory(&self, quota: u64) -> bool {
         let mut current_quota = self.total_size.load(AtomicOrdering::Acquire);
         while self.permit_quota(current_quota, quota) {
