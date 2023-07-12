@@ -155,11 +155,26 @@ impl FileCache {
     pub async fn insert(&self, key: SstableBlockIndex, value: Box<Block>) -> Result<()> {
         match self {
             FileCache::None => Ok(()),
-            FileCache::Foyer(store) => store
-                .insert(key, value)
-                .await
-                .map(|_| ())
-                .map_err(FileCacheError::foyer),
+            FileCache::Foyer(store) => {
+                let len = value.serialized_len();
+
+                let time = std::time::Instant::now();
+                let res = store
+                    .insert(key.clone(), value)
+                    .await
+                    .map(|_| ())
+                    .map_err(FileCacheError::foyer);
+                let elapsed = time.elapsed();
+
+                if elapsed.as_millis() > 100 {
+                    tracing::warn!(
+                        "slow file cache insertion, key: {:?}, value len: {:?}",
+                        key,
+                        len
+                    );
+                }
+                res
+            }
         }
     }
 
