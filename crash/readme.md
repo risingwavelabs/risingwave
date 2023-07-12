@@ -69,16 +69,28 @@ watch kubectl get pods -A -o wide
 k apply -f k8s_resources/capture_ds.yaml 
 ```
 
-Is my rust application actually core dumpling? 
-    I don't think so
-what is the ulimit -c ? 
-    unlimited
+# Obverse capturing 
 
-Would capture catch core dumps work? 
-    Create files in the core dump dir and see if it will be picked up on
-    -> Works fine
+```bash
+k get pods -A -o wide 
 
+# follow one of the crashing applications 
+k logs crash-deployment-56b9bcb7b-4nsxr --follow
 
-ulimit -c 1024000000
-mkdir /var/coredump
+# follow one of the capturers, make sure it is on the same node as the crashing applicaiton
+k logs  capture-b9m29 --follow
+```
 
+You should see how core dumps are created in your application
+
+```log
+thread 'main' panicked at 'randomly panicking here', src/main.rs:24:13
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+./entrypoint.sh: line 7:    12 Quit                    (core dumped) /crash/target/debug/crash
+```
+
+These core dumps should then be captured
+
+```log
+[2023-07-12 14:09:16] [coredump] 'core.crash.sig3.11.1689170956' has been uploaded to 's3://myorg-coredump/__CLUSTER_NAME__``/onebox-worker.core.crash.sig3.11.1689170956'
+```
