@@ -233,13 +233,25 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
         match old_val {
-            None => self.mem_table.insert(key, new_val)?,
-            Some(old_val) => self.mem_table.update(key, old_val, new_val)?,
+            None => {
+                self.mem_table.insert(key, new_val)?;
+            }
+            Some(old_val) => {
+                self.mem_table.update(key, old_val, new_val)?;
+            }
         };
+        self.stats
+            .mem_table_memory_size
+            .with_label_values(&[&self.table_id.to_string()])
+            .set(self.mem_table.mem_table_size as i64);
         Ok(())
     }
 
     fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        self.stats
+            .mem_table_memory_size
+            .with_label_values(&[&self.table_id.to_string()])
+            .set(self.mem_table.mem_table_size as i64);
         Ok(self.mem_table.delete(key, old_val)?)
     }
 
@@ -247,6 +259,10 @@ impl LocalStateStore for LocalHummockStorage {
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
     ) -> StorageResult<usize> {
+        self.stats
+            .mem_table_memory_size
+            .with_label_values(&[&self.table_id.to_string()])
+            .set(0);
         debug_assert!(delete_ranges
             .iter()
             .map(|(key, _)| key)

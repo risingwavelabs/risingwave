@@ -47,6 +47,7 @@ pub enum KeyOp {
 pub struct MemTable {
     pub(crate) buffer: BTreeMap<Bytes, KeyOp>,
     pub(crate) is_consistent_op: bool,
+    pub mem_table_size: usize,
 }
 
 #[derive(Error, Debug)]
@@ -62,10 +63,12 @@ impl MemTable {
         Self {
             buffer: BTreeMap::new(),
             is_consistent_op,
+            mem_table_size: 0,
         }
     }
 
     pub fn drain(&mut self) -> Self {
+        self.mem_table_size = 0;
         std::mem::replace(self, Self::new(self.is_consistent_op))
     }
 
@@ -81,18 +84,22 @@ impl MemTable {
     /// write methods
     pub fn insert(&mut self, pk: Bytes, value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
+            self.mem_table_size += std::mem::size_of::<Bytes>() + pk.len() + value.len();
             self.buffer.insert(pk, KeyOp::Insert(value));
+
             return Ok(());
         }
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
+                self.mem_table_size += std::mem::size_of::<Bytes>() + e.key().len() + value.len();
                 e.insert(KeyOp::Insert(value));
                 Ok(())
             }
             Entry::Occupied(mut e) => match e.get_mut() {
                 KeyOp::Delete(ref mut old_value) => {
                     let old_val = std::mem::take(old_value);
+                    self.mem_table_size += std::mem::size_of::<Bytes>() + value.len();
                     e.insert(KeyOp::Update((old_val, value)));
                     Ok(())
                 }
@@ -108,12 +115,15 @@ impl MemTable {
 
     pub fn delete(&mut self, pk: Bytes, old_value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
+            self.mem_table_size += std::mem::size_of::<Bytes>() + pk.len() + old_value.len();
             self.buffer.insert(pk, KeyOp::Delete(old_value));
             return Ok(());
         }
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
+                self.mem_table_size +=
+                    std::mem::size_of::<Bytes>() + e.key().len() + old_value.len();
                 e.insert(KeyOp::Delete(old_value));
                 Ok(())
             }
@@ -126,7 +136,10 @@ impl MemTable {
                             new: KeyOp::Delete(old_value),
                         }));
                     }
+                    self.mem_table_size -=
+                        std::mem::size_of::<Bytes>() + e.key().len() + old_value.len();
                     e.remove();
+
                     Ok(())
                 }
                 KeyOp::Delete(_) => Err(MemTableError::InconsistentOperation {
@@ -144,6 +157,7 @@ impl MemTable {
                             new: KeyOp::Delete(old_value),
                         }));
                     }
+                    self.mem_table_size -= std::mem::size_of::<Bytes>() + original_new_value.len();
                     e.insert(KeyOp::Delete(original_old_value));
                     Ok(())
                 }
@@ -153,6 +167,8 @@ impl MemTable {
 
     pub fn update(&mut self, pk: Bytes, old_value: Bytes, new_value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
+            self.mem_table_size -=
+                std::mem::size_of::<Bytes>() + pk.len() + old_value.len() + new_value.len();
             self.buffer
                 .insert(pk, KeyOp::Update((old_value, new_value)));
             return Ok(());
@@ -160,6 +176,10 @@ impl MemTable {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
+                self.mem_table_size += std::mem::size_of::<Bytes>()
+                    + e.key().len()
+                    + old_value.len()
+                    + new_value.len();
                 e.insert(KeyOp::Update((old_value, new_value)));
                 Ok(())
             }
