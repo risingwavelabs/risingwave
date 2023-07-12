@@ -52,8 +52,10 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 ///
 /// ## Description
 ///
-/// The cache holds a single value from the LHS, the largest value nearest to current RHS (largest first, then nearest).
-/// N.B. Largest could be minimal or maximal value, depending on the sign of the comparator, and could be inclusive or exclusive as well.
+/// The cache holds a single value from the LHS,
+/// the largest value nearest to current RHS (largest first, then nearest).
+/// N.B. Largest could be minimal or maximal value, depending on the sign of the comparator,
+/// and could be inclusive or exclusive as well.
 ///
 /// Assuming sign is '>'.
 /// If RHS 100,
@@ -68,24 +70,31 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 /// For monotonically increasing RHS (e.g. NOW()), current_RHS > old_RHS.
 /// The cache_value from LHS partitions the range.
 /// Case 1:
-/// cache_value larger than current_RHS. Need to send all rows between (old_RHS, current_RHS) downstream.
+/// cache_value larger than current_RHS.
+/// Need to send all rows between (old_RHS, current_RHS) downstream.
 /// Case 2:
-/// cache_value smaller or same as current_RHS, larger than prev_RHS. Need to send all rows between (prev_RHS, cache_value) downstream.
+/// cache_value smaller or same as current_RHS, larger than prev_RHS.
+/// Need to send all rows between (prev_RHS, cache_value) downstream.
 /// Case 3:
-/// cache_value smaller than prev_RHS. No need scan any rows, there are no LHS rows between (old_RHS, current_RHS).
+/// cache_value smaller than prev_RHS.
+/// No need scan any rows, there are no LHS rows between (old_RHS, current_RHS).
 /// Case 4:
-/// No cache_value. Need to send all rows between (old_RHS, current_RHS) downstream, cache value could have been deleted.
+/// No cache_value.
+/// Need to send all rows between (old_RHS, current_RHS) downstream,
+/// because cache value could have been deleted.
 ///
 /// ## Initial state
 /// Nothing in cache (None).
 ///
 /// ## Updates
-/// 1. Whenever we receive LHS updates, we need to update the cache. `old_value` refers to `old_value` in cache.
-///    `new_value` refers to the new value received from LHS in the update message.
-///    INSERT: if the new value is (RHS, old_value), replace `old_value` in cache. Otherwise, do nothing.
+/// 1. Whenever we receive LHS updates, we need to update the cache. `old_value` refers to
+/// `old_value` in cache.    `new_value` refers to the new value received from LHS in the update
+/// message.    INSERT: if the new value is (RHS, old_value), replace `old_value` in cache.
+///            Otherwise, do nothing.
 ///    UPDATE: if the new value is (RHS, old_value), OR if has same key as `old_value`,
-///            replace `old_value` in cache. Otherwise, do nothing.
-///    DELETE, if the new value has the same key as `old_value`, empty cache. It is now `None`.
+///            replace `old_value` in cache.
+///            Otherwise, do nothing.
+///    DELETE: if the new value has the same key as `old_value`, empty cache. It is now `None`.
 ///
 ///    Example A:
 ///    FILTER_COL: [1]
@@ -132,7 +141,6 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 ///    NEW_RHS_VALUE: Row(1, 4)
 ///    ---
 ///    Cache needs update. Largest LHS value that is nearest to RHS can now be Row(1, 5).
-///
 pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
     source_l: Option<BoxedExecutor>,
