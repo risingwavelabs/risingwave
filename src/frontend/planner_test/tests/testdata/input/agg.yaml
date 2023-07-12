@@ -434,6 +434,12 @@
   expected_outputs:
   - stream_plan
   - batch_plan
+- name: distinct agg on empty args
+  sql: |
+    create table t(x int, y varchar);
+    select count(distinct *) from t;
+  expected_outputs:
+  - binder_error
 - name: only distinct agg
   sql: |
     create table t(a int, b int, c int);
@@ -456,6 +462,42 @@
   - optimized_logical_plan_for_batch
   - stream_plan
   - batch_plan
+- name: distinct & string_agg
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(y, ','), count(distinct x) from t;
+  expected_outputs:
+  - logical_plan
+  - stream_plan
+  - batch_plan
+- name: distinct & order by on different calls
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(y, ',' order by y), count(distinct x) from t;
+  expected_outputs:
+  - logical_plan
+  - stream_plan
+  - batch_plan
+- name: distinct & order by on same calls
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(distinct y, ',' order by y), count(distinct x) from t;
+  expected_outputs:
+  - logical_plan
+  - stream_plan
+  - batch_plan
+- name: distinct & invalid order by
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(distinct y, ',' order by x) from t;
+  expected_outputs:
+  - binder_error
+- name: distinct with multiple non-const args
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(distinct y, x::varchar) from t;
+  expected_outputs:
+  - binder_error
 - name: distinct agg with filter
   sql: |
     create table t(a int, b int, c int);
@@ -478,11 +520,6 @@
   - logical_plan
   - stream_plan
   - optimized_logical_plan_for_batch
-- sql: |
-    create table t(x int, y varchar);
-    select string_agg(y, ',' order by y), count(distinct x) from t;
-  expected_outputs:
-  - planner_error
 - sql: |
     create table t(v1 int, v2 int);
     with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
@@ -521,11 +558,6 @@
   - optimized_logical_plan_for_stream
   with_config_map:
     RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
-- sql: |
-    create table t(x varchar, y int);
-    select string_agg(x, ','), count(distinct y) from t;
-  expected_outputs:
-  - planner_error
 - name: remove unnecessary distinct for max and min
   sql: |
     create table t(x int, y int);
@@ -863,3 +895,31 @@
     select mode(1) within group (order by y desc) from t;
   expected_outputs:
   - binder_error
+
+- sql: |
+    create table t (x int, y int);
+    select first_value(x) from t;
+  expected_outputs:
+  - planner_error
+- sql: |
+    create table t (x int, y int);
+    select last_value(x) from t;
+  expected_outputs:
+  - planner_error
+- sql: |
+    create table t (x int, y int);
+    select first_value(x order by y asc) from t;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- sql: |
+    create table t (x int, y int);
+    select last_value(x order by y desc nulls last) from t;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT count(DISTINCT i) FROM integers;
+  expected_outputs:
+  - batch_plan

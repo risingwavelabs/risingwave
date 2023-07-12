@@ -26,6 +26,9 @@ import org.apache.commons.io.IOUtils;
 import org.apache.commons.text.StringSubstitutor;
 
 public class DbzConnectorConfig {
+    /* Debezium private configs */
+    public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
+            "debezium.embedded.shutdown.pause.before.interrupt.ms";
 
     /* Common configs */
     public static final String HOST = "hostname";
@@ -43,25 +46,28 @@ public class DbzConnectorConfig {
 
     /* Postgres specified configs */
     public static final String PG_SLOT_NAME = "slot.name";
+    public static final String PG_PUB_NAME = "publication.name";
+    public static final String PG_PUB_CREATE = "publication.create.enable";
     public static final String PG_SCHEMA_NAME = "schema.name";
 
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
 
-    public static Map<String, String> extractDebeziumProperties(Map<String, String> properties) {
+    private static final String DBZ_PROPERTY_PREFIX = "debezium.";
+
+    private static Map<String, String> extractDebeziumProperties(
+            Map<String, String> userProperties) {
         // retain only debezium properties if any
-        var userProps = new HashMap<>(properties);
-        userProps.remove(DbzConnectorConfig.HOST);
-        userProps.remove(DbzConnectorConfig.PORT);
-        userProps.remove(DbzConnectorConfig.USER);
-        userProps.remove(DbzConnectorConfig.PASSWORD);
-        userProps.remove(DbzConnectorConfig.DB_NAME);
-        userProps.remove(DbzConnectorConfig.TABLE_NAME);
-        userProps.remove(DbzConnectorConfig.MYSQL_SERVER_ID);
-        userProps.remove(DbzConnectorConfig.PG_SLOT_NAME);
-        userProps.remove(DbzConnectorConfig.PG_SCHEMA_NAME);
-        return userProps;
+        var dbzProps = new HashMap<String, String>();
+        for (var entry : userProperties.entrySet()) {
+            var key = entry.getKey();
+            if (key.startsWith(DBZ_PROPERTY_PREFIX)) {
+                // remove the prefix
+                dbzProps.put(key.substring(DBZ_PROPERTY_PREFIX.length()), entry.getValue());
+            }
+        }
+        return dbzProps;
     }
 
     private final long sourceId;
@@ -113,6 +119,14 @@ public class DbzConnectorConfig {
                 postgresProps.setProperty("publication.autocreate.mode", "all_tables");
             }
 
+            // disable publication auto creation if needed
+            var pubAutoCreate =
+                    Boolean.parseBoolean(
+                            userProps.getOrDefault(DbzConnectorConfig.PG_PUB_CREATE, "true"));
+
+            if (!pubAutoCreate) {
+                postgresProps.setProperty("publication.autocreate.mode", "disabled");
+            }
             // if snapshot phase is finished and offset is specified, we will continue reading
             // changes from the given offset
             if (snapshotDone && null != startOffset && !startOffset.isBlank()) {

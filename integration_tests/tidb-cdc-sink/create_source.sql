@@ -10,7 +10,7 @@ CREATE TABLE tweet (
     topic='ticdc_test_tweet',
     properties.bootstrap.server='kafka:9092',
     scan.startup.mode='earliest'
-) ROW FORMAT CANAL_JSON;
+) FORMAT CANAL ENCODE JSON;
 
 create table user (
     id varchar,
@@ -24,4 +24,4 @@ create table user (
     topic='ticdc_test_user',
     properties.bootstrap.server='kafka:9092',
     scan.startup.mode='earliest'
-) ROW FORMAT CANAL_JSON;
+) FORMAT CANAL ENCODE JSON;

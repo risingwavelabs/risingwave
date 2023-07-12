@@ -14,18 +14,18 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
 use super::{
-    post_telemetry_report, TelemetryReport, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL,
+    post_telemetry_report, Result, TelemetryReport, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL,
 };
 
 #[async_trait::async_trait]
 pub trait TelemetryInfoFetcher {
+    /// Fetches telemetry info from meta. Currently it's only `tracking_id` (`cluster_id`).
     async fn fetch_telemetry_info(&self) -> Result<Option<String>>;
 }
 
@@ -92,7 +92,7 @@ where
                     begin_time.elapsed().as_secs(),
                 )
                 .await
-                .map(|r| r.to_json())
+                .map(|r| serde_json::to_string(&r))
             {
                 Ok(Ok(report_json)) => report_json,
                 Ok(Err(e)) => {

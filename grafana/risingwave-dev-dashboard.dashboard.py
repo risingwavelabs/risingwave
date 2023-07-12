@@ -247,39 +247,39 @@ def section_compaction(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_task_duration_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_task_duration_bucket')}[$__rate_interval])) by (le, job))",
                                 f"compact-task p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [50, 90, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_sst_duration_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_sst_duration_bucket')}[$__rate_interval])) by (le, job))",
                                 f"compact-key-range p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [90, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_get_table_id_total_time_duration_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_get_table_id_total_time_duration_bucket')}[$__rate_interval])) by (le, job))",
                                 f"get-table-id p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [90, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_remote_read_time_per_task_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_remote_read_time_bucket')}[$__rate_interval])) by (le, job))",
                                 f"remote-io p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [90, "max"],
                         ),
                         panels.target(
-                            f"histogram_quantile(0.99, sum(rate({metric('compute_refill_cache_duration_bucket')}[$__rate_interval])) by (le, instance))",
-                            "compute_apply_version_duration_p99 - {{instance}}",
+                            f"histogram_quantile(0.99, sum(rate({metric('compute_refill_cache_duration_bucket')}[$__rate_interval])) by (le))",
+                            "compute_apply_version_duration_p99",
                         ),
                         panels.target(
                             f"sum by(le)(rate({metric('compactor_compact_task_duration_sum')}[$__rate_interval])) / sum by(le)(rate({metric('compactor_compact_task_duration_count')}[$__rate_interval]))",
@@ -696,6 +696,20 @@ def section_streaming(panels):
                 panels.target(
                     f"rate({metric('stream_source_split_change_event_count')}[$__rate_interval])",
                     "source={{source_name}} actor={{actor_id}} @ {{instance}}"
+                )
+            ]
+        ),
+        panels.timeseries_count(
+            "Kafka Consumer Lag Size",
+            "Kafka Consumer Lag Size by source_id, partition and actor_id",
+            [
+                panels.target(
+                    f"{metric('high_watermark')}",
+                    "source={{source_id}} partition={{partition}}"
+                ),
+                panels.target(
+                    f"{metric('latest_message_id')}",
+                    "source={{source_id}} partition={{partition}} actor_id={{actor_id}}"
                 )
             ]
         ),
@@ -1768,20 +1782,16 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(irate({table_metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "bloom filter true negative  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"sum(irate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (table_id,type)",
+                    "bloom filter false positive count  - {{table_id}} - {{type}}",
                 ),
                 panels.target(
-                    f"sum(irate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "bloom filter false positive count  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"sum(irate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (table_id,type)",
+                    "bloom filter miss count - {{table_id}} - {{type}}",
                 ),
                 panels.target(
-                    f"sum(irate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req bloom filter positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(irate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req check bloom filter - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"sum(irate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (table_id,type)",
+                    "bloom filter check count- {{table_id}} - {{type}}",
                 ),
             ],
         ),
@@ -1814,22 +1824,22 @@ def section_hummock(panels):
             ],
         ),
         panels.timeseries_percentage(
-            "Read Request Bloom-Filter Filtered Rate",
-            "Negative / Total",
+            "Bloom-Filter Miss Rate",
+            "Positive / Total",
             [
                 panels.target(
-                    f"1 - (((sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
-                    "read req bloom filter filter rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"(sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (table_id,type)) / (sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (table_id,type))",
+                    "bloom filter miss rate - {{table_id}} - {{type}}",
                 ),
             ],
         ),
         panels.timeseries_percentage(
             "Read Request Bloom-Filter False-Positive Rate",
-            "False-Positive / Positive",
+            "False-Positive / Total",
             [
                 panels.target(
-                    f"(((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
-                    "read req bloom filter false positive rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"(((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (table_id,type))) / (sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (table_id,type)))",
+                    "read req bloom filter false positive rate - {{table_id}} - {{type}}",
                 ),
             ],
         ),

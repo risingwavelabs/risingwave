@@ -16,29 +16,21 @@ use risingwave_expr_macro::function;
 
 #[function("length(varchar) -> int32")]
 #[function("char_length(varchar) -> int32")]
-pub fn length(s: &str) -> i32 {
+pub fn char_length(s: &str) -> i32 {
     s.chars().count() as i32
 }
 
 #[function("octet_length(varchar) -> int32")]
-pub fn octet_length_str(s: &str) -> i32 {
-    s.as_bytes().len() as i32
-}
-
 #[function("length(bytea) -> int32")]
 #[function("octet_length(bytea) -> int32")]
-pub fn octet_length_bytea(s: &[u8]) -> i32 {
-    s.len() as i32
+pub fn octet_length(s: impl AsRef<[u8]>) -> i32 {
+    s.as_ref().len() as i32
 }
 
 #[function("bit_length(varchar) -> int32")]
-pub fn bit_length_str(s: &str) -> i32 {
-    octet_length_str(s) * 8
-}
-
 #[function("bit_length(bytea) -> int32")]
-pub fn bit_length_bytea(s: &[u8]) -> i32 {
-    octet_length_bytea(s) * 8
+pub fn bit_length(s: impl AsRef<[u8]>) -> i32 {
+    octet_length(s) * 8
 }
 
 #[cfg(test)]
@@ -51,7 +43,7 @@ mod tests {
         let cases = [("hello world", 11), ("hello rust", 10)];
 
         for (s, expected) in cases {
-            assert_eq!(length(s), expected);
+            assert_eq!(char_length(s), expected);
         }
     }
 
@@ -60,7 +52,7 @@ mod tests {
         let cases = [("hello world", 11), ("你好", 6), ("😇哈哈hhh", 13)];
 
         for (s, expected) in cases {
-            assert_eq!(octet_length_str(s), expected);
+            assert_eq!(octet_length(s), expected);
         }
     }
 
@@ -73,7 +65,7 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            assert_eq!(bit_length_str(s), expected);
+            assert_eq!(bit_length(s), expected);
         }
     }
 }

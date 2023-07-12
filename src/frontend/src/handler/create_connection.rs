@@ -131,7 +131,7 @@ pub async fn handle_create_connection(
 
     let create_connection_payload = resolve_create_connection_payload(&with_properties)?;
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_connection(
             connection_name,

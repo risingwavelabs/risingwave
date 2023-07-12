@@ -29,7 +29,6 @@ use regex::Regex;
 use risingwave_pb::data::PbInterval;
 use rust_decimal::prelude::Decimal;
 
-use super::ops::IsNegative;
 use super::to_binary::ToBinary;
 use super::*;
 use crate::error::{ErrorCode, Result, RwError};
@@ -971,12 +970,6 @@ impl Zero for Interval {
 
     fn is_zero(&self) -> bool {
         self.months == 0 && self.days == 0 && self.usecs == 0
-    }
-}
-
-impl IsNegative for Interval {
-    fn is_negative(&self) -> bool {
-        self < &Self::from_month_day_usec(0, 0, 0)
     }
 }
 

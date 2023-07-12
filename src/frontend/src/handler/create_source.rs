@@ -23,7 +23,7 @@ use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolErro
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
-    AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
+    AvroParserConfig, DebeziumAvroParserConfig, ParserProperties, ProtobufParserConfig,
 };
 use risingwave_connector::source::cdc::{
     CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
@@ -32,13 +32,13 @@ use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::{
-    GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
+    SourceFormat, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
     PULSAR_CONNECTOR,
 };
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
-    self, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema,
+    self, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema, Encode,
     ProtobufSchema, SourceSchema, SourceWatermark,
 };
 
@@ -65,14 +65,13 @@ async fn extract_avro_table_schema(
     schema: &AvroSchema,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let conf = AvroParserConfig::new(
-        with_properties,
-        schema.row_schema_location.0.as_str(),
-        schema.use_schema_registry,
-        false,
-        None,
-    )
-    .await?;
+    let info = StreamSourceInfo {
+        row_schema_location: schema.row_schema_location.0.clone(),
+        use_schema_registry: schema.use_schema_registry,
+        ..Default::default()
+    };
+    let parser_config = ParserProperties::new(SourceFormat::Avro, with_properties, &info)?;
+    let conf = AvroParserConfig::new(parser_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     Ok(vec_column_desc
         .into_iter()
@@ -88,14 +87,13 @@ async fn extract_upsert_avro_table_schema(
     schema: &AvroSchema,
     with_properties: &HashMap<String, String>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let conf = AvroParserConfig::new(
-        with_properties,
-        schema.row_schema_location.0.as_str(),
-        schema.use_schema_registry,
-        true,
-        None,
-    )
-    .await?;
+    let info = StreamSourceInfo {
+        row_schema_location: schema.row_schema_location.0.clone(),
+        use_schema_registry: schema.use_schema_registry,
+        ..Default::default()
+    };
+    let parser_config = ParserProperties::new(SourceFormat::UpsertAvro, with_properties, &info)?;
+    let conf = AvroParserConfig::new(parser_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
 
     let vec_pk_desc = conf.extract_pks().map_err(|e| RwError::from(ErrorCode::InternalError(
@@ -132,9 +130,12 @@ async fn extract_debezium_avro_table_pk_columns(
     schema: &DebeziumAvroSchema,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
-    let conf =
-        DebeziumAvroParserConfig::new(with_properties, schema.row_schema_location.0.as_str())
-            .await?;
+    let info = StreamSourceInfo {
+        row_schema_location: schema.row_schema_location.0.clone(),
+        ..Default::default()
+    };
+    let parser_config = ParserProperties::new(SourceFormat::DebeziumAvro, with_properties, &info)?;
+    let conf = DebeziumAvroParserConfig::new(parser_config).await?;
     Ok(conf.extract_pks()?.drain(..).map(|c| c.name).collect())
 }
 
@@ -143,9 +144,12 @@ async fn extract_debezium_avro_table_schema(
     schema: &DebeziumAvroSchema,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let conf =
-        DebeziumAvroParserConfig::new(with_properties, schema.row_schema_location.0.as_str())
-            .await?;
+    let info = StreamSourceInfo {
+        row_schema_location: schema.row_schema_location.0.clone(),
+        ..Default::default()
+    };
+    let parser_config = ParserProperties::new(SourceFormat::DebeziumAvro, with_properties, &info)?;
+    let conf = DebeziumAvroParserConfig::new(parser_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     let column_catalog = vec_column_desc
         .into_iter()
@@ -162,14 +166,16 @@ async fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
     with_properties: HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser = ProtobufParserConfig::new(
-        &with_properties,
-        &schema.row_schema_location.0,
-        &schema.message_name.0,
-        schema.use_schema_registry,
-    )
-    .await?;
-    let column_descs = parser.map_to_columns()?;
+    let info = StreamSourceInfo {
+        proto_message_name: schema.message_name.0.clone(),
+        row_schema_location: schema.row_schema_location.0.clone(),
+        use_schema_registry: schema.use_schema_registry,
+        ..Default::default()
+    };
+    let parser_config = ParserProperties::new(SourceFormat::Protobuf, &with_properties, &info)?;
+    let conf = ProtobufParserConfig::new(parser_config).await?;
+
+    let column_descs = conf.map_to_columns()?;
 
     Ok(column_descs
         .into_iter()
@@ -208,7 +214,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::Protobuf(protobuf_schema) => {
             if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string())));
+                    "User-defined schema is not allowed with FORMAT PLAIN ENCODE PROTOBUF. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string())));
             };
             (
                 Some(
@@ -227,7 +233,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::Avro(avro_schema) => {
             if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
+                    "User-defined schema is not allowed with FORMAT PLAIN ENCODE AVRO. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
             (
                 Some(extract_avro_table_schema(avro_schema, with_properties).await?),
@@ -340,7 +346,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::UpsertJson => {
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format upsert_json."
+                    "Primary key must be specified when creating source with FORMAT UPSERT ENCODE JSON."
                         .to_string(),
                 )));
             }
@@ -356,7 +362,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::Maxwell => {
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format maxwell."
+                    "Primary key must be specified when creating source with FORMAT MAXWELL ENCODE JSON."
                         .to_string(),
                 )));
             }
@@ -659,6 +665,14 @@ pub fn validate_compatibility(
             // Default schema name is "public"
             props.insert("schema.name".into(), "public".into());
         }
+        if !props.contains_key("publication.name") {
+            // Default publication name is "rw_publication"
+            props.insert("publication.name".into(), "rw_publication".into());
+        }
+        if !props.contains_key("publication.create.enable") {
+            // Default auto create publication if doesn't exist
+            props.insert("publication.create.enable".into(), "true".into());
+        }
     }
     Ok(())
 }
@@ -750,19 +764,26 @@ pub async fn handle_create_source(
         )));
     }
 
+    if stmt.source_schema.row_encode == Encode::Json && stmt.columns.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(
+            "schema definition is required for ENCODE JSON".to_owned(),
+        )));
+    }
+
+    let (source_schema, _) = stmt
+        .source_schema
+        .into_source_schema()
+        .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
+
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
-    validate_compatibility(&stmt.source_schema, &mut with_properties)?;
+    validate_compatibility(&source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&stmt.constraints)?;
     let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    let (columns_from_resolve_source, pk_names, source_info) = try_bind_columns_from_source(
-        &stmt.source_schema,
-        pk_names,
-        &stmt.columns,
-        &with_properties,
-    )
-    .await?;
+    let (columns_from_resolve_source, pk_names, source_info) =
+        try_bind_columns_from_source(&source_schema, pk_names, &stmt.columns, &with_properties)
+            .await?;
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);
@@ -823,7 +844,7 @@ pub async fn handle_create_source(
         optional_associated_table_id: None,
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_source(source).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
@@ -847,7 +868,7 @@ pub mod tests {
         let sql = format!(
             r#"CREATE SOURCE t
     WITH (connector = 'kinesis')
-    ROW FORMAT PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
+    FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;

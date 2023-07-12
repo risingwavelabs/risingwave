@@ -43,7 +43,7 @@ use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
+use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -317,8 +317,15 @@ pub async fn compute_node_serve(
         source_metrics.clone(),
     );
 
+    info!(
+        "connector param: {:?} {:?}",
+        opts.connector_rpc_endpoint, opts.connector_rpc_sink_payload_format
+    );
+
+    let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
+
     let connector_params = risingwave_connector::ConnectorParams {
-        connector_rpc_endpoint: opts.connector_rpc_endpoint,
+        connector_client,
         sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
             None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
             Some("json") => SinkPayloadFormat::Json,
@@ -330,8 +337,6 @@ pub async fn compute_node_serve(
             }
         },
     };
-
-    info!("connector param: {:?}", connector_params);
 
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
@@ -491,40 +496,31 @@ fn print_memory_config(
     embedded_compactor_enabled: bool,
     reserved_memory_bytes: usize,
 ) {
-    info!("Memory outline: ");
-    info!("> total_memory: {}", convert(cn_total_memory_bytes as _));
-    info!(
-        ">     storage_memory: {}",
-        convert(storage_memory_bytes as _)
-    );
-    info!(
-        ">         block_cache_capacity: {}",
-        convert((storage_memory_config.block_cache_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         meta_cache_capacity: {}",
-        convert((storage_memory_config.meta_cache_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         shared_buffer_capacity: {}",
-        convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         file_cache_total_buffer_capacity: {}",
-        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _)
-    );
-    if embedded_compactor_enabled {
-        info!(
-            ">         compactor_memory_limit: {}",
+    let memory_config = format!(
+        "\n\
+        Memory outline:\n\
+        > total_memory: {}\n\
+        >     storage_memory: {}\n\
+        >         block_cache_capacity: {}\n\
+        >         meta_cache_capacity: {}\n\
+        >         shared_buffer_capacity: {}\n\
+        >         file_cache_total_buffer_capacity: {}\n\
+        >         compactor_memory_limit: {}\n\
+        >     compute_memory: {}\n\
+        >     reserved_memory: {}",
+        convert(cn_total_memory_bytes as _),
+        convert(storage_memory_bytes as _),
+        convert((storage_memory_config.block_cache_capacity_mb << 20) as _),
+        convert((storage_memory_config.meta_cache_capacity_mb << 20) as _),
+        convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _),
+        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _),
+        if embedded_compactor_enabled {
             convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
-        );
-    }
-    info!(
-        ">     compute_memory: {}",
-        convert(compute_memory_bytes as _)
+        } else {
+            "Not enabled".to_string()
+        },
+        convert(compute_memory_bytes as _),
+        convert(reserved_memory_bytes as _),
     );
-    info!(
-        ">     reserved_memory: {}",
-        convert(reserved_memory_bytes as _)
-    );
+    info!("{}", memory_config);
 }

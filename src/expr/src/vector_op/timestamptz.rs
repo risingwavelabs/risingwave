@@ -14,7 +14,6 @@
 
 use std::fmt::Write;
 
-use chrono_tz::Tz;
 use num_traits::CheckedNeg;
 use risingwave_common::cast::str_to_timestamp;
 use risingwave_common::types::{CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64};
@@ -24,11 +23,11 @@ use crate::{ExprError, Result};
 
 /// Just a wrapper to reuse the `map_err` logic.
 #[inline(always)]
-fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
-    Tz::from_str_insensitive(time_zone).map_err(|e| ExprError::InvalidParam {
+pub fn time_zone_err(inner_err: String) -> ExprError {
+    ExprError::InvalidParam {
         name: "time_zone",
-        reason: e,
-    })
+        reason: inner_err,
+    }
 }
 
 #[function("to_timestamp(float64) -> timestamptz")]
@@ -43,7 +42,7 @@ pub fn f64_sec_to_timestamptz(elem: F64) -> Result<Timestamptz> {
 
 #[function("at_time_zone(timestamp, varchar) -> timestamptz")]
 pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Timestamptz> {
-    let time_zone = lookup_time_zone(time_zone)?;
+    let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
     // https://www.postgresql.org/docs/current/datetime-invalid-input.html
     // Special cases:
     // * invalid time during daylight forward
@@ -72,9 +71,8 @@ pub fn timestamptz_to_string(
     time_zone: &str,
     writer: &mut dyn Write,
 ) -> Result<()> {
-    let time_zone = lookup_time_zone(time_zone)?;
-    let instant_utc = elem.to_datetime_utc();
-    let instant_local = instant_utc.with_timezone(&time_zone);
+    let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
+    let instant_local = elem.to_datetime_in_zone(time_zone);
     write!(
         writer,
         "{}",
@@ -98,9 +96,8 @@ pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<Timestamptz> {
 
 #[function("at_time_zone(timestamptz, varchar) -> timestamp")]
 pub fn timestamptz_at_time_zone(input: Timestamptz, time_zone: &str) -> Result<Timestamp> {
-    let time_zone = lookup_time_zone(time_zone)?;
-    let instant_utc = input.to_datetime_utc();
-    let instant_local = instant_utc.with_timezone(&time_zone);
+    let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
+    let instant_local = input.to_datetime_in_zone(time_zone);
     let naive = instant_local.naive_local();
     Ok(Timestamp(naive))
 }

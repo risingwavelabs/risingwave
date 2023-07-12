@@ -790,6 +790,15 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v2) filter((t.v2 < 5:Int32))] }
             └─StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: distinct agg on empty args
+  sql: |
+    create table t(x int, y varchar);
+    select count(distinct *) from t;
+  binder_error: |-
+    Bind error: failed to bind expression: count(DISTINCT *)
+
+    Caused by:
+      Invalid input syntax: DISTINCT is not allowed for aggregate function `count` without args
 - name: only distinct agg
   sql: |
     create table t(a int, b int, c int);
@@ -843,6 +852,88 @@
       └─StreamHashAgg { group_key: [t.a], aggs: [count(distinct t.b), count(distinct t.c), sum(t.c), count] }
         └─StreamExchange { dist: HashShard(t.a) }
           └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: distinct & string_agg
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(y, ','), count(distinct x) from t;
+  logical_plan: |-
+    LogicalProject { exprs: [string_agg(t.y, ',':Varchar), count(distinct t.x)] }
+    └─LogicalAgg { aggs: [string_agg(t.y, ',':Varchar), count(distinct t.x)] }
+      └─LogicalProject { exprs: [t.y, ',':Varchar, t.x] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [string_agg(t.y, ',':Varchar), count(distinct t.x)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.y, ',':Varchar, t.x] }
+        └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [string_agg, count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [string_agg(t.y, ',':Varchar), count(distinct t.x)] }
+      └─StreamSimpleAgg { aggs: [string_agg(t.y, ',':Varchar), count(distinct t.x), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamProject { exprs: [t.y, ',':Varchar, t.x, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: distinct & order by on different calls
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(y, ',' order by y), count(distinct x) from t;
+  logical_plan: |-
+    LogicalProject { exprs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
+    └─LogicalAgg { aggs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
+      └─LogicalProject { exprs: [t.y, ',':Varchar, t.x] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.y, ',':Varchar, t.x] }
+        └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [string_agg, count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
+      └─StreamSimpleAgg { aggs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamProject { exprs: [t.y, ',':Varchar, t.x, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: distinct & order by on same calls
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(distinct y, ',' order by y), count(distinct x) from t;
+  logical_plan: |-
+    LogicalProject { exprs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
+    └─LogicalAgg { aggs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
+      └─LogicalProject { exprs: [t.y, ',':Varchar, t.x] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchProject { exprs: [t.y, ',':Varchar, t.x] }
+        └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [string_agg, count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
+      └─StreamSimpleAgg { aggs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamProject { exprs: [t.y, ',':Varchar, t.x, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: distinct & invalid order by
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(distinct y, ',' order by x) from t;
+  binder_error: |-
+    Bind error: failed to bind expression: string_agg(DISTINCT y, ',' ORDER BY x)
+
+    Caused by:
+      Invalid input syntax: ORDER BY expressions must match regular arguments of the aggregate for `string_agg` when DISTINCT is provided
+- name: distinct with multiple non-const args
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(distinct y, x::varchar) from t;
+  binder_error: |-
+    Bind error: failed to bind expression: string_agg(DISTINCT y, CAST(x AS CHARACTER VARYING))
+
+    Caused by:
+      Feature is not yet implemented: non-constant arguments other than the first one for DISTINCT aggregation is not supported now
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - name: distinct agg with filter
   sql: |
     create table t(a int, b int, c int);
@@ -893,10 +984,6 @@
           └─StreamStatelessSimpleAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
             └─StreamProject { exprs: [t.b, (Length(t.a) * t.b) as $expr1, t._row_id] }
               └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- sql: |
-    create table t(x int, y varchar);
-    select string_agg(y, ',' order by y), count(distinct x) from t;
-  planner_error: 'Invalid input syntax: Order by aggregates are disallowed to occur with distinct aggregates'
 - sql: |
     create table t(v1 int, v2 int);
     with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
@@ -963,12 +1050,6 @@
         └─LogicalScan { table: t, columns: [t.x, t.y] }
   with_config_map:
     RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
-- sql: |
-    create table t(x varchar, y int);
-    select string_agg(x, ','), count(distinct y) from t;
-  planner_error: |-
-    Feature is not yet implemented: Non-distinct string_agg can't appear with distinct aggregates
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - name: remove unnecessary distinct for max and min
   sql: |
     create table t(x int, y int);
@@ -1445,7 +1526,8 @@
     Bind error: failed to bind expression: percentile_cont(x)
 
     Caused by:
-      Invalid input syntax: arg in percentile_cont must be constant
+      Feature is not yet implemented: non-constant direct arguments for ordered-set aggregation is not supported now
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t (x int, y int);
     select percentile_cont('abc') within group (order by y) from t;
@@ -1453,7 +1535,7 @@
     Bind error: failed to bind expression: percentile_cont('abc')
 
     Caused by:
-      Invalid input syntax: arg in percentile_cont must be float64
+      Invalid input syntax: direct arg in `percentile_cont` must be castable to float64
 - sql: |
     create table t (x int, y int);
     select percentile_cont(1.3) within group (order by y) from t;
@@ -1461,7 +1543,7 @@
     Bind error: failed to bind expression: percentile_cont(1.3)
 
     Caused by:
-      Invalid input syntax: arg in percentile_cont must between 0 and 1
+      Invalid input syntax: direct arg in `percentile_cont` must between 0.0 and 1.0
 - sql: |
     create table t (x int, y int);
     select percentile_cont(0, 0) within group (order by y) from t;
@@ -1469,7 +1551,7 @@
     Bind error: failed to bind expression: percentile_cont(0, 0)
 
     Caused by:
-      Invalid input syntax: only one arg is expected in percentile_cont
+      Invalid input syntax: invalid direct args or within group argument for `percentile_cont` aggregation
 - sql: |
     create table t (x int, y varchar);
     select percentile_cont(0) within group (order by y) from t;
@@ -1477,7 +1559,7 @@
     Bind error: failed to bind expression: percentile_cont(0)
 
     Caused by:
-      Bind error: cannot cast type "varchar" to "double precision" in Implicit context
+      Invalid input syntax: arg in `percentile_cont` must be castable to float64
 - sql: |
     create table t (x int, y int);
     select percentile_cont(0) within group (order by y desc) from t;
@@ -1507,4 +1589,48 @@
     Bind error: failed to bind expression: mode(1)
 
     Caused by:
-      Invalid input syntax: no arguments are expected in mode agg
+      Invalid input syntax: invalid direct args or within group argument for `mode` aggregation
+- sql: |
+    create table t (x int, y int);
+    select first_value(x) from t;
+  planner_error: 'Invalid input syntax: Aggregation function first_value requires ORDER BY clause'
+- sql: |
+    create table t (x int, y int);
+    select last_value(x) from t;
+  planner_error: 'Invalid input syntax: Aggregation function last_value requires ORDER BY clause'
+- sql: |
+    create table t (x int, y int);
+    select first_value(x order by y asc) from t;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [first_value(t.x order_by(t.y ASC))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [first_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [first_value(t.x order_by(t.y ASC))] }
+      └─StreamSimpleAgg { aggs: [first_value(t.x order_by(t.y ASC)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    create table t (x int, y int);
+    select last_value(x order by y desc nulls last) from t;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [last_value(t.x order_by(t.y DESC NULLS LAST))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [last_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [last_value(t.x order_by(t.y DESC NULLS LAST))] }
+      └─StreamSimpleAgg { aggs: [last_value(t.x order_by(t.y DESC NULLS LAST)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT count(DISTINCT i) FROM integers;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [sum0(count(integers.i))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [count(integers.i)] }
+        └─BatchHashAgg { group_key: [integers.i], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(integers.i) }
+            └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }

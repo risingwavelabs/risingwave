@@ -394,6 +394,17 @@
     └─LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
       ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       └─LogicalScan { table: b, columns: [b.x, b._row_id] }
+- name: Ensure that natural joins work on materialized views
+  sql: |
+    create table t (a int, b int, c int);
+    create materialized view mv1 as select *, lag(a) over (partition by c) out1 from t;
+    create materialized view mv2 as select *, lead(b) over (partition by c) out2 from t;
+    select * from mv1 natural join mv2;
+  logical_plan: |-
+    LogicalProject { exprs: [mv1.c, mv1.b, mv1.a, mv1.out1, mv2.out2] }
+    └─LogicalJoin { type: Inner, on: (mv1.a = mv2.a) AND (mv1.b = mv2.b) AND (mv1.c = mv2.c), output: all }
+      ├─LogicalScan { table: mv1, columns: [mv1.a, mv1.b, mv1.c, mv1.t._row_id, mv1.out1] }
+      └─LogicalScan { table: mv2, columns: [mv2.a, mv2.b, mv2.c, mv2.t._row_id, mv2.out2] }
 - name: Ensure that nested natural joins bind and disambiguate columns
   sql: |
     create table a(x int, y int);

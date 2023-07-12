@@ -30,6 +30,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             Some(funcs) => funcs,
         };
         let func = funcs.choose(&mut self.rng).unwrap();
+        if matches!(
+            (func.func, func.inputs_type.as_slice()),
+            (
+                AggKind::Min | AggKind::Max,
+                [DataType::Boolean | DataType::Jsonb]
+            )
+        ) {
+            return self.gen_simple_scalar(ret);
+        }
 
         let context = SqlGeneratorContext::new();
         let context = context.set_inside_agg();
@@ -39,7 +48,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .map(|t| self.gen_expr(t, context))
             .collect();
 
-        let distinct = self.flip_coin() && self.is_distinct_allowed && !exprs.is_empty();
+        // DISTINCT now only works with agg kinds except `ApproxCountDistinct`, and with at least
+        // one argument and only the first being non-constant. See `Binder::bind_normal_agg`
+        // for more details.
+        let distinct_allowed = func.func != AggKind::ApproxCountDistinct
+            && !exprs.is_empty()
+            && exprs.iter().skip(1).all(|e| matches!(e, Expr::Value(_)));
+        let distinct = distinct_allowed && self.flip_coin();
+
         let filter = if self.flip_coin() {
             let context = SqlGeneratorContext::new_with_can_agg(false);
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/4762
@@ -52,11 +68,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             None
         };
 
-        // Only can generate ORDER BY if distinct_allowed is banned globally in the generator.
-        // This avoids ORDER BY + Distinct aggregate from being generated.
-        // See https://github.com/risingwavelabs/risingwave/issues/9860.
-        let order_by = if self.flip_coin() && !distinct && !self.is_distinct_allowed {
-            self.gen_order_by()
+        let order_by = if self.flip_coin() {
+            if distinct {
+                // can only generate order by clause with exprs in argument list, see
+                // `Binder::bind_normal_agg`
+                self.gen_order_by_within(&exprs)
+            } else {
+                self.gen_order_by()
+            }
         } else {
             vec![]
         };
@@ -75,32 +94,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     ) -> Option<Expr> {
         use AggKind as A;
         match func {
-            A::StringAgg => {
-                // distinct and non_distinct_string_agg are incompatible according to
-                // https://github.com/risingwavelabs/risingwave/blob/a703dc7d725aa995fecbaedc4e9569bc9f6ca5ba/src/frontend/src/optimizer/plan_node/logical_agg.rs#L394
-                if self.is_distinct_allowed && !distinct {
+            kind @ (A::FirstValue | A::LastValue) => {
+                if order_by.is_empty() {
+                    // `first/last_value` only works when ORDER BY is provided
                     None
                 } else {
                     Some(Expr::Function(make_agg_func(
-                        "string_agg",
+                        &kind.to_string(),
                         exprs,
                         distinct,
-                        filter,
-                        order_by,
-                    )))
-                }
-            }
-            A::FirstValue => None,
-            A::ApproxCountDistinct => {
-                if self.is_distinct_allowed {
-                    None
-                } else {
-                    // It does not make sense to have `distinct`.
-                    // That requires precision, which `approx_count_distinct` does not provide.
-                    Some(Expr::Function(make_agg_func(
-                        "approx_count_distinct",
-                        exprs,
-                        false,
                         filter,
                         order_by,
                     )))

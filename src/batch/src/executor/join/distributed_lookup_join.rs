@@ -34,14 +34,13 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
-use tokio::sync::watch::Receiver;
 
 use crate::executor::join::JoinType;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
     ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
 };
-use crate::task::{BatchTaskContext, ShutdownMsg};
+use crate::task::{BatchTaskContext, ShutdownToken};
 
 /// Distributed Lookup Join Executor.
 /// High level Execution flow:
@@ -261,7 +260,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 output_indices,
                 chunk_size,
                 identity: identity.clone(),
-                shutdown_rx: Some(source.shutdown_rx.clone()),
+                shutdown_rx: source.shutdown_rx.clone(),
                 mem_ctx: source.context.create_executor_mem_context(&identity),
             }
             .dispatch())
@@ -285,7 +284,7 @@ struct DistributedLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
-    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    shutdown_rx: ShutdownToken,
     mem_ctx: MemoryContext,
 }
 

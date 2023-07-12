@@ -16,7 +16,6 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::{ArrayRef, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -260,15 +259,16 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         ops: &[Op],
         columns: &[ArrayRef],
         visibilities: Vec<Option<Bitmap>>,
+        materialized: &Bitmap,
     ) -> StreamExecutorResult<()> {
-        let columns = columns.iter().map(|col| col.as_ref()).collect_vec();
-        for ((state, storage), visibility) in self
+        for (((state, storage), visibility), materialized) in self
             .states
             .iter_mut()
             .zip_eq_fast(storages)
             .zip_eq_fast(visibilities)
+            .zip_eq_fast(materialized.iter())
         {
-            state.apply_chunk(ops, visibility.as_ref(), &columns, storage)?;
+            state.apply_chunk(ops, visibility.as_ref(), columns, storage, materialized)?;
         }
         Ok(())
     }

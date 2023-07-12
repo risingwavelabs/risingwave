@@ -16,6 +16,7 @@ use std::assert_matches::assert_matches;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem;
+use std::pin::pin;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,7 +29,7 @@ use futures_async_stream::for_await;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
-use risingwave_batch::task::{ShutdownMsg, TaskId as TaskIdBatch};
+use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId as TaskIdBatch};
 use risingwave_common::array::DataChunk;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::addr::HostAddr;
@@ -45,7 +46,7 @@ use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::RwLock;
 use tonic::Streaming;
 use tracing::{debug, error, warn, Instrument};
 use StageEvent::Failed;
@@ -80,13 +81,6 @@ enum StageState {
 }
 
 #[derive(Debug)]
-enum StageMessage {
-    /// Contains the reason why need to stop (e.g. Execution failure). The message is `None` if
-    /// it's normal stop.
-    Stop(Option<String>),
-}
-
-#[derive(Debug)]
 pub enum StageEvent {
     Scheduled(StageId),
     ScheduledRoot(Receiver<SchedulerResult<DataChunk>>),
@@ -117,7 +111,7 @@ pub struct StageExecution {
     worker_node_manager: WorkerNodeSelector,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     state: Arc<RwLock<StageState>>,
-    shutdown_tx: RwLock<Option<oneshot::Sender<StageMessage>>>,
+    shutdown_tx: RwLock<Option<ShutdownSender>>,
     /// Children stage executions.
     ///
     /// We use `Vec` here since children's size is usually small.
@@ -211,7 +205,7 @@ impl StageExecution {
                 };
 
                 // The channel used for shutdown signal messaging.
-                let (sender, receiver) = oneshot::channel();
+                let (sender, receiver) = ShutdownToken::new();
                 // Fill the shutdown sender.
                 let mut holder = self.shutdown_tx.write().await;
                 *holder = Some(sender);
@@ -225,7 +219,11 @@ impl StageExecution {
                     query_id = self.stage.query_id.id,
                     stage_id = self.stage.id,
                 );
-                spawn(async move { runner.run(receiver).instrument(span).await });
+                self.ctx
+                    .session()
+                    .env()
+                    .compute_runtime()
+                    .spawn(async move { runner.run(receiver).instrument(span).await });
 
                 tracing::trace!(
                     "Stage {:?}-{:?} started.",
@@ -244,7 +242,12 @@ impl StageExecution {
         if let Some(shutdown_tx) = self.shutdown_tx.write().await.take() {
             // It's possible that the stage has not been scheduled, so the channel sender is
             // None.
-            if shutdown_tx.send(StageMessage::Stop(error)).is_err() {
+
+            if !if let Some(error) = error {
+                shutdown_tx.abort(error)
+            } else {
+                shutdown_tx.cancel()
+            } {
                 // The stage runner handle has already closed. so do no-op.
                 tracing::trace!(
                     "Failed to send stop message stage: {:?}-{:?}",
@@ -306,7 +309,7 @@ impl StageExecution {
 }
 
 impl StageRunner {
-    async fn run(mut self, shutdown_rx: oneshot::Receiver<StageMessage>) {
+    async fn run(mut self, shutdown_rx: ShutdownToken) {
         if let Err(e) = self.schedule_tasks_for_all(shutdown_rx).await {
             error!(
                 "Stage {:?}-{:?} failed to schedule tasks, error: {:?}",
@@ -329,10 +332,7 @@ impl StageRunner {
 
     /// Schedule all tasks to CN and wait process all status messages from RPC. Note that when all
     /// task is created, it should tell `QueryRunner` to schedule next.
-    async fn schedule_tasks(
-        &mut self,
-        shutdown_rx: oneshot::Receiver<StageMessage>,
-    ) -> SchedulerResult<()> {
+    async fn schedule_tasks(&mut self, mut shutdown_rx: ShutdownToken) -> SchedulerResult<()> {
         let mut futures = vec![];
 
         if let Some(table_scan_info) = self.stage.table_scan_info.as_ref()
@@ -394,7 +394,8 @@ impl StageRunner {
         }
 
         // Merge different task streams into a single stream.
-        let mut all_streams = select_all(buffered_streams).take_until(shutdown_rx);
+        let cancelled = pin!(shutdown_rx.cancelled());
+        let mut all_streams = select_all(buffered_streams).take_until(cancelled);
 
         // Process the stream until finished.
         let mut running_task_cnt = 0;
@@ -518,7 +519,7 @@ impl StageRunner {
                 self.stage.id
             );
             // Waiting for shutdown signal.
-            shutdown.await.expect("Sender should not exited.");
+            shutdown.await;
         }
 
         // Received shutdown signal from query runner, should send abort RPC to all CNs.
@@ -543,7 +544,7 @@ impl StageRunner {
 
     async fn schedule_tasks_for_root(
         &mut self,
-        shutdown_rx: oneshot::Receiver<StageMessage>,
+        mut shutdown_rx: ShutdownToken,
     ) -> SchedulerResult<()> {
         let root_stage_id = self.stage.id;
         // Currently, the dml or table scan should never be root fragment, so the partition is None.
@@ -561,23 +562,24 @@ impl StageRunner {
         self.notify_stage_scheduled(QueryMessage::Stage(StageEvent::ScheduledRoot(result_rx)))
             .await;
 
-        // TODO(ZENOTME): For now this rx is only used as placehodler, it didn't take effect.
-        // Refactor later to make use it.
-        let (_tx, rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
             self.ctx.to_batch_task_context(),
             self.epoch.clone(),
-            rx,
+            shutdown_rx.clone(),
         );
 
+        let shutdown_rx0 = shutdown_rx.clone();
         let executor = executor.build().await?;
         let chunk_stream = executor.execute();
-        let mut terminated_chunk_stream = chunk_stream.take_until(shutdown_rx);
+        let cancelled = pin!(shutdown_rx.cancelled());
         #[for_await]
-        for chunk in &mut terminated_chunk_stream {
+        for chunk in chunk_stream.take_until(cancelled) {
             if let Err(ref e) = chunk {
+                if shutdown_rx0.is_cancelled() {
+                    break;
+                }
                 let err_str = e.to_string();
 
                 // This is possible if The Query Runner drop early before schedule the root
@@ -596,23 +598,15 @@ impl StageRunner {
             }
         }
 
-        if let Some(err) = terminated_chunk_stream.take_result() {
-            let stage_message = err.expect("The sender should always exist!");
-
-            // Terminated by other tasks execution error, so no need to return error here.
-            match stage_message {
-                StageMessage::Stop(Some(err_str)) => {
-                    // Tell Query Result Fetcher to stop polling and attach failure reason as str.
-                    if let Err(_e) = result_tx.send(Err(TaskExecutionError(err_str))).await {
-                        warn!("Send task execution failed");
-                    }
-                }
-                StageMessage::Stop(None) => {
-                    unreachable!()
+        // Terminated by other tasks execution error, so no need to return error here.
+        match shutdown_rx0.message() {
+            ShutdownMsg::Abort(err_str) => {
+                // Tell Query Result Fetcher to stop polling and attach failure reason as str.
+                if let Err(_e) = result_tx.send(Err(TaskExecutionError(err_str))).await {
+                    warn!("Send task execution failed");
                 }
             }
-        } else {
-            self.notify_stage_completed().await;
+            _ => self.notify_stage_completed().await,
         }
 
         tracing::trace!(
@@ -624,10 +618,7 @@ impl StageRunner {
         Ok(())
     }
 
-    async fn schedule_tasks_for_all(
-        &mut self,
-        shutdown_rx: oneshot::Receiver<StageMessage>,
-    ) -> SchedulerResult<()> {
+    async fn schedule_tasks_for_all(&mut self, shutdown_rx: ShutdownToken) -> SchedulerResult<()> {
         // If root, we execute it locally.
         if !self.is_root_stage() {
             self.schedule_tasks(shutdown_rx).await?;

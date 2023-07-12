@@ -91,7 +91,7 @@ pub async fn handle_drop_function(
         }
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_function(function_id).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_FUNCTION))

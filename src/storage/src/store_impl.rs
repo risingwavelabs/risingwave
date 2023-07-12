@@ -270,28 +270,32 @@ pub mod verify {
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
         type IterStream = impl StateStoreReadIterStream;
 
-        define_state_store_read_associated_type!();
-
-        fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
-            async move {
-                let actual = self
-                    .actual
-                    .get(key.clone(), epoch, read_options.clone())
-                    .await;
-                if let Some(expected) = &self.expected {
-                    let expected = expected.get(key, epoch, read_options).await;
-                    assert_result_eq(&actual, &expected);
-                }
-                actual
+        async fn get(
+            &self,
+            key: Bytes,
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>> {
+            let actual = self
+                .actual
+                .get(key.clone(), epoch, read_options.clone())
+                .await;
+            if let Some(expected) = &self.expected {
+                let expected = expected.get(key, epoch, read_options).await;
+                assert_result_eq(&actual, &expected);
             }
+            actual
         }
 
+        // TODO: may avoid manual async fn when the bug of rust compiler is fixed. Currently it will
+        // fail to compile.
+        #[allow(clippy::manual_async_fn)]
         fn iter(
             &self,
             key_range: IterKeyRange,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> Self::IterFuture<'_> {
+        ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
             async move {
                 let actual = self
                     .actual
@@ -332,31 +336,27 @@ pub mod verify {
     }
 
     impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
-        define_state_store_write_associated_type!();
-
-        fn ingest_batch(
+        async fn ingest_batch(
             &self,
             kv_pairs: Vec<(Bytes, StorageValue)>,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
             write_options: WriteOptions,
-        ) -> Self::IngestBatchFuture<'_> {
-            async move {
-                let actual = self
-                    .actual
-                    .ingest_batch(
-                        kv_pairs.clone(),
-                        delete_ranges.clone(),
-                        write_options.clone(),
-                    )
+        ) -> StorageResult<usize> {
+            let actual = self
+                .actual
+                .ingest_batch(
+                    kv_pairs.clone(),
+                    delete_ranges.clone(),
+                    write_options.clone(),
+                )
+                .await;
+            if let Some(expected) = &self.expected {
+                let expected = expected
+                    .ingest_batch(kv_pairs, delete_ranges, write_options)
                     .await;
-                if let Some(expected) = &self.expected {
-                    let expected = expected
-                        .ingest_batch(kv_pairs, delete_ranges, write_options)
-                        .await;
-                    assert_eq!(actual.is_err(), expected.is_err());
-                }
-                actual
+                assert_eq!(actual.is_err(), expected.is_err());
             }
+            actual
         }
     }
 
@@ -370,12 +370,7 @@ pub mod verify {
     }
 
     impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
-        type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
-        type GetFuture<'a> = impl GetFutureTrait<'a>;
-        type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
         type IterStream<'a> = impl StateStoreIterItemStream + 'a;
-
-        define_local_state_store_associated_type!();
 
         // We don't verify `may_exist` across different state stores because
         // the return value of `may_exist` is implementation specific and may not
@@ -384,22 +379,25 @@ pub mod verify {
             &self,
             key_range: IterKeyRange,
             read_options: ReadOptions,
-        ) -> Self::MayExistFuture<'_> {
+        ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
             self.actual.may_exist(key_range, read_options)
         }
 
-        fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
-            async move {
-                let actual = self.actual.get(key.clone(), read_options.clone()).await;
-                if let Some(expected) = &self.expected {
-                    let expected = expected.get(key, read_options).await;
-                    assert_result_eq(&actual, &expected);
-                }
-                actual
+        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+            let actual = self.actual.get(key.clone(), read_options.clone()).await;
+            if let Some(expected) = &self.expected {
+                let expected = expected.get(key, read_options).await;
+                assert_result_eq(&actual, &expected);
             }
+            actual
         }
 
-        fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
+        #[allow(clippy::manual_async_fn)]
+        fn iter(
+            &self,
+            key_range: IterKeyRange,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
             async move {
                 let actual = self
                     .actual
@@ -437,16 +435,14 @@ pub mod verify {
             Ok(())
         }
 
-        fn flush(
+        async fn flush(
             &mut self,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        ) -> Self::FlushFuture<'_> {
-            async move {
-                if let Some(expected) = &mut self.expected {
-                    expected.flush(delete_ranges.clone()).await?;
-                }
-                self.actual.flush(delete_ranges).await
+        ) -> StorageResult<usize> {
+            if let Some(expected) = &mut self.expected {
+                expected.flush(delete_ranges.clone()).await?;
             }
+            self.actual.flush(delete_ranges).await
         }
 
         fn init(&mut self, epoch: u64) {
@@ -483,42 +479,37 @@ pub mod verify {
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
 
-        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
-
-        define_state_store_associated_type!();
-
-        fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+        fn try_wait_epoch(
+            &self,
+            epoch: HummockReadEpoch,
+        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
             self.actual.try_wait_epoch(epoch)
         }
 
-        fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
-            async move {
-                if let Some(expected) = &self.expected {
-                    let _ = expected.sync(epoch).await;
-                }
-                self.actual.sync(epoch).await
+        async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
+            if let Some(expected) = &self.expected {
+                let _ = expected.sync(epoch).await;
             }
+            self.actual.sync(epoch).await
         }
 
         fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
             self.actual.seal_epoch(epoch, is_checkpoint)
         }
 
-        fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
-            async move { self.actual.clear_shared_buffer().await }
+        fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.actual.clear_shared_buffer()
         }
 
-        fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
-            async move {
-                let expected = if let Some(expected) = &self.expected {
-                    Some(expected.new_local(option.clone()).await)
-                } else {
-                    None
-                };
-                VerifyStateStore {
-                    actual: self.actual.new_local(option).await,
-                    expected,
-                }
+        async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
+            let expected = if let Some(expected) = &self.expected {
+                Some(expected.new_local(option.clone()).await)
+            } else {
+                None
+            };
+            VerifyStateStore {
+                actual: self.actual.new_local(option).await,
+                expected,
             }
         }
 
@@ -854,25 +845,27 @@ pub mod boxed_state_store {
     impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
         type IterStream<'a> = BoxLocalStateStoreIterStream<'a>;
 
-        type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
-        type GetFuture<'a> = impl GetFutureTrait<'a>;
-        type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
-
-        define_local_state_store_associated_type!();
-
         fn may_exist(
             &self,
             key_range: IterKeyRange,
             read_options: ReadOptions,
-        ) -> Self::MayExistFuture<'_> {
+        ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
             self.deref().may_exist(key_range, read_options)
         }
 
-        fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
+        fn get(
+            &self,
+            key: Bytes,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
             self.deref().get(key, read_options)
         }
 
-        fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
+        fn iter(
+            &self,
+            key_range: IterKeyRange,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
             self.deref().iter(key_range, read_options)
         }
 
@@ -892,7 +885,7 @@ pub mod boxed_state_store {
         fn flush(
             &mut self,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
-        ) -> Self::FlushFuture<'_> {
+        ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
             self.deref_mut().flush(delete_ranges)
         }
 
@@ -962,9 +955,12 @@ pub mod boxed_state_store {
     impl StateStoreRead for BoxDynamicDispatchedStateStore {
         type IterStream = BoxStateStoreReadIterStream;
 
-        define_state_store_read_associated_type!();
-
-        fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
+        fn get(
+            &self,
+            key: Bytes,
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
             self.deref().get(key, epoch, read_options)
         }
 
@@ -973,7 +969,7 @@ pub mod boxed_state_store {
             key_range: IterKeyRange,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> Self::IterFuture<'_> {
+        ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
             self.deref().iter(key_range, epoch, read_options)
         }
     }
@@ -1021,19 +1017,18 @@ pub mod boxed_state_store {
     impl StateStore for BoxDynamicDispatchedStateStore {
         type Local = BoxDynamicDispatchedLocalStateStore;
 
-        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
-
-        define_state_store_associated_type!();
-
-        fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+        fn try_wait_epoch(
+            &self,
+            epoch: HummockReadEpoch,
+        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
             self.deref().try_wait_epoch(epoch)
         }
 
-        fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
+        fn sync(&self, epoch: u64) -> impl Future<Output = StorageResult<SyncResult>> + Send + '_ {
             self.deref().sync(epoch)
         }
 
-        fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
             self.deref().clear_shared_buffer()
         }
 
@@ -1041,7 +1036,10 @@ pub mod boxed_state_store {
             self.deref().seal_epoch(epoch, is_checkpoint)
         }
 
-        fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+        fn new_local(
+            &self,
+            option: NewLocalOptions,
+        ) -> impl Future<Output = Self::Local> + Send + '_ {
             self.deref().new_local(option)
         }
 

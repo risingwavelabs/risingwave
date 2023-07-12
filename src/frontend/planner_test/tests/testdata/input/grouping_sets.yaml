@@ -1,0 +1,14 @@
+- name: without distinct
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(sales) FROM items_sold GROUP BY GROUPING SETS ((brand), (size), ());
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: with distinct
+  sql: |
+    create table items_sold (brand varchar, size varchar, sales int);
+    SELECT brand, size, sum(distinct sales) FROM items_sold GROUP BY GROUPING SETS ((brand), (size), ());
+  expected_outputs:
+    - batch_plan
+    - stream_plan
