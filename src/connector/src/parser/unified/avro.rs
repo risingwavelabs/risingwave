@@ -372,7 +372,7 @@ pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
             let inner_schema = union_schema
                 .variants()
                 .iter()
-                .find(|s| **s != Schema::Null)
+                .find(|s| !matches!(s, &&Schema::Null))
                 .ok_or_else(|| {
                     anyhow::format_err!("illegal avro record schema {:?}", union_schema)
                 })?;
