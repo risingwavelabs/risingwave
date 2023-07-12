@@ -28,6 +28,8 @@ pub struct BarrierManagerState {
 impl BarrierManagerState {
     pub fn new() -> Self {
         Self {
+            // We set the initial value to `INVALID_EPOCH` here. After bootstrap recovery is done,
+            // the value will be set to the latest committed snapshot in `HummockManager`.
             in_flight_prev_epoch: TracedEpoch::new(INVALID_EPOCH.into()),
         }
     }

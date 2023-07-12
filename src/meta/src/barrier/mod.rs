@@ -559,8 +559,8 @@ where
 
             let latest_snapshot = self.hummock_manager.latest_snapshot();
             assert_eq!(
-                latest_snapshot.committed_epoch,
-                latest_snapshot.current_epoch,
+                latest_snapshot.committed_epoch, latest_snapshot.current_epoch,
+                "persisted snapshot must be from a checkpoint barrier"
             );
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into());
 
@@ -832,7 +832,7 @@ where
             fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.barrier_failed();
             tracing::warn!("Failed to complete epoch {}: {:?}", prev_epoch, err);
-            self.do_recovery(err, fail_node, state, checkpoint_control)
+            self.failure_recovery(err, fail_node, state, checkpoint_control)
                 .await;
             return;
         }
@@ -858,12 +858,12 @@ where
             let fail_nodes = complete_nodes
                 .drain(index..)
                 .chain(checkpoint_control.barrier_failed().into_iter());
-            self.do_recovery(err, fail_nodes, state, checkpoint_control)
+            self.failure_recovery(err, fail_nodes, state, checkpoint_control)
                 .await;
         }
     }
 
-    async fn do_recovery(
+    async fn failure_recovery(
         &self,
         err: MetaError,
         fail_nodes: impl IntoIterator<Item = EpochNode<S>>,
@@ -891,7 +891,7 @@ where
             *tracker = CreateMviewProgressTracker::new();
 
             let latest_snapshot = self.hummock_manager.latest_snapshot();
-            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into());
+            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
                 %err,

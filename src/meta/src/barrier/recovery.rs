@@ -158,6 +158,7 @@ where
                         actor_splits: build_actor_connector_splits(&source_split_assignments),
                     })));
 
+                    // Use a different `curr_epoch` for each recovery attempt.
                     let new_epoch = prev_epoch.next();
 
                     // checkpoint, used as init barrier to initialize all executors.
