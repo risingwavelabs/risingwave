@@ -18,5 +18,6 @@ mod avro_parser;
 mod mongo_json_parser;
 mod operators;
 mod simd_json_parser;
+mod debezium_parser;
 pub use avro_parser::*;
 pub use mongo_json_parser::DebeziumMongoJsonParser;

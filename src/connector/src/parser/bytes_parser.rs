@@ -15,9 +15,24 @@
 use risingwave_common::error::Result;
 
 use super::unified::bytes::{BytesAccess, BytesChangeEvent};
-use super::unified::ChangeEvent;
-use super::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use super::unified::{ChangeEvent, AccessImpl};
+use super::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard, EncodingProperties, EncodingType};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+
+pub struct BytesAccessBuilder {}
+
+impl BytesAccessBuilder {
+    pub fn new() -> Result<Self> {
+        Ok(Self {})
+    }
+
+    pub async fn generate_accessor<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+    ) -> Result<AccessImpl<'_, '_>> {
+        Ok(AccessImpl::Bytes(BytesAccess::new(payload)))
+    }
+}
 
 /// Parser for BYTES format
 #[derive(Debug)]

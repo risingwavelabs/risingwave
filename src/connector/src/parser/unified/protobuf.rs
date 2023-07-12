@@ -26,6 +26,12 @@ pub struct ProtobufAccess {
     message: DynamicMessage,
 }
 
+impl ProtobufAccess {
+    pub fn new(message: DynamicMessage) -> Self {
+        Self { message }
+    }
+}
+
 impl Access for ProtobufAccess {
     fn access(&self, path: &[&str], _type_expected: Option<&DataType>) -> AccessResult {
         debug_assert_eq!(1, path.len());

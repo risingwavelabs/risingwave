@@ -43,7 +43,7 @@ where
     }
 
     /// Panic: one of the `key_accessor` or `value_accessor` must be provided.
-    fn new(key_accessor: Option<A>, value_accessor: Option<A>) -> Self {
+    pub fn new(key_accessor: Option<A>, value_accessor: Option<A>) -> Self {
         assert!(key_accessor.is_some() || value_accessor.is_some());
         Self {
             value_accessor,

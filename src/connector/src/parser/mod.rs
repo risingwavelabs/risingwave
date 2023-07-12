@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::ops::Deref;
 
 use auto_enums::auto_enum;
 pub use avro::{AvroParser, AvroParserConfig};
@@ -32,8 +33,10 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::StreamSourceInfo;
 
-use self::bytes_parser::BytesParser;
+use self::avro::AvroAccessBuilder;
+use self::bytes_parser::{BytesAccessBuilder, BytesParser};
 pub use self::csv_parser::CsvParserConfig;
+use self::unified::{AccessImpl, AccessResult};
 use self::util::get_kafka_topic;
 use crate::aws_auth::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
@@ -388,6 +391,57 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
     }
 }
 
+// TODO:
+// 1. Debezium parser: tombstone,
+// 2. Avro: specific behaviour for debezium
+// 3. Maxwell
+// 4. Canal
+// 5. Overall performance #10840
+// 6. dispatch
+// 7. correct parser trait
+
+pub enum EncodingType {
+    Key,
+    Value,
+}
+
+pub enum AccessBuilder {
+    Avro(AvroAccessBuilder),
+    Protobuf(ProtobufAccessBuilder),
+    Json(JsonAccessBuilder),
+    Bytes(BytesAccessBuilder),
+}
+
+impl AccessBuilder {
+    pub async fn new(config: EncodingProperties, kv: EncodingType) -> Result<Self> {
+        let accessor = match config {
+            EncodingProperties::Avro(config) => {
+                AccessBuilder::Avro(AvroAccessBuilder::new(config, kv).await?)
+            }
+            EncodingProperties::Protobuf(config) => {
+                AccessBuilder::Protobuf(ProtobufAccessBuilder::new(config).await?)
+            }
+            EncodingProperties::Bytes => AccessBuilder::Bytes(BytesAccessBuilder::new()?),
+            EncodingProperties::Json(config) => {
+                AccessBuilder::Json(JsonAccessBuilder::new(config)?)
+            }
+            EncodingProperties::Csv(_) => unreachable!(),
+            EncodingProperties::None => unreachable!(),
+        };
+        Ok(accessor)
+    }
+
+    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        let accessor = match self {
+            Self::Avro(builder) => builder.generate_accessor(payload).await?,
+            Self::Protobuf(builder) => builder.generate_accessor(payload).await?,
+            Self::Json(builder) => builder.generate_accessor(payload).await?,
+            Self::Bytes(builder) => builder.generate_accessor(payload).await?,
+        };
+        Ok(accessor)
+    }
+}
+
 #[derive(Debug)]
 pub enum ByteStreamSourceParserImpl {
     Csv(CsvParser),
@@ -540,11 +594,16 @@ pub struct CsvProperties {
     pub has_header: bool,
 }
 
+pub struct JsonProperties {
+    pub format: SourceFormat,
+}
+
 #[derive(Default)]
 pub enum EncodingProperties {
     Avro(AvroProperties),
     Protobuf(ProtobufProperties),
     Csv(CsvProperties),
+    Json(JsonProperties),
     Bytes,
     #[default]
     None,
@@ -560,6 +619,7 @@ pub enum ProtocolProperties {
 }
 
 pub struct ParserProperties {
+    pub key_encoding_config: Option<EncodingProperties>,
     pub encoding_config: EncodingProperties,
     pub protocol_config: ProtocolProperties,
 }
@@ -630,7 +690,9 @@ impl ParserProperties {
             _ => EncodingProperties::None,
         };
         let protocol_config = ProtocolProperties::Plain;
+        /// TODO: need to build correct key encoding config
         Ok(ParserProperties {
+            key_encoding_config: None,
             encoding_config,
             protocol_config,
         })

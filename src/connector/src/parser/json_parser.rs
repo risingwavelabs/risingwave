@@ -15,13 +15,48 @@
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 
-use super::ByteStreamSourceParser;
+use super::unified::json::JsonParseOptions;
+use super::unified::AccessImpl;
+use super::{ByteStreamSourceParser, EncodingProperties, EncodingType, JsonProperties};
 use crate::common::UpsertMessage;
 use crate::parser::unified::json::JsonAccess;
 use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+
+pub struct JsonAccessBuilder {
+    value: Option<Vec<u8>>,
+    option: JsonParseOptions,
+}
+
+impl JsonAccessBuilder {
+    pub fn new(config: JsonProperties) -> Result<Self> {
+        Ok(Self {value: None,
+        option: match config.format {
+            crate::source::SourceFormat::Json => JsonParseOptions::DEFAULT,
+            crate::source::SourceFormat::UpsertJson => JsonParseOptions::DEFAULT,
+            crate::source::SourceFormat::DebeziumJson => JsonParseOptions::DEBEZIUM,
+            crate::source::SourceFormat::Maxwell => JsonParseOptions::DEFAULT,
+            crate::source::SourceFormat::CanalJson => JsonParseOptions::CANAL,
+            _ => unreachable!(),
+
+        }})
+    }
+
+    pub async fn generate_accessor<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+    ) -> Result<AccessImpl<'_, '_>> {
+        self.value = Some(payload);
+        let value = simd_json::to_borrowed_value(self.value.as_deref_mut().unwrap())
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        Ok(AccessImpl::Json(JsonAccess::new_with_options(
+            value,
+            &self.option,
+        )))
+    }
+}
 
 /// Parser for JSON format
 #[derive(Debug)]

@@ -30,11 +30,106 @@ use url::Url;
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::unified::AccessImpl;
+use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::{
     ByteStreamSourceParser, EncodingProperties, ParserProperties, SourceStreamChunkRowWriter,
-    WriteGuard,
+    WriteGuard, EncodingType, ProtobufProperties,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+
+pub struct ProtobufAccessBuilder {
+    confluent_wire_type: bool,
+    message_descriptor: MessageDescriptor,
+}
+
+impl ProtobufAccessBuilder {
+    pub async fn new(protobuf_config: ProtobufProperties) -> Result<Self> {
+        let location = &protobuf_config.row_schema_location;
+        let message_name = &protobuf_config.message_name;
+        let url = Url::parse(location)
+            .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
+
+        let schema_bytes = if protobuf_config.use_schema_registry {
+            let client = Client::new(url, &protobuf_config.client_config)?;
+            compile_file_descriptor_from_schema_registry(
+                format!("{}-value", &protobuf_config.topic).as_str(),
+                &client,
+            )
+            .await?
+        } else {
+            match url.scheme() {
+                // TODO(Tao): support local file only when it's compiled in debug mode.
+                "file" => {
+                    let path = url.to_file_path().map_err(|_| {
+                        RwError::from(InternalError(format!("illegal path: {}", location)))
+                    })?;
+
+                    if path.is_dir() {
+                        return Err(RwError::from(ProtocolError(
+                            "schema file location must not be a directory".to_string(),
+                        )));
+                    }
+                    Self::local_read_to_bytes(&path)
+                }
+                "s3" => {
+                    load_file_descriptor_from_s3(
+                        &url,
+                        protobuf_config.aws_auth_props.as_ref().unwrap(),
+                    )
+                    .await
+                }
+                "https" | "http" => load_file_descriptor_from_http(&url).await,
+                scheme => Err(RwError::from(ProtocolError(format!(
+                    "path scheme {} is not supported",
+                    scheme
+                )))),
+            }?
+        };
+
+        let pool = DescriptorPool::decode(schema_bytes.as_slice()).map_err(|e| {
+            ProtocolError(format!(
+                "cannot build descriptor pool from schema: {}, error: {}",
+                location, e
+            ))
+        })?;
+        let message_descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
+            ProtocolError(format!(
+                "cannot find message {} in schema: {}.\n poll is {:?}",
+                message_name, location, pool
+            ))
+        })?;
+        Ok(Self {
+            message_descriptor,
+            confluent_wire_type: protobuf_config.use_schema_registry,
+        })
+    }
+
+    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_,'_>> {
+        let payload = if self.confluent_wire_type {
+            resolve_pb_header(&payload)?
+        } else {
+            &payload
+        };
+
+        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
+            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
+
+        Ok(AccessImpl::Protobuf(ProtobufAccess::new(message)))
+    }
+
+    /// read binary schema from a local file
+    fn local_read_to_bytes(path: &Path) -> Result<Vec<u8>> {
+        std::fs::read(path).map_err(|e| {
+            RwError::from(InternalError(format!(
+                "failed to read file {}: {}",
+                path.display(),
+                e
+            )))
+        })
+    }
+
+}
 
 #[derive(Debug, Clone)]
 pub struct ProtobufParser {
