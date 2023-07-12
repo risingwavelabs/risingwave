@@ -15,13 +15,21 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use risingwave_common::estimate_size::{EstimateSize, ZeroHeapSize};
+use risingwave_common::bail;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::*;
 use risingwave_expr_macro::aggregate;
 
-const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash
+use self::append_only::AppendOnlyBucket;
+use crate::Result;
+
+mod append_only;
+mod updatable;
+
+const INDEX_BITS: u8 = 16; // number of bits used for finding the index of each 64-bit hash
 const NUM_OF_REGISTERS: usize = 1 << INDEX_BITS; // number of indices available
 const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-bit hash
+const LOG_COUNT_BITS: u8 = 6;
 
 // Approximation for bias correction for 16384 registers. See "HyperLogLog: the analysis of a
 // near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
@@ -36,9 +44,9 @@ fn approx_count_distinct<'a>(
     mut reg: Registers,
     value: impl ScalarRef<'a>,
     retract: bool,
-) -> Registers {
-    reg.update(value, retract);
-    reg
+) -> Result<Registers> {
+    reg.update(value, retract)?;
+    Ok(reg)
 }
 
 /// Approximates the count of non-null rows using a modified version of the `HyperLogLog` algorithm.
@@ -51,62 +59,37 @@ fn approx_count_distinct<'a>(
 /// The estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^16 registers this
 /// is ~1/256, or about 0.4%. The memory usage for the default choice of parameters is about
 /// (1024 + 24) bits * 2^16 buckets, which is about 8.58 MB.
-#[derive(Clone, EstimateSize)]
-struct Registers<B: Bucket = u8> {
-    initial: i64,
+#[derive(Clone)]
+struct Registers<B: Bucket = AppendOnlyBucket> {
     registers: Box<[B]>,
 }
 
-trait Bucket: Copy + ZeroHeapSize {
-    fn new() -> Self;
-
+trait Bucket: Default + Clone + EstimateSize {
     /// Increments or decrements the bucket at `index` depending on the state of `retract`.
     /// Returns an Error if `index` is invalid or if inserting will cause an overflow in the bucket.
-    fn update(&mut self, index: u8, retract: bool);
+    fn update(&mut self, index: u8, retract: bool) -> Result<()>;
 
     /// Gets the number of the maximum bucket which has a count greater than zero.
     fn max(&self) -> u8;
 }
 
-impl Bucket for u8 {
-    fn new() -> Self {
-        0
-    }
-
-    fn update(&mut self, index: u8, retract: bool) {
-        if index > 64 || index == 0 {
-            panic!("HyperLogLog: Invalid bucket index");
-        }
-        if retract {
-            panic!("HyperLogLog: Deletion in append-only bucket");
-        }
-        if index > *self {
-            *self = index;
-        }
-    }
-
-    fn max(&self) -> u8 {
-        *self
-    }
-}
-
 impl<B: Bucket> Registers<B> {
     fn new() -> Self {
         Self {
-            initial: 0,
-            registers: Box::new([B::new(); NUM_OF_REGISTERS]),
+            registers: (0..NUM_OF_REGISTERS).map(|_| B::default()).collect(),
         }
     }
 
     /// Adds the count of the datum's hash into the register, if it is greater than the existing
     /// count at the register
-    fn update<'a>(&mut self, scalar_ref: impl ScalarRef<'a>, retract: bool) {
+    fn update<'a>(&mut self, scalar_ref: impl ScalarRef<'a>, retract: bool) -> Result<()> {
         let hash = self.get_hash(scalar_ref.into());
 
         let index = (hash as usize) & (NUM_OF_REGISTERS - 1); // Index is based on last few bits
         let count = self.count_hash(hash);
 
-        self.registers[index].update(count, retract);
+        self.registers[index].update(count, retract)?;
+        Ok(())
     }
 
     /// Calculate the hash of the `scalar` using Rust's default hasher
@@ -157,7 +140,7 @@ impl<B: Bucket> Registers<B> {
             raw_estimate
         };
 
-        answer as i64 + self.initial
+        answer as i64
     }
 }
 
@@ -165,6 +148,67 @@ impl<B: Bucket> From<Registers<B>> for i64 {
     fn from(reg: Registers<B>) -> Self {
         reg.calculate_result()
     }
+}
+
+impl<B: Bucket> EstimateSize for Registers<B> {
+    fn estimated_heap_size(&self) -> usize {
+        self.registers.len() * std::mem::size_of::<B>()
+    }
+}
+
+/// Serialize the state into a Datum.
+impl From<Registers> for Datum {
+    fn from(reg: Registers) -> Self {
+        let buckets = &reg.registers[..];
+        let result_len = (buckets.len() * LOG_COUNT_BITS as usize - 1) / (i64::BITS as usize) + 1;
+        let mut result = vec![0u64; result_len];
+        for (i, bucket_val) in buckets.iter().enumerate() {
+            let (start_idx, begin_bit, post_end_bit) = pos_in_serialized(i);
+            result[start_idx] |= (buckets[i].0 as u64) << begin_bit;
+            if post_end_bit > i64::BITS {
+                result[start_idx + 1] |= (bucket_val.0 as u64) >> (i64::BITS - begin_bit as u32);
+            }
+        }
+        Some(ScalarImpl::List(ListValue::new(
+            result
+                .into_iter()
+                .map(|x| Some(ScalarImpl::Int64(x as i64)))
+                .collect(),
+        )))
+    }
+}
+
+/// Deserialize the state from a Datum.
+impl From<Datum> for Registers {
+    fn from(state: Datum) -> Self {
+        let list = state.as_ref().unwrap().as_list().values();
+        let bucket_num = list.len() * i64::BITS as usize / LOG_COUNT_BITS as usize;
+        let registers = (0..bucket_num)
+            .map(|i| {
+                let (start_idx, begin_bit, post_end_bit) = pos_in_serialized(i);
+                let val = *list[start_idx].as_ref().unwrap().as_int64();
+                let v = if post_end_bit <= i64::BITS {
+                    (val as u64) << (i64::BITS - post_end_bit)
+                        >> (i64::BITS - LOG_COUNT_BITS as u32)
+                } else {
+                    ((val as u64) >> begin_bit)
+                        + (((*list[start_idx + 1].as_ref().unwrap().as_int64() as u64)
+                            & ((1 << (post_end_bit - i64::BITS)) - 1))
+                            << (i64::BITS - begin_bit as u32))
+                };
+                AppendOnlyBucket(v as u8)
+            })
+            .collect();
+        Registers { registers }
+    }
+}
+
+fn pos_in_serialized(bucket_idx: usize) -> (usize, usize, u32) {
+    // rust compiler will optimize for us
+    let start_idx = bucket_idx * LOG_COUNT_BITS as usize / i64::BITS as usize;
+    let begin_bit = bucket_idx * LOG_COUNT_BITS as usize % i64::BITS as usize;
+    let post_end_bit = begin_bit as u32 + LOG_COUNT_BITS as u32;
+    (start_idx, begin_bit, post_end_bit)
 }
 
 #[cfg(test)]

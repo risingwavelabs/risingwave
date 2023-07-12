@@ -23,80 +23,11 @@ use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_storage::StateStore;
 
-use super::approx_distinct_utils::{
-    deserialize_buckets_from_list, serialize_buckets, RegisterBucket, StreamingApproxCountDistinct,
-};
+use super::approx_distinct_utils::{RegisterBucket, StreamingApproxCountDistinct};
 use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::table::TableStateImpl;
 use crate::executor::aggregation::GroupKey;
 use crate::executor::StreamExecutorResult;
-
-#[derive(Clone, Debug)]
-pub(super) struct AppendOnlyRegisterBucket {
-    max: u8,
-}
-
-impl ZeroHeapSize for AppendOnlyRegisterBucket {}
-
-impl RegisterBucket for AppendOnlyRegisterBucket {
-    fn new() -> Self {
-        Self { max: 0 }
-    }
-
-    fn update_bucket(&mut self, index: usize, is_insert: bool) -> StreamExecutorResult<()> {
-        if index > 64 || index == 0 {
-            bail!("HyperLogLog: Invalid bucket index");
-        }
-
-        if !is_insert {
-            bail!("HyperLogLog: Deletion in append-only bucket");
-        }
-
-        if index as u8 > self.max {
-            self.max = index as u8;
-        }
-
-        Ok(())
-    }
-
-    fn get_max(&self) -> u8 {
-        self.max
-    }
-}
-
-#[derive(Clone, Debug, Default, EstimateSize)]
-pub struct AppendOnlyStreamingApproxCountDistinct {
-    registers: Vec<AppendOnlyRegisterBucket>,
-
-    initial_count: i64,
-}
-
-impl StreamingApproxCountDistinct for AppendOnlyStreamingApproxCountDistinct {
-    type Bucket = AppendOnlyRegisterBucket;
-
-    fn with_i64(registers_num: u32, initial_count: i64) -> Self {
-        Self {
-            registers: vec![AppendOnlyRegisterBucket::new(); registers_num as usize],
-            initial_count,
-        }
-    }
-
-    fn get_initial_count(&self) -> i64 {
-        self.initial_count
-    }
-
-    fn reset_buckets(&mut self, registers_num: u32) {
-        self.registers = vec![AppendOnlyRegisterBucket::new(); registers_num as usize];
-    }
-
-    fn registers(&self) -> &[AppendOnlyRegisterBucket] {
-        &self.registers
-    }
-
-    fn registers_mut(&mut self) -> &mut [AppendOnlyRegisterBucket] {
-        &mut self.registers
-    }
-}
 
 #[async_trait::async_trait]
 impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct {
