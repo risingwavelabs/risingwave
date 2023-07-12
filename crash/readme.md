@@ -10,8 +10,8 @@ docker build . -t crash
 
 # Check that new image is present
 docker image ls | head -2 
-# REPOSITORY                                                                                      TAG                  IMAGE ID       CREATED         SIZE
-# crash                                                                                           latest               353ffa759902   4 minutes ago   892MB
+# REPOSITORY             TAG                  IMAGE ID       CREATED         SIZE
+# crash                  latest               353ffa759902   4 minutes ago   892MB
 
 docker run crash 
 # You should see a few random numbers and then a panic
@@ -45,4 +45,15 @@ for node in $(docker ps | grep onebox | awk '{print $NF}') ; do echo "on node $n
 ```
 
 At this point we have a running dev cluster with our crash image. We can now use the crash image in deployments inside our cluster
+
+
+# Setup our crashing application 
+
+```bash 
+kubectl apply -f k8s_resources/crash_deployment.yaml
+watch kubectl get pods -A -o wide
+# You should see the crash pods being created and restarting every few seconds and then
+```
+
+
 

@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: default
+  name: crash-deployment
+  labels:
+    app: crash
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: crash
+  template:
+    metadata:
+      labels:
+        app: crash
+    spec:
+      containers:
+        - name: crash
+          image: crash
+          imagePullPolicy: Never
