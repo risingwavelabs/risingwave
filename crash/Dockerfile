@@ -36,7 +36,6 @@ LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwa
 
 COPY --from=builder /crash/target/debug/crash /crash/target/debug/crash
 
-RUN ulimit -c 1024000000
-
-ENTRYPOINT [ "/crash/target/debug/crash" ]
+RUN mkdir -p /var/coredump
+ENTRYPOINT [ "/bin/bash", "-c", "ulimit -c 1024000000 && cat /proc/sys/kernel/core_pattern && mkdir -p /var/coredump && /crash/target/debug/crash" ]
 

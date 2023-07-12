@@ -19,6 +19,7 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [dependencies]
 coredump = "0.1.2"
+rlimit = "0.10.0"
 
 [profile.dev]
 opt-level = 0  # Controls the --opt-level the compiler builds with

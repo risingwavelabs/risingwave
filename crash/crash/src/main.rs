@@ -2,12 +2,17 @@ use std::path::Path;
 use std::{thread, time};
 
 use coredump;
+use rlimit::{getrlimit, Resource};
+
 fn main() {
     if !Path::new("/var/coredump").is_dir() {
         println!("/var/coredump does not exist")
     } else {
-        println!("ready to generate core files")
+        println!("ready to write core files to /var/coredump")
     }
+
+    let (x, _) = getrlimit(Resource::CORE).unwrap();
+    println!("Core file limit: {}", x);
 
     coredump::register_panic_handler().expect("unable to register panic handler");
     loop {
