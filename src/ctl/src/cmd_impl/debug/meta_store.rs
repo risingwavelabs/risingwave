@@ -19,6 +19,7 @@ use etcd_client::ConnectOptions;
 use risingwave_meta::model::{MetadataModel, TableFragments, Worker};
 use risingwave_meta::storage::meta_store::MetaStore;
 use risingwave_meta::storage::{EtcdMetaStore, WrappedEtcdClient};
+use risingwave_meta::{ElectionClient, ElectionMember, EtcdElectionClient};
 use risingwave_pb::user::UserInfo;
 use serde_yaml::Value;
 
@@ -36,7 +37,7 @@ macro_rules! yaml_arm {
         );
         mapping.insert(
             Value::String(ITEM_KEY.to_string()),
-            serde_yaml::to_value($item.to_protobuf()).unwrap(),
+            serde_yaml::to_value($item).unwrap(),
         );
         serde_yaml::Value::Mapping(mapping)
     }};
@@ -49,10 +50,7 @@ macro_rules! json_arm {
             KIND_KEY.to_string(),
             serde_json::Value::String($kind.to_string()),
         );
-        mapping.insert(
-            ITEM_KEY.to_string(),
-            serde_json::to_value($item.to_protobuf()).unwrap(),
-        );
+        mapping.insert(ITEM_KEY.to_string(), serde_json::to_value($item).unwrap());
         serde_json::Value::Object(mapping)
     }};
 }
@@ -61,6 +59,7 @@ enum Item {
     Worker(Worker),
     User(UserInfo),
     Table(TableFragments),
+    MetaMember(ElectionMember),
 }
 
 pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
@@ -75,12 +74,12 @@ pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
 
     let client = if enable_etcd_auth {
         let options = ConnectOptions::default().with_user(
-            etcd_username.unwrap_or_default(),
-            etcd_password.unwrap_or_default(),
+            etcd_username.clone().unwrap_or_default(),
+            etcd_password.clone().unwrap_or_default(),
         );
-        WrappedEtcdClient::connect(etcd_endpoints, Some(options), true).await?
+        WrappedEtcdClient::connect(etcd_endpoints.clone(), Some(options), true).await?
     } else {
-        WrappedEtcdClient::connect(etcd_endpoints, None, false).await?
+        WrappedEtcdClient::connect(etcd_endpoints.clone(), None, false).await?
     };
 
     let meta_store = Arc::new(EtcdMetaStore::new(client));
@@ -102,6 +101,34 @@ pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
                 .await?
                 .into_iter()
                 .for_each(|table| items.push(Item::Table(table))),
+            DebugCommonKind::MetaMember => {
+                let election_client = if enable_etcd_auth {
+                    let options = ConnectOptions::default().with_user(
+                        etcd_username.clone().unwrap_or_default(),
+                        etcd_password.clone().unwrap_or_default(),
+                    );
+                    EtcdElectionClient::new(
+                        etcd_endpoints.clone(),
+                        Some(options),
+                        true,
+                        "_".to_string(),
+                    )
+                    .await?
+                } else {
+                    EtcdElectionClient::new(etcd_endpoints.clone(), None, false, "_".to_string())
+                        .await?
+                };
+
+                let election_client: Box<dyn ElectionClient> = Box::new(election_client);
+
+                election_client
+                    .get_members()
+                    .await?
+                    .into_iter()
+                    .for_each(|member| {
+                        items.push(Item::MetaMember(member));
+                    });
+            }
         };
     }
 
@@ -112,9 +139,12 @@ pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
             let mut seq = serde_yaml::Sequence::new();
             for item in items {
                 seq.push(match item {
-                    Item::Worker(worker) => yaml_arm!("worker", worker),
-                    Item::User(user) => yaml_arm!("user", user),
-                    Item::Table(table) => yaml_arm!("table", table),
+                    Item::Worker(worker) => yaml_arm!("worker", worker.to_protobuf()),
+                    Item::User(user) => yaml_arm!("user", user.to_protobuf()),
+                    Item::Table(table) => yaml_arm!("table", table.to_protobuf()),
+                    Item::MetaMember(member) => {
+                        yaml_arm!("meta_member", member)
+                    }
                 });
             }
             serde_yaml::to_writer(writer, &seq).unwrap();
@@ -123,9 +153,12 @@ pub async fn dump(common: DebugCommon) -> anyhow::Result<()> {
             let mut seq = vec![];
             for item in items {
                 seq.push(match item {
-                    Item::Worker(worker) => json_arm!("worker", worker),
-                    Item::User(user) => json_arm!("user", user),
-                    Item::Table(table) => json_arm!("table", table),
+                    Item::Worker(worker) => json_arm!("worker", worker.to_protobuf()),
+                    Item::User(user) => json_arm!("user", user.to_protobuf()),
+                    Item::Table(table) => json_arm!("table", table.to_protobuf()),
+                    Item::MetaMember(member) => {
+                        json_arm!("meta_member", member)
+                    }
                 });
             }
             serde_json::to_writer_pretty(writer, &seq).unwrap();

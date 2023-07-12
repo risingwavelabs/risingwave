@@ -82,6 +82,7 @@ enum DebugCommonKind {
     Worker,
     User,
     Table,
+    MetaMember,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
