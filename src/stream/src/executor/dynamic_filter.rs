@@ -49,13 +49,19 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 /// LHS: Outer side of the join.
 /// RHS: Dynamic Filter (single value), inner side of the join.
 ///
-///
 /// ## Description
-///
+/// This cache is meant to minimize table scans of LHS internal table.
 /// The cache holds a single value from the LHS,
-/// the largest value nearest to current RHS (largest first, then nearest).
-/// N.B. Largest could be minimal or maximal value, depending on the sign of the comparator,
-/// and could be inclusive or exclusive as well.
+/// the largest value nearest to current RHS (prioritize values larger than RHS).
+/// By storing this value, we know for LHS values:
+/// A) If LHS cache value is larger,
+///    None are between LHS cache value and current RHS.
+/// B) Or if there LHS cache value is same or smaller than current RHS.
+///    None are larger than LHS cache value and current RHS value.
+///
+/// N.B. Largest could be minimal or maximal value,
+/// depending on the sign of the comparator (< / >),
+/// and could be inclusive or exclusive as well (<= / >=).
 ///
 /// Assuming sign is '>'.
 /// If RHS 100,
@@ -69,27 +75,34 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 /// So we need to send rows between (old_RHS, current_RHS) downstream for either deletion/insertion.
 /// For monotonically increasing RHS (e.g. NOW()), current_RHS > old_RHS.
 /// The cache_value from LHS partitions the range.
+///
 /// Case 1:
 /// cache_value larger than current_RHS.
-/// Need to send all rows between (old_RHS, current_RHS) downstream.
+/// Need to send all rows between (prev_RHS, current_RHS) downstream.
+///
 /// Case 2:
 /// cache_value smaller or same as current_RHS, larger than prev_RHS.
 /// Need to send all rows between (prev_RHS, cache_value) downstream.
+///
 /// Case 3:
 /// cache_value smaller than prev_RHS.
-/// No need scan any rows, there are no LHS rows between (old_RHS, current_RHS).
+/// No need scan any rows, there are no LHS rows between (prev_RHS, current_RHS).
+///
 /// Case 4:
 /// No cache_value.
-/// Need to send all rows between (old_RHS, current_RHS) downstream,
+/// Need to send all rows between (prev_RHS, current_RHS) downstream,
 /// because cache value could have been deleted.
 ///
 /// ## Initial state
 /// Nothing in cache (None).
 ///
 /// ## Updates
-/// 1. Whenever we receive LHS updates, we need to update the cache. `old_value` refers to
-/// `old_value` in cache.    `new_value` refers to the new value received from LHS in the update
-/// message.    INSERT: if the new value is (RHS, old_value), replace `old_value` in cache.
+/// 1. Whenever we receive LHS updates, we need to update the cache.
+///    `old_value` refers to `old_value` in cache.
+///    `new_value` refers to the new value received from LHS in the update
+///    message.
+///
+///    INSERT: if the new value is (RHS, old_value), replace `old_value` in cache.
 ///            Otherwise, do nothing.
 ///    UPDATE: if the new value is (RHS, old_value), OR if has same key as `old_value`,
 ///            replace `old_value` in cache.
