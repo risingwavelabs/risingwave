@@ -12,8 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod kind;
-pub use kind::*;
-
-mod call;
-pub use call::*;
+pub use crate::window_function::*;

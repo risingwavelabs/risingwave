@@ -55,6 +55,9 @@ struct Progress {
     /// Upstream mvs total key count.
     upstream_total_key_count: u64,
 
+    /// Consumed rows
+    consumed_rows: u64,
+
     /// DDL definition
     definition: String,
 }
@@ -80,6 +83,7 @@ impl Progress {
             creating_mv_id,
             upstream_mv_count,
             upstream_total_key_count,
+            consumed_rows: 0,
             definition,
         }
     }
@@ -87,15 +91,25 @@ impl Progress {
     /// Update the progress of `actor`.
     fn update(&mut self, actor: ActorId, new_state: ChainState, upstream_total_key_count: u64) {
         self.upstream_total_key_count = upstream_total_key_count;
-        match self.states.get_mut(&actor).unwrap() {
-            state @ (ChainState::Init | ChainState::ConsumingUpstream(_, _)) => {
-                if matches!(new_state, ChainState::Done) {
-                    self.done_count += 1;
+        match self.states.remove(&actor).unwrap() {
+            ChainState::Init => {}
+            ChainState::ConsumingUpstream(_, old_consumed_rows) => {
+                if !matches!(new_state, ChainState::Done) {
+                    self.consumed_rows -= old_consumed_rows;
                 }
-                *state = new_state;
             }
             ChainState::Done => panic!("should not report done multiple times"),
-        }
+        };
+        match &new_state {
+            ChainState::Init => {}
+            ChainState::ConsumingUpstream(_, new_consumed_rows) => {
+                self.consumed_rows += new_consumed_rows;
+            }
+            ChainState::Done => {
+                self.done_count += 1;
+            }
+        };
+        self.states.insert(actor, new_state);
         self.calculate_progress();
     }
 
@@ -110,26 +124,16 @@ impl Progress {
         self.states.keys().cloned()
     }
 
-    /// `progress` = `done_ratio` + (1 - `done_ratio`) * (`consumed_rows` / `remaining_rows`).
+    /// `progress` = `consumed_rows` / `upstream_total_key_count`
     fn calculate_progress(&self) -> f64 {
         if self.is_done() || self.states.is_empty() {
             return 1.0;
         }
-        let done_ratio: f64 = (self.done_count) as f64 / self.states.len() as f64;
-        let mut remaining_rows = self.upstream_total_key_count as f64 * (1_f64 - done_ratio);
-        if remaining_rows == 0.0 {
-            remaining_rows = 1.0;
+        let mut upstream_total_key_count = self.upstream_total_key_count as f64;
+        if upstream_total_key_count == 0.0 {
+            upstream_total_key_count = 1.0
         }
-        let consumed_rows: u64 = self
-            .states
-            .values()
-            .map(|x| match x {
-                ChainState::ConsumingUpstream(_, rows) => *rows,
-                _ => 0,
-            })
-            .sum();
-        let mut progress =
-            done_ratio + (1_f64 - done_ratio) * consumed_rows as f64 / remaining_rows;
+        let mut progress = self.consumed_rows as f64 / upstream_total_key_count;
         if progress >= 1.0 {
             progress = 0.99;
         }
