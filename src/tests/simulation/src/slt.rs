@@ -99,10 +99,8 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         // use a session per file
-        let risingwave = RisingWave::connect("frontend".into(), "dev".into())
-            .await
-            .unwrap();
-        let mut tester = sqllogictest::Runner::new(risingwave);
+        let mut tester =
+            sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
 
         let file = file.unwrap();
         let path = file.as_path();
@@ -230,10 +228,8 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
 }
 
 pub async fn run_parallel_slt_task(glob: &str, jobs: usize) -> Result<(), ParallelTestError> {
-    let db = RisingWave::connect("frontend".into(), "dev".into())
-        .await
-        .unwrap();
-    let mut tester = sqllogictest::Runner::new(db);
+    let mut tester =
+        sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
     tester
         .run_parallel_async(
             glob,
