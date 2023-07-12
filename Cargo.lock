@@ -9039,6 +9039,7 @@ dependencies = [
  "rand_chacha",
  "rand_core",
  "regex",
+ "regex-automata 0.3.2",
  "regex-syntax 0.7.4",
  "reqwest",
  "rust_decimal",
