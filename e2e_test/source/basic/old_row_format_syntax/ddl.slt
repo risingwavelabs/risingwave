@@ -42,7 +42,9 @@ create source invalid_format with (
 ) row format abc;
 
 statement ok
-create table s with (
+create table s (
+  column1 varchar
+) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092'
@@ -110,7 +112,9 @@ statement ok
 drop source s
 
 statement ok
-create table s with (
+create table s (
+  column1 varchar
+) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092'
