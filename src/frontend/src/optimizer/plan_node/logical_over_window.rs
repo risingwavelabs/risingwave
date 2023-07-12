@@ -27,12 +27,113 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamOverWindow, StreamSort,
     ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, WindowFunction};
+use crate::expr::{
+    Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, WindowFunction,
+};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
+
+struct LogicalOverWindowBuilder {
+    /// the builder of the input Project
+    input_proj_builder: ProjectBuilder,
+    /// the window functions
+    window_functions: Vec<PlanWindowFunction>,
+    /// over window input
+    input: PlanRef,
+    /// the error during the expression rewriting
+    error: Option<ErrorCode>,
+}
+
+impl LogicalOverWindowBuilder {
+    fn new(input: PlanRef, input_proj_builder: ProjectBuilder) -> Result<Self> {
+        Ok(Self {
+            window_functions: vec![],
+            input_proj_builder,
+            input,
+            error: None,
+        })
+    }
+
+    fn rewrite_with_error(&mut self, expr: ExprImpl) -> Result<ExprImpl> {
+        let rewritten_expr = self.rewrite_expr(expr);
+        if let Some(error) = self.error.take() {
+            return Err(error.into());
+        }
+        Ok(rewritten_expr)
+    }
+}
+
+struct OverWindowProjectBuilder<'a> {
+    builder: &'a mut ProjectBuilder,
+    error: Option<ErrorCode>,
+}
+
+impl<'a> OverWindowProjectBuilder<'a> {
+    fn new(builder: &mut ProjectBuilder) -> Self {
+        Self {
+            builder,
+            error: None,
+        }
+    }
+
+    fn try_visit_window_function(&mut self, window_function: &WindowFunction) -> std::result::Result<(), ErrorCode> {
+        if let WindowFuncKind::Aggregate(agg_kind) = window_function.kind
+        && matches!(
+            agg_kind,
+            AggKind::StddevPop
+                | AggKind::StddevSamp
+                | AggKind::VarPop
+                | AggKind::VarSamp
+        )
+    {
+        let input = window_function.args.iter().exactly_one().unwrap();
+        let squared_input_expr = ExprImpl::from(
+            FunctionCall::new(ExprType::Multiply, vec![input.clone(), input.clone()])
+                .unwrap(),
+        );
+    }
+        let input_idx_in_args: Vec<_> = window_function
+            .args
+            .iter()
+            .map(|x| self.builder.add_expr(x))
+            .try_collect()
+            .map_err(|err| ErrorCode::NotImplemented(format!("{err} inside args"), None.into()))?;
+        let input_idx_in_order_by: Vec<_> = window_function
+            .order_by
+            .sort_exprs
+            .iter()
+            .map(|x| self.builder.add_expr(&x.expr))
+            .try_collect()
+            .map_err(|err| {
+                ErrorCode::NotImplemented(format!("{err} inside order_by"), None.into())
+            })?;
+        let input_idx_in_partition_by: Vec<_> = window_function
+            .partition_by
+            .iter()
+            .map(|x| self.builder.add_expr(x))
+            .try_collect()
+            .map_err(|err| {
+                ErrorCode::NotImplemented(format!("{err} inside partition_by"), None.into())
+            })?;
+        Ok(())
+    }
+}
+
+impl ExprVisitor<()> for OverWindowProjectBuilder {
+    fn merge(a: (), b: ()) -> () {
+        ()
+    }
+
+    fn visit_window_function(&mut self, window_function: &WindowFunction) -> () {
+        if let Err(e) = self.try_visit_window_function(window_function) {
+            self.error = Some(e);
+        }
+        ()
+    }
+}
 
 /// `LogicalOverWindow` performs `OVER` window functions to its input.
 ///
@@ -50,11 +151,34 @@ impl LogicalOverWindow {
         Self { base, core }
     }
 
+    fn build_input(input: PlanRef, select_exprs: &[ExprImpl]) -> Result<ProjectBuilder> {
+        let mut input_proj_builder = ProjectBuilder::default();
+        // Add and check input columns
+        for (idx, field) in input.schema().fields().iter().enumerate() {
+            input_proj_builder
+                .add_expr(&InputRef::new(idx, field.data_type()).into())
+                .map_err(|err| {
+                    ErrorCode::NotImplemented(format!("{err} inside input"), None.into())
+                })?;
+        }
+        let build_input_proj_visitor = OverWindowProjectBuilder::new(&mut input_proj_builder);
+        for expr in select_exprs {
+            build_input_proj_visitor.visit_expr(expr);
+            if let Some(error) = build_input_proj_visitor.error.take() {
+                return Err(error.into());
+            }
+        }
+        Ok(input_proj_builder)
+    }
+
     pub fn create(
         input: PlanRef,
         mut select_exprs: Vec<ExprImpl>,
     ) -> Result<(PlanRef, Vec<ExprImpl>)> {
-        let mut input_proj_builder = ProjectBuilder::default();
+        let mut input_proj_builder = Self::build_input(input, &select_exprs)?;
+
+        let mut over_window_builder = LogicalOverWindowBuilder::new(input, input_proj_builder);
+
         for (idx, field) in input.schema().fields().iter().enumerate() {
             input_proj_builder
                 .add_expr(&InputRef::new(idx, field.data_type()).into())
@@ -328,13 +452,6 @@ impl LogicalOverWindow {
                         .unwrap();
                     window_funcs.push(*f);
                 }
-            }
-            if expr.has_window_function() {
-                return Err(ErrorCode::NotImplemented(
-                    format!("window function in expression: {:?}", expr),
-                    None.into(),
-                )
-                .into());
             }
         }
         for f in &window_funcs {
