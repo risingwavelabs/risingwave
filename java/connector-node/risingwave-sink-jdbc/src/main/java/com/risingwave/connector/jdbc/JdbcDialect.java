@@ -61,7 +61,7 @@ public interface JdbcDialect {
     Optional<String> getUpsertStatement(
             SchemaTableName schemaTableName, List<String> fieldNames, List<String> uniqueKeyFields);
 
-    void bindUpsertStatement(
+    void bindInsertOrUpsertStatement(
             PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
             throws SQLException;
 

@@ -37,7 +37,8 @@ public class JDBCSink extends SinkBase {
     private final List<String> pkColumnNames;
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
 
-    private final PreparedStatement upsertPreparedStmt;
+    private PreparedStatement insertPreparedStmt;
+    private PreparedStatement upsertPreparedStmt;
     private PreparedStatement deletePreparedStmt;
 
     private boolean updateFlag = false;
@@ -72,18 +73,26 @@ public class JDBCSink extends SinkBase {
             var schemaTableName =
                     jdbcDialect.createSchemaTableName(
                             config.getSchemaName(), config.getTableName());
-            var upsertSql =
-                    jdbcDialect.getUpsertStatement(
-                            schemaTableName, List.of(tableSchema.getColumnNames()), pkColumnNames);
-            // MySQL and Postgres have upsert SQL
-            assert (upsertSql.isPresent());
-            this.upsertPreparedStmt =
-                    conn.prepareStatement(upsertSql.get(), Statement.RETURN_GENERATED_KEYS);
-            // upsert sink will handle DELETE events
             if (config.isUpsertSink()) {
+                var upsertSql =
+                        jdbcDialect.getUpsertStatement(
+                                schemaTableName,
+                                List.of(tableSchema.getColumnNames()),
+                                pkColumnNames);
+                // MySQL and Postgres have upsert SQL
+                assert (upsertSql.isPresent());
+                this.upsertPreparedStmt =
+                        conn.prepareStatement(upsertSql.get(), Statement.RETURN_GENERATED_KEYS);
+                // upsert sink will handle DELETE events
                 var deleteSql = jdbcDialect.getDeleteStatement(schemaTableName, pkColumnNames);
                 this.deletePreparedStmt =
                         conn.prepareStatement(deleteSql, Statement.RETURN_GENERATED_KEYS);
+            } else {
+                var insertSql =
+                        jdbcDialect.getInsertIntoStatement(
+                                schemaTableName, List.of(tableSchema.getColumnNames()));
+                this.insertPreparedStmt =
+                        conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS);
             }
         } catch (SQLException e) {
             throw Status.INTERNAL
@@ -111,23 +120,30 @@ public class JDBCSink extends SinkBase {
         return pkColumnNames;
     }
 
-    private PreparedStatement prepareUpsertStatement(SinkRow row) {
+    private PreparedStatement prepareInsertOrUpsertStatement(SinkRow row) {
         try {
+            var preparedStmt = config.isUpsertSink() ? upsertPreparedStmt : insertPreparedStmt;
             switch (row.getOp()) {
                 case INSERT:
-                    jdbcDialect.bindUpsertStatement(
-                            upsertPreparedStmt, conn, getTableSchema(), row);
-                    return upsertPreparedStmt;
+                    jdbcDialect.bindInsertOrUpsertStatement(
+                            preparedStmt, conn, getTableSchema(), row);
+                    return preparedStmt;
                 case UPDATE_INSERT:
+                    if (!config.isUpsertSink()) {
+                        throw Status.FAILED_PRECONDITION
+                                .withDescription(
+                                        "UPDATE_INSERT events are not expected in non-upsert sink")
+                                .asRuntimeException();
+                    }
                     if (!updateFlag) {
                         throw Status.FAILED_PRECONDITION
                                 .withDescription("an UPDATE_DELETE should precede an UPDATE_INSERT")
                                 .asRuntimeException();
                     }
-                    jdbcDialect.bindUpsertStatement(
-                            upsertPreparedStmt, conn, getTableSchema(), row);
+                    jdbcDialect.bindInsertOrUpsertStatement(
+                            preparedStmt, conn, getTableSchema(), row);
                     updateFlag = false;
-                    return upsertPreparedStmt;
+                    return preparedStmt;
                 default:
                     throw Status.FAILED_PRECONDITION
                             .withDescription("unexpected op type: " + row.getOp())
@@ -184,7 +200,7 @@ public class JDBCSink extends SinkBase {
                 if (row.getOp() == Data.Op.DELETE) {
                     stmt = prepareDeleteStatement(row);
                 } else {
-                    stmt = prepareUpsertStatement(row);
+                    stmt = prepareInsertOrUpsertStatement(row);
                 }
 
                 try {
