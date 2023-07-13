@@ -24,6 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
+use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
@@ -249,7 +250,13 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    Compactor::compact(compact_ctx, compact_task.clone(), rx).await;
+    let (mut result_task, task_stats) =
+        Compactor::compact(compact_ctx, compact_task.clone(), rx).await;
+
+    hummock_manager_ref
+        .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
