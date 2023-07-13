@@ -870,7 +870,6 @@ async fn test_trigger_manual_compaction() {
 async fn test_hummock_compaction_task_heartbeat() {
     use risingwave_pb::hummock::CompactTaskProgress;
 
-    use crate::hummock::compaction_scheduler::ScheduleStatus;
     use crate::hummock::HummockManager;
 
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
@@ -914,7 +913,6 @@ async fn test_hummock_compaction_task_heartbeat() {
     .await
     .unwrap();
 
-    let mut compactor_pull_task_handle = hummock_manager.get_idle_compactor().unwrap();
     // Get a compaction task.
     let mut compact_task = hummock_manager
         .get_compact_task(
@@ -934,11 +932,6 @@ async fn test_hummock_compaction_task_heartbeat() {
         0
     );
     assert_eq!(compact_task.get_task_id(), 2);
-    assert_eq!(
-        ScheduleStatus::Ok,
-        compactor_pull_task_handle.consume_task(&compact_task).await
-    );
-    drop(compactor_pull_task_handle);
 
     for i in 0..10 {
         // send heartbeats to the task over 2.5 seconds
@@ -958,8 +951,6 @@ async fn test_hummock_compaction_task_heartbeat() {
         .await
         .unwrap());
 
-    let mut compactor_pull_task_handle = hummock_manager.get_idle_compactor().unwrap();
-
     // Get a compaction task.
     let mut compact_task = hummock_manager
         .get_compact_task(
@@ -971,13 +962,6 @@ async fn test_hummock_compaction_task_heartbeat() {
         .unwrap();
 
     assert_eq!(compact_task.get_task_id(), 3);
-
-    // send task
-    assert_eq!(
-        ScheduleStatus::Ok,
-        compactor_pull_task_handle.consume_task(&compact_task).await
-    );
-    drop(compactor_pull_task_handle);
 
     // Cancel the task after heartbeat has triggered and fail.
     compact_task.set_task_status(TaskStatus::ExecuteFailed);
@@ -998,10 +982,8 @@ async fn test_hummock_compaction_task_heartbeat() {
 #[cfg(madsim)]
 #[tokio::test]
 async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
-    use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::CompactTaskProgress;
 
-    use crate::hummock::compaction_scheduler::ScheduleStatus;
     use crate::hummock::HummockManager;
     let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
@@ -1044,7 +1026,6 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     .await
     .unwrap();
 
-    let mut compactor_pull_task_handle = hummock_manager.get_idle_compactor().unwrap();
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
@@ -1064,12 +1045,6 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         0
     );
     assert_eq!(compact_task.get_task_id(), 2);
-    // send task
-    assert_eq!(
-        ScheduleStatus::Ok,
-        compactor_pull_task_handle.consume_task(&compact_task).await
-    );
-    drop(compactor_pull_task_handle);
 
     // send heartbeats to the task immediately
     let req = CompactTaskProgress {
