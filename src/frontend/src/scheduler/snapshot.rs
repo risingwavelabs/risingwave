@@ -18,7 +18,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use more_asserts::assert_le;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::PbHummockSnapshot;
