@@ -21,6 +21,7 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use either::Either;
 use futures::Future;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
@@ -77,6 +78,8 @@ pub struct LoggerSettings {
     enable_tokio_console: bool,
     /// Enable colorful output in console.
     colorful: bool,
+    /// Output to `stderr` instead of `stdout`.
+    stderr: bool,
     /// Override default target settings.
     targets: Vec<(String, tracing::metadata::LevelFilter)>,
 }
@@ -93,12 +96,20 @@ impl LoggerSettings {
             name: name.into(),
             enable_tokio_console: false,
             colorful: console::colors_enabled_stderr() && console::colors_enabled(),
+            stderr: false,
             targets: vec![],
         }
     }
 
-    pub fn enable_tokio_console(mut self, enable: bool) -> Self {
-        self.enable_tokio_console = enable;
+    /// Enable tokio console output.
+    pub fn tokio_console(mut self, enabled: bool) -> Self {
+        self.enable_tokio_console = enabled;
+        self
+    }
+
+    /// Output to `stderr` instead of `stdout`.
+    pub fn stderr(mut self, enabled: bool) -> Self {
+        self.stderr = enabled;
         self
     }
 
@@ -199,11 +210,18 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
     let mut layers = vec![];
 
-    // fmt layer (formatting and logging to stdout)
+    // fmt layer (formatting and logging to `stdout` or `stderr`)
     {
         let fmt_layer = tracing_subscriber::fmt::layer()
             .with_timer(default_timer.clone())
-            .with_ansi(settings.colorful);
+            .with_ansi(settings.colorful)
+            .with_writer(move || {
+                if settings.stderr {
+                    Either::Left(std::io::stderr())
+                } else {
+                    Either::Right(std::io::stdout())
+                }
+            });
 
         let fmt_layer = match deployment {
             Deployment::Ci => fmt_layer

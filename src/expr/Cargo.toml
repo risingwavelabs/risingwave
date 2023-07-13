@@ -28,6 +28,7 @@ ctor = "0.1"
 dyn-clone = "1"
 easy-ext = "1"
 either = "1"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hex = "0.4.3"
@@ -46,6 +47,7 @@ self_cell = "1.0.0"
 serde_json = "1"
 sha1 = "0.10.5"
 sha2 = "0.10.6"
+smallvec = "1"
 static_assertions = "1"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
