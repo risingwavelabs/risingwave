@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
 use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, RowRef, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{once, OwnedRow as RowData, OwnedRow, Row};
+use risingwave_common::row::{once, OwnedRow as RowData, OwnedRow, Project, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::sort_util::{cmp_datum, cmp_datum_iter};
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
@@ -155,26 +157,139 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 ///    ---
 ///    Cache needs update. Largest LHS value that is nearest to RHS can now be Row(1, 5).
 struct DynamicFilterCache {
-    value: Option<OwnedRow>,
+    value: DynamicFilterCacheEntry,
     /// LHS key column index.
     key_l: usize,
+    /// LHS key indices
+    pk_indices: Vec<usize>,
+}
+
+enum DynamicFilterCacheEntry {
+    /// No values within range (prev_RHS, current_RHS).
+    NoMatch,
+    /// Nearest value to `prev_RHS` within the range (prev_RHS, current_RHS).
+    /// Stores (pk, owned row).
+    Match((OwnedRow, OwnedRow)),
+    /// No entry, we need initialize it with the first value we receive,
+    /// Or do an LHS table scan to refresh it.
+    Empty,
 }
 
 impl DynamicFilterCache {
-    fn new(key_l: usize) -> Self {
-        Self { value: None, key_l }
-    }
-
-    fn handle_lhs_chunk(&mut self, lhs_chunk: &OwnedRow, rhs: &OwnedRow) {
-        if new_value[self.key_l] == self.rhs_value[self.key_r] {
-            self.value = Some(new_value.clone());
+    fn new(key_l: usize, pk_indices: Vec<usize>) -> Self {
+        Self {
+            value: DynamicFilterCacheEntry::Empty,
+            key_l,
+            pk_indices,
         }
     }
 
-    fn handle_rhs_chunk(&mut self, new_value: &OwnedRow) {
-        if self.value.is_some() {
-            if new_value[self.key_r] > self.rhs_value[self.key_r] {
-                self.value = None;
+    /// INSERT/UPDATE_INSERT:
+    /// If the new value is (RHS, old_value), replace `old_value` in cache.
+    /// Otherwise, do nothing.
+    ///
+    /// DELETE/UPDATE_DELETE:
+    /// If the new value has the same key as `old_value`, empty cache. It is now `Empty`.
+    /// It means for this epoch, we will need to do table scan.
+    ///
+    /// TODO(kwannoel):
+    /// Optimization: For the rest of values in the chunk, if any are between `(RHS, old_value]`,
+    /// replace `old_value` in cache.
+    fn handle_lhs_row(
+        &mut self,
+        lhs_row: RowRef<'_>,
+        op: Op,
+        cur_rhs: &Datum,
+        prev_rhs: Option<&Datum>,
+    ) {
+        match self.value {
+            DynamicFilterCacheEntry::NoMatch | DynamicFilterCacheEntry::Empty => {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        let new_lhs_value = lhs_row.datum_at(self.key_l);
+                        if matches!(
+                            cmp_datum(new_lhs_value, cur_rhs, Default::default()),
+                            Ordering::Greater
+                        ) {
+                            let lhs_pk =
+                                lhs_row.project(self.pk_indices.as_slice()).into_owned_row();
+                            self.value =
+                                DynamicFilterCacheEntry::Match((lhs_pk, lhs_row.into_owned_row()));
+                        }
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        // Nothing needs to be done, cache is empty.
+                    }
+                }
+            }
+            DynamicFilterCacheEntry::Match((ref mut old_pk, ref mut old_value)) => {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        let new_lhs_value = lhs_row.datum_at(self.key_l);
+                        // RHS < new_lhs_value < old_value
+                        if matches!(
+                            cmp_datum(new_lhs_value, cur_rhs, Default::default()),
+                            Ordering::Greater
+                        ) && matches!(
+                            cmp_datum(
+                                new_lhs_value,
+                                old_value.datum_at(self.key_l),
+                                Default::default()
+                            ),
+                            Ordering::Less
+                        ) {
+                            *old_pk = lhs_row.project(self.pk_indices.as_slice()).into_owned_row();
+                            *old_value = lhs_row.into_owned_row();
+                        }
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        let new_lhs_pk = lhs_row.project(self.pk_indices.as_slice());
+                        if Row::eq(old_pk, new_lhs_pk) {
+                            self.value = DynamicFilterCacheEntry::Empty;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_rhs_chunk(&mut self, prev_rhs: RowRef, new_rhs: RowRef) {
+        match self.value {
+            DynamicFilterCacheEntry::NoMatch | DynamicFilterCacheEntry::Empty => {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                    }
+                }
+            }
+            DynamicFilterCacheEntry::Match((ref mut old_pk, ref mut old_value)) => {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        let new_lhs_value = lhs_row.datum_at(self.key_l);
+                        // RHS < new_lhs_value < old_value
+                        if matches!(
+                            cmp_datum(new_lhs_value, cur_rhs, Default::default()),
+                            Ordering::Greater
+                        ) && matches!(
+                            cmp_datum(
+                                new_lhs_value,
+                                old_value.datum_at(self.key_l),
+                                Default::default()
+                            ),
+                            Ordering::Less
+                        ) {
+                            *old_pk = lhs_row.project(self.pk_indices.as_slice()).into_owned_row();
+                            *old_value = lhs_row.into_owned_row();
+                        }
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        let new_lhs_pk = lhs_row.project(self.pk_indices.as_slice());
+                        if Row::eq(old_pk, new_lhs_pk) {
+                            self.value = DynamicFilterCacheEntry::Empty;
+                        }
+                    }
+                }
             }
         }
     }
@@ -396,7 +511,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
         let left_len = input_l.schema().len();
 
-        let mut cache = None;
+        let mut cache = DynamicFilterCache::new(self.key_l, self.pk_indices.clone());
 
         // Derive the dynamic expression
         let l_data_type = input_l.schema().data_types()[self.key_l].clone();

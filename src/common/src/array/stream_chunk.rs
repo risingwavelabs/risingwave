@@ -19,13 +19,13 @@ use itertools::Itertools;
 use risingwave_pb::data::{PbOp, PbStreamChunk};
 
 use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
-use crate::array::{DataChunk, Vis};
+use crate::array::{DataChunk, RowRef, Vis};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
 use crate::row::{OwnedRow, Row};
 use crate::types::{DataType, DefaultOrdered, ToText};
-use crate::util::iter_util::ZipEqFast;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 
 /// `Op` represents three operations in `StreamChunk`.
 ///
@@ -275,6 +275,10 @@ impl StreamChunk {
                 data: self.data.reorder_columns(column_mapping),
             }
         }
+    }
+
+    pub fn iter_rows_and_ops(&self) -> impl Iterator<Item = (&Op, RowRef)> {
+        self.ops.iter().zip_eq_debug(self.data.rows())
     }
 }
 
