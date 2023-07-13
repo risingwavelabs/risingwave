@@ -1,6 +1,6 @@
 [[test]]
 name = "window_hash_agg"
-# Prepare the tesing table & mviews.
+# Prepare the testing table & mviews.
 init_sqls = [
     # Set up the base table.
     """

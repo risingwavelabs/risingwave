@@ -131,7 +131,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let write_log_stream = Self::execute_write_log(
             self.input,
             self.log_writer,
-            self.input_columns,
+            self.input_columns.clone(),
             self.sink_param.sink_type,
             self.actor_context,
         );
@@ -140,6 +140,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             let consume_log_stream = Self::execute_consume_log(
                 sink,
                 self.log_reader,
+                self.input_columns,
                 sink_metrics,
                 self.sink_writer_param,
             );
@@ -171,12 +172,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         // Propagate the first barrier
         yield Message::Barrier(barrier);
 
-        let visible_columns = columns
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
-            .collect_vec();
-
         #[for_await]
         for msg in input {
             match msg? {
@@ -192,15 +187,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     };
 
                     if let Some(chunk) = visible_chunk {
-                        let chunk_to_connector = if visible_columns.len() != columns.len() {
-                            // Do projection here because we may have columns that aren't visible to
-                            // the downstream.
-                            chunk.clone().reorder_columns(&visible_columns)
-                        } else {
-                            chunk.clone()
-                        };
-
-                        log_writer.write_chunk(chunk_to_connector).await?;
+                        log_writer.write_chunk(chunk.clone()).await?;
 
                         // Use original chunk instead of the reordered one as the executor output.
                         yield Message::Chunk(chunk);
@@ -222,11 +209,18 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     async fn execute_consume_log<S: Sink, R: LogReader>(
         sink: S,
         mut log_reader: R,
+        columns: Vec<ColumnCatalog>,
         sink_metrics: SinkMetrics,
         sink_writer_param: SinkWriterParam,
     ) -> StreamExecutorResult<Message> {
         log_reader.init().await?;
         let mut sink_writer = sink.new_writer(sink_writer_param).await?;
+
+        let visible_columns = columns
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
+            .collect_vec();
 
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
@@ -271,7 +265,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             };
             match item {
                 LogStoreReadItem::StreamChunk(chunk) => {
-                    if let Err(e) = sink_writer.write_batch(chunk.clone()).await {
+                    let chunk = if visible_columns.len() != columns.len() {
+                        // Do projection here because we may have columns that aren't visible to
+                        // the downstream.
+                        chunk.reorder_columns(&visible_columns)
+                    } else {
+                        chunk
+                    };
+                    if let Err(e) = sink_writer.write_batch(chunk).await {
                         sink_writer.abort().await?;
                         return Err(e.into());
                     }

@@ -81,7 +81,7 @@ impl<S: MetaStore> SystemParamsManager<S> {
         self.params.read().await.clone().into()
     }
 
-    pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<()> {
+    pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<SystemParams> {
         let mut params_guard = self.params.write().await;
         let params = params_guard.deref_mut();
         let mut mem_txn = VarTransaction::new(params);
@@ -104,7 +104,7 @@ impl<S: MetaStore> SystemParamsManager<S> {
         // Sync params to worker nodes.
         self.notify_workers(params).await;
 
-        Ok(())
+        Ok(params.clone())
     }
 
     /// Flush the cached params to meta store.
