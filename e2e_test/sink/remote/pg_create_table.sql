@@ -49,6 +49,11 @@ CREATE TABLE t_types (
     jsonb_column JSONB,
 );
 
+CREATE TABLE t_append_only (
+    v1 BIGINT,
+    v2 VARCHAR(100),
+);
+
 CREATE SCHEMA biz;
 CREATE TABLE biz.t_types (
     id BIGINT PRIMARY KEY,
@@ -70,7 +75,3 @@ CREATE TABLE biz.t_types (
     array_column2 DECIMAL[]
 );
 
-CREATE TABLE t_append_only (
-    v1 BIGINT,
-    v2 VARCHAR(100),
-);
