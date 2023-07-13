@@ -60,7 +60,11 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_system_params(&self) -> Result<SystemParamsReader>;
 
-    async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()>;
+    async fn set_system_param(
+        &self,
+        param: String,
+        value: Option<String>,
+    ) -> Result<Option<SystemParamsReader>>;
 
     async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 }
@@ -121,7 +125,11 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.get_system_params().await
     }
 
-    async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()> {
+    async fn set_system_param(
+        &self,
+        param: String,
+        value: Option<String>,
+    ) -> Result<Option<SystemParamsReader>> {
         self.0.set_system_param(param, value).await
     }
 

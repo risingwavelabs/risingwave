@@ -88,3 +88,35 @@
     join version2 FOR SYSTEM_TIME AS OF PROCTIME() on stream.id2 = version2.id2 where a1 < 10;
   expected_outputs:
   - stream_plan
+- name: temporal join with an index (distribution key size = 1)
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    create index idx2 on version (a2, b2) distributed by (a2);
+    select id1, a1, id2, a2 from stream left join idx2 FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
+  expected_outputs:
+  - stream_plan
+- name: temporal join with an index (distribution key size = 2)
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    create index idx2 on version (a2, b2);
+    select id1, a1, id2, a2 from stream left join idx2 FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
+  expected_outputs:
+  - stream_plan
+- name: temporal join with an index (index column size = 1)
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    create index idx2 on version (b2);
+    select id1, a1, id2, a2 from stream left join idx2 FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
+  expected_outputs:
+  - stream_plan
+- name: temporal join with singleton table
+  sql: |
+    create table t (a int) append only;
+    create materialized view v as select count(*) from t;
+    select * from t left join v FOR SYSTEM_TIME AS OF PROCTIME() on a = count;
+  expected_outputs:
+  - stream_plan
+
