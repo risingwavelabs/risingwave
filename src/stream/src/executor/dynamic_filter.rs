@@ -197,13 +197,11 @@ impl DynamicFilterCache {
     /// TODO(kwannoel):
     /// Optimization: For the rest of values in the chunk, if any are between `(RHS, old_value]`,
     /// replace `old_value` in cache.
-    fn handle_lhs_row(
-        &mut self,
-        lhs_row: RowRef<'_>,
-        op: Op,
-        cur_rhs: &Datum,
-        prev_rhs: Option<&Datum>,
-    ) {
+    fn handle_lhs_row(&mut self, lhs_row: RowRef<'_>, op: &Op, cur_rhs: &Option<Datum>) {
+        // IF no rhs value yet, there's nothing to cache.
+        let Some(cur_rhs) = cur_rhs else {
+            return;
+        };
         match self.value {
             DynamicFilterCacheEntry::NoMatch | DynamicFilterCacheEntry::Empty => {
                 match op {
@@ -354,6 +352,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         data_chunk: &DataChunk,
         ops: Vec<Op>,
         condition: Option<BoxedExpression>,
+        cache: &mut DynamicFilterCache,
+        cur_rhs: &Option<Datum>,
     ) -> Result<(Vec<Op>, Bitmap), StreamExecutorError> {
         debug_assert_eq!(ops.len(), data_chunk.cardinality());
         let mut new_ops = Vec::with_capacity(ops.len());
@@ -437,6 +437,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         self.left_table.delete(row);
                     }
                 }
+                cache.handle_lhs_row(row, op, cur_rhs)
             }
         }
 
@@ -588,8 +589,15 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // input, so we save evaluating it on the datachunk
                     let condition = dynamic_cond(right_val).transpose()?;
 
-                    let (new_ops, new_visibility) =
-                        self.apply_batch(&data_chunk, ops, condition).await?;
+                    let (new_ops, new_visibility) = self
+                        .apply_batch(
+                            &data_chunk,
+                            ops,
+                            condition,
+                            &mut cache,
+                            &current_epoch_value,
+                        )
+                        .await?;
 
                     let (columns, _) = data_chunk.into_parts();
 
