@@ -490,8 +490,7 @@ pub(crate) mod tests {
                 ReadSnapshot::FrontendPinned {
                     snapshot: pinned_snapshot,
                     is_barrier_read: true
-                }
-                .into(),
+                },
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
