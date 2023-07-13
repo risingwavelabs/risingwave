@@ -261,9 +261,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_group_by(&mut self) -> Vec<Expr> {
         // 90% generate simple group by.
         // 10% generate grouping sets.
-        match self.rng.gen_range(0..=9) {
-            0 => self.gen_grouping_sets(),
-            1..=9 => {
+        match self.rng.gen_range(0..=8) {
+            0..=8 => {
                 let group_by_cols = self.gen_random_bound_columns();
                 self.bound_columns = group_by_cols.clone();
                 group_by_cols
@@ -271,10 +270,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     .map(|c| Expr::Identifier(Ident::new_unchecked(c.name)))
                     .collect_vec()
             }
+            // FIXME: See https://github.com/risingwavelabs/risingwave/pull/10918 for details.
+            // 9 => self.gen_grouping_sets(),
             _ => unreachable!(),
         }
     }
 
+    #[allow(dead_code)]
     /// GROUPING SETS will constrain the generated columns.
     fn gen_grouping_sets(&mut self) -> Vec<Expr> {
         let grouping_num = self.rng.gen_range(0..=5);

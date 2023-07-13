@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
@@ -133,21 +132,27 @@ fn is_timestamp_col(c: &Column) -> bool {
     c.data_type == DataType::Timestamp || c.data_type == DataType::Timestamptz
 }
 
-fn get_table_name_and_cols_with_timestamp(table: Table) -> (String, Vec<Column>, Vec<Column>) {
-    let name = table.name.clone();
-    let cols_with_timestamp = table
-        .get_qualified_columns()
-        .iter()
-        .cloned()
-        .filter(is_timestamp_col)
-        .collect_vec();
-    (name, cols_with_timestamp, table.columns)
-}
-
 fn find_tables_with_timestamp_cols(tables: Vec<Table>) -> Vec<(String, Vec<Column>, Vec<Column>)> {
     tables
         .into_iter()
-        .map(get_table_name_and_cols_with_timestamp)
-        .filter(|(_name, timestamp_cols, _schema)| !timestamp_cols.is_empty())
+        .filter_map(|table| {
+            let name = table.name.clone();
+            let columns = table.get_qualified_columns();
+            let mut timestamp_cols = vec![];
+            for col in columns {
+                let col_name = col.name.clone();
+                if col_name.contains("window_start") || col_name.contains("window_end") {
+                    return None;
+                }
+                if is_timestamp_col(&col) {
+                    timestamp_cols.push(col);
+                }
+            }
+            if timestamp_cols.is_empty() {
+                None
+            } else {
+                Some((name, timestamp_cols, table.columns))
+            }
+        })
         .collect()
 }
