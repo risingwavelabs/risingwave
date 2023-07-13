@@ -545,7 +545,10 @@ impl HummockEventHandler {
                             epoch,
                             is_checkpoint,
                         } => {
-                            self.uploader.seal_epoch(epoch);
+                            let skip = self.uploader.seal_epoch(epoch);
+                            if skip {
+                                continue;
+                            }
 
                             if is_checkpoint {
                                 self.uploader.start_sync_epoch(epoch);

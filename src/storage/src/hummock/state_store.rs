@@ -19,13 +19,14 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::oneshot;
-use tracing::log::warn;
+use tracing::warn;
 
 use super::store::state_store::HummockStorageIterator;
 use super::store::version::CommittedVersion;
@@ -250,8 +251,9 @@ impl StateStore for HummockStorage {
         }
         // Update `seal_epoch` synchronously,
         // as `HummockEvent::SealEpoch` is handled asynchronously.
-        assert!(epoch > self.seal_epoch.load(MemOrdering::SeqCst));
-        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
+        let prev_epoch = self.seal_epoch.swap(epoch, MemOrdering::SeqCst);
+        assert_gt!(epoch, prev_epoch);
+
         if is_checkpoint {
             let _ = self.min_current_epoch.compare_exchange(
                 HummockEpoch::MAX,

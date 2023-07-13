@@ -32,6 +32,7 @@ itertools = "0.10"
 libc = "0.2"
 lz4 = "1.23.1"
 memcomparable = "0.2"
+more-asserts = "0.3"
 num-integer = "0.1"
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
