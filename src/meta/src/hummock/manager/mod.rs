@@ -2451,6 +2451,7 @@ where
                             RequestEvent::PullTask(PullTask {
                                 pull_task_count,
                             }) => {
+                                assert_ne!(0, pull_task_count);
                                 use rand::prelude::SliceRandom;
                                 use rand::thread_rng;
                                 let compactor = hummock_manager.compactor_manager.get_compactor(context_id).unwrap();
@@ -2472,9 +2473,9 @@ where
                                     (group, task_type)
                                 };
 
+                                let mut compactor_alive = true;
                                 if let (Some(group), Some(task_type)) = (group, task_type) {
                                     let selector: &mut Box<dyn LevelSelector> = compaction_selectors.get_mut(&task_type).unwrap();
-
                                     for _ in 0..pull_task_count {
                                         let compact_task =
                                             hummock_manager
@@ -2498,41 +2499,28 @@ where
                                                     let _ = compactor.cancel_task(task_id).await;
                                                     hummock_manager.compactor_manager
                                                         .remove_compactor(compactor.context_id());
+
+                                                    compactor_alive = false;
+                                                    break;
                                                 }
                                             },
                                             Ok(None) => {
+                                                // no compact_task to be picked
                                                 hummock_manager.compaction_state.unschedule(group, task_type);
-                                                // ack to compactor
-                                                if let Err(e) = compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {})).await {
-                                                    tracing::warn!(
-                                                        "Failed to send ask to {}. {:#?}",
-                                                        context_id,
-                                                        e
-                                                    );
-
-                                                    hummock_manager.compactor_manager
-                                                        .remove_compactor(context_id);
-                                                }
                                                 break;
                                             }
                                             Err(err) => {
                                                 tracing::warn!("Failed to get compaction task: {:#?}.", err);
-                                                if let Err(e) = compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {})).await {
-                                                    tracing::warn!(
-                                                        "Failed to send ask to {}. {:#?}",
-                                                        context_id,
-                                                        e
-                                                    );
-
-                                                    hummock_manager.compactor_manager
-                                                        .remove_compactor(context_id);
-                                                }
                                                 break;
                                             }
                                         };
                                     }
                                 } else {
                                     tracing::debug!("Fail auto_pick_type group {:?} task_type {:?}", group, task_type);
+                                }
+
+                                // ack to compactor
+                                if compactor_alive {
                                     if let Err(e) = compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {})).await {
                                         tracing::warn!(
                                             "Failed to send ask to {}. {:#?}",
