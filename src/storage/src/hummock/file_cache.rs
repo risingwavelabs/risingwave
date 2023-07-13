@@ -78,7 +78,7 @@ pub enum FoyerRuntimeTask {
     Insert {
         key: SstableBlockIndex,
         value: Box<Block>,
-        tx: oneshot::Sender<Result<()>>,
+        tx: Option<oneshot::Sender<Result<()>>>,
     },
     Remove {
         key: SstableBlockIndex,
@@ -248,7 +248,9 @@ impl FileCache {
                                     .await
                                     .map(|_| ())
                                     .map_err(FileCacheError::foyer);
-                                tx.send(res).unwrap();
+                                if let Some(tx) = tx {
+                                    tx.send(res).unwrap();
+                                }
                             }
                             FoyerRuntimeTask::Remove { key, tx } => {
                                 store.remove(&key);
@@ -284,7 +286,11 @@ impl FileCache {
             FileCache::FoyerRuntime { task_tx, .. } => {
                 let (tx, rx) = oneshot::channel();
                 task_tx
-                    .send(FoyerRuntimeTask::Insert { key, value, tx })
+                    .send(FoyerRuntimeTask::Insert {
+                        key,
+                        value,
+                        tx: Some(tx),
+                    })
                     .unwrap();
                 rx.await.unwrap()
             }
@@ -297,9 +303,12 @@ impl FileCache {
             FileCache::None => {}
             FileCache::Foyer(_) => panic!("unsupported"),
             FileCache::FoyerRuntime { task_tx, .. } => {
-                let (tx, _rx) = oneshot::channel();
                 task_tx
-                    .send(FoyerRuntimeTask::Insert { key, value, tx })
+                    .send(FoyerRuntimeTask::Insert {
+                        key,
+                        value,
+                        tx: None,
+                    })
                     .unwrap();
             }
         }
