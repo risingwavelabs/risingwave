@@ -287,6 +287,7 @@ pub fn run() {
                     tables,
                     setup_sql,
                 } = &*env;
+                let _guard = session.txn_begin_implicit();
                 test_batch_query(session.clone(), tables.clone(), i, setup_sql)?;
                 let test_stream_query =
                     test_stream_query(session.clone(), tables.clone(), i, setup_sql);
