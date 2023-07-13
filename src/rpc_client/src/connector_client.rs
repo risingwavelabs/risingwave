@@ -26,6 +26,7 @@ use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::P
 use risingwave_pb::connector_service::sink_writer_stream_request::{
     Barrier, BeginEpoch, Request as SinkRequest, StartSink, WriteBatch,
 };
+use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
 use risingwave_pb::connector_service::*;
 use tokio::sync::mpsc::{channel, Sender};
 use tokio_stream::wrappers::ReceiverStream;
@@ -71,48 +72,63 @@ impl SinkWriterStreamHandle {
             .ok_or(RpcError::Internal(anyhow!("end of response stream")))??)
     }
 
+    async fn send_request(&mut self, request: SinkWriterStreamRequest) -> Result<()> {
+        self.request_sender.send(request).await.map_err(|e| {
+            RpcError::Internal(anyhow!(
+                "unable to send request {:?}",
+                match e.0.request {
+                    Some(sink_writer_stream_request::Request::WriteBatch(write_batch)) => {
+                        format!(
+                            "WriteBatch(batch_id = {}, epoch = {})",
+                            write_batch.batch_id, write_batch.epoch
+                        )
+                    }
+                    req => format!("{:?}", req),
+                }
+            ))
+        })
+    }
+
     pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.request_sender
-            .send(SinkWriterStreamRequest {
-                request: Some(SinkRequest::BeginEpoch(BeginEpoch { epoch })),
-            })
-            .await
-            .map_err(|_| RpcError::Internal(anyhow!("unable to send start epoch on {}", epoch)))
+        self.send_request(SinkWriterStreamRequest {
+            request: Some(SinkRequest::BeginEpoch(BeginEpoch { epoch })),
+        })
+        .await
     }
 
     pub async fn write_batch(&mut self, epoch: u64, batch_id: u64, payload: Payload) -> Result<()> {
-        self.request_sender
-            .send(SinkWriterStreamRequest {
-                request: Some(SinkRequest::WriteBatch(WriteBatch {
-                    epoch,
-                    batch_id,
-                    payload: Some(payload),
-                })),
-            })
-            .await
-            .map_err(|_| {
-                RpcError::Internal(anyhow!(
-                    "unable to send write batch on {} with batch id {}",
-                    epoch,
-                    batch_id
-                ))
-            })
+        self.send_request(SinkWriterStreamRequest {
+            request: Some(SinkRequest::WriteBatch(WriteBatch {
+                epoch,
+                batch_id,
+                payload: Some(payload),
+            })),
+        })
+        .await
     }
 
-    pub async fn commit(&mut self, epoch: u64) -> Result<()> {
-        self.request_sender
-            .send(SinkWriterStreamRequest {
-                request: Some(SinkRequest::Barrier(Barrier {
-                    epoch,
-                    is_checkpoint: true,
-                })),
-            })
-            .await
-            .map_err(|_| RpcError::Internal(anyhow!("unable to send barrier on {}", epoch,)))?;
+    pub async fn barrier(&mut self, epoch: u64) -> Result<()> {
+        self.send_request(SinkWriterStreamRequest {
+            request: Some(SinkRequest::Barrier(Barrier {
+                epoch,
+                is_checkpoint: false,
+            })),
+        })
+        .await
+    }
+
+    pub async fn commit(&mut self, epoch: u64) -> Result<CommitResponse> {
+        self.send_request(SinkWriterStreamRequest {
+            request: Some(SinkRequest::Barrier(Barrier {
+                epoch,
+                is_checkpoint: true,
+            })),
+        })
+        .await?;
         match self.next_response().await? {
             SinkWriterStreamResponse {
-                response: Some(sink_writer_stream_response::Response::Sync(_)),
-            } => Ok(()),
+                response: Some(sink_writer_stream_response::Response::Commit(rsp)),
+            } => Ok(rsp),
             msg => Err(RpcError::Internal(anyhow!(
                 "should get Sync response but get {:?}",
                 msg

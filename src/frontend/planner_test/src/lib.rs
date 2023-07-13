@@ -414,11 +414,14 @@ impl TestCase {
                     append_only,
                     ..
                 } => {
+                    // TODO(st1page): refacor it
+                    let mut notice = Default::default();
                     let source_schema = source_schema
                         .map(|source_schema| -> Result<SourceSchema> {
-                            let (source_schema, _) = source_schema
+                            let (source_schema, _, n) = source_schema
                                 .into_source_schema()
                                 .map_err(|e| anyhow!(e.inner_msg()))?;
+                            notice = n;
                             Ok(source_schema)
                         })
                         .transpose()?;
@@ -432,6 +435,7 @@ impl TestCase {
                         source_schema,
                         source_watermarks,
                         append_only,
+                        notice,
                     )
                     .await?;
                 }

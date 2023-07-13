@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::json_payload::RowOp;
@@ -37,8 +38,7 @@ use tracing::error;
 
 use crate::sink::utils::{record_to_json, TimestampHandlingMode};
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam, SinkWriterV1,
-    SinkWriterV1Adapter,
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam,
 };
 use crate::ConnectorParams;
 
@@ -89,17 +89,15 @@ impl RemoteSink {
 #[async_trait]
 impl Sink for RemoteSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = SinkWriterV1Adapter<RemoteSinkWriter>;
+    type Writer = RemoteSinkWriter;
 
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(SinkWriterV1Adapter::new(
-            RemoteSinkWriter::new(
-                self.config.clone(),
-                self.param.clone(),
-                writer_param.connector_params,
-            )
-            .await?,
-        ))
+        Ok(RemoteSinkWriter::new(
+            self.config.clone(),
+            self.param.clone(),
+            writer_param.connector_params,
+        )
+        .await?)
     }
 
     async fn validate(&self, client: Option<ConnectorClient>) -> Result<()> {
@@ -238,7 +236,7 @@ impl RemoteSinkWriter {
 }
 
 #[async_trait]
-impl SinkWriterV1 for RemoteSinkWriter {
+impl SinkWriter for RemoteSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let payload = match self.payload_format {
             SinkPayloadFormat::Json => {
@@ -286,15 +284,24 @@ impl SinkWriterV1 for RemoteSinkWriter {
         Ok(())
     }
 
-    async fn commit(&mut self) -> Result<()> {
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
         let epoch = self.epoch.ok_or_else(|| {
             SinkError::Remote("epoch has not been initialize, call `begin_epoch`".to_string())
         })?;
-        self.stream_handle.commit(epoch).await?;
-        Ok(())
+        if is_checkpoint {
+            let _rsp = self.stream_handle.commit(epoch).await?;
+            Ok(())
+        } else {
+            self.stream_handle.barrier(epoch).await?;
+            Ok(())
+        }
     }
 
     async fn abort(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }
@@ -307,13 +314,13 @@ mod test {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::Payload;
     use risingwave_pb::connector_service::sink_writer_stream_request::{Barrier, Request};
-    use risingwave_pb::connector_service::sink_writer_stream_response::{Response, SyncResponse};
+    use risingwave_pb::connector_service::sink_writer_stream_response::{CommitResponse, Response};
     use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
     use risingwave_pb::data;
     use tokio::sync::mpsc;
 
     use crate::sink::remote::RemoteSinkWriter;
-    use crate::sink::SinkWriterV1;
+    use crate::sink::SinkWriter;
 
     #[tokio::test]
     async fn test_epoch_check() {
@@ -329,7 +336,7 @@ mod test {
 
         // test epoch check
         assert!(
-            tokio::time::timeout(Duration::from_secs(10), sink.commit())
+            tokio::time::timeout(Duration::from_secs(10), sink.barrier(true))
                 .await
                 .expect("test failed: should not commit without epoch")
                 .is_err(),
@@ -413,10 +420,10 @@ mod test {
         // test commit
         response_sender
             .send(Ok(SinkWriterStreamResponse {
-                response: Some(Response::Sync(SyncResponse { epoch: 2022 })),
+                response: Some(Response::Commit(CommitResponse { epoch: 2022 })),
             }))
             .expect("test failed: failed to sync epoch");
-        sink.commit().await.unwrap();
+        sink.barrier(true).await.unwrap();
         let commit_request = request_receiver.recv().await.unwrap();
         match commit_request.request {
             Some(Request::Barrier(Barrier {

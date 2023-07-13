@@ -44,12 +44,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .context
             .lock_barrier_manager()
             .register_sender(params.actor_context.id, sender);
-        let barrier_interval_ms = params
-            .env
-            .system_params_manager_ref()
-            .get_params()
-            .load()
-            .barrier_interval_ms() as u64;
+        let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
             let source_id = TableId::new(source.source_id);
@@ -124,7 +119,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     stream_source_core,
                     params.executor_stats,
                     barrier_receiver,
-                    barrier_interval_ms,
+                    system_params,
                     params.executor_id,
                     source_ctrl_opts,
                 )?))
@@ -136,7 +131,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     Some(stream_source_core),
                     params.executor_stats,
                     barrier_receiver,
-                    barrier_interval_ms,
+                    system_params,
                     params.executor_id,
                     source_ctrl_opts,
                 )))
@@ -151,7 +146,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 None,
                 params.executor_stats,
                 barrier_receiver,
-                barrier_interval_ms,
+                system_params,
                 params.executor_id,
                 // we don't expect any data in, so no need to set chunk_sizes
                 SourceCtrlOpts::default(),

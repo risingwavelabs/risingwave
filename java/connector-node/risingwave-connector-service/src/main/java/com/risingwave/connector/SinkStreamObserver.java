@@ -154,9 +154,9 @@ public class SinkStreamObserver
                 if (isCheckpoint) {
                     responseObserver.onNext(
                             ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
-                                    .setSync(
+                                    .setCommit(
                                             ConnectorServiceProto.SinkWriterStreamResponse
-                                                    .SyncResponse.newBuilder()
+                                                    .CommitResponse.newBuilder()
                                                     .setEpoch(currentEpoch)
                                                     .build())
                                     .build());

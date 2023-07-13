@@ -280,13 +280,14 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    let memory_mgr = GlobalMemoryManager::new(
-        system_params.barrier_interval_ms(),
-        streaming_metrics.clone(),
-        memory_control_policy,
-    );
+    let memory_mgr = GlobalMemoryManager::new(streaming_metrics.clone(), memory_control_policy);
     // Run a background memory monitor
-    tokio::spawn(memory_mgr.clone().run(batch_mgr_clone, stream_mgr_clone));
+    tokio::spawn(memory_mgr.clone().run(
+        batch_mgr_clone,
+        stream_mgr_clone,
+        system_params.barrier_interval_ms(),
+        system_params_manager.watch_params(),
+    ));
 
     let watermark_epoch = memory_mgr.get_watermark_epoch();
     // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead

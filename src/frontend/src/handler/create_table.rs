@@ -661,8 +661,13 @@ pub async fn handle_create_table(
     source_schema: Option<SourceSchema>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
+    notice: Option<String>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
+    // TODO(st1page): refactor it
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    }
 
     match session.check_relation_name_duplicated(table_name.clone()) {
         Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
