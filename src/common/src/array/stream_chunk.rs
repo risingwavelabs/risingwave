@@ -19,13 +19,13 @@ use itertools::Itertools;
 use risingwave_pb::data::{PbOp, PbStreamChunk};
 
 use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
-use crate::array::{DataChunk, RowRef, Vis};
+use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
 use crate::row::{OwnedRow, Row};
 use crate::types::{DataType, DefaultOrdered, ToText};
-use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::iter_util::ZipEqFast;
 
 /// `Op` represents three operations in `StreamChunk`.
 ///
