@@ -119,7 +119,7 @@ impl SessionImpl {
                     snapshot: Default::default(),
                 })
             }
-            State::Implicit(_) => unreachable!(),
+            State::Implicit(_) => unreachable!("implicit transaction is already in progress"),
             State::Explicit(_) => {} /* do nothing since an explicit transaction is already in
                                       * progress */
         }
@@ -134,7 +134,7 @@ impl SessionImpl {
         match &*txn {
             // Since an implicit transaction is always started, we only need to upgrade it to an
             // explicit transaction.
-            State::Initial => unreachable!(),
+            State::Initial => unreachable!("no implicit transaction in progress"),
             State::Implicit(ctx) => {
                 *txn = State::Explicit(Context {
                     id: ctx.id,
@@ -155,7 +155,7 @@ impl SessionImpl {
         let mut txn = self.txn.lock();
 
         match &*txn {
-            State::Initial => unreachable!(),
+            State::Initial => unreachable!("no transaction in progress"),
             State::Implicit(_) => {
                 // TODO: should be warning
                 self.notice_to_user("there is no transaction in progress")
@@ -173,7 +173,7 @@ impl SessionImpl {
         let mut txn = self.txn.lock();
 
         match &*txn {
-            State::Initial => unreachable!(),
+            State::Initial => unreachable!("no transaction in progress"),
             State::Implicit(_) => {
                 // TODO: should be warning
                 self.notice_to_user("there is no transaction in progress")
@@ -188,7 +188,7 @@ impl SessionImpl {
     /// Returns the transaction context.
     fn txn_ctx(&self) -> MappedMutexGuard<'_, Context> {
         MutexGuard::map(self.txn.lock(), |txn| match txn {
-            State::Initial => unreachable!(),
+            State::Initial => unreachable!("no transaction in progress"),
             State::Implicit(ctx) => ctx,
             State::Explicit(ctx) => ctx,
         })
