@@ -26,7 +26,6 @@ use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::oneshot;
-use tracing::warn;
 
 use super::store::state_store::HummockStorageIterator;
 use super::store::version::CommittedVersion;
@@ -227,13 +226,6 @@ impl StateStore for HummockStorage {
     }
 
     async fn sync(&self, epoch: u64) -> StorageResult<SyncResult> {
-        if epoch == INVALID_EPOCH {
-            warn!("syncing invalid epoch");
-            return Ok(SyncResult {
-                sync_size: 0,
-                uncommitted_ssts: vec![],
-            });
-        }
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
             .send(HummockEvent::AwaitSyncEpoch {
@@ -245,10 +237,6 @@ impl StateStore for HummockStorage {
     }
 
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        if epoch == INVALID_EPOCH {
-            warn!("sealing invalid epoch");
-            return;
-        }
         // Update `seal_epoch` synchronously,
         // as `HummockEvent::SealEpoch` is handled asynchronously.
         let prev_epoch = self.seal_epoch.swap(epoch, MemOrdering::SeqCst);

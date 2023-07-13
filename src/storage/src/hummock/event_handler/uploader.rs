@@ -660,23 +660,14 @@ impl HummockUploader {
             .push_front(imm);
     }
 
-    /// Seal an epoch, returns `true` if there's nothing to seal.
-    pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) -> bool {
-        match self.max_sealed_epoch.cmp(&epoch) {
-            std::cmp::Ordering::Less => info_in_release!(epoch, "epoch is sealed"),
-            std::cmp::Ordering::Equal => {
-                // This is possible when the cluster recovers.
-                tracing::warn!(epoch, "sealing a sealed epoch, are we recovering?");
-                return true;
-            }
-            std::cmp::Ordering::Greater => {
-                panic!(
-                    "sealing an older epoch `{}` than max sealed epoch `{}`",
-                    epoch, self.max_sealed_epoch
-                );
-            }
-        }
-
+    pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
+        info_in_release!("epoch {} is sealed", epoch);
+        assert!(
+            epoch > self.max_sealed_epoch,
+            "sealing a sealed epoch {}. {}",
+            epoch,
+            self.max_sealed_epoch
+        );
         self.max_sealed_epoch = epoch;
         if let Some((&smallest_unsealed_epoch, _)) = self.unsealed_data.first_key_value() {
             assert!(
@@ -697,8 +688,6 @@ impl HummockUploader {
         } else {
             info_in_release!("epoch {} to seal has no data", epoch);
         }
-
-        false
     }
 
     pub(crate) fn start_merge_imms(&mut self, sealed_epoch: HummockEpoch) {
