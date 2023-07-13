@@ -175,6 +175,8 @@ pub enum Error {
     },
     #[error("arrow error: {0}")]
     Arrow(#[from] arrow_schema::ArrowError),
+    #[error("UDF unsupported: {0}")]
+    Unsupported(String),
     #[error("UDF service returned no data")]
     NoReturned,
 }
