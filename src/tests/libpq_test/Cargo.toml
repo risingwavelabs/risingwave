@@ -1,23 +1,12 @@
+[workspace]
+# To speedup the building, we don't include the test in the root workspace.
+
 [package]
 name = "risingwave_libpq_test"
-version = { workspace = true }
-edition = { workspace = true }
-homepage = { workspace = true }
-keywords = { workspace = true }
-license = { workspace = true }
-repository = { workspace = true }
-
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
 anyhow = "1"
 libpq = "3.0"
 clap = { version = "4", features = ["derive"] }
-risingwave_rt = { path = "../../utils/runtime" }
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
