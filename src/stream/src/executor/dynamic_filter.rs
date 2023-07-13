@@ -23,7 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{once, OwnedRow as RowData, OwnedRow, Project, Row, RowExt};
+use risingwave_common::row::{once, OwnedRow as RowData, OwnedRow, Row, RowExt};
 use risingwave_common::types::{
     DataType, Datum, DatumRef, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum,
 };
@@ -76,25 +76,25 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 ///
 /// On update, we need to do table scan, to decide which rows need to be sent downstream.
 /// This happens because RHS value is dynamic.
-/// So we need to send rows between (old_RHS, current_RHS) downstream for either deletion/insertion.
-/// For monotonically increasing RHS (e.g. NOW()), current_RHS > old_RHS.
-/// The cache_value from LHS partitions the range.
+/// So we need to send rows between (`old_RHS`, `current_RHS`) downstream for either
+/// deletion/insertion. For monotonically increasing RHS (e.g. NOW()), `current_RHS` > `old_RHS`.
+/// The `cache_value` from LHS partitions the range.
 ///
 /// Case 1:
-/// cache_value larger than current_RHS.
-/// Need to send all rows between (prev_RHS, current_RHS) downstream.
+/// `cache_value` larger than `current_RHS`.
+/// Need to send all rows between (`prev_RHS`, `current_RHS`) downstream.
 ///
 /// Case 2:
-/// cache_value smaller or same as current_RHS, larger than prev_RHS.
-/// Need to send all rows between (prev_RHS, cache_value) downstream.
+/// `cache_value` smaller or same as `current_RHS`, larger than `prev_RHS`.
+/// Need to send all rows between (`prev_RHS`, `cache_value`) downstream.
 ///
 /// Case 3:
-/// cache_value smaller than prev_RHS.
-/// No need scan any rows, there are no LHS rows between (prev_RHS, current_RHS).
+/// `cache_value` smaller than `prev_RHS`.
+/// No need scan any rows, there are no LHS rows between (`prev_RHS`, `current_RHS`).
 ///
 /// Case 4:
-/// No cache_value.
-/// Need to send all rows between (prev_RHS, current_RHS) downstream,
+/// No `cache_value`.
+/// Need to send all rows between (`prev_RHS`, `current_RHS`) downstream,
 /// because cache value could have been deleted.
 ///
 /// ## Initial state
@@ -106,32 +106,32 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 ///    `new_value` refers to the new value received from LHS in the update
 ///    message.
 ///
-///    INSERT: if the new value is (RHS, old_value), replace `old_value` in cache.
+///    INSERT: if the new value is (RHS, `old_value`), replace `old_value` in cache.
 ///            Otherwise, do nothing.
-///    UPDATE: if the new value is (RHS, old_value), OR if has same key as `old_value`,
+///    UPDATE: if the new value is (RHS, `old_value`), OR if has same key as `old_value`,
 ///            replace `old_value` in cache.
 ///            Otherwise, do nothing.
 ///    DELETE: if the new value has the same key as `old_value`, empty cache. It is now `None`.
 ///
 ///    Example A:
-///    FILTER_COL: [1]
+///    `FILTER_COL`: [1]
 ///    Existing cache: Row(1, 3)
-///    RHS_VALUE: Row(1, 1)
-///    LHS_INSERT: Row(1, 2)
+///    `RHS_VALUE`: Row(1, 1)
+///    `LHS_INSERT`: Row(1, 2)
 ///    Cache update: Row(1, 3) -> Row(1, 2).
 ///
 ///    Example B:
-///    FILTER_COL: [1]
+///    `FILTER_COL`: [1]
 ///    Existing cache: Row(1, 3)
-///    RHS_VALUE: Row(1, 1)
-///    LHS_DELETE: Row(1, 3)
+///    `RHS_VALUE`: Row(1, 1)
+///    `LHS_DELETE`: Row(1, 3)
 ///    Cache update: Row(1, 3) -> None.
 ///
 ///    Example C:
-///    FILTER_COL: [1]
+///    `FILTER_COL`: [1]
 ///    Existing cache: Row(1, 3)
-///    RHS_VALUE: Row(1, 1)
-///    LHS_INSERT: Row(1, 1)
+///    `RHS_VALUE`: Row(1, 1)
+///    `LHS_INSERT`: Row(1, 1)
 ///    Cache update: No update, assuming condition is LHS > RHS.
 ///
 /// 2. Whenever we receive RHS updates to our existing RHS value, we need to empty the cache
@@ -139,23 +139,23 @@ use crate::executor::expect_first_barrier_from_aligned_stream;
 ///    Cache now holds `None`.
 ///
 ///    Example A:
-///    EXISTING_RHS_VALUE: Row(1, 1)
-///    LHS_CACHE: Row(1, 3)
-///    NEW_RHS_VALUE: Row(1, 2)
+///    `EXISTING_RHS_VALUE`: Row(1, 1)
+///    `LHS_CACHE`: Row(1, 3)
+///    `NEW_RHS_VALUE`: Row(1, 2)
 ///    ---
 ///    Cache no update, since LHS value would still be largest, nearest to RHS.
 ///
 ///    Example B:
-///    RHS_VALUE: Row(1, 3)
-///    LHS_CACHE: Row(1, 2)
-///    NEW_RHS_VALUE: Row(1, 1)
+///    `RHS_VALUE`: Row(1, 3)
+///    `LHS_CACHE`: Row(1, 2)
+///    `NEW_RHS_VALUE`: Row(1, 1)
 ///    ---
 ///    Cache no update. Largest LHS value that is nearest to RHS remains the same.
 ///
 ///    Example C:
-///    RHS_VALUE: Row(1, 3)
-///    LHS_VALUE: Row(1, 4)
-///    NEW_RHS_VALUE: Row(1, 4)
+///    `RHS_VALUE`: Row(1, 3)
+///    `LHS_VALUE`: Row(1, 4)
+///    `NEW_RHS_VALUE`: Row(1, 4)
 ///    ---
 ///    Cache needs update. Largest LHS value that is nearest to RHS can now be Row(1, 5).
 struct DynamicFilterCache {
@@ -166,6 +166,7 @@ struct DynamicFilterCache {
     pk_indices: Vec<usize>,
 }
 
+#[derive(PartialEq)]
 enum DynamicFilterCacheEntry {
     /// No values within range (prev_RHS, current_RHS).
     NoMatch,
@@ -186,13 +187,49 @@ impl DynamicFilterCache {
         }
     }
 
-    // TODO: Handle table scan.
+    fn get_cached_lhs(&self) -> Option<&OwnedRow> {
+        if let DynamicFilterCacheEntry::Match((_, lhs_row)) = &self.value {
+            Some(lhs_row)
+        } else {
+            None
+        }
+    }
 
-    /// INSERT/UPDATE_INSERT:
-    /// If the new value is (RHS, old_value), replace `old_value` in cache.
+    /// All rows are guaranteed to be between
+    /// (prev_epoch_val, cur_epoch_val].
+    /// So we just need to find the minimum
+    fn handle_scan_row(&mut self, lhs_row: &OwnedRow) {
+        match &self.value {
+            DynamicFilterCacheEntry::Empty | DynamicFilterCacheEntry::NoMatch => {
+                let lhs_pk = lhs_row.project(self.pk_indices.as_slice()).into_owned_row();
+                self.value = DynamicFilterCacheEntry::Match((lhs_pk, lhs_row.clone()));
+            }
+            DynamicFilterCacheEntry::Match((_, cur_cached_lhs)) => {
+                if cmp_datum(
+                    lhs_row.datum_at(self.key_l),
+                    cur_cached_lhs.datum_at(self.key_l),
+                    Default::default(),
+                ) == Ordering::Less
+                {
+                    let lhs_pk = lhs_row.project(self.pk_indices.as_slice()).into_owned_row();
+                    self.value = DynamicFilterCacheEntry::Match((lhs_pk, lhs_row.clone()));
+                }
+            }
+        }
+    }
+
+    /// If after table scan CacheEntry is still Empty, means no match.
+    fn ensure_no_match_if_empty(&mut self) {
+        if self.value == DynamicFilterCacheEntry::Empty {
+            self.value = DynamicFilterCacheEntry::NoMatch;
+        }
+    }
+
+    /// `INSERT/UPDATE_INSERT`:
+    /// If the new value is (RHS, `old_value`), replace `old_value` in cache.
     /// Otherwise, do nothing.
     ///
-    /// DELETE/UPDATE_DELETE:
+    /// `DELETE/UPDATE_DELETE`:
     /// If the new value has the same key as `old_value`, empty cache. It is now `Empty`.
     /// It means for this epoch, we will need to do table scan.
     ///
@@ -255,7 +292,7 @@ impl DynamicFilterCache {
         }
     }
 
-    fn handle_rhs_row(&mut self, op: &Op, prev_rhs: &Option<Datum>, new_rhs: DatumRef) {
+    fn handle_rhs_row(&mut self, op: &Op, prev_rhs: &Option<Datum>, new_rhs: DatumRef<'_>) {
         let Some(prev_rhs) = prev_rhs else {
             return;
         };
@@ -277,7 +314,7 @@ impl DynamicFilterCache {
                     Op::Delete => self.value = DynamicFilterCacheEntry::Empty,
                 }
             }
-            DynamicFilterCacheEntry::Match((ref mut cur_pk, ref mut cur_value)) => {
+            DynamicFilterCacheEntry::Match((ref mut _cur_pk, ref mut cur_value)) => {
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         // cur_RHS <= new_RHS < cur_value => Can ignore safely.
@@ -664,7 +701,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let prev: Datum = prev_epoch_value.flatten();
                     if prev != curr {
                         let (range, _latest_is_lower, is_insert) = self.get_range(&curr, prev);
-                        let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
+                        let left_bound = if let Some(lhs) = cache.get_cached_lhs()
+                            && let Some(lhs_value) = lhs.datum_at(self.key_l) // FIXME should only cache scalar.
+                        {
+                            Bound::Included(lhs_value.into_scalar_impl())
+                        } else {
+                            range.0
+                        };
+                        let range = (Self::to_row_bound(left_bound), Self::to_row_bound(range.1));
 
                         // TODO: prefetching for append-only case.
                         let streams = futures::future::try_join_all(
@@ -683,6 +727,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         #[for_await]
                         for res in stream::select_all(streams) {
                             let row = res?;
+                            cache.handle_scan_row(&row);
                             if let Some(chunk) = stream_chunk_builder.append_row_matched(
                                 // All rows have a single identity at this point
                                 if is_insert { Op::Insert } else { Op::Delete },
@@ -691,6 +736,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                                 yield Message::Chunk(chunk);
                             }
                         }
+
+                        cache.ensure_no_match_if_empty();
 
                         if let Some(chunk) = stream_chunk_builder.take() {
                             yield Message::Chunk(chunk);
