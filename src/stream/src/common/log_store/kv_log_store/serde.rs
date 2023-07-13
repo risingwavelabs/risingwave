@@ -26,8 +26,8 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::constants::log_store::{
-    EPOCH_COLUMN_INDEX, EPOCH_COLUMN_TYPE, ROW_OP_COLUMN_INDEX, ROW_OP_COLUMN_TYPE,
-    SEQ_ID_COLUMN_INDEX, SEQ_ID_COLUMN_TYPE,
+    EPOCH_COLUMN_INDEX, EPOCH_COLUMN_TYPE, PK_TYPES, KV_LOG_STORE_PREDEFINED_COLUMNS, ROW_OP_COLUMN_INDEX,
+    SEQ_ID_COLUMN_INDEX,
 };
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -49,12 +49,6 @@ use crate::common::log_store::kv_log_store::{
     ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
 };
 use crate::common::log_store::{LogStoreError, LogStoreReadItem, LogStoreResult};
-
-/// `epoch`, `seq_id`, `row_op`
-const PREDEFINED_COLUMNS_TYPES: [DataType; 3] =
-    [EPOCH_COLUMN_TYPE, SEQ_ID_COLUMN_TYPE, ROW_OP_COLUMN_TYPE];
-/// `epoch`, `seq_id`
-const PK_TYPES: [DataType; 2] = [EPOCH_COLUMN_TYPE, SEQ_ID_COLUMN_TYPE];
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
 const DELETE_OP_CODE: RowOpCodeType = 2;
@@ -121,12 +115,12 @@ impl LogStoreRowSerde {
             .collect_vec();
 
         // There are 3 predefined columns for kv log store:
-        assert!(data_types.len() > PREDEFINED_COLUMNS_TYPES.len());
-        for i in 0..PREDEFINED_COLUMNS_TYPES.len() {
-            assert_eq!(data_types[i], PREDEFINED_COLUMNS_TYPES[i]);
+        assert!(data_types.len() > KV_LOG_STORE_PREDEFINED_COLUMNS.len());
+        for i in 0..KV_LOG_STORE_PREDEFINED_COLUMNS.len() {
+            assert_eq!(data_types[i], KV_LOG_STORE_PREDEFINED_COLUMNS[i]);
         }
 
-        let payload_schema = data_types[PREDEFINED_COLUMNS_TYPES.len()..].to_vec();
+        let payload_schema = data_types[KV_LOG_STORE_PREDEFINED_COLUMNS.len()..].to_vec();
 
         let row_serde = BasicSerde::new(input_value_indices.into(), table_columns.into());
 
@@ -264,7 +258,7 @@ impl LogStoreRowSerde {
     fn deserialize(&self, value_bytes: Bytes) -> LogStoreResult<(u64, LogStoreRowOp)> {
         let row_data = self.row_serde.deserialize(&value_bytes)?;
 
-        let payload_row = OwnedRow::new(row_data[PREDEFINED_COLUMNS_TYPES.len()..].to_vec());
+        let payload_row = OwnedRow::new(row_data[KV_LOG_STORE_PREDEFINED_COLUMNS.len()..].to_vec());
         let epoch = Self::decode_epoch(*row_data[EPOCH_COLUMN_INDEX].as_ref().unwrap().as_int64());
         let row_op_code = *row_data[ROW_OP_COLUMN_INDEX].as_ref().unwrap().as_int16();
 

@@ -43,6 +43,15 @@ pub mod log_store {
     pub const SEQ_ID_COLUMN_NAME: &str = "kv_log_store_seq_id";
     pub const ROW_OP_COLUMN_NAME: &str = "kv_log_store_row_op";
 
+    /// `epoch`, `seq_id`, `row_op`
+    pub const KV_LOG_STORE_PREDEFINED_COLUMNS: [(&str, DataType); 3] = [
+        (EPOCH_COLUMN_NAME, EPOCH_COLUMN_TYPE),
+        (SEQ_ID_COLUMN_NAME, SEQ_ID_COLUMN_TYPE),
+        (ROW_OP_COLUMN_NAME, ROW_OP_COLUMN_TYPE),
+    ];
+    /// `epoch`, `seq_id`
+    pub const PK_TYPES: [DataType; 2] = [EPOCH_COLUMN_TYPE, SEQ_ID_COLUMN_TYPE];
+
     pub const EPOCH_COLUMN_TYPE: DataType = DataType::Int64;
     pub const SEQ_ID_COLUMN_TYPE: DataType = DataType::Int32;
     pub const ROW_OP_COLUMN_TYPE: DataType = DataType::Int16;
