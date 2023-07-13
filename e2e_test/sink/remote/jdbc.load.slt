@@ -111,7 +111,7 @@ CREATE SINK s2_mysql FROM rw_types WITH (
 statement ok
 CREATE TABLE tt1 (
     v1 BIGINT,
-    v2 VARCHAR(100),
+    v2 VARCHAR,
 );
 
 statement ok
