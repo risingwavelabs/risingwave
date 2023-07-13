@@ -276,10 +276,6 @@ impl StreamChunk {
             }
         }
     }
-
-    pub fn iter_rows_and_ops(&self) -> impl Iterator<Item = (&Op, RowRef)> {
-        self.ops.iter().zip_eq_debug(self.data.rows())
-    }
 }
 
 impl fmt::Debug for StreamChunk {

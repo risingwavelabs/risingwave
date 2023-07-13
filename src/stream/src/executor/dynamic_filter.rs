@@ -28,7 +28,7 @@ use risingwave_common::types::{
     DataType, Datum, DatumRef, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::sort_util::{cmp_datum, cmp_datum_iter};
+use risingwave_common::util::sort_util::{cmp_datum};
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
@@ -196,7 +196,7 @@ impl DynamicFilterCache {
     }
 
     /// All rows are guaranteed to be between
-    /// (prev_epoch_val, cur_epoch_val].
+    /// (`prev_epoch_val`, `cur_epoch_val`].
     /// So we just need to find the minimum
     fn handle_scan_row(&mut self, lhs_row: &OwnedRow) {
         match &self.value {
@@ -218,7 +218,7 @@ impl DynamicFilterCache {
         }
     }
 
-    /// If after table scan CacheEntry is still Empty, means no match.
+    /// If after table scan `CacheEntry` is still Empty, means no match.
     fn ensure_no_match_if_empty(&mut self) {
         if self.value == DynamicFilterCacheEntry::Empty {
             self.value = DynamicFilterCacheEntry::NoMatch;
