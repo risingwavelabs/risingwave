@@ -95,6 +95,8 @@ services:
       - 1m
       - "--snapshot-count"
       - "10000"
+      - "--data-dir"
+      - /etcd-data
     expose:
       - "2388"
     ports:

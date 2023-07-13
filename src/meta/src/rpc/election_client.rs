@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use etcd_client::{ConnectOptions, Error, GetOptions, LeaderKey, ResignOptions};
 use risingwave_common::bail;
+use serde::Serialize;
 use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time;
@@ -28,6 +29,7 @@ use crate::MetaResult;
 
 const META_ELECTION_KEY: &str = "__meta_election_";
 
+#[derive(Debug, Serialize)]
 pub struct ElectionMember {
     pub id: String,
     pub is_leader: bool,
@@ -335,7 +337,7 @@ impl ElectionClient for EtcdElectionClient {
 }
 
 impl EtcdElectionClient {
-    pub(crate) async fn new(
+    pub async fn new(
         endpoints: Vec<String>,
         options: Option<ConnectOptions>,
         auth_enabled: bool,

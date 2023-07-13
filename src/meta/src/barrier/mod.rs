@@ -598,7 +598,17 @@ where
                 }
                 // Checkpoint frequency changes.
                 notification = local_notification_rx.recv() => {
-                    self.handle_local_notification(notification.unwrap());
+                    let notification = notification.unwrap();
+                    // Handle barrier interval and checkpoint frequency changes
+                    if let LocalNotification::SystemParamsChange(p) = &notification {
+                        let new_interval = Duration::from_millis(p.barrier_interval_ms() as u64);
+                        if new_interval != min_interval.period() {
+                            min_interval = tokio::time::interval(new_interval);
+                            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                        }
+                        self.scheduled_barriers
+                            .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
+                    }
                 }
                 // Barrier completes.
                 completion = barrier_complete_rx.recv() => {
@@ -1050,14 +1060,6 @@ where
 
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
         self.tracker.lock().await.gen_ddl_progress()
-    }
-
-    /// Only handle `SystemParamsChange`.
-    fn handle_local_notification(&self, notification: LocalNotification) {
-        if let LocalNotification::SystemParamsChange(p) = notification {
-            self.scheduled_barriers
-                .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
-        }
     }
 }
 
