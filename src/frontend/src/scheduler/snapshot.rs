@@ -167,17 +167,30 @@ impl HummockSnapshotManager {
         self.latest_snapshot.borrow().clone()
     }
 
-    /// Update the latest snapshot. Panics if the new snapshot is older than the current one.
+    /// Update the latest snapshot.
     ///
     /// Should only be called by the observer manager.
     pub fn update(&self, snapshot: PbHummockSnapshot) {
         self.latest_snapshot.send_if_modified(move |old_snapshot| {
+            // Note(bugen): theoritically, the snapshots from the observer should always be
+            // monotonically increasing, so there's no need to `max` them or check whether they are
+            // the same. But we still do it here to be safe.
+            // TODO: turn this into an assertion.
+            let snapshot = PbHummockSnapshot {
+                committed_epoch: std::cmp::max(
+                    old_snapshot.value.committed_epoch,
+                    snapshot.committed_epoch,
+                ),
+                current_epoch: std::cmp::max(
+                    old_snapshot.value.current_epoch,
+                    snapshot.current_epoch,
+                ),
+            };
+
             if old_snapshot.value == snapshot {
-                // ignore the same snapshot, should rarely happen
+                // Ignore the same snapshot
                 false
             } else {
-                assert_le!(old_snapshot.value.committed_epoch, snapshot.committed_epoch);
-
                 // First tell the worker that a new snapshot is going to be pinned.
                 self.worker_sender
                     .send(Operation::Pin(snapshot.clone()))
