@@ -69,3 +69,8 @@ CREATE TABLE biz.t_types (
     array_column VARCHAR[],
     array_column2 DECIMAL[]
 );
+
+CREATE TABLE t_append_only (
+    v1 BIGINT,
+    v2 VARCHAR(100),
+);
