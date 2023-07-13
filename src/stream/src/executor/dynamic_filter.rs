@@ -28,7 +28,7 @@ use risingwave_common::types::{
     DataType, Datum, DatumRef, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::sort_util::{cmp_datum};
+use risingwave_common::util::sort_util::cmp_datum;
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
