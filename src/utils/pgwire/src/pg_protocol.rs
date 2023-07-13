@@ -363,7 +363,6 @@ where
         let result = self.inner_process_query_msg(sql, session).await;
 
         let mills = start.elapsed().as_millis();
-        let truncated = sql.len() > 1024;
 
         tracing::info!(
             target: PGWIRE_QUERY_LOG,
@@ -371,11 +370,7 @@ where
             session = %session_id,
             status = %if result.is_ok() { "ok" } else { "err" },
             time = %format_args!("{}ms", mills),
-            sql = %format_args!(
-                "{}{}",
-                if truncated { &sql[..1024] } else { sql },
-                if truncated { "...(truncated)" } else { "" }
-            )
+            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
         );
 
         result
