@@ -709,7 +709,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
-    async fn get_epoch(&self) -> RpcResult<HummockSnapshot> {
+    async fn get_snapshot(&self) -> RpcResult<HummockSnapshot> {
         Ok(HummockSnapshot {
             committed_epoch: 0,
             current_epoch: 0,
