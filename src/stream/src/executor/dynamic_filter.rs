@@ -184,6 +184,8 @@ impl DynamicFilterCache {
         }
     }
 
+    // TODO: Handle table scan.
+
     /// INSERT/UPDATE_INSERT:
     /// If the new value is (RHS, old_value), replace `old_value` in cache.
     /// Otherwise, do nothing.
@@ -253,42 +255,46 @@ impl DynamicFilterCache {
         }
     }
 
-    fn handle_rhs_chunk(&mut self, prev_rhs: RowRef, new_rhs: RowRef) {
+    fn handle_rhs_row(&mut self, op: &Op, prev_rhs: &Datum, new_rhs: &Datum) {
         match self.value {
-            DynamicFilterCacheEntry::NoMatch | DynamicFilterCacheEntry::Empty => {
+            DynamicFilterCacheEntry::Empty => {}
+            DynamicFilterCacheEntry::NoMatch => {
                 match op {
-                    Op::Insert | Op::UpdateInsert => {
-                    }
-                    Op::Delete | Op::UpdateDelete => {
-                    }
+                    // Guaranteed it is monotonically increasing,
+                    // so means if no match now, no match later either,
+                    // since there's no LHS value larger currently.
+                    // If we update delete, it has to be paired with an
+                    // UpdateInsert with a larger value later too.
+                    Op::Insert | Op::UpdateInsert | Op::UpdateDelete => {}
+
+                    // If just delete, it's possible that we have no RHS value left.
+                    // OR we revert to an older value, i.e. smaller.
+                    // There could be a match in that case.
+                    // So we need to mark as empty, so we can refresh it later.
+                    Op::Delete => self.value = DynamicFilterCacheEntry::Empty,
                 }
             }
-            DynamicFilterCacheEntry::Match((ref mut old_pk, ref mut old_value)) => {
+            DynamicFilterCacheEntry::Match((ref mut cur_pk, ref mut cur_value)) => {
                 match op {
                     Op::Insert | Op::UpdateInsert => {
-                        let new_lhs_value = lhs_row.datum_at(self.key_l);
-                        // RHS < new_lhs_value < old_value
+                        // cur_RHS <= new_RHS < cur_value => Can ignore safely.
+                        // otherwise RHS less or more => Empty cache, refresh it on table scan.
                         if matches!(
-                            cmp_datum(new_lhs_value, cur_rhs, Default::default()),
-                            Ordering::Greater
+                            cmp_datum(new_rhs, prev_rhs, Default::default()),
+                            Ordering::Greater | Ordering::Equal
                         ) && matches!(
-                            cmp_datum(
-                                new_lhs_value,
-                                old_value.datum_at(self.key_l),
-                                Default::default()
-                            ),
+                            cmp_datum(new_rhs, cur_value.datum_at(self.key_l), Default::default()),
                             Ordering::Less
                         ) {
-                            *old_pk = lhs_row.project(self.pk_indices.as_slice()).into_owned_row();
-                            *old_value = lhs_row.into_owned_row();
+                            // No need to do anything.
+                        } else {
+                            self.value = DynamicFilterCacheEntry::Empty
                         }
                     }
-                    Op::Delete | Op::UpdateDelete => {
-                        let new_lhs_pk = lhs_row.project(self.pk_indices.as_slice());
-                        if Row::eq(old_pk, new_lhs_pk) {
-                            self.value = DynamicFilterCacheEntry::Empty;
-                        }
+                    Op::UpdateDelete => {
+                        // Depends on `Op::UpdateInsert`. Can ignore it.
                     }
+                    Op::Delete => self.value = DynamicFilterCacheEntry::Empty,
                 }
             }
         }
