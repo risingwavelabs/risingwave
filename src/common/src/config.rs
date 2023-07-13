@@ -524,8 +524,14 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::lfu_tiny_lru_capacity_ratio")]
     pub lfu_tiny_lru_capacity_ratio: f64,
 
-    #[serde(default = "default::file_cache::rated_random_rate")]
-    pub rated_random_rate: usize,
+    #[serde(default = "default::file_cache::rated_random_rate_mb")]
+    pub rated_random_rate_mb: usize,
+
+    #[serde(default = "default::file_cache::flush_rate_limit_mb")]
+    pub flush_rate_limit_mb: usize,
+
+    #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
+    pub reclaim_rate_limit_mb: usize,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -934,7 +940,15 @@ mod default {
             0.01
         }
 
-        pub fn rated_random_rate() -> usize {
+        pub fn rated_random_rate_mb() -> usize {
+            0
+        }
+
+        pub fn flush_rate_limit_mb() -> usize {
+            0
+        }
+
+        pub fn reclaim_rate_limit_mb() -> usize {
             0
         }
     }

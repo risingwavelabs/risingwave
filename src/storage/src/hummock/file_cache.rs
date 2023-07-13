@@ -58,7 +58,9 @@ pub struct FoyerStoreConfig {
     pub device_align: usize,
     pub device_io_size: usize,
     pub flushers: usize,
+    pub flush_rate_limit: usize,
     pub reclaimers: usize,
+    pub reclaim_rate_limit: usize,
     pub recover_concurrency: usize,
     pub lfu_window_to_cache_size_ratio: usize,
     pub lfu_tiny_lru_capacity_ratio: f64,
@@ -151,10 +153,7 @@ impl FileCache {
             Arc<dyn AdmissionPolicy<Key = SstableBlockIndex, Value = Box<Block>>>,
         > = vec![];
         if config.rated_random_rate > 0 {
-            let rr = RatedRandom::new(
-                config.rated_random_rate * 1024 * 1024,
-                Duration::from_millis(100),
-            );
+            let rr = RatedRandom::new(config.rated_random_rate, Duration::from_millis(100));
             admissions.push(Arc::new(rr));
         }
 
@@ -174,7 +173,9 @@ impl FileCache {
             reinsertions: vec![],
             buffer_pool_size: config.buffer_pool_size,
             flushers: config.flushers,
+            flush_rate_limit: config.flush_rate_limit,
             reclaimers: config.reclaimers,
+            reclaim_rate_limit: config.reclaim_rate_limit,
             recover_concurrency: config.recover_concurrency,
             prometheus_registry: config.prometheus_registry,
         };
@@ -207,7 +208,7 @@ impl FileCache {
             > = vec![];
             if foyer_store_config.rated_random_rate > 0 {
                 let rr = RatedRandom::new(
-                    foyer_store_config.rated_random_rate * 1024 * 1024,
+                    foyer_store_config.rated_random_rate,
                     Duration::from_millis(100),
                 );
                 admissions.push(Arc::new(rr));
@@ -229,7 +230,9 @@ impl FileCache {
                 reinsertions: vec![],
                 buffer_pool_size: foyer_store_config.buffer_pool_size,
                 flushers: foyer_store_config.flushers,
+                flush_rate_limit: foyer_store_config.flush_rate_limit,
                 reclaimers: foyer_store_config.reclaimers,
+                reclaim_rate_limit: foyer_store_config.reclaim_rate_limit,
                 recover_concurrency: foyer_store_config.recover_concurrency,
                 prometheus_registry: foyer_store_config.prometheus_registry,
             };
@@ -274,7 +277,7 @@ impl FileCache {
         match self {
             FileCache::None => Ok(()),
             FileCache::Foyer(store) => store
-                .insert(key.clone(), value)
+                .insert(key, value)
                 .await
                 .map(|_| ())
                 .map_err(FileCacheError::foyer),
@@ -284,6 +287,20 @@ impl FileCache {
                     .send(FoyerRuntimeTask::Insert { key, value, tx })
                     .unwrap();
                 rx.await.unwrap()
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub fn insert_without_wait(&self, key: SstableBlockIndex, value: Box<Block>) {
+        match self {
+            FileCache::None => {}
+            FileCache::Foyer(_) => panic!("unsupported"),
+            FileCache::FoyerRuntime { task_tx, .. } => {
+                let (tx, _rx) = oneshot::channel();
+                task_tx
+                    .send(FoyerRuntimeTask::Insert { key, value, tx })
+                    .unwrap();
             }
         }
     }

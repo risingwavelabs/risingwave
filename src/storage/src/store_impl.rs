@@ -553,9 +553,11 @@ impl StateStoreImpl {
                 device_io_size: opts.file_cache_device_io_size,
                 lfu_window_to_cache_size_ratio: opts.file_cache_lfu_window_to_cache_size_ratio,
                 lfu_tiny_lru_capacity_ratio: opts.file_cache_lfu_tiny_lru_capacity_ratio,
-                rated_random_rate: opts.file_cache_rated_random_rate,
+                rated_random_rate: opts.file_cache_rated_random_rate_mb * MB,
                 flushers: opts.file_cache_flushers,
                 reclaimers: opts.file_cache_reclaimers,
+                flush_rate_limit: opts.file_cache_flush_rate_limit_mb * MB,
+                reclaim_rate_limit: opts.file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.file_cache_recover_concurrency,
                 prometheus_registry: Some(state_store_metrics.registry().clone()),
             };

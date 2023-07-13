@@ -19,7 +19,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use itertools::Itertools;
-use risingwave_common::cache::{CachePriority, LookupResponse};
+use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
@@ -86,6 +86,21 @@ impl From<CachePolicy> for TracedCachePolicy {
     }
 }
 
+struct BlockCacheEventListener(FileCache);
+
+impl LruCacheEventListener for BlockCacheEventListener {
+    type K = (u64, u64);
+    type T = Box<Block>;
+
+    fn on_release(&self, key: Self::K, value: Self::T) {
+        let key = SstableBlockIndex {
+            sst_id: key.0,
+            block_idx: key.1,
+        };
+        self.0.insert_without_wait(key, value);
+    }
+}
+
 pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
@@ -110,14 +125,16 @@ impl SstableStore {
             shard_bits -= 1;
         }
         let meta_cache = Arc::new(LruCache::new(shard_bits, meta_cache_capacity, 0));
+        let listener = Arc::new(BlockCacheEventListener(file_cache.clone()));
 
         Self {
             path,
             store,
-            block_cache: BlockCache::new(
+            block_cache: BlockCache::with_event_listener(
                 block_cache_capacity,
                 MAX_CACHE_SHARD_BITS,
                 high_priority_ratio,
+                listener,
             ),
             meta_cache,
             file_cache,
@@ -224,11 +241,6 @@ impl SstableStore {
                 let block_data = store.read(&data_path, Some(block_loc)).await?;
                 let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
 
-                // try fill file cache
-                if use_file_cache && let CachePolicy::Fill(_) = policy {
-                    // TODO(MrCroxx): try eliminate copy
-                    file_cache.insert(key, block.clone()).await.map_err(HummockError::file_cache)?;
-                }
                 Ok(block)
             }
         };
