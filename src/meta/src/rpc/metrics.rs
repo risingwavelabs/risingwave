@@ -507,7 +507,7 @@ impl MetaMetrics {
         let mv_info = register_int_gauge_vec_with_registry!(
             "materialized_info",
             "Mapping from materialized view id to (table id, table name)",
-            &["materialized_view_id", "table_id", "table_name"],
+            &["id", "table_id", "table_name"],
             registry
         )
         .unwrap();

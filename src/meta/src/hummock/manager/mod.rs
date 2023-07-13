@@ -60,7 +60,7 @@ use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCo
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_delta_log_stats, trigger_lsm_stat, trigger_pin_unpin_snapshot_state,
+    trigger_delta_log_stats, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
     trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_version_stat,
     trigger_write_stop_stats,
 };
@@ -1300,17 +1300,7 @@ where
                 branched_ssts.commit_memory();
                 current_version.apply_version_delta(&version_delta);
 
-                let mv_id_to_all_table_ids = self
-                    .fragment_manager
-                    .get_mv_id_to_internal_table_ids_mapping()
-                    .await;
-
-                trigger_version_stat(
-                    &self.metrics,
-                    current_version,
-                    &versioning.version_stats,
-                    mv_id_to_all_table_ids,
-                );
+                trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
 
@@ -1617,15 +1607,10 @@ where
         assert!(prev_snapshot.committed_epoch < epoch);
         assert!(prev_snapshot.current_epoch < epoch);
 
-        let mv_id_to_all_table_ids = self
-            .fragment_manager
-            .get_mv_id_to_internal_table_ids_mapping()
-            .await;
         trigger_version_stat(
             &self.metrics,
             &versioning.current_version,
             &versioning.version_stats,
-            mv_id_to_all_table_ids,
         );
         for compaction_group_id in &modified_compaction_groups {
             trigger_sst_stat(
@@ -2102,7 +2087,6 @@ where
                 Report,
                 CompactionHeartBeat,
             }
-
             let mut check_compact_trigger_interval =
                 tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
             check_compact_trigger_interval
@@ -2188,9 +2172,15 @@ where
                                 }
 
                                 HummockTimerEvent::Report => {
-                                    let (current_version, id_to_config, branched_sst) = {
+                                    let (
+                                        current_version,
+                                        id_to_config,
+                                        branched_sst,
+                                        version_stats,
+                                    ) = {
                                         let mut versioning_guard =
                                             write_lock!(hummock_manager.as_ref(), versioning).await;
+
                                         let configs =
                                             hummock_manager.get_compaction_group_map().await;
                                         let versioning_deref = versioning_guard.deref_mut();
@@ -2198,8 +2188,20 @@ where
                                             versioning_deref.current_version.clone(),
                                             configs,
                                             versioning_deref.branched_ssts.clone(),
+                                            versioning_deref.version_stats.clone(),
                                         )
                                     };
+
+                                    if let Some(mv_id_to_all_table_ids) = hummock_manager
+                                        .fragment_manager
+                                        .get_mv_id_to_internal_table_ids_mapping()
+                                    {
+                                        trigger_mv_stat(
+                                            &hummock_manager.metrics,
+                                            &version_stats,
+                                            mv_id_to_all_table_ids,
+                                        );
+                                    }
 
                                     for compaction_group_id in
                                         get_compaction_group_ids(&current_version)
