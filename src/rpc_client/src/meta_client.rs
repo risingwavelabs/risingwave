@@ -942,10 +942,14 @@ impl MetaClient {
         Ok(resp.params.unwrap().into())
     }
 
-    pub async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()> {
+    pub async fn set_system_param(
+        &self,
+        param: String,
+        value: Option<String>,
+    ) -> Result<Option<SystemParamsReader>> {
         let req = SetSystemParamRequest { param, value };
-        self.inner.set_system_param(req).await?;
-        Ok(())
+        let resp = self.inner.set_system_param(req).await?;
+        Ok(resp.params.map(SystemParamsReader::from))
     }
 
     pub async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
@@ -1175,8 +1179,8 @@ impl HummockMetaClient for MetaClient {
 
 #[async_trait]
 impl TelemetryInfoFetcher for MetaClient {
-    async fn fetch_telemetry_info(&self) -> anyhow::Result<Option<String>> {
-        let resp = self.get_telemetry_info().await?;
+    async fn fetch_telemetry_info(&self) -> std::result::Result<Option<String>, String> {
+        let resp = self.get_telemetry_info().await.map_err(|e| e.to_string())?;
         let tracking_id = resp.get_tracking_id().ok();
         Ok(tracking_id.map(|id| id.to_owned()))
     }

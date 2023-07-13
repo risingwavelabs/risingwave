@@ -22,7 +22,7 @@ use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::agg::{agg_kinds, AggKind};
 use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
@@ -36,127 +36,9 @@ use crate::optimizer::property::{Distribution, FunctionalDependencySet, Required
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
+    IndexSet,
 };
 use crate::TableCatalog;
-
-/// Macros to generate match arms for [`AggKind`].
-/// IMPORTANT: These macros must be carefully maintained especially when adding new [`AggKind`]
-/// variants.
-pub(crate) mod agg_kinds {
-    /// [`AggKind`]s that are currently not supported in streaming mode.
-    macro_rules! unimplemented_in_stream {
-        () => {
-            AggKind::BitAnd
-                | AggKind::BitOr
-                | AggKind::BoolAnd
-                | AggKind::BoolOr
-                | AggKind::JsonbAgg
-                | AggKind::JsonbObjectAgg
-                | AggKind::PercentileCont
-                | AggKind::PercentileDisc
-                | AggKind::Mode
-        };
-    }
-    pub(crate) use unimplemented_in_stream;
-
-    /// [`AggKind`]s that should've been rewritten to other kinds. These kinds should not appear
-    /// when generating physical plan nodes.
-    macro_rules! rewritten {
-        () => {
-            AggKind::Avg
-                | AggKind::StddevPop
-                | AggKind::StddevSamp
-                | AggKind::VarPop
-                | AggKind::VarSamp
-        };
-    }
-    pub(crate) use rewritten;
-
-    /// [`AggKind`]s of which the aggregate results are not affected by the user given ORDER BY
-    /// clause.
-    macro_rules! result_unaffected_by_order_by {
-        () => {
-            AggKind::BitAnd
-                | AggKind::BitOr
-                | AggKind::BitXor // XOR is commutative and associative
-                | AggKind::BoolAnd
-                | AggKind::BoolOr
-                | AggKind::Min
-                | AggKind::Max
-                | AggKind::Sum
-                | AggKind::Sum0
-                | AggKind::Count
-                | AggKind::Avg
-                | AggKind::ApproxCountDistinct
-                | AggKind::VarPop
-                | AggKind::VarSamp
-                | AggKind::StddevPop
-                | AggKind::StddevSamp
-        };
-    }
-    pub(crate) use result_unaffected_by_order_by;
-
-    /// [`AggKind`]s that must be called with ORDER BY clause. These are slightly different from
-    /// variants not in [`result_unaffected_by_order_by`], in that variants returned by this macro
-    /// should be banned while the others should just be warned.
-    macro_rules! must_have_order_by {
-        () => {
-            AggKind::FirstValue
-                | AggKind::LastValue
-                | AggKind::PercentileCont
-                | AggKind::PercentileDisc
-                | AggKind::Mode
-        };
-    }
-    pub(crate) use must_have_order_by;
-
-    /// [`AggKind`]s of which the aggregate results are not affected by the user given DISTINCT
-    /// keyword.
-    macro_rules! result_unaffected_by_distinct {
-        () => {
-            AggKind::BitAnd
-                | AggKind::BitOr
-                | AggKind::BoolAnd
-                | AggKind::BoolOr
-                | AggKind::Min
-                | AggKind::Max
-                | AggKind::ApproxCountDistinct
-        };
-    }
-    pub(crate) use result_unaffected_by_distinct;
-
-    /// [`AggKind`]s that are simply cannot 2-phased.
-    macro_rules! simply_cannot_two_phase {
-        () => {
-            AggKind::StringAgg
-                | AggKind::ApproxCountDistinct
-                | AggKind::ArrayAgg
-                | AggKind::JsonbAgg
-                | AggKind::JsonbObjectAgg
-                | AggKind::PercentileCont
-                | AggKind::PercentileDisc
-                | AggKind::Mode
-        };
-    }
-    pub(crate) use simply_cannot_two_phase;
-
-    /// [`AggKind`]s that are implemented with a single value state (so-called stateless).
-    macro_rules! single_value_state {
-        () => {
-            AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::BitXor
-        };
-    }
-    pub(crate) use single_value_state;
-
-    /// [`AggKind`]s that are implemented with a single value state (so-called stateless) iff the
-    /// input is append-only.
-    macro_rules! single_value_state_iff_in_append_only {
-        () => {
-            AggKind::Max | AggKind::Min
-        };
-    }
-    pub(crate) use single_value_state_iff_in_append_only;
-}
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
 ///
@@ -167,7 +49,8 @@ pub(crate) mod agg_kinds {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Agg<PlanRef> {
     pub agg_calls: Vec<PlanAggCall>,
-    pub group_key: FixedBitSet,
+    pub group_key: IndexSet,
+    pub grouping_sets: Vec<IndexSet>,
     pub input: PlanRef,
 }
 
@@ -179,14 +62,14 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     pub(crate) fn output_len(&self) -> usize {
-        self.group_key.count_ones(..) + self.agg_calls.len()
+        self.group_key.len() + self.agg_calls.len()
     }
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         let mut map = vec![None; self.output_len()];
-        for (i, key) in self.group_key.ones().enumerate() {
+        for (i, key) in self.group_key.indices().enumerate() {
             map[i] = Some(key);
         }
         ColIndexMapping::with_target_size(map, self.input.schema().len())
@@ -195,7 +78,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     /// get the Mapping of columnIndex from input column index to out column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         let mut map = vec![None; self.input.schema().len()];
-        for (i, key) in self.group_key.ones().enumerate() {
+        for (i, key) in self.group_key.indices().enumerate() {
             map[key] = Some(i);
         }
         ColIndexMapping::with_target_size(map, self.output_len())
@@ -232,10 +115,8 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     /// If input dist already satisfies hash agg distribution,
     /// it will be more expensive to do two phase agg, should just do shuffle agg.
     pub(crate) fn hash_agg_dist_satisfied_by_input_dist(&self, input_dist: &Distribution) -> bool {
-        let required_dist = RequiredDist::shard_by_key(
-            self.input.schema().len(),
-            &self.group_key.ones().collect_vec(),
-        );
+        let required_dist =
+            RequiredDist::shard_by_key(self.input.schema().len(), &self.group_key.to_vec());
         input_dist.satisfies(&required_dist)
     }
 
@@ -249,15 +130,30 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
 
     pub(crate) fn watermark_group_key(&self, input_watermark_columns: &FixedBitSet) -> Vec<usize> {
         self.group_key
-            .ones()
+            .indices()
             .filter(|&idx| input_watermark_columns.contains(idx))
             .collect()
     }
 
-    pub fn new(agg_calls: Vec<PlanAggCall>, group_key: FixedBitSet, input: PlanRef) -> Self {
+    pub fn new(agg_calls: Vec<PlanAggCall>, group_key: IndexSet, input: PlanRef) -> Self {
         Self {
             agg_calls,
             group_key,
+            input,
+            grouping_sets: vec![],
+        }
+    }
+
+    pub fn new_with_grouping_sets(
+        agg_calls: Vec<PlanAggCall>,
+        group_key: IndexSet,
+        grouping_sets: Vec<IndexSet>,
+        input: PlanRef,
+    ) -> Self {
+        Self {
+            agg_calls,
+            group_key,
+            grouping_sets,
             input,
         }
     }
@@ -266,7 +162,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
 impl<PlanRef: BatchPlanRef> Agg<PlanRef> {
     // Check if the input is already sorted on group keys.
     pub(crate) fn input_provides_order_on_group_keys(&self) -> bool {
-        self.group_key.ones().all(|group_by_idx| {
+        self.group_key.indices().all(|group_by_idx| {
             self.input
                 .order()
                 .column_orders
@@ -280,7 +176,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     fn schema(&self) -> Schema {
         let fields = self
             .group_key
-            .ones()
+            .indices()
             .map(|i| self.input.schema().fields()[i].clone())
             .chain(self.agg_calls.iter().map(|agg_call| {
                 let plan_agg_call_display = PlanAggCallDisplay {
@@ -295,7 +191,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some((0..self.group_key.count_ones(..)).collect())
+        Some((0..self.group_key.len()).collect())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -305,10 +201,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     fn functional_dependency(&self) -> FunctionalDependencySet {
         let output_len = self.output_len();
         let _input_len = self.input.schema().len();
-        let mut fd_set = FunctionalDependencySet::with_key(
-            output_len,
-            &(0..self.group_key.count_ones(..)).collect_vec(),
-        );
+        let mut fd_set =
+            FunctionalDependencySet::with_key(output_len, &(0..self.group_key.len()).collect_vec());
         // take group keys from input_columns, then grow the target size to column_cnt
         let i2o = self.i2o_col_mapping();
         for fd in self.input.functional_dependency().as_dependencies() {
@@ -400,11 +294,14 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         if let Some(window_col_idx) = window_col_idx {
             assert!(self.group_key.contains(window_col_idx));
             Either::Left(
-                std::iter::once(window_col_idx)
-                    .chain(self.group_key.ones().filter(move |&i| i != window_col_idx)),
+                std::iter::once(window_col_idx).chain(
+                    self.group_key
+                        .indices()
+                        .filter(move |&i| i != window_col_idx),
+                ),
             )
         } else {
-            Either::Right(self.group_key.ones())
+            Either::Right(self.group_key.indices())
         }
         .collect()
     }
@@ -433,7 +330,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         let mut included_upstream_indices = vec![];
         let mut column_mapping = BTreeMap::new();
         let in_fields = self.input.schema().fields();
-        for idx in self.group_key.ones() {
+        for idx in self.group_key.indices() {
             let tbl_col_idx = table_builder.add_column(&in_fields[idx]);
             included_upstream_indices.push(idx);
             column_mapping.insert(idx, tbl_col_idx);
@@ -628,7 +525,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     ) -> TableCatalog {
         let out_fields = me.schema().fields();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
-        let n_group_key_cols = self.group_key.count_ones(..);
+        let n_group_key_cols = self.group_key.len();
 
         let (mut table_builder, _, _) = self.create_table_builder(me.ctx(), window_col_idx);
         let read_prefix_len_hint = table_builder.get_current_pk_len();
@@ -704,13 +601,18 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect()
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, FixedBitSet, PlanRef) {
-        (self.agg_calls, self.group_key, self.input)
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
+        (
+            self.agg_calls,
+            self.group_key,
+            self.grouping_sets,
+            self.input,
+        )
     }
 
     pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
         let last = ("aggs", self.agg_calls_pretty());
-        if self.group_key.count_ones(..) != 0 {
+        if !self.group_key.is_empty() {
             let first = ("group_key", self.group_key_pretty());
             vec![first, last]
         } else {
@@ -730,7 +632,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
     fn group_key_pretty<'a>(&self) -> Pretty<'a> {
         let f = |i| Pretty::display(&FieldDisplay(self.input.schema().fields.get(i).unwrap()));
-        Pretty::Array(self.group_key.ones().map(f).collect())
+        Pretty::Array(self.group_key.indices().map(f).collect())
     }
 }
 
@@ -836,31 +738,10 @@ impl PlanAggCall {
     }
 
     pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
-        let total_agg_kind = match &self.agg_kind {
-            AggKind::BitAnd
-            | AggKind::BitOr
-            | AggKind::BitXor
-            | AggKind::BoolAnd
-            | AggKind::BoolOr
-            | AggKind::Min
-            | AggKind::Max
-            | AggKind::FirstValue
-            | AggKind::LastValue => self.agg_kind,
-            AggKind::Sum => AggKind::Sum,
-            AggKind::Sum0 | AggKind::Count => AggKind::Sum0,
-            agg_kinds::simply_cannot_two_phase!() => {
-                unreachable!(
-                    "{} aggregation cannot be converted to 2-phase",
-                    self.agg_kind
-                )
-            }
-            agg_kinds::rewritten!() => {
-                unreachable!(
-                    "{} aggregation should have been rewritten to Sum, Count and Case",
-                    self.agg_kind
-                )
-            }
-        };
+        let total_agg_kind = self
+            .agg_kind
+            .partial_to_total()
+            .expect("unsupported kinds shouldn't get here");
         PlanAggCall {
             agg_kind: total_agg_kind,
             inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],

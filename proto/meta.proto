@@ -492,7 +492,9 @@ message SetSystemParamRequest {
   optional string value = 2;
 }
 
-message SetSystemParamResponse {}
+message SetSystemParamResponse {
+  optional SystemParams params = 1;
+}
 
 service SystemParamsService {
   rpc GetSystemParams(GetSystemParamsRequest) returns (GetSystemParamsResponse);

@@ -661,8 +661,13 @@ pub async fn handle_create_table(
     source_schema: Option<SourceSchema>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
+    notice: Option<String>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
+    // TODO(st1page): refactor it
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    }
 
     match session.check_relation_name_duplicated(table_name.clone()) {
         Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
@@ -673,6 +678,12 @@ pub async fn handle_create_table(
         Err(e) => return Err(e.into()),
         Ok(_) => {}
     };
+
+    if source_schema == Some(SourceSchema::Json) && columns.is_empty() {
+        return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+            "schema definition is required for ENCODE JSON".to_owned(),
+        )));
+    }
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
@@ -718,7 +729,7 @@ pub async fn handle_create_table(
         serde_json::to_string_pretty(&graph).unwrap()
     );
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_table(source, table, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))

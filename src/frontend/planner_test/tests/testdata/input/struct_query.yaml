@@ -2,7 +2,8 @@
     create materialized view t as select country from s;
     select * from t;
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -30,7 +31,8 @@
     -- select (t).country.city,(t).country,(country).city.address from t;
     select (t.country).city,t.country,(country).city.address from t;
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -71,7 +73,8 @@
     -- select (t).country1.city.*,(t.country2).*,(country3).city.* from t;
     select (t.country1).city.*,(t.country2).*,(country3).city.* from t;
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -100,7 +103,8 @@
     -- select (c).zipcode from (select (t).country.city as c from t);
     select (c).zipcode from (select (t.country).city as c from t);
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -127,7 +131,8 @@
     -- select (c).zipcode from (select min((t).country.city) as c from t);
     select (c).zipcode from (select min((t.country).city) as c from t);
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -153,7 +158,8 @@
     create materialized view t as select * from s;
     select * from (select (country).city as c from t) as vv join t on (c).zipcode=(t.country).zipcode;
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -179,7 +185,8 @@
     create materialized view t as select * from s;
     select min((t.country).city.address) + max((t.country).city.address) * count(zipcode) from t;
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -205,7 +212,8 @@
     create materialized view t as select * from s;
     select count(1), count((country).city.zipcode) from t where (country).city.address>1;
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -236,7 +244,8 @@
     create materialized view t as select * from s;
     select (country + country) from t;
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -257,7 +266,8 @@
     create materialized view t as select * from s;
     select avg(country) from t;
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -278,7 +288,8 @@
     create materialized view t as select * from s;
     select (country).city from t;
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -299,7 +310,8 @@
     create materialized view t as select * from s;
     select (country).address.* from t;
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -319,7 +331,8 @@
 - sql: |
     insert into s values (1,2,(1,2,(1,2,null)));
   create_table_with_connector:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -344,7 +357,8 @@
 - sql: |
     select * from s where s.v3 = (1,2,(1,2,3));
   create_table_with_connector:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |-
       syntax = "proto3";

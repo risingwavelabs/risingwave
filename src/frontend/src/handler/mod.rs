@@ -69,6 +69,7 @@ pub mod handle_privilege;
 pub mod privilege;
 pub mod query;
 mod show;
+mod transaction;
 pub mod util;
 pub mod variable;
 
@@ -170,9 +171,12 @@ pub async fn handle(
     sql: &str,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
-    session.clear_cancel_query_flag();
-    let handler_args = HandlerArgs::new(session, &stmt, sql)?;
     const IGNORE_NOTICE: &str = "Ignored temporarily. See details in https://github.com/risingwavelabs/risingwave/issues/2541";
+
+    session.clear_cancel_query_flag();
+    let _guard = session.txn_begin_implicit();
+
+    let handler_args = HandlerArgs::new(session, &stmt, sql)?;
 
     match stmt {
         Statement::Explain {
@@ -245,6 +249,18 @@ pub async fn handle(
                 )
                 .await;
             }
+            // TODO(st1page): refacor it
+            let mut notice = Default::default();
+            let source_schema = source_schema
+                .map(|source_schema| -> Result<SourceSchema> {
+                    let (source_schema, _, n) = source_schema
+                        .into_source_schema()
+                        .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
+                    notice = n;
+                    Ok(source_schema)
+                })
+                .transpose()?;
+
             create_table::handle_create_table(
                 handler_args,
                 name,
@@ -254,6 +270,7 @@ pub async fn handle(
                 source_schema,
                 source_watermarks,
                 append_only,
+                notice,
             )
             .await
         }
@@ -467,19 +484,16 @@ pub async fn handle(
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
-        // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
-        // final implementation.
-        // 1. Fully support transaction is too hard and gives few benefits to us.
-        // 2. Some client e.g. psycopg2 will use this statement.
-        // TODO: Tracking issues #2595 #2541
-        Statement::StartTransaction { .. } => Ok(PgResponse::builder(START_TRANSACTION)
-            .notice(IGNORE_NOTICE)
-            .into()),
-        Statement::BEGIN { .. } => Ok(PgResponse::builder(BEGIN).notice(IGNORE_NOTICE).into()),
-        Statement::Abort { .. } => Ok(PgResponse::builder(ABORT).notice(IGNORE_NOTICE).into()),
-        Statement::Commit { .. } => Ok(PgResponse::builder(COMMIT).notice(IGNORE_NOTICE).into()),
-        Statement::Rollback { .. } => {
-            Ok(PgResponse::builder(ROLLBACK).notice(IGNORE_NOTICE).into())
+        Statement::StartTransaction { modes } => {
+            transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
+        }
+        Statement::Begin { modes } => transaction::handle_begin(handler_args, BEGIN, modes).await,
+        Statement::Commit { chain } => {
+            transaction::handle_commit(handler_args, COMMIT, chain).await
+        }
+        Statement::Abort => transaction::handle_rollback(handler_args, ABORT, false).await,
+        Statement::Rollback { chain } => {
+            transaction::handle_rollback(handler_args, ROLLBACK, chain).await
         }
         Statement::SetTransaction { .. } => Ok(PgResponse::builder(SET_TRANSACTION)
             .notice(IGNORE_NOTICE)

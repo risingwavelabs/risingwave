@@ -38,8 +38,8 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
-    self, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema,
-    ProtobufSchema, SourceSchema, SourceWatermark,
+    self, AvroSchema, ColumnDef, ColumnOption, CompatibleSourceSchema, CreateSourceStatement,
+    DebeziumAvroSchema, Encode, ProtobufSchema, SourceSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -214,7 +214,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::Protobuf(protobuf_schema) => {
             if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string())));
+                    "User-defined schema is not allowed with FORMAT PLAIN ENCODE PROTOBUF. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string())));
             };
             (
                 Some(
@@ -233,7 +233,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::Avro(avro_schema) => {
             if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
+                    "User-defined schema is not allowed with FORMAT PLAIN ENCODE AVRO. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
             (
                 Some(extract_avro_table_schema(avro_schema, with_properties).await?),
@@ -346,7 +346,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::UpsertJson => {
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format upsert_json."
+                    "Primary key must be specified when creating source with FORMAT UPSERT ENCODE JSON."
                         .to_string(),
                 )));
             }
@@ -362,7 +362,7 @@ pub(crate) async fn try_bind_columns_from_source(
         SourceSchema::Maxwell => {
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format maxwell."
+                    "Primary key must be specified when creating source with FORMAT MAXWELL ENCODE JSON."
                         .to_string(),
                 )));
             }
@@ -665,6 +665,14 @@ pub fn validate_compatibility(
             // Default schema name is "public"
             props.insert("schema.name".into(), "public".into());
         }
+        if !props.contains_key("publication.name") {
+            // Default publication name is "rw_publication"
+            props.insert("publication.name".into(), "rw_publication".into());
+        }
+        if !props.contains_key("publication.create.enable") {
+            // Default auto create publication if doesn't exist
+            props.insert("publication.create.enable".into(), "true".into());
+        }
     }
     Ok(())
 }
@@ -756,19 +764,30 @@ pub async fn handle_create_source(
         )));
     }
 
+    if let CompatibleSourceSchema::V2(s) = &stmt.source_schema {
+        if s.row_encode == Encode::Json && stmt.columns.is_empty() {
+            return Err(RwError::from(InvalidInputSyntax(
+                "schema definition is required for ENCODE JSON".to_owned(),
+            )));
+        }
+    }
+
+    let (source_schema, _, notice) = stmt
+        .source_schema
+        .into_source_schema()
+        .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    }
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
-    validate_compatibility(&stmt.source_schema, &mut with_properties)?;
+    validate_compatibility(&source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&stmt.constraints)?;
     let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    let (columns_from_resolve_source, pk_names, source_info) = try_bind_columns_from_source(
-        &stmt.source_schema,
-        pk_names,
-        &stmt.columns,
-        &with_properties,
-    )
-    .await?;
+    let (columns_from_resolve_source, pk_names, source_info) =
+        try_bind_columns_from_source(&source_schema, pk_names, &stmt.columns, &with_properties)
+            .await?;
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);
@@ -829,7 +848,7 @@ pub async fn handle_create_source(
         optional_associated_table_id: None,
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_source(source).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
@@ -853,7 +872,7 @@ pub mod tests {
         let sql = format!(
             r#"CREATE SOURCE t
     WITH (connector = 'kinesis')
-    ROW FORMAT PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
+    FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;

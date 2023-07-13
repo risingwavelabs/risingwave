@@ -15,8 +15,6 @@
 mod delta_btree_map;
 mod eowc;
 mod general;
-mod state;
-mod window_states;
 
 pub use eowc::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
 pub use general::{OverWindowExecutor, OverWindowExecutorArgs};

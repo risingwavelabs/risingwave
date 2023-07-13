@@ -128,8 +128,7 @@ impl Distill for BatchLookupJoin {
         ));
 
         if verbose {
-            let data = IndicesDisplay::from_join(&self.logical, &concat_schema)
-                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema);
             vec.push(("output", data));
         }
 

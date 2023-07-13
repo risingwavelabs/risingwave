@@ -13,3 +13,5 @@
 // limitations under the License.
 
 pub mod window;
+
+// TODO(rc): this module is to be removed

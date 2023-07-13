@@ -160,10 +160,6 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
             .map(|f| (&f.partition_by, &f.order_by))
             .all_equal()
     }
-
-    pub fn has_rank_function(&self) -> bool {
-        self.window_functions.iter().any(|f| f.kind.is_rank())
-    }
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for OverWindow<PlanRef> {

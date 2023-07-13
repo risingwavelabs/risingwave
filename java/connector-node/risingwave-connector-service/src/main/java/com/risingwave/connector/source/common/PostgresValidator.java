@@ -33,6 +33,15 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     private final Connection jdbcConnection;
 
+    private final String user;
+    private final String dbName;
+    private final String schemaName;
+    private final String tableName;
+    private final String pubName;
+    private final String slotName;
+
+    private final boolean pubAutoCreate;
+
     public PostgresValidator(Map<String, String> userProps, TableSchema tableSchema)
             throws SQLException {
         this.userProps = userProps;
@@ -46,6 +55,16 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         var user = userProps.get(DbzConnectorConfig.USER);
         var password = userProps.get(DbzConnectorConfig.PASSWORD);
         this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
+
+        this.dbName = dbName;
+        this.user = user;
+        this.schemaName = userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME);
+        this.tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
+        this.pubName = userProps.get(DbzConnectorConfig.PG_PUB_NAME);
+        this.slotName = userProps.get(DbzConnectorConfig.PG_SLOT_NAME);
+
+        this.pubAutoCreate =
+                userProps.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
     }
 
     @Override
@@ -61,14 +80,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 }
             }
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
 
         try (var stmt =
                 jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.slot.check"))) {
             // check whether the replication slot is already existed
-            var slotName = userProps.get(DbzConnectorConfig.PG_SLOT_NAME);
-            var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
             stmt.setString(1, slotName);
             stmt.setString(2, dbName);
             var res = stmt.executeQuery();
@@ -87,7 +104,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 }
             }
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
@@ -96,7 +113,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         try {
             validatePrivileges();
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
@@ -105,14 +122,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         try {
             validateTableSchema();
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
     /** For Citus which is a distributed version of PG */
     public void validateDistributedTable() throws SQLException {
-        String schemaName = userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME);
-        String tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
         try (var stmt =
                 jdbcConnection.prepareStatement(ValidatorUtils.getSql("citus.distributed_table"))) {
             stmt.setString(1, schemaName + "." + tableName);
@@ -127,9 +142,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     }
 
     private void validateTableSchema() throws SQLException {
-        String schemaName = userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME);
-        String tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
-
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.table"))) {
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
@@ -145,7 +157,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         // check primary key
         // reference: https://wiki.postgresql.org/wiki/Retrieve_primary_key_columns
         try (var stmt = jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.pk"))) {
-            stmt.setString(1, schemaName + "." + tableName);
+            stmt.setString(1, this.schemaName + "." + this.tableName);
             var res = stmt.executeQuery();
             var pkFields = new HashSet<String>();
             while (res.next()) {
@@ -163,8 +175,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         // All columns defined must exist in upstream database
         try (var stmt =
                 jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.table_schema"))) {
-            stmt.setString(1, schemaName);
-            stmt.setString(2, tableName);
+            stmt.setString(1, this.schemaName);
+            stmt.setString(2, this.tableName);
             var res = stmt.executeQuery();
 
             // Field names in lower case -> data type
@@ -195,7 +207,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         ValidatorUtils.getSql("postgres.superuser.check"))) {
-            stmt.setString(1, userProps.get(DbzConnectorConfig.USER));
+            stmt.setString(1, this.user);
             var res = stmt.executeQuery();
             while (res.next()) {
                 isSuperUser = res.getBoolean(1);
@@ -207,7 +219,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             // check whether user is superuser or replication role
             try (var stmt =
                     jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.role.check"))) {
-                stmt.setString(1, userProps.get(DbzConnectorConfig.USER));
+                stmt.setString(1, this.user);
                 var res = stmt.executeQuery();
                 while (res.next()) {
                     if (!res.getBoolean(1)) {
@@ -220,36 +232,64 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             try (var stmt =
                     jdbcConnection.prepareStatement(
                             ValidatorUtils.getSql("postgres.table_privilege.check"))) {
-                stmt.setString(1, userProps.get(DbzConnectorConfig.TABLE_NAME));
-                stmt.setString(2, userProps.get(DbzConnectorConfig.USER));
+                stmt.setString(1, this.schemaName);
+                stmt.setString(2, this.tableName);
+                stmt.setString(3, this.user);
                 var res = stmt.executeQuery();
                 while (res.next()) {
                     if (!res.getBoolean(1)) {
                         throw ValidatorUtils.invalidArgument(
-                                "Postgres user must have select privilege on table "
-                                        + userProps.get(DbzConnectorConfig.TABLE_NAME));
+                                "Postgres user must have select privilege on table '"
+                                        + schemaName
+                                        + "."
+                                        + tableName
+                                        + "'");
                     }
                 }
             }
         }
 
-        // check whether publication exists
+        validatePublicationConfig(isSuperUser);
+    }
+
+    /* Check required privilege to create/alter a publication */
+    private void validatePublicationConfig(boolean isSuperUser) throws SQLException {
+        boolean publicationCoversTable = false;
         boolean publicationExists = false;
         boolean partialPublication = false;
+
+        // Check whether publication exists
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        ValidatorUtils.getSql("postgres.publication_exist"))) {
+            stmt.setString(1, pubName);
+            var res = stmt.executeQuery();
+            while (res.next()) {
+                publicationExists = res.getBoolean(1);
+            }
+        }
+
+        if (!pubAutoCreate && !publicationExists) {
+            throw ValidatorUtils.invalidArgument(
+                    "Publication '" + pubName + "' doesn't exist and auto create is disabled");
+        }
+
+        // When publication exists, we should check whether it covers the table
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("postgres.publication_att_exists"));
             while (res.next()) {
                 partialPublication = res.getBoolean(1);
             }
         }
-        // pg 15 and up supports partial publication of table
-        // check whether publication covers all columns
+        // PG 15 and up supports partial publication of table
+        // check whether publication covers all columns of the table schema
         if (partialPublication) {
             try (var stmt =
                     jdbcConnection.prepareStatement(
-                            ValidatorUtils.getSql("postgres.publication_att"))) {
-                stmt.setString(1, userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME));
-                stmt.setString(2, userProps.get(DbzConnectorConfig.TABLE_NAME));
+                            ValidatorUtils.getSql("postgres.publication_attnames"))) {
+                stmt.setString(1, schemaName);
+                stmt.setString(2, tableName);
+                stmt.setString(3, pubName);
                 var res = stmt.executeQuery();
                 while (res.next()) {
                     String[] columnsPub = (String[]) res.getArray("attnames").getArray();
@@ -258,99 +298,132 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         String columnName = tableSchema.getColumnNames()[i];
                         if (!attNames.contains(columnName)) {
                             throw ValidatorUtils.invalidArgument(
-                                    "The publication 'dbz_publication' does not cover all necessary columns in table "
-                                            + userProps.get(DbzConnectorConfig.TABLE_NAME));
+                                    String.format(
+                                            "The publication '%s' does not cover all columns of the table '%s'",
+                                            pubName, schemaName + "." + tableName));
                         }
                         if (i == tableSchema.getNumColumns() - 1) {
-                            publicationExists = true;
+                            publicationCoversTable = true;
                         }
                     }
-                    if (publicationExists) {
-                        LOG.info("publication already existed");
+                    if (publicationCoversTable) {
+                        LOG.info(
+                                "The publication covers the table '{}'.",
+                                schemaName + "." + tableName);
                         break;
                     }
                 }
             }
-        } else { // check directly whether publication exists
+        } else {
+            // PG <= 14.0
+            // check whether the publication covers the subscribed table
             try (var stmt =
                     jdbcConnection.prepareStatement(
-                            ValidatorUtils.getSql("postgres.publication_cnt"))) {
-                stmt.setString(1, userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME));
-                stmt.setString(2, userProps.get(DbzConnectorConfig.TABLE_NAME));
+                            ValidatorUtils.getSql("postgres.publication_has_table"))) {
+                stmt.setString(1, schemaName);
+                stmt.setString(2, tableName);
+                stmt.setString(3, pubName);
                 var res = stmt.executeQuery();
-                while (res.next()) {
-                    if (res.getInt("count") > 0) {
-                        publicationExists = true;
-                        LOG.info("publication already existed");
-                        break;
+                if (res.next()) {
+                    publicationCoversTable = res.getBoolean(1);
+                    if (publicationCoversTable) {
+                        LOG.info("The publication covers the table.");
                     }
                 }
             }
         }
-        // if publication does not exist, check permission to create publication
-        if (!publicationExists && !isSuperUser) {
-            // check create privilege on database
-            try (var stmt =
-                    jdbcConnection.prepareStatement(
-                            ValidatorUtils.getSql("postgres.database_privilege.check"))) {
-                stmt.setString(1, userProps.get(DbzConnectorConfig.USER));
-                stmt.setString(2, userProps.get(DbzConnectorConfig.DB_NAME));
-                stmt.setString(3, userProps.get(DbzConnectorConfig.USER));
-                var res = stmt.executeQuery();
-                while (res.next()) {
-                    if (!res.getBoolean(1)) {
-                        throw ValidatorUtils.invalidArgument(
-                                "Postgres user must have create privilege on database"
-                                        + userProps.get(DbzConnectorConfig.DB_NAME));
-                    }
+
+        // If auto create is enabled and the publication doesn't exist or doesn't cover the table,
+        // we need to create or alter the publication. And we need to check the required privileges.
+        if (!publicationCoversTable) {
+            // check whether the user has the CREATE privilege on database
+            if (!isSuperUser) {
+                validatePublicationPrivileges();
+            }
+            if (publicationExists) {
+                alterPublicationIfNeeded();
+            } else {
+                LOG.info(
+                        "Publication '{}' doesn't exist, will be created in the process of streaming job.",
+                        this.pubName);
+            }
+        }
+    }
+
+    private void validatePublicationPrivileges() throws SQLException {
+        // check whether the user has the CREATE privilege on database
+        try (var stmt =
+                jdbcConnection.prepareStatement(
+                        ValidatorUtils.getSql("postgres.database_privilege.check"))) {
+            stmt.setString(1, this.user);
+            stmt.setString(2, this.dbName);
+            stmt.setString(3, this.user);
+            var res = stmt.executeQuery();
+            while (res.next()) {
+                if (!res.getBoolean(1)) {
+                    throw ValidatorUtils.invalidArgument(
+                            "Postgres user must have create privilege on database '"
+                                    + this.dbName
+                                    + "'");
                 }
             }
-            // check ownership on table
-            boolean isTableOwner = false;
-            String tableOwner = null;
-            // check if user is owner
+        }
+
+        // check whether the user has ownership on the table
+        boolean isTableOwner = false;
+        String tableOwner = null;
+        // check if user is the direct owner of table
+        try (var stmt =
+                jdbcConnection.prepareStatement(ValidatorUtils.getSql("postgres.table_owner"))) {
+            stmt.setString(1, schemaName);
+            stmt.setString(2, tableName);
+            var res = stmt.executeQuery();
+            while (res.next()) {
+                tableOwner = res.getString("tableowner");
+                if (tableOwner != null && tableOwner.equals(this.user)) {
+                    isTableOwner = true;
+                    break;
+                }
+            }
+        }
+
+        // if user is not the direct owner, check if user belongs to an owner group
+        if (!isTableOwner && null != tableOwner) {
             try (var stmt =
                     jdbcConnection.prepareStatement(
-                            ValidatorUtils.getSql("postgres.table_owner"))) {
-                stmt.setString(1, userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME));
-                stmt.setString(2, userProps.get(DbzConnectorConfig.TABLE_NAME));
+                            ValidatorUtils.getSql("postgres.users_of_group"))) {
+                stmt.setString(1, tableOwner);
                 var res = stmt.executeQuery();
                 while (res.next()) {
-                    tableOwner = res.getString("tableowner");
-                    if (tableOwner.equals(userProps.get(DbzConnectorConfig.USER))) {
+                    var usersArray = res.getArray("members");
+                    if (usersArray == null) {
+                        break;
+                    }
+                    String[] users = (String[]) usersArray.getArray();
+                    if (null != users
+                            && Arrays.asList(users)
+                                    .contains(userProps.get(DbzConnectorConfig.USER))) {
                         isTableOwner = true;
                         break;
                     }
                 }
             }
+        }
+        if (!isTableOwner) {
+            throw ValidatorUtils.invalidArgument(
+                    "Postgres user must be the owner of table '"
+                            + tableName
+                            + "' to create/alter publication");
+        }
+    }
 
-            // if user is not owner, check if user belongs to owner group
-            if (!isTableOwner && null != tableOwner) {
-                try (var stmt =
-                        jdbcConnection.prepareStatement(
-                                ValidatorUtils.getSql("postgres.users_of_group"))) {
-                    stmt.setString(1, tableOwner);
-                    var res = stmt.executeQuery();
-                    while (res.next()) {
-                        var usersArray = res.getArray("members");
-                        if (usersArray == null) {
-                            break;
-                        }
-                        String[] users = (String[]) usersArray.getArray();
-                        if (null != users
-                                && Arrays.asList(users)
-                                        .contains(userProps.get(DbzConnectorConfig.USER))) {
-                            isTableOwner = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if (!isTableOwner) {
-                throw ValidatorUtils.invalidArgument(
-                        "Postgres user must be owner of table "
-                                + userProps.get(DbzConnectorConfig.TABLE_NAME));
-            }
+    private void alterPublicationIfNeeded() throws SQLException {
+        String alterPublicationSql =
+                String.format(
+                        "ALTER PUBLICATION %s ADD TABLE %s", pubName, schemaName + "." + tableName);
+        try (var stmt = jdbcConnection.createStatement()) {
+            LOG.info("Altered publication with statement: {}", stmt);
+            stmt.execute(alterPublicationSql);
         }
     }
 

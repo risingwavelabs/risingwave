@@ -53,7 +53,7 @@ pub async fn handle_rename_table(
         table.id
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_table_name(table_id.table_id, &new_table_name)
         .await?;
@@ -89,7 +89,7 @@ pub async fn handle_rename_index(
         index.id
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_index_name(index_id.index_id, &new_index_name)
         .await?;
@@ -119,7 +119,7 @@ pub async fn handle_rename_view(
         view.id
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_view_name(view_id, &new_view_name)
         .await?;
@@ -149,7 +149,7 @@ pub async fn handle_rename_sink(
         sink.id
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_sink_name(sink_id.sink_id, &new_sink_name)
         .await?;
@@ -189,7 +189,7 @@ pub async fn handle_rename_source(
         source.id
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_source_name(source_id, &new_source_name)
         .await?;

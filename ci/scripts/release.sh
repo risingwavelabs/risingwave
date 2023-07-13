@@ -11,7 +11,7 @@ if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhoo
 fi
 
 echo "--- Install java and maven"
-yum install -y java-11-openjdk wget python3
+yum install -y java-11-openjdk wget python3 cyrus-sasl-devel
 pip3 install toml-cli
 wget https://ci-deps-dist.s3.amazonaws.com/apache-maven-3.9.3-bin.tar.gz && tar -zxvf apache-maven-3.9.3-bin.tar.gz
 export PATH="${REPO_ROOT}/apache-maven-3.9.3/bin:$PATH"

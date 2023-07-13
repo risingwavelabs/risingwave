@@ -16,6 +16,7 @@ pub mod utils;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use itertools::Itertools;
 use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
+use risingwave_batch::task::ShutdownToken;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
@@ -102,7 +103,7 @@ fn create_hash_agg_executor(
         "HashAggExecutor".to_string(),
         CHUNK_SIZE,
         MemoryContext::none(),
-        None,
+        ShutdownToken::empty(),
     ))
 }
 

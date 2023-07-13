@@ -329,13 +329,33 @@ impl WorkerNodeSelector {
         if self.enable_barrier_read {
             self.manager.get_streaming_fragment_mapping(&fragment_id)
         } else {
-            let origin = self.manager.serving_fragment_mapping(fragment_id)?;
-            if self.manager.worker_node_mask().is_empty() {
-                return Ok(origin);
-            }
+            let (hint, parallelism) = match self.manager.serving_fragment_mapping(fragment_id) {
+                Ok(o) => {
+                    if self.manager.worker_node_mask().is_empty() {
+                        // 1. Stable mapping for most cases.
+                        return Ok(o);
+                    }
+                    let max_parallelism = o.iter_unique().count();
+                    (Some(o), max_parallelism)
+                }
+                Err(e) => {
+                    if !matches!(e, SchedulerError::ServingVnodeMappingNotFound(_)) {
+                        return Err(e);
+                    }
+                    let max_parallelism = 100;
+                    tracing::warn!(
+                        fragment_id,
+                        max_parallelism,
+                        "Serving fragment mapping not found, fall back to temporary one."
+                    );
+                    // Workaround the case that new mapping is not available yet due to asynchronous
+                    // notification.
+                    (None, max_parallelism)
+                }
+            };
+            // 2. Temporary mapping that filters out unavailable workers.
             let new_workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
-            let masked_mapping =
-                place_vnode(Some(&origin), &new_workers, origin.iter_unique().count());
+            let masked_mapping = place_vnode(hint.as_ref(), &new_workers, parallelism);
             masked_mapping.ok_or_else(|| SchedulerError::EmptyWorkerNodes)
         }
     }
@@ -393,6 +413,7 @@ mod tests {
                     is_serving: true,
                     is_streaming: true,
                 }),
+                transactional_id: Some(1),
             },
             WorkerNode {
                 id: 2,
@@ -405,6 +426,7 @@ mod tests {
                     is_serving: true,
                     is_streaming: false,
                 }),
+                transactional_id: Some(2),
             },
         ];
         worker_nodes

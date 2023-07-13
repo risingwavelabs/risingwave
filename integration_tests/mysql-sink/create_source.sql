@@ -11,7 +11,7 @@ CREATE SOURCE user_behaviors (
     topic = 'user_behaviors',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;
 
 CREATE TABLE data_types (
     id BIGINT PRIMARY KEY,
