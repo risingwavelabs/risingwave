@@ -26,8 +26,8 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::constants::log_store::{
-    EPOCH_COLUMN_INDEX, EPOCH_COLUMN_TYPE, PK_TYPES, KV_LOG_STORE_PREDEFINED_COLUMNS, ROW_OP_COLUMN_INDEX,
-    SEQ_ID_COLUMN_INDEX,
+    EPOCH_COLUMN_INDEX, EPOCH_COLUMN_TYPE, KV_LOG_STORE_PREDEFINED_COLUMNS, PK_TYPES,
+    ROW_OP_COLUMN_INDEX, SEQ_ID_COLUMN_INDEX,
 };
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -117,7 +117,7 @@ impl LogStoreRowSerde {
         // There are 3 predefined columns for kv log store:
         assert!(data_types.len() > KV_LOG_STORE_PREDEFINED_COLUMNS.len());
         for i in 0..KV_LOG_STORE_PREDEFINED_COLUMNS.len() {
-            assert_eq!(data_types[i], KV_LOG_STORE_PREDEFINED_COLUMNS[i]);
+            assert_eq!(data_types[i], KV_LOG_STORE_PREDEFINED_COLUMNS[i].1);
         }
 
         let payload_schema = data_types[KV_LOG_STORE_PREDEFINED_COLUMNS.len()..].to_vec();

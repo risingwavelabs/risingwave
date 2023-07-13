@@ -20,9 +20,7 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::constants::log_store::{
-    EPOCH_COLUMN_INDEX, EPOCH_COLUMN_NAME, EPOCH_COLUMN_TYPE, KV_LOG_STORE_PREDEFINED_COLUMNS,
-    ROW_OP_COLUMN_NAME, ROW_OP_COLUMN_TYPE, SEQ_ID_COLUMN_INDEX, SEQ_ID_COLUMN_NAME,
-    SEQ_ID_COLUMN_TYPE,
+    EPOCH_COLUMN_INDEX, KV_LOG_STORE_PREDEFINED_COLUMNS, SEQ_ID_COLUMN_INDEX,
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::OrderType;
@@ -254,11 +252,12 @@ impl StreamSink {
         let mut table_catalog_builder =
             TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
 
-        let mut value_indices =
-            Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + self.sink_desc.columns.len());
+        let mut value_indices = Vec::with_capacity(
+            KV_LOG_STORE_PREDEFINED_COLUMNS.len() + self.sink_desc.columns.len(),
+        );
 
         for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
-            let indice = table_catalog_builder.add_column((&Field::with_name(data_type, name)));
+            let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
             value_indices.push(indice);
         }
 
