@@ -87,7 +87,7 @@ impl MemTable {
             let key_len = pk.len();
             self.mem_table_size += std::mem::size_of::<Bytes>() + key_len + value.len();
             let origin_value = self.buffer.insert(pk, KeyOp::Insert(value));
-            self.caculate_origin_size(origin_value, key_len);
+            self.calculate_origin_size(origin_value, key_len);
 
             return Ok(());
         }
@@ -120,7 +120,7 @@ impl MemTable {
             let key_len = pk.len();
             self.mem_table_size += std::mem::size_of::<Bytes>() + key_len + old_value.len();
             let origin_value = self.buffer.insert(pk, KeyOp::Delete(old_value));
-            self.caculate_origin_size(origin_value, key_len);
+            self.calculate_origin_size(origin_value, key_len);
             return Ok(());
         }
         let entry = self.buffer.entry(pk);
@@ -177,7 +177,7 @@ impl MemTable {
             let origin_value = self
                 .buffer
                 .insert(pk, KeyOp::Update((old_value, new_value)));
-            self.caculate_origin_size(origin_value, key_len);
+            self.calculate_origin_size(origin_value, key_len);
             return Ok(());
         }
         let entry = self.buffer.entry(pk);
@@ -224,7 +224,7 @@ impl MemTable {
         self.buffer.range(key_range)
     }
 
-    fn caculate_origin_size(&mut self, origin_value: Option<KeyOp>, key_len: usize) {
+    fn calculate_origin_size(&mut self, origin_value: Option<KeyOp>, key_len: usize) {
         if let Some(origin_value) = origin_value {
             match origin_value {
                 KeyOp::Insert(old_value) => {

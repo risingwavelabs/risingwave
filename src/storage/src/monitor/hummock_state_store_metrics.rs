@@ -243,6 +243,7 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        // todo(wcy-fdu): may replace instance_id with actor_id.
         let mem_table_memory_size = register_int_gauge_vec_with_registry!(
             "state_store_mem_table_memory_size",
             "Memory usage of mem_table",
