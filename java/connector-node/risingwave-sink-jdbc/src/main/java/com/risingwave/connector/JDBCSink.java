@@ -80,7 +80,11 @@ public class JDBCSink extends SinkBase {
                                 List.of(tableSchema.getColumnNames()),
                                 pkColumnNames);
                 // MySQL and Postgres have upsert SQL
-                assert (upsertSql.isPresent());
+                if (upsertSql.isEmpty()) {
+                    throw Status.FAILED_PRECONDITION
+                            .withDescription("Failed to get upsert SQL")
+                            .asRuntimeException();
+                }
                 this.upsertPreparedStmt =
                         conn.prepareStatement(upsertSql.get(), Statement.RETURN_GENERATED_KEYS);
                 // upsert sink will handle DELETE events
@@ -140,7 +144,6 @@ public class JDBCSink extends SinkBase {
     }
 
     private PreparedStatement prepareUpsertStatement(SinkRow row) {
-        assert config.isUpsertSink();
         try {
             var preparedStmt = upsertPreparedStmt;
             switch (row.getOp()) {
@@ -171,7 +174,6 @@ public class JDBCSink extends SinkBase {
     }
 
     private PreparedStatement prepareDeleteStatement(SinkRow row) {
-        assert row.getOp() == Data.Op.DELETE;
         if (!config.isUpsertSink()) {
             throw Status.FAILED_PRECONDITION
                     .withDescription("Non-upsert sink cannot handle DELETE event")

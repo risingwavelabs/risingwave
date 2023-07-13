@@ -1,6 +1,6 @@
 CREATE TABLE t_append_only (
    v1 BIGINT,
-   v2 VARCHAR(100),
+   v2 VARCHAR(100)
 );
 
 CREATE TABLE t_remote_0 (
@@ -50,7 +50,7 @@ CREATE TABLE t_types (
     time_column TIME,
     timestamp_column TIMESTAMP,
     interval_column INTERVAL,
-    jsonb_column JSONB,
+    jsonb_column JSONB
 );
 
 CREATE SCHEMA biz;
