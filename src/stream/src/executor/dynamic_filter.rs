@@ -24,7 +24,9 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{once, OwnedRow as RowData, OwnedRow, Project, Row, RowExt};
-use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{
+    DataType, Datum, DatumRef, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum,
+};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum, cmp_datum_iter};
 use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
@@ -253,7 +255,10 @@ impl DynamicFilterCache {
         }
     }
 
-    fn handle_rhs_row(&mut self, op: &Op, prev_rhs: &Datum, new_rhs: &Datum) {
+    fn handle_rhs_row(&mut self, op: &Op, prev_rhs: &Option<Datum>, new_rhs: DatumRef) {
+        let Some(prev_rhs) = prev_rhs else {
+            return;
+        };
         match self.value {
             DynamicFilterCacheEntry::Empty => {}
             DynamicFilterCacheEntry::NoMatch => {
@@ -612,6 +617,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let (data_chunk, ops) = chunk.into_parts();
 
                     for (row, op) in data_chunk.rows().zip_eq_debug(ops.iter()) {
+                        cache.handle_rhs_row(op, &current_epoch_value, row.datum_at(0));
                         match *op {
                             Op::UpdateInsert | Op::Insert => {
                                 current_epoch_value = Some(row.datum_at(0).to_owned_datum());
