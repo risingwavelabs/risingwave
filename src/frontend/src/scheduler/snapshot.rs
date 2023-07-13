@@ -172,7 +172,7 @@ impl HummockSnapshotManager {
     /// Should only be called by the observer manager.
     pub fn update(&self, snapshot: PbHummockSnapshot) {
         self.latest_snapshot.send_if_modified(move |old_snapshot| {
-            // Note(bugen): theoritically, the snapshots from the observer should always be
+            // Note(bugen): theoretically, the snapshots from the observer should always be
             // monotonically increasing, so there's no need to `max` them or check whether they are
             // the same. But we still do it here to be safe.
             // TODO: turn this into an assertion.
