@@ -552,10 +552,7 @@ where
             self.in_flight_barrier_nums,
         );
 
-        let epoch = if self.enable_recovery {
-            // handle init, here we simply trigger a recovery process to achieve the consistency. We
-            // may need to avoid this when we have more state persisted in meta store.
-
+        let prev_epoch = {
             let latest_snapshot = self.hummock_manager.latest_snapshot();
             assert_eq!(
                 latest_snapshot.committed_epoch, latest_snapshot.current_epoch,
@@ -563,19 +560,24 @@ where
             );
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into());
 
-            self.set_status(BarrierManagerStatus::Recovering).await;
-            let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
-            self.recovery(prev_epoch).instrument(span).await
-        } else if self.fragment_manager.has_any_table_fragments().await {
-            panic!(
-                "Some streaming jobs already exist in meta, please start with recovery enabled \
-            or clean up the metadata using `./risedev clean-data`"
-            )
-        } else {
-            // Fresh start.
-            TracedEpoch::new(INVALID_EPOCH.into())
+            if self.enable_recovery {
+                // Bootstrap recovery. Here we simply trigger a recovery process to achieve the
+                // consistency.
+                self.set_status(BarrierManagerStatus::Recovering).await;
+                let span =
+                    tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+                self.recovery(prev_epoch).instrument(span).await
+            } else if self.fragment_manager.has_any_table_fragments().await {
+                panic!(
+                    "Some streaming jobs already exist in meta, please start with recovery enabled \
+                or clean up the metadata using `./risedev clean-data`"
+                )
+            } else {
+                // Fresh start, use the epoch of the latest snapshot.
+                prev_epoch
+            }
         };
-        let mut state = BarrierManagerState::new(epoch);
+        let mut state = BarrierManagerState::new(prev_epoch);
 
         self.set_status(BarrierManagerStatus::Running).await;
 
