@@ -226,6 +226,13 @@ enum MetaCommands {
 
     /// List all existing connections in the catalog
     ListConnections,
+
+    /// Validate source interface for the cloud team
+    ValidateSource {
+        /// CREATE SOURCE statement
+        #[clap(long)]
+        sql: String,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -357,6 +364,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Meta(MetaCommands::ListConnections) => {
             cmd_impl::meta::list_connections(context).await?
+        }
+        Commands::Meta(MetaCommands::ValidateSource { sql }) => {
+            cmd_impl::meta::validate_source(context, sql).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,

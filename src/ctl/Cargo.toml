@@ -29,6 +29,7 @@ risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
+risingwave_sqlparser = { path = "../sqlparser" }
 risingwave_storage = { path = "../storage" }
 risingwave_stream = { path = "../stream" }
 risingwave_tracing = { path = "../tracing" }

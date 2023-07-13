@@ -42,6 +42,8 @@ use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
     Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
+use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
+use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
@@ -889,6 +891,19 @@ impl MetaClient {
         let resp = self.inner.get_tables(req).await?;
         Ok(resp.tables)
     }
+
+    pub async fn rw_cloud_validate_source(
+        &self,
+        source_type: SourceType,
+        source_config: HashMap<String, String>,
+    ) -> Result<RwCloudValidateSourceResponse> {
+        let req = RwCloudValidateSourceRequest {
+            source_type: source_type.into(),
+            source_config,
+        };
+        let resp = self.inner.rw_cloud_validate_source(req).await?;
+        Ok(resp)
+    }
 }
 
 #[async_trait]
@@ -1074,6 +1089,7 @@ struct GrpcMetaClientCore {
     backup_client: BackupServiceClient<Channel>,
     telemetry_client: TelemetryInfoServiceClient<Channel>,
     system_params_client: SystemParamsServiceClient<Channel>,
+    cloud_client: CloudServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1089,7 +1105,8 @@ impl GrpcMetaClientCore {
         let scale_client = ScaleServiceClient::new(channel.clone());
         let backup_client = BackupServiceClient::new(channel.clone());
         let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
-        let system_params_client = SystemParamsServiceClient::new(channel);
+        let system_params_client = SystemParamsServiceClient::new(channel.clone());
+        let cloud_client = CloudServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1104,6 +1121,7 @@ impl GrpcMetaClientCore {
             backup_client,
             telemetry_client,
             system_params_client,
+            cloud_client,
         }
     }
 }
@@ -1521,6 +1539,7 @@ macro_rules! for_all_meta_rpc {
             ,{ telemetry_client, get_telemetry_info, GetTelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
+            ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
         }
     };
 }
