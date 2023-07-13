@@ -26,7 +26,7 @@ use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
 use risingwave_stream::error::StreamError;
 use risingwave_stream::executor::Barrier;
-use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
+use risingwave_stream::task::{CollectResult, LocalStreamManager, StreamEnvironment};
 use tonic::{Code, Request, Response, Status};
 use tracing::Instrument;
 
@@ -177,7 +177,13 @@ impl StreamService for StreamServiceImpl {
         request: Request<BarrierCompleteRequest>,
     ) -> Result<Response<BarrierCompleteResponse>, Status> {
         let req = request.into_inner();
-        let (collect_result, checkpoint) = self
+        let (
+            CollectResult {
+                create_mview_progress,
+                is_first_barrier,
+            },
+            checkpoint,
+        ) = self
             .mgr
             .collect_barrier(req.prev_epoch)
             .instrument_await(format!("collect_barrier (epoch {})", req.prev_epoch))
@@ -185,7 +191,13 @@ impl StreamService for StreamServiceImpl {
             .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))?;
         // Must finish syncing data written in the epoch before respond back to ensure persistence
         // of the state.
-        let synced_sstables = if checkpoint {
+        let synced_sstables = if is_first_barrier {
+            tracing::info!(
+                epoch = req.prev_epoch,
+                "ignored syncing data for the first barrier"
+            );
+            vec![]
+        } else if checkpoint {
             let span = TracingContext::from_protobuf(&req.tracing_context).attach(
                 tracing::info_span!("sync_epoch", prev_epoch = req.prev_epoch),
             );
@@ -202,7 +214,7 @@ impl StreamService for StreamServiceImpl {
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
             status: None,
-            create_mview_progress: collect_result.create_mview_progress,
+            create_mview_progress,
             synced_sstables: synced_sstables
                 .into_iter()
                 .map(

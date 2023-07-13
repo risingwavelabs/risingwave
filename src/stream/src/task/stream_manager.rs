@@ -241,9 +241,7 @@ impl LocalStreamManager {
 
     /// Clear all senders and collect rx in barrier manager.
     pub fn clear_all_senders_and_collect_rx(&self) {
-        let mut barrier_manager = self.context.lock_barrier_manager();
-        barrier_manager.clear_senders();
-        barrier_manager.clear_collect_rx();
+        self.context.lock_barrier_manager().clear();
     }
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before

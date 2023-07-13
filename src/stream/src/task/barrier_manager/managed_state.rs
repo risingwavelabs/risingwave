@@ -67,6 +67,10 @@ pub(super) struct ManagedBarrierState {
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
 
+    /// Whether the first barrier has been collected. Note that we don't seal the data of the first
+    /// barrier with its `prev_epoch`. This will be reset after recovery.
+    first_collected: bool,
+
     state_store: StateStoreImpl,
 }
 
@@ -77,6 +81,7 @@ impl ManagedBarrierState {
             epoch_barrier_state_map: BTreeMap::default(),
             create_mview_progress: Default::default(),
             failure_actors: Default::default(),
+            first_collected: false,
             state_store,
         }
     }
@@ -133,9 +138,16 @@ impl ManagedBarrierState {
                     })
                     .collect();
 
-                dispatch_state_store!(&self.state_store, state_store, {
-                    state_store.seal_epoch(barrier_state.prev_epoch, barrier_state.checkpoint);
-                });
+                if self.first_collected {
+                    dispatch_state_store!(&self.state_store, state_store, {
+                        state_store.seal_epoch(barrier_state.prev_epoch, barrier_state.checkpoint);
+                    });
+                } else {
+                    tracing::info!(
+                        epoch = barrier_state.prev_epoch,
+                        "ignore sealing data for the first barrier"
+                    )
+                }
 
                 match barrier_state.inner {
                     ManagedBarrierStateInner::Issued {
@@ -144,6 +156,7 @@ impl ManagedBarrierState {
                         // Notify about barrier finishing.
                         let result = CollectResult {
                             create_mview_progress,
+                            is_first_barrier: !self.first_collected,
                         };
                         if collect_notifier.unwrap().send(Ok(result)).is_err() {
                             warn!("failed to notify barrier collection with epoch {}", epoch)
@@ -151,6 +164,8 @@ impl ManagedBarrierState {
                     }
                     _ => unreachable!(),
                 }
+
+                self.first_collected = true;
             }
         }
     }
@@ -158,9 +173,8 @@ impl ManagedBarrierState {
     /// Clear and reset all states.
     pub(crate) fn clear_all_states(&mut self) {
         tracing::debug!("clear all states in local barrier manager");
-        self.epoch_barrier_state_map.clear();
-        self.create_mview_progress.clear();
-        self.failure_actors.clear();
+
+        *self = Self::new(self.state_store.clone());
     }
 
     /// Notify unexpected actor exit with given `actor_id`.

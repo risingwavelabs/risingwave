@@ -42,7 +42,12 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
 pub struct CollectResult {
+    /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
+
+    /// Whether this barrier is the first one collected on current compute node (or after soft
+    /// reset in recovery).
+    pub is_first_barrier: bool,
 }
 
 enum BarrierState {
@@ -62,10 +67,6 @@ enum BarrierState {
 pub struct LocalBarrierManager {
     /// Stores all streaming job source sender.
     senders: HashMap<ActorId, Vec<UnboundedSender<Barrier>>>,
-
-    /// Span of the current epoch.
-    #[expect(dead_code)]
-    span: tracing::Span,
 
     /// Current barrier collection state.
     state: BarrierState,
@@ -88,7 +89,6 @@ impl LocalBarrierManager {
     fn with_state(state: BarrierState) -> Self {
         Self {
             senders: HashMap::new(),
-            span: tracing::Span::none(),
             state,
             collect_complete_receiver: HashMap::default(),
         }
@@ -200,14 +200,11 @@ impl LocalBarrierManager {
             })
     }
 
-    // remove all senders
-    pub fn clear_senders(&mut self) {
+    /// Clear all internal states.
+    pub fn clear(&mut self) {
         self.senders.clear();
-    }
-
-    /// remove all collect rx
-    pub fn clear_collect_rx(&mut self) {
         self.collect_complete_receiver.clear();
+
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
