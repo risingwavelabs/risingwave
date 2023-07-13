@@ -420,8 +420,6 @@ impl LogicalMultiJoin {
 
         let mut join_ordering = vec![];
 
-        println!("{:?}", edge_sets);
-
         for component in edge_sets {
             let mut eq_cond_edges: Vec<(usize, usize)> = component.into_iter().collect();
 
