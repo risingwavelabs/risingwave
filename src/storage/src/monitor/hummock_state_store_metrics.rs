@@ -68,6 +68,7 @@ pub struct HummockStateStoreMetrics {
 
     // memory
     pub mem_table_memory_size: IntGaugeVec,
+    pub mem_table_item_count: IntGaugeVec,
 }
 
 impl HummockStateStoreMetrics {
@@ -245,7 +246,15 @@ impl HummockStateStoreMetrics {
         let mem_table_memory_size = register_int_gauge_vec_with_registry!(
             "state_store_mem_table_memory_size",
             "Memory usage of mem_table",
-            &["table_id"],
+            &["table_id", "instance_id"],
+            registry
+        )
+        .unwrap();
+
+        let mem_table_item_count = register_int_gauge_vec_with_registry!(
+            "state_store_mem_table_item_count",
+            "Item counts in mem_table",
+            &["table_id", "instance_id"],
             registry
         )
         .unwrap();
@@ -275,6 +284,7 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
             mem_table_memory_size,
+            mem_table_item_count,
         }
     }
 

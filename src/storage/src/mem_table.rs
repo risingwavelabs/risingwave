@@ -84,8 +84,10 @@ impl MemTable {
     /// write methods
     pub fn insert(&mut self, pk: Bytes, value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
-            self.mem_table_size += std::mem::size_of::<Bytes>() + pk.len() + value.len();
-            self.buffer.insert(pk, KeyOp::Insert(value));
+            let key_len = pk.len();
+            self.mem_table_size += std::mem::size_of::<Bytes>() + key_len + value.len();
+            let origin_value = self.buffer.insert(pk, KeyOp::Insert(value));
+            self.caculate_origin_size(origin_value, key_len);
 
             return Ok(());
         }
@@ -115,8 +117,10 @@ impl MemTable {
 
     pub fn delete(&mut self, pk: Bytes, old_value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
-            self.mem_table_size += std::mem::size_of::<Bytes>() + pk.len() + old_value.len();
-            self.buffer.insert(pk, KeyOp::Delete(old_value));
+            let key_len = pk.len();
+            self.mem_table_size += std::mem::size_of::<Bytes>() + key_len + old_value.len();
+            let origin_value = self.buffer.insert(pk, KeyOp::Delete(old_value));
+            self.caculate_origin_size(origin_value, key_len);
             return Ok(());
         }
         let entry = self.buffer.entry(pk);
@@ -167,10 +171,13 @@ impl MemTable {
 
     pub fn update(&mut self, pk: Bytes, old_value: Bytes, new_value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
+            let key_len = pk.len();
             self.mem_table_size -=
-                std::mem::size_of::<Bytes>() + pk.len() + old_value.len() + new_value.len();
-            self.buffer
+                std::mem::size_of::<Bytes>() + key_len + old_value.len() + new_value.len();
+            let origin_value = self
+                .buffer
                 .insert(pk, KeyOp::Update((old_value, new_value)));
+            self.caculate_origin_size(origin_value, key_len);
             return Ok(());
         }
         let entry = self.buffer.entry(pk);
@@ -215,6 +222,23 @@ impl MemTable {
         R: RangeBounds<Bytes> + 'a,
     {
         self.buffer.range(key_range)
+    }
+
+    fn caculate_origin_size(&mut self, origin_value: Option<KeyOp>, key_len: usize) {
+        if let Some(origin_value) = origin_value {
+            match origin_value {
+                KeyOp::Insert(old_value) => {
+                    self.mem_table_size -= std::mem::size_of::<Bytes>() + old_value.len() + key_len
+                }
+                KeyOp::Delete(old_value) => {
+                    self.mem_table_size -= std::mem::size_of::<Bytes>() + old_value.len() + key_len
+                }
+                KeyOp::Update((old_value1, old_value2)) => {
+                    self.mem_table_size -=
+                        std::mem::size_of::<Bytes>() + old_value1.len() + old_value2.len() + key_len
+                }
+            }
+        }
     }
 }
 
