@@ -174,6 +174,8 @@ fn run_batch_query(
     context: OptimizerContextRef,
     stmt: Statement,
 ) -> Result<()> {
+    let _guard = session.txn_begin_implicit();
+
     let mut binder = Binder::new(&session);
     let bound = binder
         .bind(stmt)
@@ -287,7 +289,6 @@ pub fn run() {
                     tables,
                     setup_sql,
                 } = &*env;
-                let _guard = session.txn_begin_implicit();
                 test_batch_query(session.clone(), tables.clone(), i, setup_sql)?;
                 let test_stream_query =
                     test_stream_query(session.clone(), tables.clone(), i, setup_sql);
