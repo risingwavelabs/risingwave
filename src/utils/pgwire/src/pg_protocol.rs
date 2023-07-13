@@ -978,15 +978,15 @@ mod truncated_fmt {
             }
 
             if self.remaining < s.len() {
-                self.remaining = 0;
                 self.f.write_str(&s[0..self.remaining])?;
+                self.remaining = 0;
                 self.f.write_str("...(truncated)")?;
                 self.finished = true; // so that ...(truncated) is printed exactly once
-                Ok(())
             } else {
+                self.f.write_str(s)?;
                 self.remaining -= s.len();
-                self.f.write_str(s)
             }
+            Ok(())
         }
     }
 
