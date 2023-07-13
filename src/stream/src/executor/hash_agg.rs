@@ -44,14 +44,13 @@ use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggGroup as GenericAggGroup};
+use crate::executor::aggregation::{generate_agg_schema, AggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Executor, Message};
 use crate::task::AtomicU64Ref;
 
-type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
-type AggGroupCache<K, S> = ManagedLruCache<K, AggGroup<S>, PrecomputedBuildHasher>;
+type AggGroupCache<K> = ManagedLruCache<K, AggGroup, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -134,7 +133,7 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
     stats: ExecutionStats,
 
     /// Cache for [`AggGroup`]s. `HashKey` -> `AggGroup`.
-    agg_group_cache: AggGroupCache<K, S>,
+    agg_group_cache: AggGroupCache<K>,
 
     /// Changed group keys in the current epoch (before next flush).
     group_change_set: HashSet<K>,
@@ -267,7 +266,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
     async fn ensure_keys_in_cache(
         this: &mut ExecutorInner<K, S>,
-        cache: &mut AggGroupCache<K, S>,
+        cache: &mut AggGroupCache<K>,
         keys: impl IntoIterator<Item = &K>,
         stats: &mut ExecutionStats,
     ) -> StreamExecutorResult<()> {
@@ -453,7 +452,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 async move {
                     // Get agg outputs and build change.
                     let curr_outputs = agg_group.get_outputs(storages).await?;
-                    let change = agg_group.build_change(curr_outputs);
+                    let change = agg_group.build_change::<OnlyOutputIfHasInput>(curr_outputs);
                     Ok::<_, StreamExecutorError>(change)
                 }
             });

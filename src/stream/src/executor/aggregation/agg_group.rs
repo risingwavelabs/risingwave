@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use risingwave_common::array::stream_record::{Record, RecordType};
@@ -155,23 +154,21 @@ impl GroupKey {
 }
 
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
-pub struct AggGroup<S: StateStore, Strtg: Strategy> {
+pub struct AggGroup {
     /// Group key.
     group_key: Option<GroupKey>,
 
     /// Current managed states for all [`AggCall`]s.
-    states: Vec<AggState<S>>,
+    states: Vec<AggState>,
 
     /// Previous outputs of managed states. Initializing with `None`.
     prev_outputs: Option<OwnedRow>,
 
     /// Index of row count agg call (`count(*)`) in the call list.
     row_count_index: usize,
-
-    _phantom: PhantomData<Strtg>,
 }
 
-impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
+impl Debug for AggGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AggGroup")
             .field("group_key", &self.group_key)
@@ -180,7 +177,7 @@ impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
     }
 }
 
-impl<S: StateStore, Strtg: Strategy> EstimateSize for AggGroup<S, Strtg> {
+impl EstimateSize for AggGroup {
     fn estimated_heap_size(&self) -> usize {
         self.states
             .iter()
@@ -189,20 +186,20 @@ impl<S: StateStore, Strtg: Strategy> EstimateSize for AggGroup<S, Strtg> {
     }
 }
 
-impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
+impl AggGroup {
     /// Create [`AggGroup`] for the given [`AggCall`]s and `group_key`.
     /// For [`crate::executor::SimpleAggExecutor`], the `group_key` should be `None`.
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         group_key: Option<GroupKey>,
         agg_calls: &[AggCall],
-        storages: &[AggStateStorage<S>],
-        result_table: &StateTable<S>,
+        storages: &[AggStateStorage<impl StateStore>],
+        result_table: &StateTable<impl StateStore>,
         pk_indices: &PkIndices,
         row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
-    ) -> StreamExecutorResult<AggGroup<S, Strtg>> {
+    ) -> StreamExecutorResult<AggGroup> {
         let prev_outputs: Option<OwnedRow> = result_table
             .get_row(group_key.as_ref().map(GroupKey::table_pk))
             .await?;
@@ -229,7 +226,6 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             states,
             prev_outputs,
             row_count_index,
-            _phantom: PhantomData,
         })
     }
 
@@ -255,7 +251,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// `visibilities` contains the row visibility of the input chunk for each agg call.
     pub async fn apply_chunk(
         &mut self,
-        storages: &mut [AggStateStorage<S>],
+        storages: &mut [AggStateStorage<impl StateStore>],
         chunk: &StreamChunk,
         visibilities: Vec<Vis>,
         materialized: &Bitmap,
@@ -279,7 +275,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// must be called before committing state tables.
     pub async fn flush_state_if_needed(
         &self,
-        storages: &mut [AggStateStorage<S>],
+        storages: &mut [AggStateStorage<impl StateStore>],
     ) -> StreamExecutorResult<()> {
         futures::future::try_join_all(self.states.iter().zip_eq_fast(storages).filter_map(
             |(state, storage)| match state {
@@ -306,7 +302,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// guaranteed to be the same.
     pub async fn get_outputs(
         &mut self,
-        storages: &[AggStateStorage<S>],
+        storages: &[AggStateStorage<impl StateStore>],
     ) -> StreamExecutorResult<OwnedRow> {
         // Row count doesn't need I/O, so the following statement is supposed to be fast.
         let row_count = self.states[self.row_count_index]
@@ -335,7 +331,10 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 
     /// Build aggregation result change, according to previous and current agg outputs.
     /// The saved previous outputs will be updated to the latest outputs after this method.
-    pub fn build_change(&mut self, curr_outputs: OwnedRow) -> Option<Record<OwnedRow>> {
+    pub fn build_change<Strtg: Strategy>(
+        &mut self,
+        curr_outputs: OwnedRow,
+    ) -> Option<Record<OwnedRow>> {
         let prev_row_count = self.prev_row_count();
         let curr_row_count = curr_outputs[self.row_count_index]
             .as_ref()

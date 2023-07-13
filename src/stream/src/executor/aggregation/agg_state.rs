@@ -48,24 +48,25 @@ pub enum AggStateStorage<S: StateStore> {
 /// State for single aggregation call. It manages the state cache and interact with the
 /// underlying state store if necessary.
 #[derive(EstimateSize)]
-pub enum AggState<S: StateStore> {
-    /// State as single scalar value, e.g. `count`, `sum`, append-only `min`/`max`.
+pub enum AggState {
+    /// State as single scalar value and is same as output.
+    /// e.g. `count`, `sum`, append-only `min`/`max`.
     Value(BoxedAggState),
 
-    /// State as a single state table whose schema is deduced by frontend and backend with implicit
-    /// consensus, e.g. append-only `single_phase_approx_count_distinct`.
-    Table(TableState<S>),
+    /// State as single scalar value but is different from output.
+    /// e.g. append-only `single_phase_approx_count_distinct`.
+    Table(TableState),
 
     /// State as materialized input chunk, e.g. non-append-only `min`/`max`, `string_agg`.
     MaterializedInput(MaterializedInputState),
 }
 
-impl<S: StateStore> AggState<S> {
+impl AggState {
     /// Create an [`AggState`] from a given [`AggCall`].
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         agg_call: &AggCall,
-        storage: &AggStateStorage<S>,
+        storage: &AggStateStorage<impl StateStore>,
         prev_output: Option<&Datum>,
         pk_indices: &PkIndices,
         group_key: Option<&GroupKey>,
@@ -99,7 +100,7 @@ impl<S: StateStore> AggState<S> {
     pub async fn apply_chunk(
         &mut self,
         chunk: &StreamChunk,
-        storage: &mut AggStateStorage<S>,
+        storage: &mut AggStateStorage<impl StateStore>,
         materialized: bool,
     ) -> StreamExecutorResult<()> {
         match self {
@@ -110,7 +111,7 @@ impl<S: StateStore> AggState<S> {
             }
             Self::Table(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
-                state.apply_chunk(chunk)
+                state.apply_chunk(chunk).await
             }
             Self::MaterializedInput(state) => {
                 let (table, mapping) = must_match!(storage, AggStateStorage::MaterializedInput { table, mapping } => (table, mapping));
@@ -125,7 +126,7 @@ impl<S: StateStore> AggState<S> {
     /// Get the output of the state.
     pub async fn get_output(
         &mut self,
-        storage: &AggStateStorage<S>,
+        storage: &AggStateStorage<impl StateStore>,
         group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<Datum> {
         match self {
