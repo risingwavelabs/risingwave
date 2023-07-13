@@ -35,6 +35,7 @@ use risingwave_pb::connector_service::{
     sink_coordinator_to_writer_msg, sink_writer_to_coordinator_msg, SinkCoordinatorToWriterMsg,
     SinkWriterToCoordinatorMsg,
 };
+use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 use tokio::task::{JoinError, JoinHandle};
@@ -76,7 +77,9 @@ pub struct SinkManager {
 }
 
 impl SinkManager {
-    pub(crate) fn start_worker() -> (Self, (JoinHandle<()>, Sender<()>)) {
+    pub(crate) fn start_worker(
+        connector_client: Option<ConnectorClient>,
+    ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let (request_tx, request_rx) = unbounded_channel();
         let (shutdown_tx, shutdown_rx) = channel();
         let worker = SinkManagerWorker {
@@ -84,6 +87,7 @@ impl SinkManager {
             shutdown_rx: Some(shutdown_rx),
             running_coordinator_worker_join_handles: Default::default(),
             running_coordinator_worker: Default::default(),
+            connector_client,
         };
         let join_handle = tokio::spawn(worker.execute());
         (SinkManager { request_tx }, (join_handle, shutdown_tx))
@@ -155,6 +159,7 @@ struct SinkCoordinatorWorkerHandle {
 }
 
 struct SinkManagerWorker {
+    connector_client: Option<ConnectorClient>,
     request_rx: UnboundedReceiver<SinkManagerRequest>,
     // Make it option so that it can be polled with &mut SinkManagerWorker
     shutdown_rx: Option<Receiver<()>>,
@@ -306,11 +311,12 @@ impl SinkManagerWorker {
             }
             Entry::Vacant(entry) => {
                 let (request_tx, request_rx) = unbounded_channel();
+                let connector_client = self.connector_client.clone();
                 let join_handle = tokio::spawn(async move {
                     if let Some(coordinator_worker) =
                         SinkCoordinatorWorker::initialize(request, request_rx).await
                     {
-                        coordinator_worker.execute().await;
+                        coordinator_worker.execute(connector_client).await;
                     }
                 });
                 self.running_coordinator_worker_join_handles.push(
@@ -436,11 +442,10 @@ impl SinkCoordinatorWorker {
         })
     }
 
-    async fn execute(mut self) {
+    async fn execute(mut self, connector_client: Option<ConnectorClient>) {
         let sink = self.sink.take().expect("should be Some when first execute");
         dispatch_sink!(sink, sink, {
-            // TODO: pass the connector param
-            let mut coordinator = match sink.new_coordinator(None).await {
+            let mut coordinator = match sink.new_coordinator(connector_client).await {
                 Ok(coordinator) => coordinator,
                 Err(e) => {
                     error!(

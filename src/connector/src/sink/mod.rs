@@ -141,7 +141,7 @@ pub trait Sink {
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
-        _connector_rpc_endpoint: Option<String>,
+        _connector_client: Option<ConnectorClient>,
     ) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
@@ -409,10 +409,7 @@ impl Sink for CoordinatorTestSink {
         })
     }
 
-    async fn new_coordinator(
-        &self,
-        _connector_rpc_endpoint: Option<String>,
-    ) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _client: Option<ConnectorClient>) -> Result<Self::Coordinator> {
         info!("create sink coordinator");
         Ok(CoordinatorTestSinkCoordinator)
     }

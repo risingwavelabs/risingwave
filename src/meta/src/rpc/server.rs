@@ -432,7 +432,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .unwrap(),
     );
 
-    let (sink_manager, shutdown_handle) = SinkManager::start_worker();
+    let (sink_manager, shutdown_handle) = SinkManager::start_worker(env.connector_client());
     let mut sub_tasks = vec![shutdown_handle];
 
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
