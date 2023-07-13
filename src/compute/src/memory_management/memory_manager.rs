@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_batch::task::BatchManager;
+use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
@@ -28,8 +29,7 @@ use crate::memory_management::MemoryControlStats;
 pub struct GlobalMemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
-    /// Loop interval of running control policy
-    interval_ms: u32,
+
     metrics: Arc<StreamingMetrics>,
     /// The memory control policy for computing tasks.
     memory_control_policy: MemoryControlRef,
@@ -38,20 +38,18 @@ pub struct GlobalMemoryManager {
 pub type GlobalMemoryManagerRef = Arc<GlobalMemoryManager>;
 
 impl GlobalMemoryManager {
+    // Arbitrarily set a minimal barrier interval in case it is too small,
+    // especially when it's 0.
+    const MIN_TICK_INTERVAL_MS: u32 = 10;
+
     pub fn new(
-        interval_ms: u32,
         metrics: Arc<StreamingMetrics>,
         memory_control_policy: MemoryControlRef,
     ) -> Arc<Self> {
-        // Arbitrarily set a minimal barrier interval in case it is too small,
-        // especially when it's 0.
-        let interval_ms = std::cmp::max(interval_ms, 10);
-
         tracing::info!("memory control policy: {:?}", &memory_control_policy);
 
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
-            interval_ms,
             metrics,
             memory_control_policy,
         })
@@ -67,10 +65,18 @@ impl GlobalMemoryManager {
         self: Arc<Self>,
         batch_manager: Arc<BatchManager>,
         stream_manager: Arc<LocalStreamManager>,
+        initial_interval_ms: u32,
+        mut system_params_change_rx: tokio::sync::watch::Receiver<SystemParamsReaderRef>,
     ) {
+        // Loop interval of running control policy
+        let mut interval_ms = std::cmp::max(initial_interval_ms, Self::MIN_TICK_INTERVAL_MS);
+        tracing::info!(
+            "start running GlobalMemoryManager with interval {}ms",
+            interval_ms
+        );
+
         // Keep same interval with the barrier interval
-        let mut tick_interval =
-            tokio::time::interval(Duration::from_millis(self.interval_ms as u64));
+        let mut tick_interval = tokio::time::interval(Duration::from_millis(interval_ms as u64));
 
         let mut memory_control_stats = MemoryControlStats {
             jemalloc_allocated_mib: 0,
@@ -82,32 +88,44 @@ impl GlobalMemoryManager {
 
         loop {
             // Wait for a while to check if need eviction.
-            tick_interval.tick().await;
+            tokio::select! {
+                Ok(_) = system_params_change_rx.changed() => {
+                    let params = system_params_change_rx.borrow().load();
+                    let new_interval_ms = std::cmp::max(params.barrier_interval_ms(), Self::MIN_TICK_INTERVAL_MS);
+                    if new_interval_ms != interval_ms {
+                        interval_ms = new_interval_ms;
+                        tick_interval = tokio::time::interval(Duration::from_millis(interval_ms as u64));
+                        tracing::info!("updated GlobalMemoryManager interval to {}ms", interval_ms);
+                    }
+                }
 
-            memory_control_stats = self.memory_control_policy.apply(
-                self.interval_ms,
-                memory_control_stats,
-                batch_manager.clone(),
-                stream_manager.clone(),
-                self.watermark_epoch.clone(),
-            );
+                _ = tick_interval.tick() => {
+                    memory_control_stats = self.memory_control_policy.apply(
+                        interval_ms,
+                        memory_control_stats,
+                        batch_manager.clone(),
+                        stream_manager.clone(),
+                        self.watermark_epoch.clone(),
+                    );
 
-            self.metrics
-                .lru_current_watermark_time_ms
-                .set(memory_control_stats.lru_watermark_time_ms as i64);
-            self.metrics
-                .lru_physical_now_ms
-                .set(memory_control_stats.lru_physical_now_ms as i64);
-            self.metrics
-                .lru_watermark_step
-                .set(memory_control_stats.lru_watermark_step as i64);
-            self.metrics.lru_runtime_loop_count.inc();
-            self.metrics
-                .jemalloc_allocated_bytes
-                .set(memory_control_stats.jemalloc_allocated_mib as i64);
-            self.metrics
-                .jemalloc_active_bytes
-                .set(memory_control_stats.jemalloc_active_mib as i64);
+                    self.metrics
+                        .lru_current_watermark_time_ms
+                        .set(memory_control_stats.lru_watermark_time_ms as i64);
+                    self.metrics
+                        .lru_physical_now_ms
+                        .set(memory_control_stats.lru_physical_now_ms as i64);
+                    self.metrics
+                        .lru_watermark_step
+                        .set(memory_control_stats.lru_watermark_step as i64);
+                    self.metrics.lru_runtime_loop_count.inc();
+                    self.metrics
+                        .jemalloc_allocated_bytes
+                        .set(memory_control_stats.jemalloc_allocated_mib as i64);
+                    self.metrics
+                        .jemalloc_active_bytes
+                        .set(memory_control_stats.jemalloc_active_mib as i64);
+                }
+            }
         }
     }
 }

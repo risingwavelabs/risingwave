@@ -366,19 +366,19 @@ impl LogicalJoin {
                 .expect("dist_key must in order_key");
             dist_key_in_order_key_pos.push(pos);
         }
-        // The at least prefix of order key that contains distribution key.
-        let at_least_prefix_len = dist_key_in_order_key_pos
+        // The shortest prefix of order key that contains distribution key.
+        let shortest_prefix_len = dist_key_in_order_key_pos
             .iter()
             .max()
             .map_or(0, |pos| pos + 1);
 
         // Distributed lookup join can't support lookup table with a singleton distribution.
-        if at_least_prefix_len == 0 {
+        if shortest_prefix_len == 0 {
             return None;
         }
 
         // Reorder the join equal predicate to match the order key.
-        let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
+        let mut reorder_idx = Vec::with_capacity(shortest_prefix_len);
         for order_col_id in order_col_ids {
             let mut found = false;
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
@@ -392,7 +392,7 @@ impl LogicalJoin {
                 break;
             }
         }
-        if reorder_idx.len() < at_least_prefix_len {
+        if reorder_idx.len() < shortest_prefix_len {
             return None;
         }
         let lookup_prefix_len = reorder_idx.len();
@@ -966,18 +966,6 @@ impl LogicalJoin {
     ) -> Result<PlanRef> {
         assert!(predicate.has_eq());
 
-        let left = self.left().to_stream_with_dist_required(
-            &RequiredDist::shard_by_key(self.left().schema().len(), &predicate.left_eq_indexes()),
-            ctx,
-        )?;
-
-        if !left.append_only() {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires an append-only left input".into(),
-                "Please ensure your left input is append-only".into(),
-            )));
-        }
-
         let right = self.right();
         let Some(logical_scan) = right.as_logical_scan() else {
             return Err(RwError::from(ErrorCode::NotSupported(
@@ -994,29 +982,75 @@ impl LogicalJoin {
         }
 
         let table_desc = logical_scan.table_desc();
-
-        // Verify that right join key columns are the primary key of the lookup table.
-        let order_col_ids = table_desc.order_column_ids();
-        let order_col_ids_len = order_col_ids.len();
         let output_column_ids = logical_scan.output_column_ids();
 
+        // Verify that the right join key columns are the the prefix of the primary key and
+        // also contain the distribution key.
+        let order_col_ids = table_desc.order_column_ids();
+        let order_key = table_desc.order_column_indices();
+        let dist_key = table_desc.distribution_key.clone();
+
+        let mut dist_key_in_order_key_pos = vec![];
+        for d in dist_key {
+            let pos = order_key
+                .iter()
+                .position(|&x| x == d)
+                .expect("dist_key must in order_key");
+            dist_key_in_order_key_pos.push(pos);
+        }
+        // The shortest prefix of order key that contains distribution key.
+        let shortest_prefix_len = dist_key_in_order_key_pos
+            .iter()
+            .max()
+            .map_or(0, |pos| pos + 1);
+
         // Reorder the join equal predicate to match the order key.
-        let mut reorder_idx = vec![];
+        let mut reorder_idx = Vec::with_capacity(shortest_prefix_len);
         for order_col_id in order_col_ids {
+            let mut found = false;
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
                 if order_col_id == output_column_ids[eq_idx] {
                     reorder_idx.push(i);
+                    found = true;
                     break;
                 }
             }
+            if !found {
+                break;
+            }
         }
-        if order_col_ids_len != predicate.eq_keys().len() || reorder_idx.len() < order_col_ids_len {
+        if reorder_idx.len() < shortest_prefix_len {
+            // TODO: support index selection for temporal join and refine this error message.
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires the lookup table's primary key contained exactly in the equivalence condition".into(),
                 "Please add the primary key of the lookup table to the join condition and remove any other conditions".into(),
             )));
         }
+        let lookup_prefix_len = reorder_idx.len();
         let predicate = predicate.reorder(&reorder_idx);
+
+        let left = if dist_key_in_order_key_pos.is_empty() {
+            self.left()
+                .to_stream_with_dist_required(&RequiredDist::single(), ctx)?
+        } else {
+            let left_eq_indexes = predicate.left_eq_indexes();
+            let left_dist_key = dist_key_in_order_key_pos
+                .iter()
+                .map(|pos| left_eq_indexes[*pos])
+                .collect_vec();
+
+            self.left().to_stream_with_dist_required(
+                &RequiredDist::shard_by_key(self.left().schema().len(), &left_dist_key),
+                ctx,
+            )?
+        };
+
+        if !left.append_only() {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join requires an append-only left input".into(),
+                "Please ensure your left input is append-only".into(),
+            )));
+        }
 
         // Extract the predicate from logical scan. Only pure scan is supported.
         let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
@@ -1089,6 +1123,8 @@ impl LogicalJoin {
             self.join_type(),
             new_join_output_indices,
         );
+
+        let new_predicate = new_predicate.retain_prefix_eq_key(lookup_prefix_len);
 
         Ok(StreamTemporalJoin::new(new_logical_join, new_predicate).into())
     }

@@ -20,6 +20,7 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
+use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData, StreamChunkWithState,
@@ -35,6 +36,11 @@ use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::*;
+
+/// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
+/// some latencies in network and cost in meta.
+const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
+
 /// [`FsSourceExecutor`] is a streaming source, fir external file systems
 /// such as s3.
 pub struct FsSourceExecutor<S: StateStore> {
@@ -55,8 +61,8 @@ pub struct FsSourceExecutor<S: StateStore> {
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
 
-    /// Expected barrier latency
-    expected_barrier_latency_ms: u64,
+    /// System parameter reader to read barrier interval
+    system_params: SystemParamsReaderRef,
 
     source_ctrl_opts: SourceCtrlOpts,
 }
@@ -70,7 +76,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
-        expected_barrier_latency_ms: u64,
+        system_params: SystemParamsReaderRef,
         executor_id: u64,
         source_ctrl_opts: SourceCtrlOpts,
     ) -> StreamResult<Self> {
@@ -82,7 +88,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
-            expected_barrier_latency_ms,
+            system_params,
             source_ctrl_opts,
         })
     }
@@ -350,7 +356,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         // We allow data to flow for 5 * `expected_barrier_latency_ms` milliseconds, considering
         // some other latencies like network and cost in Meta.
-        let max_wait_barrier_time_ms = self.expected_barrier_latency_ms as u128 * 5;
+        let mut max_wait_barrier_time_ms =
+            self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
         let mut metric_row_per_barrier: u64 = 0;
@@ -415,6 +422,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
                         // chunks.
                         self_paused = true;
                         stream.pause_stream();
+
+                        // Only update `max_wait_barrier_time_ms` to capture `barrier_interval_ms`
+                        // changes here to avoid frequently accessing the shared `system_params`.
+                        max_wait_barrier_time_ms = self.system_params.load().barrier_interval_ms()
+                            as u128
+                            * WAIT_BARRIER_MULTIPLE_TIMES;
                     }
                     // update split offset
                     if let Some(mapping) = split_offset_mapping {

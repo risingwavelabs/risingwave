@@ -762,8 +762,12 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(SystemParams::default().into())
     }
 
-    async fn set_system_param(&self, _param: String, _value: Option<String>) -> RpcResult<()> {
-        Ok(())
+    async fn set_system_param(
+        &self,
+        _param: String,
+        _value: Option<String>,
+    ) -> RpcResult<Option<SystemParamsReader>> {
+        Ok(Some(SystemParams::default().into()))
     }
 
     async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {

@@ -941,10 +941,14 @@ impl MetaClient {
         Ok(resp.params.unwrap().into())
     }
 
-    pub async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()> {
+    pub async fn set_system_param(
+        &self,
+        param: String,
+        value: Option<String>,
+    ) -> Result<Option<SystemParamsReader>> {
         let req = SetSystemParamRequest { param, value };
-        self.inner.set_system_param(req).await?;
-        Ok(())
+        let resp = self.inner.set_system_param(req).await?;
+        Ok(resp.params.map(SystemParamsReader::from))
     }
 
     pub async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
