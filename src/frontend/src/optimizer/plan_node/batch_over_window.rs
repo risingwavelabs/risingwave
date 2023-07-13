@@ -36,36 +36,23 @@ impl BatchOverWindow {
         assert!(logical.funcs_have_same_partition_and_order());
 
         let input = &logical.input;
+        let input_dist = input.distribution().clone();
 
-        let base =
-            PlanBase::new_batch_from_logical(&logical, input.distribution().clone(), Order::any());
+        let order = Order::new(
+            logical
+                .partition_key_indices()
+                .into_iter()
+                .map(|idx| ColumnOrder::new(idx, OrderType::default()))
+                .chain(logical.order_key().iter().cloned())
+                .collect(),
+        );
+
+        let base = PlanBase::new_batch_from_logical(&logical, input_dist, order);
         BatchOverWindow { base, logical }
     }
 
-    fn window_functions(&self) -> &[PlanWindowFunction] {
-        &self.logical.window_functions
-    }
-
-    fn partition_key_indices(&self) -> Vec<usize> {
-        self.window_functions()[0]
-            .partition_by
-            .iter()
-            .map(|i| i.index())
-            .collect()
-    }
-
-    fn order_key(&self) -> &[ColumnOrder] {
-        &self.window_functions()[0].order_by
-    }
-
     fn expected_input_order(&self) -> Order {
-        Order::new(
-            self.partition_key_indices()
-                .into_iter()
-                .map(|idx| ColumnOrder::new(idx, OrderType::default()))
-                .chain(self.order_key().iter().cloned())
-                .collect(),
-        )
+        self.order().clone()
     }
 }
 
@@ -89,7 +76,10 @@ impl ToDistributedBatch for BatchOverWindow {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self.input().to_distributed_with_required(
             &self.expected_input_order(),
-            &RequiredDist::shard_by_key(self.input().schema().len(), &self.partition_key_indices()),
+            &RequiredDist::shard_by_key(
+                self.input().schema().len(),
+                &self.logical.partition_key_indices(),
+            ),
         )?;
         Ok(self.clone_with_input(new_input).into())
     }
@@ -108,11 +98,13 @@ impl ToBatchPb for BatchOverWindow {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::SortOverWindow(SortOverWindowNode {
             calls: self
+                .logical
                 .window_functions()
                 .iter()
                 .map(PlanWindowFunction::to_protobuf)
                 .collect(),
             partition_by: self
+                .logical
                 .partition_key_indices()
                 .into_iter()
                 .map(|idx| idx as _)
