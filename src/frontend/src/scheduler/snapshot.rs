@@ -177,7 +177,6 @@ impl HummockSnapshotManager {
                 false
             } else {
                 assert_le!(old_snapshot.value.committed_epoch, snapshot.committed_epoch);
-                assert_le!(old_snapshot.value.current_epoch, snapshot.current_epoch);
 
                 // First tell the worker that a new snapshot is going to be pinned.
                 self.worker_sender
@@ -271,9 +270,6 @@ struct UnpinWorker {
     /// All snapshots in this map are considered to be pinned by the meta service, those with
     /// [`PinState::Unpinned`] will be unpinned in the next unpin batch through RPC.
     states: BTreeMap<SnapshotKey, PinState>,
-
-    /// The last snapshot that is unpinned by the meta service. Used to reduce the number of RPCs.
-    last_unpinned: SnapshotKey,
 }
 
 impl UnpinWorker {
@@ -285,7 +281,6 @@ impl UnpinWorker {
             meta_client,
             receiver,
             states: Default::default(),
-            last_unpinned: SnapshotKey(invalid_snapshot()),
         }
     }
 
@@ -339,8 +334,12 @@ impl UnpinWorker {
             .iter()
             .find(|(_, s)| matches!(s, PinState::Pinned))
             .map(|(k, _)| k.clone())
-            .filter(|k| k.0.committed_epoch != self.last_unpinned.0.committed_epoch)
         {
+            if &min_snapshot == self.states.first_key_value().unwrap().0 {
+                // Nothing to unpin.
+                return;
+            }
+
             let min_epoch = min_snapshot.0.committed_epoch;
             tracing::info!(min_epoch, "unpin snapshot with RPC");
 
@@ -348,7 +347,6 @@ impl UnpinWorker {
                 Ok(()) => {
                     // Remove all snapshots before this one.
                     self.states = self.states.split_off(&min_snapshot);
-                    self.last_unpinned = min_snapshot;
                 }
                 Err(e) => tracing::error!(%e, min_epoch, "unpin snapshot failed"),
             }
