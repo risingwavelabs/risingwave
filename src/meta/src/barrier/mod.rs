@@ -552,8 +552,7 @@ where
             self.in_flight_barrier_nums,
         );
 
-        let mut state = BarrierManagerState::new();
-        if self.enable_recovery {
+        let epoch = if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
             // may need to avoid this when we have more state persisted in meta store.
 
@@ -566,15 +565,18 @@ where
 
             self.set_status(BarrierManagerStatus::Recovering).await;
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
-            let new_epoch = self.recovery(prev_epoch).instrument(span).await;
-
-            state.update_inflight_prev_epoch(new_epoch);
+            self.recovery(prev_epoch).instrument(span).await
         } else if self.fragment_manager.has_any_table_fragments().await {
             panic!(
                 "Some streaming jobs already exist in meta, please start with recovery enabled \
             or clean up the metadata using `./risedev clean-data`"
-            );
-        }
+            )
+        } else {
+            // Fresh start.
+            TracedEpoch::new(INVALID_EPOCH.into())
+        };
+        let mut state = BarrierManagerState::new(epoch);
+
         self.set_status(BarrierManagerStatus::Running).await;
 
         let mut min_interval = tokio::time::interval(interval);
@@ -647,7 +649,7 @@ where
         let prev_epoch = state.in_flight_prev_epoch();
 
         let new_epoch = prev_epoch.next();
-        state.update_inflight_prev_epoch(new_epoch.clone());
+        state.update_in_flight_prev_epoch(new_epoch.clone());
 
         // Tracing related stuff
         prev_epoch.span().in_scope(|| {
@@ -899,7 +901,7 @@ where
             );
             let new_epoch = self.recovery(prev_epoch).instrument(span).await;
 
-            state.update_inflight_prev_epoch(new_epoch);
+            state.update_in_flight_prev_epoch(new_epoch);
             self.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);

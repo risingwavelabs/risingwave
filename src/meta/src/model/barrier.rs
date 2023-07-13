@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::epoch::INVALID_EPOCH;
-
 use crate::barrier::TracedEpoch;
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
@@ -26,15 +24,13 @@ pub struct BarrierManagerState {
 }
 
 impl BarrierManagerState {
-    pub fn new() -> Self {
+    pub fn new(in_flight_prev_epoch: TracedEpoch) -> Self {
         Self {
-            // We set the initial value to `INVALID_EPOCH` here. After bootstrap recovery is done,
-            // the value will be set to the latest committed snapshot in `HummockManager`.
-            in_flight_prev_epoch: TracedEpoch::new(INVALID_EPOCH.into()),
+            in_flight_prev_epoch,
         }
     }
 
-    pub fn update_inflight_prev_epoch(&mut self, new_epoch: TracedEpoch) {
+    pub fn update_in_flight_prev_epoch(&mut self, new_epoch: TracedEpoch) {
         self.in_flight_prev_epoch = new_epoch;
     }
 

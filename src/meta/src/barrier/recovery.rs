@@ -107,6 +107,8 @@ where
     }
 
     /// Recovery the whole cluster from the latest epoch.
+    ///
+    /// Returns the new epoch after recovery.
     pub(crate) async fn recovery(&self, prev_epoch: TracedEpoch) -> TracedEpoch {
         // pause discovery of all connector split changes and trigger config change.
         let _source_pause_guard = self.source_manager.paused.lock().await;
