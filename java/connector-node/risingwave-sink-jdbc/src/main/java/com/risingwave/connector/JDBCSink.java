@@ -120,28 +120,40 @@ public class JDBCSink extends SinkBase {
         return pkColumnNames;
     }
 
-    private PreparedStatement prepareInsertOrUpsertStatement(SinkRow row) {
+    private PreparedStatement prepareInsertStatement(SinkRow row) {
+        if (row.getOp() != Data.Op.INSERT) {
+            throw Status.FAILED_PRECONDITION
+                    .withDescription("unexpected op type: " + row.getOp())
+                    .asRuntimeException();
+        }
         try {
-            var preparedStmt = config.isUpsertSink() ? upsertPreparedStmt : insertPreparedStmt;
+            var preparedStmt = insertPreparedStmt;
+            jdbcDialect.bindInsertIntoStatement(preparedStmt, conn, getTableSchema(), row);
+            return preparedStmt;
+        } catch (SQLException e) {
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .withCause(e)
+                    .asRuntimeException();
+        }
+    }
+
+    private PreparedStatement prepareUpsertStatement(SinkRow row) {
+        assert config.isUpsertSink();
+        try {
+            var preparedStmt = upsertPreparedStmt;
             switch (row.getOp()) {
                 case INSERT:
-                    jdbcDialect.bindInsertOrUpsertStatement(
-                            preparedStmt, conn, getTableSchema(), row);
+                    jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
                     return preparedStmt;
                 case UPDATE_INSERT:
-                    if (!config.isUpsertSink()) {
-                        throw Status.FAILED_PRECONDITION
-                                .withDescription(
-                                        "UPDATE_INSERT events are not expected in non-upsert sink")
-                                .asRuntimeException();
-                    }
                     if (!updateFlag) {
                         throw Status.FAILED_PRECONDITION
                                 .withDescription("an UPDATE_DELETE should precede an UPDATE_INSERT")
                                 .asRuntimeException();
                     }
-                    jdbcDialect.bindInsertOrUpsertStatement(
-                            preparedStmt, conn, getTableSchema(), row);
+                    jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
                     updateFlag = false;
                     return preparedStmt;
                 default:
@@ -197,10 +209,10 @@ public class JDBCSink extends SinkBase {
                     continue;
                 }
 
-                if (row.getOp() == Data.Op.DELETE) {
-                    stmt = prepareDeleteStatement(row);
+                if (config.isUpsertSink()) {
+                    stmt = prepareForUpsert(row);
                 } else {
-                    stmt = prepareInsertOrUpsertStatement(row);
+                    stmt = prepareForAppendOnly(row);
                 }
 
                 try {
@@ -217,6 +229,20 @@ public class JDBCSink extends SinkBase {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    private PreparedStatement prepareForUpsert(SinkRow row) {
+        PreparedStatement stmt;
+        if (row.getOp() == Data.Op.DELETE) {
+            stmt = prepareDeleteStatement(row);
+        } else {
+            stmt = prepareUpsertStatement(row);
+        }
+        return stmt;
+    }
+
+    private PreparedStatement prepareForAppendOnly(SinkRow row) {
+        return prepareInsertStatement(row);
     }
 
     @Override

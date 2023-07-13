@@ -71,7 +71,14 @@ public class PostgresDialect implements JdbcDialect {
     }
 
     @Override
-    public void bindInsertOrUpsertStatement(
+    public void bindUpsertStatement(
+            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
+            throws SQLException {
+        bindInsertIntoStatement(stmt, conn, tableSchema, row);
+    }
+
+    @Override
+    public void bindInsertIntoStatement(
             PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
             throws SQLException {
         var columnDescs = tableSchema.getColumnDescs();
