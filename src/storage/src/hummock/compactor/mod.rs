@@ -550,7 +550,7 @@ impl Compactor {
                             if pull_task_ack.load(Ordering::SeqCst) {
                                 // reset pending_pull_task_count when all pending task had been refill
                                 let pending_pull_task_count = {
-                                    cpu_core_num * 2 - running_task_count.load(Ordering::Relaxed)
+                                   (cpu_core_num as f32 * 1.5) as u32 - running_task_count.load(Ordering::Relaxed)
                                 };
 
                                 if pending_pull_task_count > 0 {
@@ -565,8 +565,6 @@ impl Compactor {
                                     } else {
                                         pull_task_ack.store(false, Ordering::SeqCst)
                                     }
-                                } else {
-                                    //do nothing
                                 }
                             }
                             continue;
