@@ -15,7 +15,7 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use futures::{pin_mut, StreamExt};
+use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
@@ -392,25 +392,28 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
 
                         // TODO: prefetching for append-only case.
-                        for vnode in self.left_table.vnodes().iter_vnodes() {
-                            let row_stream = self
-                                .left_table
-                                .iter_with_pk_range(
+                        let streams = futures::future::try_join_all(
+                            self.left_table.vnodes().iter_vnodes().map(|vnode| {
+                                self.left_table.iter_with_pk_range(
                                     &range,
                                     vnode,
                                     PrefetchOptions::new_for_exhaust_iter(),
                                 )
-                                .await?;
-                            pin_mut!(row_stream);
-                            while let Some(res) = row_stream.next().await {
-                                let row = res?;
-                                if let Some(chunk) = stream_chunk_builder.append_row_matched(
-                                    // All rows have a single identity at this point
-                                    if is_insert { Op::Insert } else { Op::Delete },
-                                    row,
-                                ) {
-                                    yield Message::Chunk(chunk);
-                                }
+                            }),
+                        )
+                        .await?
+                        .into_iter()
+                        .map(Box::pin);
+
+                        #[for_await]
+                        for res in stream::select_all(streams) {
+                            let row = res?;
+                            if let Some(chunk) = stream_chunk_builder.append_row_matched(
+                                // All rows have a single identity at this point
+                                if is_insert { Op::Insert } else { Op::Delete },
+                                row,
+                            ) {
+                                yield Message::Chunk(chunk);
                             }
                         }
 

@@ -39,6 +39,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use self::command::CommandContext;
@@ -85,6 +86,7 @@ struct Scheduled {
     command: Command,
     notifiers: Vec<Notifier>,
     send_latency_timer: HistogramTimer,
+    span: tracing::Span,
     /// Choose a different barrier(checkpoint == true) according to it
     checkpoint: bool,
 }
@@ -559,7 +561,8 @@ where
             let new_epoch = state.in_flight_prev_epoch().next();
 
             self.set_status(BarrierManagerStatus::Recovering).await;
-            let new_epoch = self.recovery(new_epoch).await;
+            let span = tracing::info_span!("bootstrap_recovery", new_epoch = new_epoch.value().0);
+            let new_epoch = self.recovery(new_epoch).instrument(span).await;
             state
                 .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)
                 .await
@@ -595,7 +598,17 @@ where
                 }
                 // Checkpoint frequency changes.
                 notification = local_notification_rx.recv() => {
-                    self.handle_local_notification(notification.unwrap());
+                    let notification = notification.unwrap();
+                    // Handle barrier interval and checkpoint frequency changes
+                    if let LocalNotification::SystemParamsChange(p) = &notification {
+                        let new_interval = Duration::from_millis(p.barrier_interval_ms() as u64);
+                        if new_interval != min_interval.period() {
+                            min_interval = tokio::time::interval(new_interval);
+                            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                        }
+                        self.scheduled_barriers
+                            .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
+                    }
                 }
                 // Barrier completes.
                 completion = barrier_complete_rx.recv() => {
@@ -617,6 +630,7 @@ where
                     self.handle_new_barrier(&barrier_complete_tx, &mut state, &mut checkpoint_control).await;
                 }
             }
+            checkpoint_control.update_barrier_nums_metrics();
         }
     }
 
@@ -634,6 +648,7 @@ where
             notifiers,
             send_latency_timer,
             checkpoint,
+            span,
         } = self.scheduled_barriers.pop_or_default().await;
         let info = self.resolve_actor_info(checkpoint_control, &command).await;
 
@@ -645,9 +660,11 @@ where
             .await
             .unwrap();
 
+        // Tracing related stuff
         prev_epoch.span().in_scope(|| {
             tracing::info!(target: "rw_tracing", epoch = new_epoch.value().0, "new barrier enqueued");
         });
+        span.record("epoch", new_epoch.value().0);
 
         let command_ctx = Arc::new(CommandContext::new(
             self.fragment_manager.clone(),
@@ -658,13 +675,16 @@ where
             command,
             checkpoint,
             self.source_manager.clone(),
+            span.clone(),
         ));
         let mut notifiers = notifiers;
         notifiers.iter_mut().for_each(Notifier::notify_to_send);
         send_latency_timer.observe_duration();
 
         checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
-        self.inject_barrier(command_ctx, barrier_complete_tx).await;
+        self.inject_barrier(command_ctx, barrier_complete_tx)
+            .instrument(span)
+            .await;
     }
 
     /// Inject a barrier to all CNs and spawn a task to collect it
@@ -803,8 +823,6 @@ where
         state: &mut BarrierManagerState,
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
-        checkpoint_control.update_barrier_nums_metrics();
-
         let BarrierCompletion { prev_epoch, result } = completion;
 
         // Received barrier complete responses with an epoch that is not managed by checkpoint
@@ -835,7 +853,12 @@ where
         let (mut index, mut err_msg) = (0, None);
         for (i, node) in complete_nodes.iter_mut().enumerate() {
             assert!(matches!(node.state, Completed(_)));
-            if let Err(err) = self.complete_barrier(node, checkpoint_control).await {
+            let span = node.command_ctx.span.clone();
+            if let Err(err) = self
+                .complete_barrier(node, checkpoint_control)
+                .instrument(span)
+                .await
+            {
                 index = i;
                 err_msg = Some(err);
                 break;
@@ -875,7 +898,13 @@ where
             self.set_status(BarrierManagerStatus::Recovering).await;
             let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::new();
-            let new_epoch = self.recovery(state.in_flight_prev_epoch()).await;
+            let prev_epoch = state.in_flight_prev_epoch();
+            let span = tracing::info_span!(
+                "failure_recovery",
+                %err,
+                prev_epoch = prev_epoch.value().0
+            );
+            let new_epoch = self.recovery(prev_epoch).instrument(span).await;
             state
                 .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)
                 .await
@@ -1031,14 +1060,6 @@ where
 
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
         self.tracker.lock().await.gen_ddl_progress()
-    }
-
-    /// Only handle `SystemParamsChange`.
-    fn handle_local_notification(&self, notification: LocalNotification) {
-        if let LocalNotification::SystemParamsChange(p) = notification {
-            self.scheduled_barriers
-                .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
-        }
     }
 }
 

@@ -17,10 +17,10 @@ pub mod report;
 
 use std::time::SystemTime;
 
-use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, SystemExt};
 
+use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{total_memory_available_bytes, total_memory_used_bytes};
 
@@ -32,6 +32,13 @@ pub const TELEMETRY_REPORT_INTERVAL: u64 = 6 * 60 * 60;
 
 /// Environment Variable that is default to be true
 const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
+
+pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
+
+/// Telemetry errors are generally recoverable/ignorable. `String` is good enough.
+pub type TelemetryError = String;
+
+type Result<T> = core::result::Result<T, TelemetryError>;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TelemetryNodeType {
@@ -57,9 +64,7 @@ pub struct TelemetryReportBase {
     pub node_type: TelemetryNodeType,
 }
 
-pub trait TelemetryReport {
-    fn to_json(&self) -> Result<String>;
-}
+pub trait TelemetryReport: Serialize {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemData {
@@ -125,20 +130,21 @@ impl Default for SystemData {
     }
 }
 
-/// post a telemetry reporting request
-pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(), anyhow::Error> {
+/// Sends a `POST` request of the telemetry reporting to a URL.
+async fn post_telemetry_report(url: &str, report_body: String) -> Result<()> {
     let client = reqwest::Client::new();
     let res = client
         .post(url)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(report_body)
         .send()
-        .await?;
+        .await
+        .map_err(|err| format!("failed to send telemetry report, err: {}", err))?;
     if res.status().is_success() {
         Ok(())
     } else {
-        Err(anyhow!(
-            "invalid telemetry resp, url {}, status {}",
+        Err(format!(
+            "telemetry response is error, url {}, status {}",
             url,
             res.status()
         ))
@@ -148,16 +154,7 @@ pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(),
 /// check whether telemetry is enabled in environment variable
 pub fn telemetry_env_enabled() -> bool {
     // default to be true
-    get_bool_env(TELEMETRY_ENV_ENABLE).unwrap_or(true)
-}
-
-pub fn get_bool_env(key: &str) -> Result<bool> {
-    let b = std::env::var(key)
-        .unwrap_or("true".to_string())
-        .trim()
-        .to_ascii_lowercase()
-        .parse()?;
-    Ok(b)
+    env_var_is_true_or(TELEMETRY_ENV_ENABLE, true)
 }
 
 pub fn current_timestamp() -> u64 {
@@ -185,42 +182,36 @@ mod tests {
     }
 
     #[test]
-    fn test_get_bool_env_true() {
-        let key = "MY_ENV_VARIABLE_TRUE";
+    fn test_env() {
+        let key = "ENABLE_TELEMETRY";
+
+        // make assertions more readable...
+        fn is_enabled() -> bool {
+            telemetry_env_enabled()
+        }
+        fn is_not_enabled() -> bool {
+            !is_enabled()
+        }
+
         std::env::set_var(key, "true");
-        let result = get_bool_env(key).unwrap();
-        assert!(result);
-    }
+        assert!(is_enabled());
 
-    #[test]
-    fn test_get_bool_env_false() {
-        let key = "MY_ENV_VARIABLE_FALSE";
         std::env::set_var(key, "false");
-        let result = get_bool_env(key).unwrap();
-        assert!(!result);
-    }
+        assert!(is_not_enabled());
 
-    #[test]
-    fn test_get_bool_env_default() {
-        let key = "MY_ENV_VARIABLE_NOT_SET";
-        std::env::remove_var(key);
-        let result = get_bool_env(key).unwrap();
-        assert!(result);
-    }
-
-    #[test]
-    fn test_get_bool_env_case_insensitive() {
-        let key = "MY_ENV_VARIABLE_MIXED_CASE";
         std::env::set_var(key, "tRue");
-        let result = get_bool_env(key).unwrap();
-        assert!(result);
-    }
+        assert!(is_enabled());
 
-    #[test]
-    fn test_get_bool_env_invalid() {
-        let key = "MY_ENV_VARIABLE_INVALID";
+        std::env::set_var(key, "2");
+        assert!(is_not_enabled());
+
+        std::env::set_var(key, "1");
+        assert!(is_enabled());
+
         std::env::set_var(key, "not_a_bool");
-        let result = get_bool_env(key);
-        assert!(result.is_err());
+        assert!(is_not_enabled());
+
+        std::env::remove_var(key);
+        assert!(is_enabled());
     }
 }

@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fmt;
 use std::rc::Rc;
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
@@ -24,7 +24,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
-use super::utils::formatter_debug_plan_node;
+use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
@@ -168,38 +168,27 @@ impl StreamTableScan {
 
 impl_plan_tree_node_for_leaf! { StreamTableScan }
 
-impl fmt::Display for StreamTableScan {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Distill for StreamTableScan {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = formatter_debug_plan_node!(f, "StreamTableScan");
-
-        let v = match verbose {
-            false => self.logical.column_names(),
-            true => self.logical.column_names_with_table_prefix(),
-        }
-        .join(", ");
-        builder
-            .field("table", &format_args!("{}", self.logical.table_name))
-            .field("columns", &format_args!("[{}]", v));
+        let mut vec = Vec::with_capacity(4);
+        vec.push(("table", Pretty::from(self.logical.table_name.clone())));
+        vec.push(("columns", self.logical.columns_pretty(verbose)));
 
         if verbose {
-            builder.field(
-                "pk",
-                &IndicesDisplay {
-                    indices: self.logical_pk(),
-                    input_schema: &self.base.schema,
-                },
-            );
-            builder.field(
-                "dist",
-                &DistributionDisplay {
-                    distribution: self.distribution(),
-                    input_schema: &self.base.schema,
-                },
-            );
+            let pk = IndicesDisplay {
+                indices: self.logical_pk(),
+                schema: &self.base.schema,
+            };
+            vec.push(("pk", pk.distill()));
+            let dist = Pretty::display(&DistributionDisplay {
+                distribution: self.distribution(),
+                input_schema: &self.base.schema,
+            });
+            vec.push(("dist", dist));
         }
 
-        builder.finish()
+        childless_record("StreamTableScan", vec)
     }
 }
 
@@ -298,7 +287,7 @@ impl StreamTableScan {
             stream_key,
             operator_id: self.base.id.0 as u64,
             identity: {
-                let s = format!("{}", self);
+                let s = self.distill_to_string();
                 s.replace("StreamTableScan", "Chain")
             },
             append_only: self.append_only(),

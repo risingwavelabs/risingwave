@@ -26,6 +26,7 @@ use prometheus::{
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables;
+use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
@@ -129,8 +130,6 @@ pub struct MetaMetrics {
     pub compact_pending_bytes: IntGaugeVec,
     /// Per level compression ratio
     pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
-    /// The number of compactor CPU need to be scale.
-    pub scale_compactor_core_num: IntGauge,
     /// Per level number of running compaction task
     pub level_compact_task_cnt: IntGaugeVec,
     pub time_after_last_observation: AtomicU64,
@@ -148,12 +147,16 @@ pub struct MetaMetrics {
     /// ********************************** Source ************************************
     /// supervisor for which source is still up.
     pub source_is_up: IntGaugeVec,
+    pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     /// ********************************** Fragment ************************************
     /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
     pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
+
+    /// Write throughput of commit epoch for each stable
+    pub table_write_throughput: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -185,7 +188,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_send_duration_seconds",
             "barrier send latency",
-            exponential_buckets(0.001, 2.0, 19).unwrap() // max 262s
+            exponential_buckets(0.1, 1.5, 19).unwrap() // max 148s
         );
         let barrier_send_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -416,12 +419,6 @@ impl MetaMetrics {
             registry,
         )
         .unwrap();
-        let scale_compactor_core_num = register_int_gauge_with_registry!(
-            "storage_compactor_suggest_core_count",
-            "num of CPU to be scale to meet compaction need",
-            registry
-        )
-        .unwrap();
 
         let meta_type = register_int_gauge_vec_with_registry!(
             "meta_num",
@@ -476,6 +473,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::new(registry.clone()));
 
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
@@ -514,6 +512,13 @@ impl MetaMetrics {
             "storage_compact_task_file_count",
             "file count of compact task",
             &["group", "type"],
+            registry
+        )
+        .unwrap();
+        let table_write_throughput = register_int_counter_vec_with_registry!(
+            "storage_commit_write_throughput",
+            "The number of compactions from one level to another level that have been skipped.",
+            &["table_id"],
             registry
         )
         .unwrap();
@@ -587,15 +592,16 @@ impl MetaMetrics {
             meta_type,
             compact_pending_bytes,
             compact_level_compression_ratio,
-            scale_compactor_core_num,
             level_compact_task_cnt,
             object_store_metric,
             source_is_up,
+            source_enumerator_metrics,
             actor_info,
             table_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
+            table_write_throughput,
             move_state_table_count,
             state_table_count,
             branched_sst_count,

@@ -70,7 +70,7 @@ use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     validate_ssts, BatchSstableWriterFactory, FilterBuilder, HummockError, SstableWriterFactory,
-    StreamingSstableWriterFactory, Xor8FilterBuilder,
+    StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -254,6 +254,7 @@ impl Compactor {
         assert_ne!(parallelism, 0, "splits cannot be empty");
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
+        let mut abort_handles = vec![];
         let task_progress_guard =
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
@@ -335,6 +336,7 @@ impl Compactor {
                     .left_future(),
             };
             let handle = tokio::spawn(traced);
+            abort_handles.push(handle.abort_handle());
             compaction_futures.push(handle);
         }
 
@@ -376,6 +378,9 @@ impl Compactor {
         }
 
         if task_status != TaskStatus::Success {
+            for abort_handle in abort_handles {
+                abort_handle.abort();
+            }
             output_ssts.clear();
         }
         // Sort by split/key range index.
@@ -788,6 +793,9 @@ impl Compactor {
                     .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
                     .verbose_instrument_await("add_full_key_delete")
                     .await?;
+                last_table_stats.total_key_count += 1;
+                last_table_stats.total_key_size += iter_key.encoded_len() as i64;
+                last_table_stats.total_value_size += 1;
                 iter_key.epoch = epoch;
                 is_new_user_key = false;
             }
@@ -861,56 +869,35 @@ impl Compactor {
 
         let (split_table_outputs, table_stats_map) = if self.options.capacity as u64
             > self.context.storage_opts.min_sst_size_for_streaming_upload
+            && self
+                .context
+                .sstable_store
+                .store()
+                .support_streaming_upload()
         {
             let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
-            if self.task_config.is_target_l0_or_lbase {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            } else {
-                self.compact_key_range_impl::<_, Xor8FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            }
+            self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                factory,
+                iter,
+                compaction_filter,
+                del_agg,
+                filter_key_extractor,
+                task_progress.clone(),
+            )
+            .verbose_instrument_await("compact")
+            .await?
         } else {
             let factory = BatchSstableWriterFactory::new(self.context.sstable_store.clone());
-            if self.task_config.is_target_l0_or_lbase {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            } else {
-                self.compact_key_range_impl::<_, Xor8FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .verbose_instrument_await("compact")
-                .await?
-            }
+            self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                factory,
+                iter,
+                compaction_filter,
+                del_agg,
+                filter_key_extractor,
+                task_progress.clone(),
+            )
+            .verbose_instrument_await("compact")
+            .await?
         };
 
         compact_timer.observe_duration();

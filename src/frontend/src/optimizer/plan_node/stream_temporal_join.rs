@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
-use risingwave_common::catalog::FieldDisplay;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
 
-use super::utils::formatter_debug_plan_node;
+use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::plan_tree_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -44,7 +41,6 @@ impl StreamTemporalJoin {
     pub fn new(logical: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
         assert!(logical.join_type == JoinType::Inner || logical.join_type == JoinType::LeftOuter);
         assert!(logical.left.append_only());
-        assert!(logical.right.logical_pk() == eq_join_predicate.right_eq_indexes());
         let right = logical.right.clone();
         let exchange: &StreamExchange = right
             .as_stream_exchange()
@@ -93,42 +89,31 @@ impl StreamTemporalJoin {
     }
 }
 
-impl fmt::Display for StreamTemporalJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamTemporalJoin");
-
+impl Distill for StreamTemporalJoin {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
-        builder.field("type", &self.logical.join_type);
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.logical.join_type)));
 
         let concat_schema = self.logical.concat_schema();
-        builder.field(
+        vec.push((
             "predicate",
-            &EqJoinPredicateDisplay {
+            Pretty::debug(&EqJoinPredicateDisplay {
                 eq_join_predicate: self.eq_join_predicate(),
                 input_schema: &concat_schema,
-            },
-        );
+            }),
+        ));
 
-        let watermark_columns = &self.base.watermark_columns;
-        if watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        if verbose {
-            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
-                None => builder.field("output", &format_args!("all")),
-                Some(id) => builder.field("output", &id),
-            };
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+            vec.push(("output_watermarks", ow));
         }
 
-        builder.finish()
+        if verbose {
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema);
+            vec.push(("output", data));
+        }
+
+        childless_record("StreamTemporalJoin", vec)
     }
 }
 

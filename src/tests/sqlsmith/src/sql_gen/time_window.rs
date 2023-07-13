@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
@@ -81,15 +80,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_secs(&mut self) -> u64 {
-        let minute = 60;
-        let hour = 60 * minute;
-        let day = 24 * hour;
-        let week = 7 * day;
-        let rand_secs = self.rng.gen_range(1..week);
-        let choices = [1, minute, hour, day, week, rand_secs];
-        let secs = choices.choose(&mut self.rng).unwrap();
-        *secs
+        self.rng.gen_range(1..100)
     }
+
+    // TODO(kwannoel): Disable for now, otherwise time window may take forever
+    // fn gen_secs(&mut self) -> u64 {
+    //     let minute = 60;
+    //     let hour = 60 * minute;
+    //     let day = 24 * hour;
+    //     let week = 7 * day;
+    //     let rand_secs = self.rng.gen_range(1..week);
+    //     let choices = [1, minute, hour, day, week, rand_secs];
+    //     let secs = choices.choose(&mut self.rng).unwrap();
+    //     *secs
+    // }
 
     fn secs_to_interval_expr(i: u64) -> Expr {
         Expr::TypedString {
@@ -109,7 +113,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// `size_secs` = k * `slide_secs`.
     /// k cannot be too large, to avoid overflow.
     fn gen_size(&mut self, slide_secs: u64) -> Expr {
-        let k = self.rng.gen_range(1..100);
+        let k = self.rng.gen_range(1..20);
         let size_secs = k * slide_secs;
         Self::secs_to_interval_expr(size_secs)
     }
@@ -128,21 +132,27 @@ fn is_timestamp_col(c: &Column) -> bool {
     c.data_type == DataType::Timestamp || c.data_type == DataType::Timestamptz
 }
 
-fn get_table_name_and_cols_with_timestamp(table: Table) -> (String, Vec<Column>, Vec<Column>) {
-    let name = table.name.clone();
-    let cols_with_timestamp = table
-        .get_qualified_columns()
-        .iter()
-        .cloned()
-        .filter(is_timestamp_col)
-        .collect_vec();
-    (name, cols_with_timestamp, table.columns)
-}
-
 fn find_tables_with_timestamp_cols(tables: Vec<Table>) -> Vec<(String, Vec<Column>, Vec<Column>)> {
     tables
         .into_iter()
-        .map(get_table_name_and_cols_with_timestamp)
-        .filter(|(_name, timestamp_cols, _schema)| !timestamp_cols.is_empty())
+        .filter_map(|table| {
+            let name = table.name.clone();
+            let columns = table.get_qualified_columns();
+            let mut timestamp_cols = vec![];
+            for col in columns {
+                let col_name = col.name.clone();
+                if col_name.contains("window_start") || col_name.contains("window_end") {
+                    return None;
+                }
+                if is_timestamp_col(&col) {
+                    timestamp_cols.push(col);
+                }
+            }
+            if timestamp_cols.is_empty() {
+                None
+            } else {
+                Some((name, timestamp_cols, table.columns))
+            }
+        })
         .collect()
 }

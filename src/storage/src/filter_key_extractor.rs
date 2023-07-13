@@ -298,13 +298,13 @@ impl FilterKeyExtractorManagerInner {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         {
             let guard = self.table_id_to_filter_key_extractor.read();
-            table_id_set.drain_filter(|table_id| match guard.get(table_id) {
+            table_id_set.retain(|table_id| match guard.get(table_id) {
                 Some(filter_key_extractor) => {
                     multi_filter_key_extractor.register(*table_id, filter_key_extractor.clone());
-                    true
+                    false
                 }
 
-                None => false,
+                None => true,
             });
         }
 
@@ -492,6 +492,7 @@ mod tests {
                 String::from("300"),
             )]),
             fragment_id: 0,
+            dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index: Some(0),
             value_indices: vec![0],

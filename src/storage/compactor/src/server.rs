@@ -130,16 +130,21 @@ pub async fn compactor_serve(
         assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
     }
 
-    let object_store = Arc::new(
-        parse_remote_object_store(
-            state_store_url
-                .strip_prefix("hummock+")
-                .expect("object store must be hummock for compactor server"),
-            object_metrics,
-            "Hummock",
-        )
-        .await,
+    let mut object_store = parse_remote_object_store(
+        state_store_url
+            .strip_prefix("hummock+")
+            .expect("object store must be hummock for compactor server"),
+        object_metrics,
+        "Hummock",
+    )
+    .await;
+    object_store.set_opts(
+        storage_opts.object_store_streaming_read_timeout_ms,
+        storage_opts.object_store_streaming_upload_timeout_ms,
+        storage_opts.object_store_read_timeout_ms,
+        storage_opts.object_store_upload_timeout_ms,
     );
+    let object_store = Arc::new(object_store);
     let sstable_store = Arc::new(SstableStore::for_compactor(
         object_store,
         storage_opts.data_directory.to_string(),

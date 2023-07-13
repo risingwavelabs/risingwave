@@ -148,10 +148,16 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
             "".into()
         } else {
             last_worker_id = Some(worker.id);
+            let cordoned = if worker.get_property().map_or(true, |p| p.is_unschedulable) {
+                " (cordoned)"
+            } else {
+                ""
+            };
             Cell::new(format!(
-                "{}@{}",
+                "{}@{}{}",
                 worker.id,
-                HostAddr::from(worker.get_host().unwrap())
+                HostAddr::from(worker.get_host().unwrap()),
+                cordoned,
             ))
             .add_attribute(Attribute::Bold)
         });

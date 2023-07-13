@@ -14,8 +14,10 @@
 
 pub mod bench;
 pub mod compute;
+pub mod debug;
 pub mod hummock;
 pub mod meta;
 pub mod profile;
+pub mod scale;
 pub mod table;
 pub mod trace;

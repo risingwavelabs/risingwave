@@ -14,6 +14,7 @@
 
 //! Aggregation function definitions.
 
+use std::iter::Peekable;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -25,7 +26,9 @@ use risingwave_common::util::value_encoding;
 use risingwave_pb::expr::agg_call::PbType;
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 
-use crate::expr::{build_from_prost, ExpressionRef, LiteralExpression};
+use crate::expr::{
+    build_from_prost, BoxedExpression, ExpectExt, ExpressionRef, LiteralExpression, Token,
+};
 use crate::Result;
 
 /// Represents an aggregation function.
@@ -93,6 +96,115 @@ impl AggCall {
             direct_args,
         })
     }
+
+    /// Build an `AggCall` from a string.
+    ///
+    /// # Syntax
+    ///
+    /// ```text
+    /// (<name>:<type> [<index>:<type>]* [distinct] [orderby [<index>:<asc|desc>]*])
+    /// ```
+    pub fn from_pretty(s: impl AsRef<str>) -> Self {
+        let tokens = crate::expr::lexer(s.as_ref());
+        Parser::new(tokens.into_iter()).parse_aggregation()
+    }
+
+    pub fn with_filter(mut self, filter: BoxedExpression) -> Self {
+        self.filter = Some(filter.into());
+        self
+    }
+}
+
+struct Parser<Iter: Iterator> {
+    tokens: Peekable<Iter>,
+}
+
+impl<Iter: Iterator<Item = Token>> Parser<Iter> {
+    fn new(tokens: Iter) -> Self {
+        Self {
+            tokens: tokens.peekable(),
+        }
+    }
+
+    fn parse_aggregation(&mut self) -> AggCall {
+        assert_eq!(self.tokens.next(), Some(Token::LParen), "Expected a (");
+        let func = self.parse_function();
+        assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");
+        let ty = self.parse_type();
+
+        let mut distinct = false;
+        let mut children = Vec::new();
+        let mut column_orders = Vec::new();
+        while matches!(self.tokens.peek(), Some(Token::Index(_))) {
+            children.push(self.parse_arg());
+        }
+        if matches!(self.tokens.peek(), Some(Token::Literal(s)) if s == "distinct") {
+            distinct = true;
+            self.tokens.next(); // Consume
+        }
+        if matches!(self.tokens.peek(), Some(Token::Literal(s)) if s == "orderby") {
+            self.tokens.next(); // Consume
+            while matches!(self.tokens.peek(), Some(Token::Index(_))) {
+                column_orders.push(self.parse_orderkey());
+            }
+        }
+        self.tokens.next(); // Consume the RParen
+
+        AggCall {
+            kind: AggKind::from_protobuf(func).unwrap(),
+            args: match children.as_slice() {
+                [] => AggArgs::None,
+                [(i, t)] => AggArgs::Unary(t.clone(), *i),
+                [(i0, t0), (i1, t1)] => AggArgs::Binary([t0.clone(), t1.clone()], [*i0, *i1]),
+                _ => panic!("too many arguments for agg call"),
+            },
+            return_type: ty,
+            column_orders,
+            filter: None,
+            distinct,
+            direct_args: Vec::new(),
+        }
+    }
+
+    fn parse_type(&mut self) -> DataType {
+        match self.tokens.next().expect("Unexpected end of input") {
+            Token::Literal(name) => name.parse::<DataType>().expect_str("type", &name),
+            t => panic!("Expected a Literal, got {t:?}"),
+        }
+    }
+
+    fn parse_arg(&mut self) -> (usize, DataType) {
+        let idx = match self.tokens.next().expect("Unexpected end of input") {
+            Token::Index(idx) => idx,
+            t => panic!("Expected an Index, got {t:?}"),
+        };
+        assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");
+        let ty = self.parse_type();
+        (idx, ty)
+    }
+
+    fn parse_function(&mut self) -> PbType {
+        match self.tokens.next().expect("Unexpected end of input") {
+            Token::Literal(name) => {
+                PbType::from_str_name(&name.to_uppercase()).expect_str("function", &name)
+            }
+            t => panic!("Expected a Literal, got {t:?}"),
+        }
+    }
+
+    fn parse_orderkey(&mut self) -> ColumnOrder {
+        let idx = match self.tokens.next().expect("Unexpected end of input") {
+            Token::Index(idx) => idx,
+            t => panic!("Expected an Index, got {t:?}"),
+        };
+        assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");
+        let order = match self.tokens.next().expect("Unexpected end of input") {
+            Token::Literal(s) if s == "asc" => OrderType::ascending(),
+            Token::Literal(s) if s == "desc" => OrderType::descending(),
+            t => panic!("Expected asc or desc, got {t:?}"),
+        };
+        ColumnOrder::new(idx, order)
+    }
 }
 
 /// Kind of aggregation function
@@ -116,6 +228,7 @@ pub enum AggKind {
     JsonbAgg,
     JsonbObjectAgg,
     FirstValue,
+    LastValue,
     VarPop,
     VarSamp,
     StddevPop,
@@ -145,6 +258,7 @@ impl AggKind {
             PbType::JsonbAgg => Ok(AggKind::JsonbAgg),
             PbType::JsonbObjectAgg => Ok(AggKind::JsonbObjectAgg),
             PbType::FirstValue => Ok(AggKind::FirstValue),
+            PbType::LastValue => Ok(AggKind::LastValue),
             PbType::StddevPop => Ok(AggKind::StddevPop),
             PbType::StddevSamp => Ok(AggKind::StddevSamp),
             PbType::VarPop => Ok(AggKind::VarPop),
@@ -175,6 +289,7 @@ impl AggKind {
             Self::JsonbAgg => PbType::JsonbAgg,
             Self::JsonbObjectAgg => PbType::JsonbObjectAgg,
             Self::FirstValue => PbType::FirstValue,
+            Self::LastValue => PbType::LastValue,
             Self::StddevPop => PbType::StddevPop,
             Self::StddevSamp => PbType::StddevSamp,
             Self::VarPop => PbType::VarPop,
@@ -182,6 +297,163 @@ impl AggKind {
             Self::PercentileCont => PbType::PercentileCont,
             Self::PercentileDisc => PbType::PercentileDisc,
             Self::Mode => PbType::Mode,
+        }
+    }
+}
+
+/// Macros to generate match arms for [`AggKind`].
+/// IMPORTANT: These macros must be carefully maintained especially when adding new [`AggKind`]
+/// variants.
+pub mod agg_kinds {
+    /// [`AggKind`]s that are currently not supported in streaming mode.
+    #[macro_export]
+    macro_rules! unimplemented_in_stream {
+        () => {
+            AggKind::BitAnd
+                | AggKind::BitOr
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::JsonbAgg
+                | AggKind::JsonbObjectAgg
+                | AggKind::PercentileCont
+                | AggKind::PercentileDisc
+                | AggKind::Mode
+        };
+    }
+    pub use unimplemented_in_stream;
+
+    /// [`AggKind`]s that should've been rewritten to other kinds. These kinds should not appear
+    /// when generating physical plan nodes.
+    #[macro_export]
+    macro_rules! rewritten {
+        () => {
+            AggKind::Avg
+                | AggKind::StddevPop
+                | AggKind::StddevSamp
+                | AggKind::VarPop
+                | AggKind::VarSamp
+        };
+    }
+    pub use rewritten;
+
+    /// [`AggKind`]s of which the aggregate results are not affected by the user given ORDER BY
+    /// clause.
+    #[macro_export]
+    macro_rules! result_unaffected_by_order_by {
+        () => {
+            AggKind::BitAnd
+                | AggKind::BitOr
+                | AggKind::BitXor // XOR is commutative and associative
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::Min
+                | AggKind::Max
+                | AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::Avg
+                | AggKind::ApproxCountDistinct
+                | AggKind::VarPop
+                | AggKind::VarSamp
+                | AggKind::StddevPop
+                | AggKind::StddevSamp
+        };
+    }
+    pub use result_unaffected_by_order_by;
+
+    /// [`AggKind`]s that must be called with ORDER BY clause. These are slightly different from
+    /// variants not in [`result_unaffected_by_order_by`], in that variants returned by this macro
+    /// should be banned while the others should just be warned.
+    #[macro_export]
+    macro_rules! must_have_order_by {
+        () => {
+            AggKind::FirstValue
+                | AggKind::LastValue
+                | AggKind::PercentileCont
+                | AggKind::PercentileDisc
+                | AggKind::Mode
+        };
+    }
+    pub use must_have_order_by;
+
+    /// [`AggKind`]s of which the aggregate results are not affected by the user given DISTINCT
+    /// keyword.
+    #[macro_export]
+    macro_rules! result_unaffected_by_distinct {
+        () => {
+            AggKind::BitAnd
+                | AggKind::BitOr
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::Min
+                | AggKind::Max
+                | AggKind::ApproxCountDistinct
+        };
+    }
+    pub use result_unaffected_by_distinct;
+
+    /// [`AggKind`]s that are simply cannot 2-phased.
+    #[macro_export]
+    macro_rules! simply_cannot_two_phase {
+        () => {
+            AggKind::StringAgg
+                | AggKind::ApproxCountDistinct
+                | AggKind::ArrayAgg
+                | AggKind::JsonbAgg
+                | AggKind::JsonbObjectAgg
+                | AggKind::FirstValue
+                | AggKind::LastValue
+                | AggKind::PercentileCont
+                | AggKind::PercentileDisc
+                | AggKind::Mode
+        };
+    }
+    pub use simply_cannot_two_phase;
+
+    /// [`AggKind`]s that are implemented with a single value state (so-called stateless).
+    #[macro_export]
+    macro_rules! single_value_state {
+        () => {
+            AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::BitXor
+        };
+    }
+    pub use single_value_state;
+
+    /// [`AggKind`]s that are implemented with a single value state (so-called stateless) iff the
+    /// input is append-only.
+    #[macro_export]
+    macro_rules! single_value_state_iff_in_append_only {
+        () => {
+            AggKind::Max | AggKind::Min
+        };
+    }
+    pub use single_value_state_iff_in_append_only;
+
+    /// Ordered-set aggregate functions.
+    #[macro_export]
+    macro_rules! ordered_set {
+        () => {
+            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
+        };
+    }
+    pub use ordered_set;
+}
+
+impl AggKind {
+    /// Get the total phase agg kind from the partial phase agg kind.
+    pub fn partial_to_total(self) -> Option<Self> {
+        match self {
+            AggKind::BitAnd
+            | AggKind::BitOr
+            | AggKind::BitXor
+            | AggKind::BoolAnd
+            | AggKind::BoolOr
+            | AggKind::Min
+            | AggKind::Max
+            | AggKind::Sum => Some(self),
+            AggKind::Sum0 | AggKind::Count => Some(AggKind::Sum0),
+            agg_kinds::simply_cannot_two_phase!() => None,
+            agg_kinds::rewritten!() => None,
         }
     }
 }

@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use pretty_xmlish::Pretty;
+use pretty_xmlish::XmlNode;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortNode;
 
-use super::utils::Distill;
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, OrderDisplay};
@@ -42,26 +40,13 @@ impl BatchSort {
     }
 }
 
-impl fmt::Display for BatchSort {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchSort {{ order: {} }}",
-            OrderDisplay {
-                order: self.order(),
-                input_schema: self.input.schema()
-            }
-        )
-    }
-}
-
 impl Distill for BatchSort {
-    fn distill<'a>(&self) -> Pretty<'a> {
-        let data = Pretty::display(&OrderDisplay {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = OrderDisplay {
             order: self.order(),
             input_schema: self.input.schema(),
-        });
-        Pretty::childless_record("BatchSort", vec![("order", data)])
+        };
+        childless_record("BatchSort", vec![("order", data.distill())])
     }
 }
 

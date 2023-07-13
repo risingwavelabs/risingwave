@@ -43,6 +43,7 @@ pub struct StreamingMetrics {
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
+    pub source_split_change_count: GenericCounterVec<AtomicU64>,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
@@ -89,6 +90,10 @@ pub struct StreamingMetrics {
     // Backfill
     pub backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
     pub backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
+
+    // Arrangement Backfill
+    pub arrangement_backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
+    pub arrangement_backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -142,6 +147,14 @@ impl StreamingMetrics {
             "stream_source_rows_per_barrier_counts",
             "Total number of rows that have been output from source per barrier",
             &["actor_id", "executor_id"],
+            registry
+        )
+        .unwrap();
+
+        let source_split_change_count = register_int_counter_vec_with_registry!(
+            "stream_source_split_change_event_count",
+            "Total number of split change events that have been operated by source",
+            &["source_id", "source_name", "actor_id"],
             registry
         )
         .unwrap();
@@ -540,6 +553,23 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let arrangement_backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
+            "stream_arrangement_backfill_snapshot_read_row_count",
+            "Total number of rows that have been read from the arrangement_backfill snapshot",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let arrangement_backfill_upstream_output_row_count =
+            register_int_counter_vec_with_registry!(
+                "stream_arrangement_backfill_upstream_output_row_count",
+                "Total number of rows that have been output from the arrangement_backfill upstream",
+                &["table_id", "actor_id"],
+                registry
+            )
+            .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -665,6 +695,7 @@ impl StreamingMetrics {
             actor_sampled_deserialize_duration_ns,
             source_output_row_count,
             source_row_per_barrier,
+            source_split_change_count,
             exchange_frag_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
@@ -697,6 +728,8 @@ impl StreamingMetrics {
             temporal_join_cached_entry_count,
             backfill_snapshot_read_row_count,
             backfill_upstream_output_row_count,
+            arrangement_backfill_snapshot_read_row_count,
+            arrangement_backfill_upstream_output_row_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,

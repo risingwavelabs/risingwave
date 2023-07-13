@@ -171,7 +171,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         let (ops, columns, visibility) = chunk.into_inner();
 
         // Calculate the row visibility for every agg call.
-        let mut visibilities = Vec::with_capacity(this.agg_calls.len());
+        let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
             let result = agg_call_filter_res(
                 &this.actor_ctx,
@@ -182,15 +182,17 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 capacity,
             )
             .await?;
-            visibilities.push(result);
+            call_visibilities.push(result);
         }
 
-        // Materialize input chunk if needed.
-        this.storages
-            .iter_mut()
-            .zip_eq_fast(visibilities.iter().map(Option::as_ref))
-            .for_each(|(storage, visibility)| {
-                if let AggStateStorage::MaterializedInput { table, mapping } = storage {
+        // Materialize input chunk if needed and possible.
+        let materialized: Bitmap = this
+            .agg_calls
+            .iter()
+            .zip_eq_fast(&mut this.storages)
+            .zip_eq_fast(call_visibilities.iter().map(Option::as_ref))
+            .map(|((call, storage), visibility)| {
+                if let AggStateStorage::MaterializedInput { table, mapping } = storage && !call.distinct {
                     let needed_columns = mapping
                         .upstream_columns()
                         .iter()
@@ -201,8 +203,11 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                         needed_columns,
                         visibility.cloned(),
                     ));
+                    true
+                } else {
+                    false
                 }
-            });
+            }).collect();
 
         // Deduplicate for distinct columns.
         let visibilities = vars
@@ -210,7 +215,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             .dedup_chunk(
                 &ops,
                 &columns,
-                visibilities,
+                call_visibilities,
                 &mut this.distinct_dedup_tables,
                 None,
                 this.actor_ctx.clone(),
@@ -218,8 +223,13 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             .await?;
 
         // Apply chunk to each of the state (per agg_call).
-        vars.agg_group
-            .apply_chunk(&mut this.storages, &ops, &columns, visibilities)?;
+        vars.agg_group.apply_chunk(
+            &mut this.storages,
+            &ops,
+            &columns,
+            visibilities,
+            &materialized,
+        )?;
 
         // Mark state as changed.
         vars.state_changed = true;
@@ -348,7 +358,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
-    use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
+    use risingwave_expr::agg::AggCall;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
@@ -390,42 +400,10 @@ mod tests {
         tx.push_barrier(4, false);
 
         let agg_calls = vec![
-            AggCall {
-                kind: AggKind::Count, // as row count, index: 0
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-                direct_args: vec![],
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-                direct_args: vec![],
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 1),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-                direct_args: vec![],
-            },
-            AggCall {
-                kind: AggKind::Min,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-                direct_args: vec![],
-            },
+            AggCall::from_pretty("(count:int8)"),
+            AggCall::from_pretty("(sum:int8 $0:int8)"),
+            AggCall::from_pretty("(sum:int8 $1:int8)"),
+            AggCall::from_pretty("(min:int8 $0:int8)"),
         ];
 
         let simple_agg = new_boxed_simple_agg_executor(

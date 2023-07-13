@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{ConfigEntry, CONFIG_KEYS, SEARCH_PATH};
-use crate::catalog::{DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
+use crate::catalog::{DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
 use crate::error::RwError;
 
 pub const USER_NAME_WILD_CARD: &str = "\"$user\"";
@@ -21,9 +21,9 @@ pub const USER_NAME_WILD_CARD: &str = "\"$user\"";
 /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
 ///
 /// 1. when we `select` or `drop` object and don't give a specified schema, it will search the
-/// object from the valid items in schema `pg_catalog` and `search_path`. If schema `pg_catalog`
-/// is not in `search_path`, we will search `pg_catalog` first. If schema `pg_catalog` is in
-/// `search_path`, we will follow the order in `search_path`.
+/// object from the valid items in schema `rw_catalog`, `pg_catalog` and `search_path`. If schema
+/// `rw_catalog` and `pg_catalog` are not in `search_path`, we will search them firstly. If they're
+/// in `search_path`, we will follow the order in `search_path`.
 ///
 /// 2. when we `create` a `source` or `mv` and don't give a specified schema, it will use the first
 /// valid schema in `search_path`.
@@ -32,17 +32,14 @@ pub const USER_NAME_WILD_CARD: &str = "\"$user\"";
 #[derive(Clone)]
 pub struct SearchPath {
     origin_str: String,
+    /// The path will implicitly includes `rw_catalog` and `pg_catalog` if user does specify them.
     path: Vec<String>,
-    insert_pg_catalog: bool,
+    real_path: Vec<String>,
 }
 
 impl SearchPath {
     pub fn real_path(&self) -> &[String] {
-        if self.insert_pg_catalog {
-            &self.path[1..]
-        } else {
-            &self.path
-        }
+        &self.real_path
     }
 
     pub fn path(&self) -> &[String] {
@@ -69,24 +66,27 @@ impl TryFrom<&[&str]> for SearchPath {
     type Error = RwError;
 
     fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
-        let mut path = vec![];
+        let mut real_path = vec![];
         for p in value {
-            path.push(p.trim().to_string());
+            real_path.push(p.trim().to_string());
+        }
+        let string = real_path.join(", ");
+
+        let mut path = real_path.clone();
+        let rw_catalog = RW_CATALOG_SCHEMA_NAME.to_string();
+        if !real_path.contains(&rw_catalog) {
+            path.insert(0, rw_catalog);
         }
 
-        let string = path.join(", ");
-
         let pg_catalog = PG_CATALOG_SCHEMA_NAME.to_string();
-        let mut insert_pg_catalog = false;
-        if !path.contains(&pg_catalog) {
+        if !real_path.contains(&pg_catalog) {
             path.insert(0, pg_catalog);
-            insert_pg_catalog = true;
         }
 
         Ok(Self {
             origin_str: string,
             path,
-            insert_pg_catalog,
+            real_path,
         })
     }
 }

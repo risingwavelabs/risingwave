@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 // Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,15 +11,16 @@ use std::borrow::Cow;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::fmt;
+
 use std::hash::Hash;
 
 use educe::Educe;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{Schema, TableVersionId};
 
 use super::{DistillUnit, GenericPlanRef};
 use crate::catalog::TableId;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, Educe)]
@@ -61,29 +61,15 @@ impl<PlanRef: Eq + Hash> Delete<PlanRef> {
             returning,
         }
     }
-
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ table: {}{} }}",
-            name,
-            self.table_name,
-            if self.returning {
-                ", returning: true"
-            } else {
-                ""
-            }
-        )
-    }
 }
 
 impl<PlanRef: Eq + Hash> DistillUnit for Delete<PlanRef> {
-    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let mut vec = Vec::with_capacity(if self.returning { 2 } else { 1 });
         vec.push(("table", Pretty::from(self.table_name.clone())));
         if self.returning {
             vec.push(("returning", Pretty::display(&true)));
         }
-        Pretty::childless_record(name, vec)
+        childless_record(name, vec)
     }
 }

@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
-use std::fmt;
-
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::Schema;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 
 /// `Except` returns the rows of its first input except any
@@ -48,16 +46,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Except<PlanRef> {
     }
 }
 
-impl<PlanRef: GenericPlanRef> Except<PlanRef> {
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        builder.field("all", &self.all);
-        builder.finish()
-    }
-}
-
 impl<PlanRef> DistillUnit for Except<PlanRef> {
-    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> Pretty<'a> {
-        Pretty::childless_record(name, vec![("all", Pretty::debug(&self.all))])
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
+        childless_record(name, vec![("all", Pretty::debug(&self.all))])
     }
 }

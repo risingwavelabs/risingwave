@@ -12,20 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroUsize;
+use std::sync::Arc;
+
 use itertools::Itertools;
+use risingwave_common::config::DefaultParallelism;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_pb::catalog::{Connection, Database, Function, Schema, Source, Table, View};
+use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
+use risingwave_pb::catalog::{
+    connection, Connection, Database, Function, Schema, Source, Table, View,
+};
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
+use tracing::log::warn;
+use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
-    IdCategory, IndexId, MetaSrvEnv, NotificationVersion, SchemaId, SinkId, SourceId, StreamingJob,
-    TableId, ViewId,
+    IdCategory, IndexId, MetaSrvEnv, NotificationVersion, SchemaId, SinkId, SourceId,
+    StreamingClusterInfo, StreamingJob, TableId, ViewId,
 };
 use crate::model::{StreamEnvironment, TableFragments};
+use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::storage::MetaStore;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -81,6 +91,8 @@ pub struct DdlController<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
     barrier_manager: BarrierManagerRef<S>,
+
+    aws_client: Arc<Option<AwsEc2Client>>,
 }
 
 impl<S> DdlController<S>
@@ -95,6 +107,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         barrier_manager: BarrierManagerRef<S>,
+        aws_client: Arc<Option<AwsEc2Client>>,
     ) -> Self {
         Self {
             env,
@@ -104,6 +117,7 @@ where
             cluster_manager,
             fragment_manager,
             barrier_manager,
+            aws_client,
         }
     }
 
@@ -125,7 +139,7 @@ where
     pub(crate) async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
         let ctrl = self.clone();
-        let handler = tokio::spawn(async move {
+        let fut = async move {
             match command {
                 DdlCommand::CreateDatabase(database) => ctrl.create_database(database).await,
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
@@ -155,8 +169,9 @@ where
                     ctrl.drop_connection(connection_id).await
                 }
             }
-        });
-        handler.await.unwrap()
+        }
+        .in_current_span();
+        tokio::spawn(fut).await.unwrap()
     }
 
     pub(crate) async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
@@ -169,7 +184,7 @@ where
 
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
         // 1. drop all catalogs in this database.
-        let (version, streaming_ids, source_ids) =
+        let (version, streaming_ids, source_ids, connections_dropped) =
             self.catalog_manager.drop_database(database_id).await?;
         // 2. Unregister source connector worker.
         self.source_manager.unregister_sources(source_ids).await;
@@ -177,6 +192,11 @@ where
         if !streaming_ids.is_empty() {
             self.stream_manager.drop_streaming_jobs(streaming_ids).await;
         }
+        // 4. delete cloud resources if any
+        for conn in connections_dropped {
+            self.delete_vpc_endpoint(&conn).await?;
+        }
+
         Ok(version)
     }
 
@@ -240,7 +260,22 @@ where
         &self,
         connection_id: ConnectionId,
     ) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.drop_connection(connection_id).await
+        let (version, connection) = self.catalog_manager.drop_connection(connection_id).await?;
+        self.delete_vpc_endpoint(&connection).await?;
+        Ok(version)
+    }
+
+    async fn delete_vpc_endpoint(&self, connection: &Connection) -> MetaResult<()> {
+        // delete AWS vpc endpoint
+        if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info
+            && svc.get_provider()? == PbPrivateLinkProvider::Aws {
+            if let Some(aws_cli) = self.aws_client.as_ref() {
+                aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
+            } else {
+                warn!("AWS client is not initialized, skip deleting vpc endpoint {}", svc.endpoint_id);
+            }
+        }
+        Ok(())
     }
 
     async fn create_streaming_job(
@@ -248,6 +283,8 @@ where
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
+
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
@@ -268,7 +305,7 @@ where
                 }
                 StreamingJob::Sink(sink) => {
                     // Validate the sink on the connector node.
-                    validate_sink(sink, self.env.opts.connector_rpc_endpoint.clone()).await?;
+                    validate_sink(sink, self.env.connector_client()).await?;
                 }
                 _ => {}
             }
@@ -288,7 +325,7 @@ where
     }
 
     async fn drop_streaming_job(&self, job_id: StreamingJobId) -> MetaResult<NotificationVersion> {
-        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
         let table_fragments = self
             .fragment_manager
             .select_table_fragments_by_table_id(&job_id.id().into())
@@ -340,11 +377,12 @@ where
     ) -> MetaResult<StreamFragmentGraph> {
         // 1. Build fragment graph.
         let fragment_graph =
-            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
+            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
                 .await?;
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
         let stream_job = &*stream_job;
 
         // 3. Mark current relation as "creating" and add reference count to dependent relations.
@@ -353,6 +391,35 @@ where
             .await?;
 
         Ok(fragment_graph)
+    }
+
+    fn resolve_stream_parallelism(
+        &self,
+        default_parallelism: Option<NonZeroUsize>,
+        cluster_info: &StreamingClusterInfo,
+    ) -> MetaResult<NonZeroUsize> {
+        if cluster_info.parallel_units.is_empty() {
+            return Err(MetaError::unavailable(
+                "No available parallel units to schedule".to_string(),
+            ));
+        }
+
+        let available_parallel_units =
+            NonZeroUsize::new(cluster_info.parallel_units.len()).unwrap();
+        // Use configured parallel units if no default parallelism is specified.
+        let parallelism = default_parallelism.unwrap_or(match &self.env.opts.default_parallelism {
+            DefaultParallelism::Full => available_parallel_units,
+            DefaultParallelism::Default(num) => *num,
+        });
+
+        if parallelism > available_parallel_units {
+            return Err(MetaError::unavailable(format!(
+                "Not enough parallel units to schedule, required: {}, available: {}",
+                parallelism, available_parallel_units
+            )));
+        }
+
+        Ok(parallelism)
     }
 
     /// `build_stream_job` builds a streaming job and returns the context and table fragments.
@@ -387,6 +454,9 @@ where
 
         // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
+        let default_parallelism =
+            self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
+
         let actor_graph_builder =
             ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
 
@@ -562,7 +632,7 @@ where
         fragment_graph: StreamFragmentGraphProto,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
-        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
         let fragment_graph = self
@@ -606,13 +676,14 @@ where
     ) -> MetaResult<StreamFragmentGraph> {
         // 1. Build fragment graph.
         let fragment_graph =
-            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
+            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
                 .await?;
         assert!(fragment_graph.internal_tables().is_empty());
         assert!(fragment_graph.dependent_table_ids().is_empty());
 
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
         let stream_job = &*stream_job;
 
         // 3. Mark current relation as "updating".
@@ -662,6 +733,8 @@ where
 
         // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
+        let default_parallelism =
+            self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
         let actor_graph_builder =
             ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
 

@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
+use super::utils::impl_distill_by_unit;
 use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -60,14 +59,6 @@ impl LogicalUnion {
         LogicalUnion::new(all, inputs).into()
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
-    }
-
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        self.core.fmt_fields_with_builder(builder)
-    }
-
     pub fn all(&self) -> bool {
         self.core.all
     }
@@ -87,11 +78,7 @@ impl PlanTreeNode for LogicalUnion {
     }
 }
 
-impl fmt::Display for LogicalUnion {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalUnion")
-    }
-}
+impl_distill_by_unit!(LogicalUnion, core, "LogicalUnion");
 
 impl ColPrunable for LogicalUnion {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

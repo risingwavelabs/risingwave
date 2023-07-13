@@ -27,6 +27,7 @@ use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -114,7 +115,7 @@ pub type ElectionClientRef = Arc<dyn ElectionClient>;
 pub async fn rpc_serve(
     address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
@@ -156,7 +157,7 @@ pub async fn rpc_serve(
                 meta_store,
                 Some(election_client),
                 address_info,
-                max_heartbeat_interval,
+                max_cluster_heartbeat_interval,
                 lease_interval_secs,
                 opts,
                 init_system_params,
@@ -169,7 +170,7 @@ pub async fn rpc_serve(
                 meta_store,
                 None,
                 address_info,
-                max_heartbeat_interval,
+                max_cluster_heartbeat_interval,
                 lease_interval_secs,
                 opts,
                 init_system_params,
@@ -183,7 +184,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
     election_client: Option<ElectionClientRef>,
     address_info: AddressInfo,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
@@ -265,7 +266,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         start_service_as_election_leader(
             meta_store,
             address_info,
-            max_heartbeat_interval,
+            max_cluster_heartbeat_interval,
             opts,
             init_system_params,
             election_client,
@@ -293,6 +294,7 @@ pub async fn start_service_as_election_follower(
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
+        .layer(TracingExtractLayer::new())
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(HealthServer::new(health_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
@@ -326,7 +328,7 @@ pub async fn start_service_as_election_follower(
 pub async fn start_service_as_election_leader<S: MetaStore>(
     meta_store: Arc<S>,
     address_info: AddressInfo,
-    max_heartbeat_interval: Duration,
+    max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
     init_system_params: SystemParams,
     election_client: Option<ElectionClientRef>,
@@ -355,7 +357,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     }
 
     let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), max_heartbeat_interval)
+        ClusterManager::new(env.clone(), max_cluster_heartbeat_interval)
             .await
             .unwrap(),
     );
@@ -370,7 +372,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
 
     let compactor_manager = Arc::new(
-        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
+        hummock::CompactorManager::with_meta(env.clone())
             .await
             .unwrap(),
     );
@@ -677,6 +679,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
+        .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
         .add_service(StreamManagerServiceServer::new(stream_srv))

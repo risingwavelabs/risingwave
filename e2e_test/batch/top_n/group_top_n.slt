@@ -55,6 +55,19 @@ where rank <= 3 AND rank > 1;
 3  3
 
 query II rowsort
+select * except (rank) from (
+    select *, ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) as rank from t
+)
+where rank <= 3 AND rank > 1;
+----
+1  2
+1  3
+2  2
+2  3
+3  2
+3  3
+
+query II rowsort
 select x, y from (
     select *, RANK() OVER (ORDER BY y) as rank from t
 )

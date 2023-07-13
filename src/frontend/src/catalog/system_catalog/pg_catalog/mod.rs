@@ -34,6 +34,7 @@ pub mod pg_operator;
 pub mod pg_proc;
 pub mod pg_roles;
 pub mod pg_settings;
+mod pg_shadow;
 pub mod pg_shdescription;
 pub mod pg_stat_activity;
 pub mod pg_tables;
@@ -41,8 +42,6 @@ pub mod pg_tablespace;
 pub mod pg_type;
 pub mod pg_user;
 pub mod pg_views;
-
-use std::collections::HashMap;
 
 use itertools::Itertools;
 pub use pg_am::*;
@@ -67,6 +66,7 @@ pub use pg_operator::*;
 pub use pg_proc::*;
 pub use pg_roles::*;
 pub use pg_settings::*;
+pub use pg_shadow::*;
 pub use pg_shdescription::*;
 pub use pg_stat_activity::*;
 pub use pg_tables::*;
@@ -76,86 +76,17 @@ pub use pg_user::*;
 pub use pg_views::*;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{ScalarImpl, Timestamp};
-use risingwave_common::util::epoch::Epoch;
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_pb::user::UserInfo;
+use risingwave_pb::user::grant_privilege::Object;
 use serde_json::json;
 
 use super::SysCatalogReaderImpl;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::user::user_privilege::available_prost_privilege;
-use crate::user::UserId;
-
-/// get acl items of `object` in string, ignore public.
-fn get_acl_items(
-    object: &Object,
-    users: &Vec<UserInfo>,
-    username_map: &HashMap<UserId, String>,
-) -> String {
-    let mut res = String::from("{");
-    let mut empty_flag = true;
-    let super_privilege = available_prost_privilege(object.clone());
-    for user in users {
-        let privileges = if user.get_is_super() {
-            vec![&super_privilege]
-        } else {
-            user.get_grant_privileges()
-                .iter()
-                .filter(|&privilege| privilege.object.as_ref().unwrap() == object)
-                .collect_vec()
-        };
-        if privileges.is_empty() {
-            continue;
-        };
-        let mut grantor_map = HashMap::new();
-        privileges.iter().for_each(|&privilege| {
-            privilege.action_with_opts.iter().for_each(|ao| {
-                grantor_map.entry(ao.granted_by).or_insert_with(Vec::new);
-                grantor_map
-                    .get_mut(&ao.granted_by)
-                    .unwrap()
-                    .push((ao.action, ao.with_grant_option));
-            })
-        });
-        for key in grantor_map.keys() {
-            if empty_flag {
-                empty_flag = false;
-            } else {
-                res.push(',');
-            }
-            res.push_str(user.get_name());
-            res.push('=');
-            grantor_map
-                .get(key)
-                .unwrap()
-                .iter()
-                .for_each(|(action, option)| {
-                    let str = match Action::from_i32(*action).unwrap() {
-                        Action::Select => "r",
-                        Action::Insert => "a",
-                        Action::Update => "w",
-                        Action::Delete => "d",
-                        Action::Create => "C",
-                        Action::Connect => "c",
-                        _ => unreachable!(),
-                    };
-                    res.push_str(str);
-                    if *option {
-                        res.push('*');
-                    }
-                });
-            res.push('/');
-            // should be able to query grantor's name
-            res.push_str(username_map.get(key).as_ref().unwrap());
-        }
-    }
-    res.push('}');
-    res
-}
+use crate::catalog::system_catalog::get_acl_items;
+use crate::user::user_authentication::encrypted_raw_password;
 
 impl SysCatalogReaderImpl {
     pub(super) fn read_types(&self) -> Result<Vec<OwnedRow>> {
@@ -212,53 +143,45 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    pub(super) async fn read_meta_snapshot(&self) -> Result<Vec<OwnedRow>> {
-        let try_get_date_time = |epoch: u64| {
-            if epoch == 0 {
-                return None;
+    pub(super) fn read_user_info_shadow(&self) -> Result<Vec<OwnedRow>> {
+        let reader = self.user_info_reader.read_guard();
+        // Since this catalog contains passwords, it must not be publicly readable.
+        match reader.get_user_by_name(&self.auth_context.user_name) {
+            None => {
+                return Err(ErrorCode::CatalogError(
+                    format!("user {} not found", self.auth_context.user_name).into(),
+                )
+                .into());
             }
-            let time_millis = Epoch::from(epoch).as_unix_millis();
-            Timestamp::with_secs_nsecs(
-                (time_millis / 1000) as i64,
-                (time_millis % 1000 * 1_000_000) as u32,
-            )
-            .map(ScalarImpl::Timestamp)
-            .ok()
-        };
-        let meta_snapshots = self
-            .meta_client
-            .list_meta_snapshots()
-            .await?
-            .into_iter()
-            .map(|s| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int64(s.id as i64)),
-                    Some(ScalarImpl::Int64(s.hummock_version_id as i64)),
-                    Some(ScalarImpl::Int64(s.safe_epoch as i64)),
-                    try_get_date_time(s.safe_epoch),
-                    Some(ScalarImpl::Int64(s.max_committed_epoch as i64)),
-                    try_get_date_time(s.max_committed_epoch),
-                ])
-            })
-            .collect_vec();
-        Ok(meta_snapshots)
-    }
+            Some(user) => {
+                if !user.is_super {
+                    return Err(ErrorCode::PermissionDenied(
+                        "permission denied for table pg_shadow".to_string(),
+                    )
+                    .into());
+                }
+            }
+        }
 
-    pub(super) async fn read_ddl_progress(&self) -> Result<Vec<OwnedRow>> {
-        let ddl_grogress = self
-            .meta_client
-            .list_ddl_progress()
-            .await?
-            .into_iter()
-            .map(|s| {
+        let users = reader.get_all_users();
+        Ok(users
+            .iter()
+            .map(|user| {
                 OwnedRow::new(vec![
-                    Some(ScalarImpl::Int64(s.id as i64)),
-                    Some(ScalarImpl::Utf8(s.statement.into())),
-                    Some(ScalarImpl::Utf8(s.progress.into())),
+                    Some(ScalarImpl::Utf8(user.name.clone().into())),
+                    Some(ScalarImpl::Int32(user.id as i32)),
+                    Some(ScalarImpl::Bool(user.can_create_db)),
+                    Some(ScalarImpl::Bool(user.is_super)),
+                    Some(ScalarImpl::Bool(false)),
+                    Some(ScalarImpl::Bool(false)),
+                    user.auth_info
+                        .as_ref()
+                        .map(|info| ScalarImpl::Utf8(encrypted_raw_password(info).into())),
+                    None,
+                    None,
                 ])
             })
-            .collect_vec();
-        Ok(ddl_grogress)
+            .collect_vec())
     }
 
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
@@ -739,132 +662,5 @@ impl SysCatalogReaderImpl {
                     }))
             })
             .collect_vec())
-    }
-
-    pub(super) async fn read_relation_info(&self) -> Result<Vec<OwnedRow>> {
-        let mut table_ids = Vec::new();
-        {
-            let reader = self.catalog_reader.read_guard();
-            let schemas = reader.get_all_schema_names(&self.auth_context.database)?;
-            for schema in &schemas {
-                let schema_catalog =
-                    reader.get_schema_by_name(&self.auth_context.database, schema)?;
-
-                schema_catalog.iter_mv().for_each(|t| {
-                    table_ids.push(t.id.table_id);
-                });
-
-                schema_catalog.iter_table().for_each(|t| {
-                    table_ids.push(t.id.table_id);
-                });
-
-                schema_catalog.iter_sink().for_each(|t| {
-                    table_ids.push(t.id.sink_id);
-                });
-
-                schema_catalog.iter_index().for_each(|t| {
-                    table_ids.push(t.index_table.id.table_id);
-                });
-            }
-        }
-
-        let table_fragments = self.meta_client.list_table_fragments(&table_ids).await?;
-        let mut rows = Vec::new();
-        let reader = self.catalog_reader.read_guard();
-        let schemas = reader.get_all_schema_names(&self.auth_context.database)?;
-        for schema in &schemas {
-            let schema_catalog = reader.get_schema_by_name(&self.auth_context.database, schema)?;
-            schema_catalog.iter_mv().for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.id.table_id) {
-                    rows.push(OwnedRow::new(vec![
-                        Some(ScalarImpl::Utf8(schema.clone().into())),
-                        Some(ScalarImpl::Utf8(t.name.clone().into())),
-                        Some(ScalarImpl::Int32(t.owner as i32)),
-                        Some(ScalarImpl::Utf8(t.definition.clone().into())),
-                        Some(ScalarImpl::Utf8("MATERIALIZED VIEW".into())),
-                        Some(ScalarImpl::Int32(t.id.table_id as i32)),
-                        Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
-                        )),
-                        Some(ScalarImpl::Utf8(
-                            json!(fragments.get_fragments()).to_string().into(),
-                        )),
-                    ]));
-                }
-            });
-
-            schema_catalog.iter_table().for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.id.table_id) {
-                    rows.push(OwnedRow::new(vec![
-                        Some(ScalarImpl::Utf8(schema.clone().into())),
-                        Some(ScalarImpl::Utf8(t.name.clone().into())),
-                        Some(ScalarImpl::Int32(t.owner as i32)),
-                        Some(ScalarImpl::Utf8(t.definition.clone().into())),
-                        Some(ScalarImpl::Utf8("TABLE".into())),
-                        Some(ScalarImpl::Int32(t.id.table_id as i32)),
-                        Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
-                        )),
-                        Some(ScalarImpl::Utf8(
-                            json!(fragments.get_fragments()).to_string().into(),
-                        )),
-                    ]));
-                }
-            });
-
-            schema_catalog.iter_sink().for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.id.sink_id) {
-                    rows.push(OwnedRow::new(vec![
-                        Some(ScalarImpl::Utf8(schema.clone().into())),
-                        Some(ScalarImpl::Utf8(t.name.clone().into())),
-                        Some(ScalarImpl::Int32(t.owner.user_id as i32)),
-                        Some(ScalarImpl::Utf8(t.definition.clone().into())),
-                        Some(ScalarImpl::Utf8("SINK".into())),
-                        Some(ScalarImpl::Int32(t.id.sink_id as i32)),
-                        Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
-                        )),
-                        Some(ScalarImpl::Utf8(
-                            json!(fragments.get_fragments()).to_string().into(),
-                        )),
-                    ]));
-                }
-            });
-
-            schema_catalog.iter_index().for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.index_table.id.table_id) {
-                    rows.push(OwnedRow::new(vec![
-                        Some(ScalarImpl::Utf8(schema.clone().into())),
-                        Some(ScalarImpl::Utf8(t.name.clone().into())),
-                        Some(ScalarImpl::Int32(t.index_table.owner as i32)),
-                        Some(ScalarImpl::Utf8(t.index_table.definition.clone().into())),
-                        Some(ScalarImpl::Utf8("INDEX".into())),
-                        Some(ScalarImpl::Int32(t.index_table.id.table_id as i32)),
-                        Some(ScalarImpl::Utf8(
-                            fragments.get_env().unwrap().get_timezone().clone().into(),
-                        )),
-                        Some(ScalarImpl::Utf8(
-                            json!(fragments.get_fragments()).to_string().into(),
-                        )),
-                    ]));
-                }
-            });
-
-            // Sources have no fragments.
-            schema_catalog.iter_source().for_each(|t| {
-                rows.push(OwnedRow::new(vec![
-                    Some(ScalarImpl::Utf8(schema.clone().into())),
-                    Some(ScalarImpl::Utf8(t.name.clone().into())),
-                    Some(ScalarImpl::Int32(t.owner as i32)),
-                    Some(ScalarImpl::Utf8(t.definition.clone().into())),
-                    Some(ScalarImpl::Utf8("SOURCE".into())),
-                    Some(ScalarImpl::Int32(t.id as i32)),
-                    Some(ScalarImpl::Utf8("".into())),
-                    None,
-                ]));
-            });
-        }
-
-        Ok(rows)
     }
 }

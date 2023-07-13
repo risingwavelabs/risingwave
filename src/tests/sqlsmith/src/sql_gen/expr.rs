@@ -41,7 +41,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             // Stop recursion with a simple scalar or column.
             // Weight it more towards columns, scalar has much higher chance of being generated,
             // since it is usually used as fail-safe expression.
-            return match self.rng.gen_bool(0.2) {
+            return match self.rng.gen_bool(0.1) {
                 true => self.gen_simple_scalar(typ),
                 false => self.gen_col(typ, context),
             };
@@ -89,12 +89,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // - `a1 >= a2 IN b`
         // ...
         // We just nest compound expressions to avoid this.
-        let range = if context.can_gen_agg() { 99 } else { 90 };
+        let range = if context.can_gen_agg() { 100 } else { 50 };
         match self.rng.gen_range(0..=range) {
-            0..=70 => Expr::Nested(Box::new(self.gen_func(typ, context))),
-            71..=80 => self.gen_exists(typ, context),
-            81..=90 => self.gen_explicit_cast(typ, context),
-            91..=99 => self.gen_agg(typ),
+            0..=35 => Expr::Nested(Box::new(self.gen_func(typ, context))),
+            36..=40 => self.gen_exists(typ, context),
+            41..=50 => self.gen_explicit_cast(typ, context),
+            51..=100 => self.gen_agg(typ),
             _ => unreachable!(),
         }
     }
@@ -230,8 +230,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Expr::Exists(Box::new(subquery))
     }
 
+    /// Generate ORDER BY expressions by choosing from available bound columns.
     pub(crate) fn gen_order_by(&mut self) -> Vec<OrderByExpr> {
-        if self.bound_columns.is_empty() || !self.is_distinct_allowed {
+        if self.bound_columns.is_empty() {
             return vec![];
         }
         let mut order_by = vec![];
@@ -239,8 +240,46 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             let column = self.bound_columns.choose(&mut self.rng).unwrap();
             order_by.push(OrderByExpr {
                 expr: Expr::Identifier(Ident::new_unchecked(&column.name)),
-                asc: Some(self.rng.gen_bool(0.5)),
-                nulls_first: None,
+                asc: if self.rng.gen_bool(0.3) {
+                    None
+                } else {
+                    Some(self.rng.gen_bool(0.5))
+                },
+                nulls_first: if self.rng.gen_bool(0.3) {
+                    None
+                } else {
+                    Some(self.rng.gen_bool(0.5))
+                },
+            })
+        }
+        order_by
+    }
+
+    /// Generate ORDER BY expressions by choosing from given expressions.
+    pub(crate) fn gen_order_by_within(&mut self, exprs: &[Expr]) -> Vec<OrderByExpr> {
+        let exprs = exprs
+            .iter()
+            .filter(|e| matches!(e, Expr::Identifier(_) | Expr::Value(_)))
+            .cloned()
+            .collect::<Vec<_>>();
+        if exprs.is_empty() {
+            return vec![];
+        }
+        let mut order_by = vec![];
+        while self.flip_coin() {
+            let expr = exprs.choose(&mut self.rng).unwrap();
+            order_by.push(OrderByExpr {
+                expr: expr.clone(),
+                asc: if self.rng.gen_bool(0.3) {
+                    None
+                } else {
+                    Some(self.rng.gen_bool(0.5))
+                },
+                nulls_first: if self.rng.gen_bool(0.3) {
+                    None
+                } else {
+                    Some(self.rng.gen_bool(0.5))
+                },
             })
         }
         order_by

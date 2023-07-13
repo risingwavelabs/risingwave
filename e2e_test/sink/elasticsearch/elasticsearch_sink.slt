@@ -1,0 +1,29 @@
+statement ok
+CREATE TABLE t7 (v1 int primary key, v2 bigint, v3 varchar);
+
+statement ok
+CREATE SINK s7 AS select t7.v1 as v1, t7.v2 as v2, t7.v3 as v3 from t7 WITH (
+    connector = 'elasticsearch-7',
+    index = 'test',
+    url = 'http://elasticsearch:9200',
+    username = 'elastic',
+    password = 'risingwave'
+);
+
+statement ok
+INSERT INTO t7 VALUES (1, 2, '1-2'), (2, 2, '2-2'), (3, 2, '3-2'), (5, 2, '5-2'), (8, 2, '8-2'), (13, 2, '13-2');
+
+statement ok
+FLUSH;
+
+statement ok
+INSERT INTO t7 VALUES (1, 50, '1-50');
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s7;
+
+statement ok
+DROP TABLE t7;

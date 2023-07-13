@@ -21,6 +21,7 @@ use google_cloud_pubsub::subscription::{SeekTo, SubscriptionConfig};
 use crate::source::base::SplitEnumerator;
 use crate::source::google_pubsub::split::PubsubSplit;
 use crate::source::google_pubsub::PubsubProperties;
+use crate::source::SourceEnumeratorContextRef;
 
 pub struct PubsubSplitEnumerator {
     subscription: String,
@@ -32,7 +33,10 @@ impl SplitEnumerator for PubsubSplitEnumerator {
     type Properties = PubsubProperties;
     type Split = PubsubSplit;
 
-    async fn new(properties: Self::Properties) -> anyhow::Result<PubsubSplitEnumerator> {
+    async fn new(
+        properties: Self::Properties,
+        _context: SourceEnumeratorContextRef,
+    ) -> anyhow::Result<PubsubSplitEnumerator> {
         let split_count = properties.split_count;
         let subscription = properties.subscription.to_owned();
 

@@ -14,10 +14,14 @@
 
 package com.risingwave.functions;
 
+import java.lang.invoke.MethodHandles;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -49,11 +53,11 @@ class TypeUtils {
         } else if (typeStr.equals("FLOAT8") || typeStr.equals("DOUBLE PRECISION")) {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE));
         } else if (typeStr.startsWith("DECIMAL") || typeStr.startsWith("NUMERIC")) {
-            return Field.nullable(name, new ArrowType.Decimal(38, 28, 128));
+            return Field.nullable(name, new ArrowType.Decimal(38, 0, 128));
         } else if (typeStr.equals("DATE")) {
             return Field.nullable(name, new ArrowType.Date(DateUnit.DAY));
         } else if (typeStr.equals("TIME") || typeStr.equals("TIME WITHOUT TIME ZONE")) {
-            return Field.nullable(name, new ArrowType.Time(TimeUnit.MICROSECOND, 32));
+            return Field.nullable(name, new ArrowType.Time(TimeUnit.MICROSECOND, 64));
         } else if (typeStr.equals("TIMESTAMP") || typeStr.equals("TIMESTAMP WITHOUT TIME ZONE")) {
             return Field.nullable(name, new ArrowType.Timestamp(TimeUnit.MICROSECOND, null));
         } else if (typeStr.startsWith("INTERVAL")) {
@@ -105,7 +109,15 @@ class TypeUtils {
         } else if (param == Double.class || param == double.class) {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE));
         } else if (param == BigDecimal.class) {
-            return Field.nullable(name, new ArrowType.Decimal(28, 0, 128));
+            return Field.nullable(name, new ArrowType.Decimal(38, 0, 128));
+        } else if (param == LocalDate.class) {
+            return Field.nullable(name, new ArrowType.Date(DateUnit.DAY));
+        } else if (param == LocalTime.class) {
+            return Field.nullable(name, new ArrowType.Time(TimeUnit.MICROSECOND, 64));
+        } else if (param == LocalDateTime.class) {
+            return Field.nullable(name, new ArrowType.Timestamp(TimeUnit.MICROSECOND, null));
+        } else if (param == PeriodDuration.class) {
+            return Field.nullable(name, new ArrowType.Interval(IntervalUnit.MONTH_DAY_NANO));
         } else if (param == String.class) {
             return Field.nullable(name, new ArrowType.Utf8());
         } else if (param == byte[].class) {
@@ -179,7 +191,15 @@ class TypeUtils {
 
     /** Fill an Arrow vector with an array of values. */
     static void fillVector(FieldVector fieldVector, Object[] values) {
-        if (fieldVector instanceof SmallIntVector) {
+        if (fieldVector instanceof BitVector) {
+            var vector = (BitVector) fieldVector;
+            vector.allocateNew(values.length);
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] != null) {
+                    vector.set(i, (boolean) values[i] ? 1 : 0);
+                }
+            }
+        } else if (fieldVector instanceof SmallIntVector) {
             var vector = (SmallIntVector) fieldVector;
             vector.allocateNew(values.length);
             for (int i = 0; i < values.length; i++) {
@@ -232,7 +252,7 @@ class TypeUtils {
             vector.allocateNew(values.length);
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
-                    vector.set(i, (int) values[i]);
+                    vector.set(i, (int) ((LocalDate) values[i]).toEpochDay());
                 }
             }
         } else if (fieldVector instanceof TimeMicroVector) {
@@ -240,7 +260,7 @@ class TypeUtils {
             vector.allocateNew(values.length);
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
-                    vector.set(i, (long) values[i]);
+                    vector.set(i, ((LocalTime) values[i]).toNanoOfDay() / 1000);
                 }
             }
         } else if (fieldVector instanceof TimeStampMicroVector) {
@@ -248,7 +268,19 @@ class TypeUtils {
             vector.allocateNew(values.length);
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
-                    vector.set(i, (long) values[i]);
+                    vector.set(i, timestampToMicros((LocalDateTime) values[i]));
+                }
+            }
+        } else if (fieldVector instanceof IntervalMonthDayNanoVector) {
+            var vector = (IntervalMonthDayNanoVector) fieldVector;
+            vector.allocateNew(values.length);
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] != null) {
+                    var pd = (PeriodDuration) values[i];
+                    var months = (int) pd.getPeriod().toTotalMonths();
+                    var days = pd.getPeriod().getDays();
+                    var nanos = pd.getDuration().toNanos();
+                    vector.set(i, months, days, nanos);
                 }
             }
         } else if (fieldVector instanceof VarCharVector) {
@@ -278,35 +310,71 @@ class TypeUtils {
         } else if (fieldVector instanceof ListVector) {
             var vector = (ListVector) fieldVector;
             vector.allocateNew();
-            // we have to enumerate the inner type again
-            if (vector.getDataVector() instanceof LargeVarCharVector) {
-                var innerVector = (LargeVarCharVector) vector.getDataVector();
-                for (int i = 0; i < values.length; i++) {
-                    var array = (String[]) values[i];
-                    if (array != null) {
-                        vector.startNewValue(i);
-                        for (int j = 0; j < array.length; j++) {
-                            if (array[j] != null) {
-                                innerVector.setSafe(j, array[j].getBytes());
-                            }
-                        }
-                        vector.endValue(i, array.length);
-                    }
-                }
+            if (vector.getDataVector() instanceof BitVector) {
+                TypeUtils.<BitVector, Boolean>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val ? 1 : 0));
+            } else if (vector.getDataVector() instanceof SmallIntVector) {
+                TypeUtils.<SmallIntVector, Short>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
+            } else if (vector.getDataVector() instanceof IntVector) {
+                TypeUtils.<IntVector, Integer>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
+            } else if (vector.getDataVector() instanceof BigIntVector) {
+                TypeUtils.<BigIntVector, Long>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
+            } else if (vector.getDataVector() instanceof Float4Vector) {
+                TypeUtils.<Float4Vector, Float>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
+            } else if (vector.getDataVector() instanceof Float8Vector) {
+                TypeUtils.<Float8Vector, Double>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
+            } else if (vector.getDataVector() instanceof DecimalVector) {
+                TypeUtils.<DecimalVector, BigDecimal>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
+            } else if (vector.getDataVector() instanceof DateDayVector) {
+                TypeUtils.<DateDayVector, LocalDate>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, (int) val.toEpochDay()));
+            } else if (vector.getDataVector() instanceof TimeMicroVector) {
+                TypeUtils.<TimeMicroVector, LocalTime>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val.toNanoOfDay() / 1000));
+            } else if (vector.getDataVector() instanceof TimeStampMicroVector) {
+                TypeUtils.<TimeStampMicroVector, LocalDateTime>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, timestampToMicros(val)));
+            } else if (vector.getDataVector() instanceof IntervalMonthDayNanoVector) {
+                TypeUtils.<IntervalMonthDayNanoVector, PeriodDuration>fillListVector(
+                        vector,
+                        values,
+                        (vec, i, val) -> {
+                            var months = (int) val.getPeriod().toTotalMonths();
+                            var days = val.getPeriod().getDays();
+                            var nanos = val.getDuration().toNanos();
+                            vec.set(i, months, days, nanos);
+                        });
+            } else if (vector.getDataVector() instanceof VarCharVector) {
+                TypeUtils.<VarCharVector, String>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val.getBytes()));
+            } else if (vector.getDataVector() instanceof LargeVarCharVector) {
+                TypeUtils.<LargeVarCharVector, String>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val.getBytes()));
+            } else if (vector.getDataVector() instanceof VarBinaryVector) {
+                TypeUtils.<VarBinaryVector, byte[]>fillListVector(
+                        vector, values, (vec, i, val) -> vec.set(i, val));
             } else {
                 throw new IllegalArgumentException("Unsupported type: " + fieldVector.getClass());
             }
         } else if (fieldVector instanceof StructVector) {
             var vector = (StructVector) fieldVector;
             vector.allocateNew();
+            var lookup = MethodHandles.lookup();
             for (var field : vector.getField().getChildren()) {
                 // extract field from values
                 var subvalues = new Object[values.length];
                 if (values.length != 0) {
                     try {
                         var javaField = values[0].getClass().getDeclaredField(field.getName());
+                        var varHandle = lookup.unreflectVarHandle(javaField);
                         for (int i = 0; i < values.length; i++) {
-                            subvalues[i] = javaField.get(values[i]);
+                            subvalues[i] = varHandle.get(values[i]);
                         }
                     } catch (NoSuchFieldException | IllegalAccessException e) {
                         throw new RuntimeException(e);
@@ -324,28 +392,96 @@ class TypeUtils {
         fieldVector.setValueCount(values.length);
     }
 
+    @FunctionalInterface
+    interface TriFunction<T, U, V> {
+        void apply(T t, U u, V v);
+    }
+
+    @SuppressWarnings("unchecked")
+    static <V extends FieldVector, T> void fillListVector(
+            ListVector vector, Object[] values, TriFunction<V, Integer, T> set) {
+        var innerVector = (V) vector.getDataVector();
+        int ii = 0;
+        for (int i = 0; i < values.length; i++) {
+            var array = (T[]) values[i];
+            if (array == null) {
+                continue;
+            }
+            vector.startNewValue(i);
+            for (T v : array) {
+                if (v == null) {
+                    innerVector.setNull(ii++);
+                } else {
+                    set.apply(innerVector, ii++, v);
+                }
+            }
+            vector.endValue(i, array.length);
+        }
+    }
+
+    static long timestampToMicros(LocalDateTime timestamp) {
+        var date = timestamp.toLocalDate().toEpochDay();
+        var time = timestamp.toLocalTime().toNanoOfDay();
+        return date * 24 * 3600 * 1000 * 1000 + time / 1000;
+    }
+
     /** Return a function that converts the object get from input array to the correct type. */
     static Function<Object, Object> processFunc(Field field, Class<?> targetClass) {
-        if (field.getType() instanceof ArrowType.Utf8) {
+        var inner = processFunc0(field, targetClass);
+        return obj -> obj == null ? null : inner.apply(obj);
+    }
+
+    static Function<Object, Object> processFunc0(Field field, Class<?> targetClass) {
+        if (field.getType() instanceof ArrowType.Utf8 && targetClass == String.class) {
             // object is org.apache.arrow.vector.util.Text
-            return obj -> obj == null ? null : obj.toString();
-        } else if (field.getType() instanceof ArrowType.LargeUtf8) {
+            return obj -> obj.toString();
+        } else if (field.getType() instanceof ArrowType.LargeUtf8 && targetClass == String.class) {
             // object is org.apache.arrow.vector.util.Text
-            return obj -> obj == null ? null : obj.toString();
+            return obj -> obj.toString();
+        } else if (field.getType() instanceof ArrowType.Date && targetClass == LocalDate.class) {
+            // object is Integer
+            return obj -> LocalDate.ofEpochDay((int) obj);
+        } else if (field.getType() instanceof ArrowType.Time && targetClass == LocalTime.class) {
+            // object is Long
+            return obj -> LocalTime.ofNanoOfDay((long) obj * 1000);
+        } else if (field.getType() instanceof ArrowType.Interval
+                && targetClass == PeriodDuration.class) {
+            // object is arrow PeriodDuration
+            return obj -> new PeriodDuration((org.apache.arrow.vector.PeriodDuration) obj);
         } else if (field.getType() instanceof ArrowType.List) {
-            // object is org.apache.arrow.vector.util.JsonStringArrayList
+            // object is List
             var subfield = field.getChildren().get(0);
-            var subfunc = processFunc(subfield, null);
-            if (subfield.getType() instanceof ArrowType.Utf8) {
-                return obj ->
-                        obj == null
-                                ? null
-                                : ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
+            var subfunc = processFunc(subfield, targetClass.getComponentType());
+            if (subfield.getType() instanceof ArrowType.Bool) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Boolean[]::new);
+            } else if (subfield.getType().equals(new ArrowType.Int(16, true))) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Short[]::new);
+            } else if (subfield.getType().equals(new ArrowType.Int(32, true))) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Integer[]::new);
+            } else if (subfield.getType().equals(new ArrowType.Int(64, true))) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Long[]::new);
+            } else if (subfield.getType()
+                    .equals(new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE))) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Float[]::new);
+            } else if (subfield.getType()
+                    .equals(new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE))) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(Double[]::new);
+            } else if (subfield.getType() instanceof ArrowType.Decimal) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(BigDecimal[]::new);
+            } else if (subfield.getType() instanceof ArrowType.Date) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(LocalDate[]::new);
+            } else if (subfield.getType() instanceof ArrowType.Time) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(LocalTime[]::new);
+            } else if (subfield.getType() instanceof ArrowType.Timestamp) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(LocalDateTime[]::new);
+            } else if (subfield.getType() instanceof ArrowType.Interval) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(PeriodDuration[]::new);
+            } else if (subfield.getType() instanceof ArrowType.Utf8) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
             } else if (subfield.getType() instanceof ArrowType.LargeUtf8) {
-                return obj ->
-                        obj == null
-                                ? null
-                                : ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
+            } else if (subfield.getType() instanceof ArrowType.Binary) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(byte[][]::new);
             }
             throw new IllegalArgumentException("Unsupported type: " + field.getType());
         } else if (field.getType() instanceof ArrowType.Struct) {
@@ -357,9 +493,6 @@ class TypeUtils {
                 subfunc[i] = processFunc(subfields.get(i), targetClass.getFields()[i].getType());
             }
             return obj -> {
-                if (obj == null) {
-                    return null;
-                }
                 var map = (AbstractMap<?, ?>) obj;
                 try {
                     var row = targetClass.getDeclaredConstructor().newInstance();

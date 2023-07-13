@@ -39,8 +39,8 @@ enum-as-inner = "0.5"
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = { workspace = true }
 hex = "0.4.3"
+http = "0.2"
 humantime = "2.1"
 hytra = { workspace = true }
 itertools = "0.10"
@@ -69,6 +69,7 @@ risingwave_pb = { path = "../prost" }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
 serde_default = "0.1"
 serde_json = "1"
 serde_with = "2"
@@ -110,7 +111,7 @@ libc = "0.2.72"
 mach2 = "0.4"
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = { workspace = true }
 more-asserts = "0.3"
 pretty_assertions = "1"
 rand = "0.8"
@@ -119,10 +120,6 @@ tempfile = "3"
 
 [[bench]]
 name = "bench_encoding"
-harness = false
-
-[[bench]]
-name = "bench_row"
 harness = false
 
 [[bench]]

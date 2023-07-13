@@ -1,0 +1,32 @@
+extend = "common.toml"
+
+[env]
+TEMPO_SYSTEM = "${SYSTEM_UNDERSCORE}"
+TEMPO_DOWNLOAD_PATH = "${PREFIX_TMP}/tempo.tar.gz"
+TEMPO_VERSION = "2.1.1"
+TEMPO_RELEASE = "tempo_${TEMPO_VERSION}_${TEMPO_SYSTEM}"
+TEMPO_DOWNLOAD_TAR_GZ = "https://github.com/grafana/tempo/releases/download/v${TEMPO_VERSION}/${TEMPO_RELEASE}.tar.gz"
+
+[tasks.download-tempo]
+private = true
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_COMPUTE_TRACING" ] }
+description = "Download and extract Tempo"
+script = '''
+#!/usr/bin/env bash
+set -e
+if [ -d "${PREFIX_BIN}/tempo" ]; then
+    if [ -f "${PREFIX_BIN}/tempo/RISEDEV-VERSION-${TEMPO_VERSION}" ]; then
+        exit 0
+    fi
+fi
+echo "Tempo not found or outdated, download ${TEMPO_RELEASE}"
+curl -fL -o "${TEMPO_DOWNLOAD_PATH}" "${TEMPO_DOWNLOAD_TAR_GZ}"
+mkdir "${PREFIX_TMP}/tempo"
+tar -xf "${TEMPO_DOWNLOAD_PATH}" -C "${PREFIX_TMP}/tempo"
+rm -rf "${PREFIX_BIN}/tempo"
+mv "${PREFIX_TMP}/tempo" "${PREFIX_BIN}/tempo"
+rm "${TEMPO_DOWNLOAD_PATH}"
+touch "${PREFIX_BIN}/tempo/RISEDEV-VERSION-${TEMPO_VERSION}"
+'''

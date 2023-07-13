@@ -136,10 +136,10 @@ fn timestamptz_to_string_with_session_data(
 ) -> Bytes {
     let mut buf = String::new();
     match d {
-        ScalarRefImpl::<'_>::Int64(d) => {
-            timestamptz_to_string(d, &session_data.timezone, &mut buf).unwrap()
+        ScalarRefImpl::<'_>::Timestamptz(tz) => {
+            timestamptz_to_string(tz, &session_data.timezone, &mut buf).unwrap()
         }
-        _ => unreachable!(),
+        _ => panic!("expect timestamptz"),
     };
     buf.into()
 }
@@ -262,6 +262,7 @@ mod tests {
     use bytes::BytesMut;
     use postgres_types::{ToSql, Type};
     use risingwave_common::array::*;
+    use risingwave_common::types::Timestamptz;
 
     use super::*;
 
@@ -409,7 +410,11 @@ mod tests {
         assert_eq!(&f(&T::Boolean, S::Bool(true), Format::Text), "t");
         assert_eq!(&f(&T::Boolean, S::Bool(false), Format::Text), "f");
         assert_eq!(
-            &f(&T::Timestamptz, S::Int64(-1), Format::Text),
+            &f(
+                &T::Timestamptz,
+                S::Timestamptz(Timestamptz::from_micros(-1)),
+                Format::Text
+            ),
             "1969-12-31 23:59:59.999999+00:00"
         );
     }

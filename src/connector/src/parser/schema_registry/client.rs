@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use reqwest::{Method, Url};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+use crate::parser::SchemaRegistryAuth;
 
 /// An client for communication with schema registry
 #[derive(Debug)]
@@ -30,10 +32,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub(crate) fn new(url: Url, props: &HashMap<String, String>) -> Result<Self> {
-        const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
-        const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
-
+    pub(crate) fn new(url: Url, client_config: &SchemaRegistryAuth) -> Result<Self> {
         if url.cannot_be_a_base() {
             return Err(RwError::from(ProtocolError(format!(
                 "{} cannot be a base url",
@@ -45,13 +44,11 @@ impl Client {
             RwError::from(ProtocolError(format!("build reqwest client failed {}", e)))
         })?;
 
-        let username = props.get(SCHEMA_REGISTRY_USERNAME).cloned();
-        let password = props.get(SCHEMA_REGISTRY_PASSWORD).cloned();
         Ok(Client {
             inner,
             url,
-            username,
-            password,
+            username: client_config.username.clone(),
+            password: client_config.password.clone(),
         })
     }
 
@@ -241,7 +238,14 @@ mod tests {
     #[ignore]
     async fn test_get_subject() {
         let url = Url::parse("http://localhost:8081").unwrap();
-        let client = Client::new(url, &HashMap::new()).unwrap();
+        let client = Client::new(
+            url,
+            &SchemaRegistryAuth {
+                username: None,
+                password: None,
+            },
+        )
+        .unwrap();
         let subject = client
             .get_subject_and_references("proto_c_bin-value")
             .await

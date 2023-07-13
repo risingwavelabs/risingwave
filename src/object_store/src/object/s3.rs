@@ -26,6 +26,8 @@ use aws_sdk_s3::types::{
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
 use aws_sdk_s3::Client;
+use aws_smithy_client::conns::NativeTls;
+use aws_smithy_client::http_connector::ConnectorSettings;
 use aws_smithy_http::body::SdkBody;
 use aws_smithy_http::result::SdkError;
 use aws_smithy_types::retry::RetryConfig;
@@ -564,41 +566,54 @@ impl S3ObjectStore {
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
-        // The following code is for compatibility.
-        if std::env::var("S3_COMPATIBLE_REGION").is_ok() {
-            std::env::set_var("AWS_REGION", std::env::var("S3_COMPATIBLE_REGION").unwrap())
-        }
-
-        if std::env::var("S3_COMPATIBLE_ENDPOINT").is_ok() {
-            std::env::set_var(
-                "RW_S3_ENDPOINT",
-                std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap(),
-            )
-        }
-
-        if std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").is_ok() {
-            std::env::set_var(
-                "AWS_ACCESS_KEY_ID",
-                std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").unwrap(),
-            )
-        }
-
-        if std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY").is_ok() {
-            std::env::set_var(
-                "AWS_SECRET_ACCESS_KEY",
-                std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY").unwrap(),
-            )
-        }
+        // Customize http connector to set keepalive.
+        let native_tls = || -> NativeTls {
+            let mut tls = hyper_tls::native_tls::TlsConnector::builder();
+            let tls = tls
+                .min_protocol_version(Some(hyper_tls::native_tls::Protocol::Tlsv12))
+                .build()
+                .unwrap_or_else(|e| panic!("Error while creating TLS connector: {}", e));
+            let mut http = hyper::client::HttpConnector::new();
+            http.set_keepalive(Some(Duration::from_secs(600)));
+            http.enforce_http(false);
+            hyper_tls::HttpsConnector::from((http, tls.into()))
+        };
+        let hyper_adapter = aws_smithy_client::hyper_ext::Adapter::builder()
+            .hyper_builder(hyper::client::Builder::default())
+            .connector_settings(ConnectorSettings::builder().build())
+            .build(native_tls());
+        let sdk_config_loader = aws_config::from_env()
+            .retry_config(RetryConfig::standard().with_max_attempts(4))
+            .http_connector(hyper_adapter);
 
         // Retry 3 times if we get server-side errors or throttling errors
-        let sdk_config_loader =
-            aws_config::from_env().retry_config(RetryConfig::standard().with_max_attempts(4));
-        let sdk_config = match std::env::var("RW_S3_ENDPOINT") {
-            Ok(endpoint) => sdk_config_loader.endpoint_url(endpoint).load().await,
-            Err(_) => sdk_config_loader.load().await,
-        };
+        let client = match std::env::var("RW_S3_ENDPOINT") {
+            Ok(endpoint) => {
+                // s3 compatible storage
+                let is_force_path_style = match std::env::var("RW_IS_FORCE_PATH_STYLE") {
+                    Ok(value) => value == "true",
+                    Err(_) => false,
+                };
 
-        let client = Client::new(&sdk_config);
+                let sdk_config: aws_config::SdkConfig = sdk_config_loader.load().await;
+                #[cfg(madsim)]
+                let client = Client::new(&sdk_config);
+                #[cfg(not(madsim))]
+                let client = Client::from_conf(
+                    aws_sdk_s3::config::Builder::from(&sdk_config)
+                        .endpoint_url(endpoint)
+                        .force_path_style(is_force_path_style)
+                        .build(),
+                );
+                client
+            }
+            Err(_) => {
+                // s3
+
+                let sdk_config = sdk_config_loader.load().await;
+                Client::new(&sdk_config)
+            }
+        };
 
         Self {
             client,
@@ -632,7 +647,6 @@ impl S3ObjectStore {
             ))
             .build();
         let client = Client::from_conf(config);
-
         Self {
             client,
             bucket: bucket.to_string(),

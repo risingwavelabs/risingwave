@@ -36,7 +36,7 @@ use risingwave_sqlparser::ast::{
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::table_catalog::TableVersion;
-use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
 use crate::expr::{Expr, ExprImpl};
 use crate::handler::create_source::{
     bind_source_watermark, check_source_schema, try_bind_columns_from_source,
@@ -46,7 +46,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::session::SessionImpl;
+use crate::session::{CheckRelationError, SessionImpl};
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_connection_in_with_option;
 use crate::{Binder, TableCatalog, WithOptions};
@@ -225,6 +225,11 @@ fn check_default_column_constraints(
                 .to_string(),
         )
         .into());
+    }
+    if expr.is_impure() {
+        return Err(
+            ErrorCode::BindError("impure default expr is not supported.".to_string()).into(),
+        );
     }
     Ok(())
 }
@@ -656,18 +661,28 @@ pub async fn handle_create_table(
     source_schema: Option<SourceSchema>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
+    notice: Option<String>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
+    // TODO(st1page): refactor it
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    }
 
-    if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
-        if if_not_exists {
-            return Ok(PgResponse::empty_result_with_notice(
-                StatementType::CREATE_TABLE,
-                format!("relation \"{}\" already exists, skipping", table_name),
-            ));
-        } else {
-            return Err(e);
+    match session.check_relation_name_duplicated(table_name.clone()) {
+        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
+            return Ok(PgResponse::builder(StatementType::CREATE_TABLE)
+                .notice(format!("relation \"{}\" already exists, skipping", name))
+                .into());
         }
+        Err(e) => return Err(e.into()),
+        Ok(_) => {}
+    };
+
+    if source_schema == Some(SourceSchema::Json) && columns.is_empty() {
+        return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+            "schema definition is required for ENCODE JSON".to_owned(),
+        )));
     }
 
     let (graph, source, table) = {
@@ -714,7 +729,7 @@ pub async fn handle_create_table(
         serde_json::to_string_pretty(&graph).unwrap()
     );
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_table(source, table, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))

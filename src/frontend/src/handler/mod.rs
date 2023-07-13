@@ -21,7 +21,7 @@ use futures::{Stream, StreamExt};
 use pgwire::pg_response::StatementType::{
     ABORT, BEGIN, COMMIT, ROLLBACK, SET_TRANSACTION, START_TRANSACTION,
 };
-use pgwire::pg_response::{PgResponse, RowSetResult};
+use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
@@ -69,10 +69,14 @@ pub mod handle_privilege;
 pub mod privilege;
 pub mod query;
 mod show;
+mod transaction;
 pub mod util;
 pub mod variable;
 
-/// The [`PgResponse`] used by Risingwave.
+/// The [`PgResponseBuilder`] used by RisingWave.
+pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
+
+/// The [`PgResponse`] used by RisingWave.
 pub type RwPgResponse = PgResponse<PgResponseStream>;
 
 pub enum PgResponseStream {
@@ -167,8 +171,13 @@ pub async fn handle(
     sql: &str,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
+    const IGNORE_NOTICE: &str = "Ignored temporarily. See details in https://github.com/risingwavelabs/risingwave/issues/2541";
+
     session.clear_cancel_query_flag();
+    let _guard = session.txn_begin_implicit();
+
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
+
     match stmt {
         Statement::Explain {
             statement,
@@ -240,6 +249,18 @@ pub async fn handle(
                 )
                 .await;
             }
+            // TODO(st1page): refacor it
+            let mut notice = Default::default();
+            let source_schema = source_schema
+                .map(|source_schema| -> Result<SourceSchema> {
+                    let (source_schema, _, n) = source_schema
+                        .into_source_schema()
+                        .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
+                    notice = n;
+                    Ok(source_schema)
+                })
+                .transpose()?;
+
             create_table::handle_create_table(
                 handler_args,
                 name,
@@ -249,6 +270,7 @@ pub async fn handle(
                 source_schema,
                 source_watermarks,
                 append_only,
+                notice,
             )
             .await
         }
@@ -462,35 +484,20 @@ pub async fn handle(
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
-        // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
-        // final implementation.
-        // 1. Fully support transaction is too hard and gives few benefits to us.
-        // 2. Some client e.g. psycopg2 will use this statement.
-        // TODO: Track issues #2595 #2541
-        Statement::StartTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
-            START_TRANSACTION,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::BEGIN { .. } => Ok(PgResponse::empty_result_with_notice(
-            BEGIN,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::Abort { .. } => Ok(PgResponse::empty_result_with_notice(
-            ABORT,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::Commit { .. } => Ok(PgResponse::empty_result_with_notice(
-            COMMIT,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::Rollback { .. } => Ok(PgResponse::empty_result_with_notice(
-            ROLLBACK,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::SetTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
-            SET_TRANSACTION,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
+        Statement::StartTransaction { modes } => {
+            transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
+        }
+        Statement::Begin { modes } => transaction::handle_begin(handler_args, BEGIN, modes).await,
+        Statement::Commit { chain } => {
+            transaction::handle_commit(handler_args, COMMIT, chain).await
+        }
+        Statement::Abort => transaction::handle_rollback(handler_args, ABORT, false).await,
+        Statement::Rollback { chain } => {
+            transaction::handle_rollback(handler_args, ROLLBACK, chain).await
+        }
+        Statement::SetTransaction { .. } => Ok(PgResponse::builder(SET_TRANSACTION)
+            .notice(IGNORE_NOTICE)
+            .into()),
         _ => Err(
             ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
         ),

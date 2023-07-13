@@ -30,7 +30,7 @@ const WORKER_CF_NAME: &str = "cf/worker";
 
 pub const INVALID_EXPIRE_AT: u64 = 0;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Worker {
     pub worker_node: WorkerNode,
 
@@ -76,6 +76,10 @@ impl MetadataModel for Worker {
 impl Worker {
     pub fn worker_id(&self) -> u32 {
         self.worker_node.id
+    }
+
+    pub fn transactional_id(&self) -> Option<u32> {
+        self.worker_node.transactional_id
     }
 
     pub fn worker_type(&self) -> WorkerType {

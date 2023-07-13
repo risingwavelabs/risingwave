@@ -18,7 +18,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
+use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, SourceSchema, Statement};
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
@@ -62,6 +62,18 @@ async fn do_handle_explain(
                 append_only,
                 ..
             } => {
+                // TODO(st1page): refacor it
+                let mut notice = Default::default();
+
+                let source_schema = source_schema
+                    .map(|source_schema| -> Result<SourceSchema> {
+                        let (source_schema, _, n) = source_schema
+                            .into_source_schema()
+                            .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
+                        notice = n;
+                        Ok(source_schema)
+                    })
+                    .transpose()?;
                 let with_options = context.with_options();
                 let plan = match check_create_table_with_source(with_options, source_schema)? {
                     Some(s) => {
@@ -92,7 +104,9 @@ async fn do_handle_explain(
                     }
                 };
                 let context = plan.ctx();
-
+                if let Some(notice) = notice {
+                    context.warn_to_user(notice);
+                }
                 (Ok(plan), context)
             }
 
@@ -200,8 +214,7 @@ async fn do_handle_explain(
             ExplainType::Physical => {
                 // if explain trace is on, the plan has been in the rows
                 if !explain_trace && let Ok(plan) = &plan {
-                    let output = plan.explain_to_string()?;
-                    blocks.push(output);
+                    blocks.push(plan.explain_to_string());
                 }
             }
             ExplainType::Logical => {
@@ -263,14 +276,14 @@ pub async fn handle_explain(
         .map(|l| Row::new(vec![Some(l.into())]))
         .collect_vec();
 
-    Ok(PgResponse::new_for_stream(
-        StatementType::EXPLAIN,
-        None,
-        rows.into(),
-        vec![PgFieldDescriptor::new(
-            "QUERY PLAN".to_owned(),
-            DataType::Varchar.to_oid(),
-            DataType::Varchar.type_len(),
-        )],
-    ))
+    Ok(PgResponse::builder(StatementType::EXPLAIN)
+        .values(
+            rows.into(),
+            vec![PgFieldDescriptor::new(
+                "QUERY PLAN".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            )],
+        )
+        .into())
 }

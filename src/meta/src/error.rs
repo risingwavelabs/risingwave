@@ -15,6 +15,7 @@
 use std::backtrace::Backtrace;
 use std::sync::Arc;
 
+use risingwave_connector::sink::SinkError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
@@ -42,8 +43,8 @@ enum MetaErrorInner {
     #[error("PermissionDenied: {0}")]
     PermissionDenied(String),
 
-    #[error("Invalid worker: {0}")]
-    InvalidWorker(WorkerId),
+    #[error("Invalid worker: {0}, {1}")]
+    InvalidWorker(WorkerId, String),
 
     #[error("Invalid parameter: {0}")]
     InvalidParameter(String),
@@ -66,6 +67,9 @@ enum MetaErrorInner {
 
     #[error("SystemParams error: {0}")]
     SystemParams(String),
+
+    #[error("Sink error: {0}")]
+    Sink(SinkError),
 
     #[error(transparent)]
     Internal(anyhow::Error),
@@ -108,13 +112,13 @@ impl MetaError {
         MetaErrorInner::PermissionDenied(s).into()
     }
 
-    pub fn invalid_worker(worker_id: WorkerId) -> Self {
-        MetaErrorInner::InvalidWorker(worker_id).into()
+    pub fn invalid_worker(worker_id: WorkerId, msg: String) -> Self {
+        MetaErrorInner::InvalidWorker(worker_id, msg).into()
     }
 
     pub fn is_invalid_worker(&self) -> bool {
         use std::borrow::Borrow;
-        std::matches!(self.inner.borrow(), &MetaErrorInner::InvalidWorker(_))
+        std::matches!(self.inner.borrow(), &MetaErrorInner::InvalidWorker(..))
     }
 
     pub fn invalid_parameter(s: impl Into<String>) -> Self {
@@ -163,6 +167,12 @@ impl From<etcd_client::Error> for MetaError {
 impl From<RpcError> for MetaError {
     fn from(e: RpcError) -> Self {
         MetaErrorInner::RpcError(e).into()
+    }
+}
+
+impl From<SinkError> for MetaError {
+    fn from(e: SinkError) -> Self {
+        MetaErrorInner::Sink(e).into()
     }
 }
 

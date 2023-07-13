@@ -72,6 +72,7 @@ pub enum Components {
     AllInOne,
     Sanitizer,
     DynamicLinking,
+    HummockTrace,
 }
 
 impl Components {
@@ -87,11 +88,12 @@ impl Components {
             Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
             Self::RustComponents => "[Build] Rust components",
             Self::Dashboard => "[Build] Dashboard v2",
-            Self::Tracing => "[Component] Tracing: Jaeger",
+            Self::Tracing => "[Component] Tracing: Grafana Tempo",
             Self::Release => "[Build] Enable release mode",
             Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
             Self::DynamicLinking => "[Build] Enable dynamic linking",
+            Self::HummockTrace => "[Build] Hummock Trace",
         }
         .into()
     }
@@ -138,7 +140,7 @@ Required if you want to build dashboard v2 from source."
             Self::Tracing => {
                 "
 Required if you want to use tracing. This option will help
-you download Jaeger."
+you download Grafana Tempo."
             }
             Self::Release => {
                 "
@@ -176,6 +178,9 @@ building Rust components. This can speed up the build process,
 but you might need the expertise to install dependencies correctly.
                 "
             }
+            Self::HummockTrace => {
+            "With this option enabled, RiseDev will enable tracing for Hummock. See storage/hummock_trace for details."
+            }
         }
         .into()
     }
@@ -197,6 +202,7 @@ but you might need the expertise to install dependencies correctly.
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
             "ENABLE_BUILD_RW_CONNECTOR" => Some(Self::BuildConnectorNode),
+            "ENABLE_HUMMOCK_TRACE" => Some(Self::HummockTrace),
             _ => None,
         }
     }
@@ -218,6 +224,7 @@ but you might need the expertise to install dependencies correctly.
             Self::Sanitizer => "ENABLE_SANITIZER",
             Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
             Self::DynamicLinking => "ENABLE_DYNAMIC_LINKING",
+            Self::HummockTrace => "ENABLE_HUMMOCK_TRACE",
         }
         .into()
     }
