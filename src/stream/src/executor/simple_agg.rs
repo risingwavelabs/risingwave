@@ -64,6 +64,13 @@ struct ExecutorInner<S: StateStore> {
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
 
+    /// Column mappings from input chunk to agg input for each agg call.
+    ///
+    /// Example:
+    /// agg_calls   = [sum(#1), string_agg(#0, #2)]
+    /// arg_indices = [[1], [0, 2]]
+    arg_indices: Vec<Vec<usize>>,
+
     /// Index of row count agg call (`count(*)`) in the call list.
     row_count_index: usize,
 
@@ -144,6 +151,11 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 },
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
+                arg_indices: args
+                    .agg_calls
+                    .iter()
+                    .map(|agg| agg.args.val_indices().to_vec())
+                    .collect(),
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
@@ -174,23 +186,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             call_visibilities.push(vis);
         }
 
-        // Materialize input chunk if needed and possible.
-        let materialized: Bitmap = this
-            .agg_calls
-            .iter()
-            .zip_eq_fast(&mut this.storages)
-            .zip_eq_fast(call_visibilities.iter())
-            .map(|((call, storage), visibility)| {
-                if let AggStateStorage::MaterializedInput { table, mapping } = storage && !call.distinct {
-                    let mut chunk = chunk.clone().project(mapping.upstream_columns());
-                    chunk.set_vis(visibility.clone());
-                    table.write_chunk(chunk);
-                    true
-                } else {
-                    false
-                }
-            }).collect();
-
         // Deduplicate for distinct columns.
         let visibilities = vars
             .distinct_dedup
@@ -204,9 +199,18 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             )
             .await?;
 
+        // Materialize input chunk if needed and possible.
+        for (storage, visibility) in this.storages.iter_mut().zip_eq_fast(visibilities.iter()) {
+            if let AggStateStorage::MaterializedInput { table, mapping } = storage {
+                let mut chunk = chunk.clone().project(mapping.upstream_columns());
+                chunk.set_vis(visibility.clone());
+                table.write_chunk(chunk);
+            }
+        }
+
         // Apply chunk to each of the state (per agg_call).
         vars.agg_group
-            .apply_chunk(&mut this.storages, &chunk, visibilities, &materialized)
+            .apply_chunk(&chunk, &this.arg_indices, visibilities)
             .await?;
 
         // Mark state as changed.

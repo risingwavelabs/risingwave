@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::{Op, StreamChunk, Vis};
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
@@ -248,24 +247,22 @@ impl AggGroup {
     }
 
     /// Apply input chunk to all managed agg states.
+    ///
+    /// `mappings` contains the column mappings from input chunk to each agg call.
     /// `visibilities` contains the row visibility of the input chunk for each agg call.
     pub async fn apply_chunk(
         &mut self,
-        storages: &mut [AggStateStorage<impl StateStore>],
         chunk: &StreamChunk,
+        mappings: &[Vec<usize>],
         visibilities: Vec<Vis>,
-        materialized: &Bitmap,
     ) -> StreamExecutorResult<()> {
-        let mut chunk = chunk.clone();
-        for (((state, storage), visibility), materialized) in self
-            .states
-            .iter_mut()
-            .zip_eq_fast(storages)
+        for ((state, mapping), visibility) in (self.states.iter_mut())
+            .zip_eq_fast(mappings)
             .zip_eq_fast(visibilities)
-            .zip_eq_fast(materialized.iter())
         {
+            let mut chunk = chunk.clone().project(mapping);
             chunk.set_vis(visibility);
-            state.apply_chunk(&chunk, storage, materialized).await?;
+            state.apply_chunk(&chunk).await?;
         }
         Ok(())
     }

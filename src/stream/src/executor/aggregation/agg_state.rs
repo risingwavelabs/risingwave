@@ -97,29 +97,14 @@ impl AggState {
     }
 
     /// Apply input chunk to the state.
-    pub async fn apply_chunk(
-        &mut self,
-        chunk: &StreamChunk,
-        storage: &mut AggStateStorage<impl StateStore>,
-        materialized: bool,
-    ) -> StreamExecutorResult<()> {
+    pub async fn apply_chunk(&mut self, chunk: &StreamChunk) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::ResultValue));
                 state.update(chunk).await?;
                 Ok(())
             }
-            Self::Table(state) => {
-                debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
-                state.apply_chunk(chunk).await
-            }
-            Self::MaterializedInput(state) => {
-                let (table, mapping) = must_match!(storage, AggStateStorage::MaterializedInput { table, mapping } => (table, mapping));
-                if !materialized {
-                    table.write_chunk(chunk.clone().project(mapping.upstream_columns()));
-                }
-                state.apply_chunk(chunk)
-            }
+            Self::Table(state) => state.apply_chunk(chunk).await,
+            Self::MaterializedInput(state) => state.apply_chunk(chunk),
         }
     }
 
