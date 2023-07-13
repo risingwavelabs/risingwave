@@ -85,7 +85,7 @@ use tonic::transport::Endpoint;
 use tonic::{Code, Request, Streaming};
 
 use crate::error::{Result, RpcError};
-use crate::hummock_meta_client::HummockMetaClient;
+use crate::hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
@@ -1179,7 +1179,7 @@ impl HummockMetaClient for MetaClient {
         &self,
     ) -> Result<(
         UnboundedSender<SubscribeCompactionEventRequest>,
-        Streaming<SubscribeCompactionEventResponse>,
+        BoxStream<'static, CompactionEventItem>,
     )> {
         let (request_sender, request_receiver) =
             unbounded_channel::<SubscribeCompactionEventRequest>();
@@ -1200,7 +1200,7 @@ impl HummockMetaClient for MetaClient {
             )))
             .await?;
 
-        Ok((request_sender, stream))
+        Ok((request_sender, Box::pin(stream)))
     }
 }
 

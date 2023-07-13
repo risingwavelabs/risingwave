@@ -204,9 +204,7 @@ impl Compactor {
             Err(e) => {
                 tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
                 let task_status = TaskStatus::ExecuteFailed;
-                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status)
-                    .await;
-                // return task_status;
+                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status);
             }
             Ok(extractor) => extractor,
         };
@@ -220,9 +218,7 @@ impl Compactor {
             if !removed_tables.is_empty() {
                 tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
                 let task_status = TaskStatus::ExecuteFailed;
-                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status)
-                    .await;
-                // return task_status;
+                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status);
             }
         }
 
@@ -256,9 +252,7 @@ impl Compactor {
             Err(e) => {
                 tracing::warn!("Failed to generate_splits {:#?}", e);
                 task_status = TaskStatus::ExecuteFailed;
-                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status)
-                    .await;
-                // return task_status;
+                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status);
             }
         }
         // Number of splits (key ranges) is equal to number of compaction tasks
@@ -281,9 +275,7 @@ impl Compactor {
             Err(err) => {
                 tracing::warn!("Failed to build delete range aggregator {:#?}", err);
                 task_status = TaskStatus::ExecuteFailed;
-                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status)
-                    .await;
-                // return task_status;
+                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status);
             }
         };
 
@@ -321,9 +313,7 @@ impl Compactor {
                 context.clone(),
                 output_ssts,
                 task_status,
-            )
-            .await;
-            // return task_status;
+            );
         }
 
         drop(memory_detector);
@@ -409,7 +399,7 @@ impl Compactor {
 
         // After a compaction is done, mutate the compaction task.
         let (compact_task, table_stats) =
-            Self::compact_done(&mut compact_task, context.clone(), output_ssts, task_status).await;
+            Self::compact_done(&mut compact_task, context.clone(), output_ssts, task_status);
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
             "Finished compaction task in {:?}ms: {}",
@@ -422,13 +412,11 @@ impl Compactor {
                 context.sstable_store.delete_cache(table.get_object_id());
             }
         }
-        // task_status
-
         (compact_task, table_stats)
     }
 
     /// Fills in the compact task and tries to report the task result to meta node.
-    async fn compact_done(
+    fn compact_done(
         compact_task: &mut CompactTask,
         context: Arc<CompactorContext>,
         output_ssts: Vec<CompactOutput>,
@@ -574,10 +562,9 @@ impl Compactor {
                             if pull_task_ack.load(Ordering::SeqCst) {
                                 // reset pending_pull_task_count when all pending task had been refill
                                 let pending_pull_task_count = {
-                                    cpu_core_num * 1 - running_task_count.load(Ordering::Relaxed)
+                                    cpu_core_num * 2 - running_task_count.load(Ordering::Relaxed)
                                 };
 
-                                // tracing::info!("TRACE workload {:?} running_task_count {:?} pending_pull_task_count {:?}", last_workload, running_task_count.load(Ordering::Relaxed), pending_pull_task_count);
                                 if pending_pull_task_count > 0 {
                                     if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
                                         event: Some(RequestEvent::PullTask(
@@ -640,7 +627,7 @@ impl Compactor {
                             executor.spawn(async move {
                                 let running_task_count = running_task_count.clone();
                                 match event {
-                                    ResponseEvent::CompactTask(compact_task) => {
+                                    ResponseEvent::CompactTask(compact_task)  => {
                                         running_task_count.fetch_add(1, Ordering::SeqCst);
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;

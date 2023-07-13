@@ -157,7 +157,7 @@ where
                         err
                     );
                     self.compactor_manager
-                        .pause_compactor(compactor.context_id());
+                        .remove_compactor(compactor.context_id());
                 }
             }
         }
@@ -356,7 +356,6 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
-    use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
     use risingwave_pb::hummock::VacuumTask;
 
@@ -403,9 +402,7 @@ mod tests {
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0
         );
-        let core_num = 16;
-        let _receiver = compactor_manager.add_compactor(context_id, core_num);
-        compactor_manager.update_compactor_pending_task(context_id, Some(core_num), false);
+        let _receiver = compactor_manager.add_compactor(context_id);
         // SST deletion is scheduled.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
@@ -464,9 +461,7 @@ mod tests {
             .await
             .unwrap());
 
-        let core_num = 16;
-        let mut receiver = compactor_manager.add_compactor(context_id, core_num);
-        compactor_manager.update_compactor_pending_task(context_id, Some(core_num), false);
+        let mut receiver = compactor_manager.add_compactor(context_id);
 
         assert!(vacuum
             .start_full_gc(Duration::from_secs(

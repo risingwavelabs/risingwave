@@ -23,7 +23,8 @@ use risingwave_pb::hummock::{
     SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
 };
 use tokio::sync::mpsc::UnboundedSender;
-use tonic::Streaming;
+
+pub type CompactionEventItem = std::result::Result<SubscribeCompactionEventResponse, tonic::Status>;
 
 use crate::error::Result;
 
@@ -68,6 +69,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         &self,
     ) -> Result<(
         UnboundedSender<SubscribeCompactionEventRequest>,
-        Streaming<SubscribeCompactionEventResponse>,
+        BoxStream<'static, CompactionEventItem>,
     )>;
 }

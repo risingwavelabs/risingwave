@@ -74,9 +74,7 @@ use crate::hummock::metrics_utils::{
     trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
-use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID,
-};
+use crate::manager::{CatalogManagerRef, ClusterManagerRef, IdCategory, MetaSrvEnv, META_NODE_ID};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
     VarTransaction,
@@ -135,7 +133,7 @@ pub struct HummockManager<S: MetaStore> {
 
     // for compactor
     compactor_streams_change_tx: UnboundedSender<(u32, Streaming<SubscribeCompactionEventRequest>)>,
-    compaction_state: CompactionState,
+    pub compaction_state: CompactionState,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -1834,72 +1832,67 @@ where
         compaction_group: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<()> {
-        todo!();
-
         let start_time = Instant::now();
 
         // // 1. Get idle compactor.
-        // let mut compactor_pull_task_handle = match self.get_idle_compactor() {
-        //     Some(compactor_pull_task_handle) => compactor_pull_task_handle,
-        //     None => {
-        //         tracing::warn!("trigger_manual_compaction No compactor is available.");
-        //         return Err(anyhow::anyhow!(
-        //             "trigger_manual_compaction No compactor is available. compaction_group {}",
-        //             compaction_group
-        //         )
-        //         .into());
-        //     }
-        // };
+        let compactor = match self.compactor_manager.next_compactor() {
+            Some(compactor) => compactor,
+            None => {
+                tracing::warn!("trigger_manual_compaction No compactor is available.");
+                return Err(anyhow::anyhow!(
+                    "trigger_manual_compaction No compactor is available. compaction_group {}",
+                    compaction_group
+                )
+                .into());
+            }
+        };
 
         // // 2. Get manual compaction task.
-        // let compact_task = self
-        //     .manual_get_compact_task(compaction_group, manual_compaction_option)
-        //     .await;
-        // let compact_task = match compact_task {
-        //     Ok(Some(compact_task)) => compact_task,
-        //     Ok(None) => {
-        //         // No compaction task available.
-        //         return Err(anyhow::anyhow!(
-        //             "trigger_manual_compaction No compaction_task is available. compaction_group
-        // {}",             compaction_group
-        //         ).into());
-        //     }
-        //     Err(err) => {
-        //         tracing::warn!("Failed to get compaction task: {:#?}.", err);
-        //         return Err(anyhow::anyhow!(
-        //             "Failed to get compaction task: {:#?} compaction_group {}",
-        //             err,
-        //             compaction_group
-        //         )
-        //         .into());
-        //     }
-        // };
-
-        // Locally cancel task if fails to assign or send task.
-        // let locally_cancel_task = |mut compact_task: CompactTask, task_status: TaskStatus| async
-        // move {     compact_task.set_task_status(task_status);
-        //     self.env
-        //         .notification_manager()
-        //         .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(compact_task))
-        //         .await;
-        //     Err(Error::Internal(anyhow::anyhow!(
-        //         "Failed to trigger_manual_compaction"
-        //     )))
-        // };
+        let compact_task = self
+            .manual_get_compact_task(compaction_group, manual_compaction_option)
+            .await;
+        let compact_task = match compact_task {
+            Ok(Some(compact_task)) => compact_task,
+            Ok(None) => {
+                // No compaction task available.
+                return Err(anyhow::anyhow!(
+                    "trigger_manual_compaction No compaction_task is available. compaction_group {}",
+                    compaction_group
+                )
+                .into());
+            }
+            Err(err) => {
+                tracing::warn!("Failed to get compaction task: {:#?}.", err);
+                return Err(anyhow::anyhow!(
+                    "Failed to get compaction task: {:#?} compaction_group {}",
+                    err,
+                    compaction_group
+                )
+                .into());
+            }
+        };
 
         // 3. send task to compactor
-        // let result = compactor_pull_task_handle.consume_task(&compact_task).await;
-        // if result != ScheduleStatus::Ok {
-        //     return locally_cancel_task(compact_task, TaskStatus::SendFailCanceled).await;
-        // }
+        let compact_task_string = compact_task_to_string(&compact_task);
+        if let Err(e) = compactor
+            .send_event(ResponseEvent::CompactTask(compact_task))
+            .await
+        {
+            // todo cancel meta ?
 
-        // todo: random send ?
+            return Err(anyhow::anyhow!(
+                "Failed to trigger compaction task: {:#?} compaction_group {}",
+                e,
+                compaction_group
+            )
+            .into());
+        }
 
-        // tracing::info!(
-        //     "Trigger manual compaction task. {}. cost time: {:?}",
-        //     compact_task_to_string(&compact_task),
-        //     start_time.elapsed(),
-        // );
+        tracing::info!(
+            "Trigger manual compaction task. {}. cost time: {:?}",
+            &compact_task_string,
+            start_time.elapsed(),
+        );
 
         Ok(())
     }
@@ -2439,11 +2432,8 @@ where
                     },
 
                     compactor_stream = compactor_streams_change_rx.recv() => {
-                        match compactor_stream {
-                            Some((context_id, stream)) => {
+                        if let Some((context_id, stream)) = compactor_stream {
                                 push_stream(context_id, stream, &mut compactor_request_streams);
-                            },
-                            None => {}
                         }
                     },
 
@@ -2485,7 +2475,7 @@ where
                                 if let (Some(group), Some(task_type)) = (group, task_type) {
                                     let selector: &mut Box<dyn LevelSelector> = compaction_selectors.get_mut(&task_type).unwrap();
 
-                                    for (pull_index, _) in (0..pull_task_count).enumerate() {
+                                    for _ in 0..pull_task_count {
                                         let compact_task =
                                             hummock_manager
                                             .get_compact_task(group, selector)
@@ -2507,14 +2497,11 @@ where
                                                     // try cancel on compactor
                                                     let _ = compactor.cancel_task(task_id).await;
                                                     hummock_manager.compactor_manager
-                                                        .pause_compactor(compactor.context_id());
-                                                } else {
-                                                    println!("EVENT ResponseEvent::CompactTask pull_index {} pull_task_count {}", pull_index, pull_task_count);
+                                                        .remove_compactor(compactor.context_id());
                                                 }
                                             },
                                             Ok(None) => {
                                                 hummock_manager.compaction_state.unschedule(group, task_type);
-                                                println!("context {} finish pull pull_index {} expected_pull_count {}", context_id, pull_index, pull_task_count);
                                                 // ack to compactor
                                                 if let Err(e) = compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {})).await {
                                                     tracing::warn!(
@@ -2524,7 +2511,7 @@ where
                                                     );
 
                                                     hummock_manager.compactor_manager
-                                                        .pause_compactor(context_id);
+                                                        .remove_compactor(context_id);
                                                 }
                                                 break;
                                             }
@@ -2538,14 +2525,14 @@ where
                                                     );
 
                                                     hummock_manager.compactor_manager
-                                                        .pause_compactor(context_id);
+                                                        .remove_compactor(context_id);
                                                 }
                                                 break;
                                             }
                                         };
                                     }
                                 } else {
-                                    println!("Fail auto_pick_type group {:?} task_type {:?}", group, task_type);
+                                    tracing::debug!("Fail auto_pick_type group {:?} task_type {:?}", group, task_type);
                                     if let Err(e) = compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {})).await {
                                         tracing::warn!(
                                             "Failed to send ask to {}. {:#?}",
@@ -2554,7 +2541,7 @@ where
                                         );
 
                                         hummock_manager.compactor_manager
-                                            .pause_compactor(context_id);
+                                            .remove_compactor(context_id);
                                     }
                                 }
                             },
@@ -2563,16 +2550,12 @@ where
                                 compact_task,
                                 table_stats_change
                             }) => {
-                                match compact_task {
-                                    Some(mut compact_task) => {
-                                       if let Err(e) =  hummock_manager
-                                       .report_compact_task(&mut compact_task, Some(table_stats_change))
+                                if let Some(mut compact_task) = compact_task {
+                                    if let Err(e) =  hummock_manager
+                                        .report_compact_task(&mut compact_task, Some(table_stats_change))
                                        .await {
                                         tracing::error!("report compact_tack fail {e:?}");
-                                       }
                                     }
-
-                                    None => {}
                                 }
                             },
 

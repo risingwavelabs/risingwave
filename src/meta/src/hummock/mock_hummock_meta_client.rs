@@ -18,8 +18,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use fail::fail_point;
-use futures::stream::{BoxStream, Stream};
-use futures::StreamExt;
+use futures::stream::BoxStream;
+use futures::{Stream, StreamExt};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
 use risingwave_hummock_sdk::{
@@ -27,16 +27,16 @@ use risingwave_hummock_sdk::{
     SstObjectIdRange,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
     compact_task, CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot,
     HummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
-use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::mpsc::UnboundedSender;
+use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tonic::Streaming;
 
 use crate::hummock::compaction::{
     default_level_selector, LevelSelector, SpaceReclaimCompactionSelector,
@@ -222,14 +222,119 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
     ) -> Result<(
         UnboundedSender<SubscribeCompactionEventRequest>,
-        Streaming<SubscribeCompactionEventResponse>,
+        BoxStream<'static, CompactionEventItem>,
     )> {
-        todo!();
+        let worker_node = self
+            .hummock_manager
+            .cluster_manager()
+            .add_worker_node(
+                WorkerType::Compactor,
+                HostAddress {
+                    host: "compactor".to_string(),
+                    port: 0,
+                },
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        let context_id = worker_node.id;
+        let _compactor_rx = self
+            .hummock_manager
+            .compactor_manager_ref_for_test()
+            .add_compactor(context_id);
+
+        let (request_sender, _request_receiver) =
+            unbounded_channel::<SubscribeCompactionEventRequest>();
+
+        self.compact_context_id.store(context_id, Ordering::Release);
+
+        let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let hummock_manager_compact = self.hummock_manager.clone();
+        let handle = tokio::spawn(async move {
+            loop {
+                use rand::prelude::SliceRandom;
+                use rand::thread_rng;
+                let mut compaction_group_ids = hummock_manager_compact.compaction_group_ids().await;
+                compaction_group_ids.shuffle(&mut thread_rng());
+
+                let (group, task_type) = {
+                    let (mut group, mut task_type) = (None, None);
+                    for cg_id in compaction_group_ids {
+                        if let Some(pick_type) = hummock_manager_compact
+                            .compaction_state
+                            .auto_pick_type(cg_id)
+                        {
+                            group = Some(cg_id);
+                            task_type = Some(pick_type);
+
+                            break;
+                        }
+                    }
+
+                    (group, task_type)
+                };
+
+                if task_type.is_none() {
+                    break;
+                }
+
+                let mut selector: Box<dyn LevelSelector> = match task_type.unwrap() {
+                    compact_task::TaskType::Dynamic => default_level_selector(),
+                    compact_task::TaskType::SpaceReclaim => {
+                        Box::<SpaceReclaimCompactionSelector>::default()
+                    }
+
+                    _ => panic!("Error type when mock_hummock_meta_client subscribe_compact_tasks"),
+                };
+                if let Some(task) = hummock_manager_compact
+                    .get_compact_task(group.unwrap(), &mut selector)
+                    .await
+                    .unwrap()
+                {
+                    let resp = SubscribeCompactionEventResponse {
+                        event: Some(ResponseEvent::CompactTask(task)),
+                    };
+
+                    let _ = task_tx.send(Ok(resp));
+                }
+            }
+        });
+
+        Ok((
+            request_sender,
+            Box::pin(CompactionEventItemStream {
+                inner: UnboundedReceiverStream::new(task_rx),
+                _handle: handle,
+            }),
+        ))
     }
 }
 
 impl MockHummockMetaClient {
     pub fn hummock_manager_ref(&self) -> Arc<HummockManager<MemStore>> {
         self.hummock_manager.clone()
+    }
+}
+
+pub struct CompactionEventItemStream {
+    inner: UnboundedReceiverStream<CompactionEventItem>,
+    _handle: JoinHandle<()>,
+}
+
+impl Drop for CompactionEventItemStream {
+    fn drop(&mut self) {
+        self.inner.close();
+    }
+}
+
+impl Stream for CompactionEventItemStream {
+    type Item = CompactionEventItem;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.inner.poll_next_unpin(cx)
     }
 }

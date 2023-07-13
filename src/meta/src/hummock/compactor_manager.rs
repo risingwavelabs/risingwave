@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -45,9 +44,6 @@ pub const TASK_NORMAL: &str = "task is normal, please wait some time";
 pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactionEventResponse>>,
-    // state
-    pub cpu_ratio: AtomicU32,
-    pub total_cpu_core: u32,
 }
 
 struct TaskHeartbeat {
@@ -65,14 +61,8 @@ impl Compactor {
     pub fn new(
         context_id: HummockContextId,
         sender: Sender<MetaResult<SubscribeCompactionEventResponse>>,
-        cpu_core_num: u32,
     ) -> Self {
-        Self {
-            context_id,
-            sender,
-            cpu_ratio: AtomicU32::new(0),
-            total_cpu_core: cpu_core_num,
-        }
+        Self { context_id, sender }
     }
 
     pub async fn send_event(&self, event: ResponseEvent) -> MetaResult<()> {
@@ -104,10 +94,6 @@ impl Compactor {
 
     pub fn context_id(&self) -> HummockContextId {
         self.context_id
-    }
-
-    pub fn is_busy(&self, limit: u32) -> bool {
-        self.cpu_ratio.load(Ordering::Acquire) > limit
     }
 }
 
@@ -195,22 +181,15 @@ impl CompactorManagerInner {
     pub fn add_compactor(
         &mut self,
         context_id: HummockContextId,
-        cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactionEventResponse>> {
         const STREAM_BUFFER_SIZE: usize = 4;
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         self.compactors.retain(|c| *c != context_id);
         self.compactors.push(context_id);
-        self.compactor_map.insert(
-            context_id,
-            Arc::new(Compactor::new(context_id, tx, cpu_core_num)),
-        );
+        self.compactor_map
+            .insert(context_id, Arc::new(Compactor::new(context_id, tx)));
 
-        tracing::info!(
-            "Added compactor session {} cpu_core_num {}",
-            context_id,
-            cpu_core_num
-        );
+        tracing::info!("Added compactor session {}", context_id);
         rx
     }
 
@@ -219,11 +198,6 @@ impl CompactorManagerInner {
         while let Some(compactor) = self.next_compactor() {
             self.remove_compactor(compactor.context_id);
         }
-    }
-
-    pub fn pause_compactor(&mut self, context_id: HummockContextId) {
-        self.remove_compactor(context_id);
-        tracing::info!("Paused compactor session {}", context_id);
     }
 
     pub fn remove_compactor(&mut self, context_id: HummockContextId) {
@@ -432,22 +406,6 @@ impl CompactorManager {
         }
     }
 
-    // pub fn next_idle_compactor(&self) -> Option<CompactorPullTaskHandle> {
-    //     if let Some((compactor, pending_pull_task_count)) =
-    // self.inner.read().next_idle_compactor()     {
-    //         assert!(pending_pull_task_count > 0);
-    //         // `update_compactor_pending_task` ensures that the compactor that can be
-    //         // selected must exist and that the value of pending_pull_task_count is not 0.
-    //         Some(CompactorPullTaskHandle {
-    //             compactor_manager: self.inner.clone(),
-    //             compactor,
-    //             pending_pull_task_count,
-    //         })
-    //     } else {
-    //         None
-    //     }
-    // }
-
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
         self.inner.read().next_compactor()
     }
@@ -455,17 +413,12 @@ impl CompactorManager {
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
-        cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactionEventResponse>> {
-        self.inner.write().add_compactor(context_id, cpu_core_num)
+        self.inner.write().add_compactor(context_id)
     }
 
     pub fn abort_all_compactors(&self) {
         self.inner.write().abort_all_compactors();
-    }
-
-    pub fn pause_compactor(&self, context_id: HummockContextId) {
-        self.inner.write().pause_compactor(context_id)
     }
 
     pub fn remove_compactor(&self, context_id: HummockContextId) {
@@ -541,7 +494,7 @@ mod tests {
             )
             .await;
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-            let _receiver = compactor_manager.add_compactor(context_id, 1);
+            let _receiver = compactor_manager.add_compactor(context_id);
             hummock_manager
                 .get_compact_task(
                     StaticCompactionGroupId::StateDefault.into(),
@@ -596,7 +549,7 @@ mod tests {
         // Test add
         assert_eq!(compactor_manager.compactor_num(), 0);
         assert!(compactor_manager.get_compactor(context_id).is_none());
-        compactor_manager.add_compactor(context_id, 1);
+        compactor_manager.add_compactor(context_id);
         assert_eq!(compactor_manager.compactor_num(), 1);
         assert_eq!(
             compactor_manager
@@ -605,21 +558,6 @@ mod tests {
                 .context_id(),
             context_id
         );
-        // Test pause
-        compactor_manager.pause_compactor(context_id);
-        assert_eq!(compactor_manager.compactor_num(), 0);
-        assert!(compactor_manager.get_compactor(context_id).is_none());
-        for _ in 0..3 {
-            compactor_manager.add_compactor(context_id, 1);
-            assert_eq!(compactor_manager.compactor_num(), 1);
-            assert_eq!(
-                compactor_manager
-                    .get_compactor(context_id)
-                    .unwrap()
-                    .context_id(),
-                context_id
-            );
-        }
         // Test remove
         compactor_manager.remove_compactor(context_id);
         assert_eq!(compactor_manager.compactor_num(), 0);

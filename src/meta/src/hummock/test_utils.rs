@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+#[cfg(test)]
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
@@ -29,6 +30,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+#[cfg(test)]
 use crate::hummock::compaction::default_level_selector;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{ClusterManager, ClusterManagerRef, MetaSrvEnv, META_NODE_ID};
@@ -80,13 +82,9 @@ where
         .compactor_num()
         == 0
     {
-        let core_num = 16;
         hummock_manager
             .compactor_manager_ref_for_test()
-            .add_compactor(context_id, core_num);
-        // hummock_manager
-        //     .compactor_manager
-        //     .update_compactor_pending_task(context_id, Some(core_num), false);
+            .add_compactor(context_id);
         temp_compactor = true;
     }
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
@@ -96,7 +94,6 @@ where
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
-    let compactor_pull_task_handle = hummock_manager.get_idle_compactor().unwrap();
     let mut selector = default_level_selector();
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
@@ -113,10 +110,11 @@ where
     );
     compact_task.target_level = 6;
     if temp_compactor {
-        assert_eq!(
-            compactor_pull_task_handle.compactor.context_id(),
-            context_id
-        );
+        let compactor = hummock_manager
+            .compactor_manager_ref_for_test()
+            .next_compactor()
+            .unwrap();
+        assert_eq!(compactor.context_id(), context_id);
     }
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.set_task_status(TaskStatus::Success);

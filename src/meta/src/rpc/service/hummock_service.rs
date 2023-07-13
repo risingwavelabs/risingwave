@@ -565,7 +565,7 @@ where
 
         let rx: tokio::sync::mpsc::Receiver<
             Result<SubscribeCompactionEventResponse, crate::MetaError>,
-        > = compactor_manager.add_compactor(context_id, 0);
+        > = compactor_manager.add_compactor(context_id);
 
         // register request stream to hummock
         self.hummock_manager

@@ -20,12 +20,11 @@ use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo, SstObjectIdRange};
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot, HummockVersion,
-    SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
+    SubscribeCompactionEventRequest, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
-use risingwave_rpc_client::{HummockMetaClient, MetaClient};
+use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
 use tokio::sync::mpsc::UnboundedSender;
-use tonic::Streaming;
 
 use crate::hummock::{HummockEpoch, HummockVersionId};
 use crate::monitor::HummockMetrics;
@@ -166,7 +165,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         &self,
     ) -> Result<(
         UnboundedSender<SubscribeCompactionEventRequest>,
-        Streaming<SubscribeCompactionEventResponse>,
+        BoxStream<'static, CompactionEventItem>,
     )> {
         self.meta_client.subscribe_compaction_event().await
     }

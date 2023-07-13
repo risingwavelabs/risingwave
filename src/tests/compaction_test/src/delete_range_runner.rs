@@ -257,6 +257,7 @@ async fn compaction_test(
                 .sum::<usize>()
         );
     }
+
     compactor_shutdown_tx.send(()).unwrap();
     compactor_thrd.await.unwrap();
     Ok(())
