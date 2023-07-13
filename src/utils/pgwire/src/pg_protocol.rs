@@ -396,7 +396,7 @@ where
             let span = tracing::info_span!(
                 "process_query_msg_one_stmt",
                 session_id = session.id().0,
-                stmt = format_args!("{:?}", truncated_fmt::TruncatedFmt(&stmt, 1024)),
+                stmt = format_args!("{}", truncated_fmt::TruncatedFmt(&stmt, 1024)),
             );
 
             self.inner_process_query_msg_one_stmt(stmt, session.clone())
