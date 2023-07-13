@@ -962,10 +962,14 @@ impl Session for SessionImpl {
 
     fn parse(
         self: Arc<Self>,
-        statement: Statement,
+        statement: Option<Statement>,
         params_types: Vec<DataType>,
     ) -> std::result::Result<PrepareStatement, BoxedError> {
-        Ok(handle_parse(self, statement, params_types)?)
+        Ok(if let Some(statement) = statement {
+            handle_parse(self, statement, params_types)?
+        } else {
+            PrepareStatement::Empty
+        })
     }
 
     fn bind(
@@ -1013,6 +1017,7 @@ impl Session for SessionImpl {
         prepare_statement: PrepareStatement,
     ) -> std::result::Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError> {
         Ok(match prepare_statement {
+            PrepareStatement::Empty => (vec![], vec![]),
             PrepareStatement::Prepared(prepare_statement) => (
                 prepare_statement.bound_result.param_types,
                 infer(
@@ -1029,6 +1034,7 @@ impl Session for SessionImpl {
         portal: Portal,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
         match portal {
+            Portal::Empty => Ok(vec![]),
             Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
