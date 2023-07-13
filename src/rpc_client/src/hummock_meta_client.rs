@@ -14,13 +14,12 @@
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo, SstObjectIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot, HummockVersion,
-    SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
+    HummockSnapshot, HummockVersion, SubscribeCompactionEventRequest,
+    SubscribeCompactionEventResponse, VacuumTask,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -37,17 +36,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;
     async fn get_epoch(&self) -> Result<HummockSnapshot>;
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange>;
-    async fn report_compaction_task(
-        &self,
-        compact_task: CompactTask,
-        table_stats_change: TableStatsMap,
-    ) -> Result<()>;
-    async fn compactor_heartbeat(
-        &self,
-        progress: Vec<CompactTaskProgress>,
-        workload: CompactorWorkload,
-        pull_task_count: Option<u32>,
-    ) -> Result<()>;
     // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch(
         &self,

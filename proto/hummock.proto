@@ -339,23 +339,6 @@ message CompactTaskAssignment {
   uint32 context_id = 2;
 }
 
-message GetCompactionTasksRequest {}
-
-message GetCompactionTasksResponse {
-  common.Status status = 1;
-  CompactTask compact_task = 2;
-}
-
-message ReportCompactionTasksRequest {
-  uint32 context_id = 1;
-  CompactTask compact_task = 2;
-  map<uint32, TableStats> table_stats_change = 3;
-}
-
-message ReportCompactionTasksResponse {
-  common.Status status = 1;
-}
-
 message HummockPinnedVersion {
   uint32 context_id = 1;
   uint64 min_pinned_id = 2;
@@ -393,17 +376,6 @@ message CompactTaskProgress {
 // The measurement of the workload on a compactor to determine whether it is idle.
 message CompactorWorkload {
   uint32 cpu = 1;
-}
-
-message CompactorHeartbeatRequest {
-  uint32 context_id = 1;
-  repeated CompactTaskProgress progress = 2;
-  CompactorWorkload workload = 3;
-  optional uint32 pull_task_count = 4;
-}
-
-message CompactorHeartbeatResponse {
-  common.Status status = 1;
 }
 
 message SubscribeCompactionEventRequest {
@@ -646,8 +618,6 @@ service HummockManagerService {
   rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
-  rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
-  rpc CompactorHeartbeat(CompactorHeartbeatRequest) returns (CompactorHeartbeatResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc PinSpecificSnapshot(PinSpecificSnapshotRequest) returns (PinSnapshotResponse);
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);

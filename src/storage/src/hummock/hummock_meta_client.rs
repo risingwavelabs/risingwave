@@ -16,11 +16,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo, SstObjectIdRange};
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot, HummockVersion,
-    SubscribeCompactionEventRequest, VacuumTask,
+    HummockSnapshot, HummockVersion, SubscribeCompactionEventRequest, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
@@ -98,38 +96,12 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn report_compaction_task(
-        &self,
-        compact_task: CompactTask,
-        table_stats_change: TableStatsMap,
-    ) -> Result<()> {
-        self.stats.report_compaction_task_counts.inc();
-        let timer = self.stats.report_compaction_task_latency.start_timer();
-        let res = self
-            .meta_client
-            .report_compaction_task(compact_task, table_stats_change)
-            .await;
-        timer.observe_duration();
-        res
-    }
-
     async fn commit_epoch(
         &self,
         _epoch: HummockEpoch,
         _sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
-    }
-
-    async fn compactor_heartbeat(
-        &self,
-        progress: Vec<CompactTaskProgress>,
-        workload: CompactorWorkload,
-        pull_task_count: Option<u32>,
-    ) -> Result<()> {
-        self.meta_client
-            .compactor_heartbeat(progress, workload, pull_task_count)
-            .await
     }
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {

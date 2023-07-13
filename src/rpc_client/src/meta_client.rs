@@ -33,7 +33,6 @@ use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     SstObjectIdRange,
@@ -1090,20 +1089,6 @@ impl HummockMetaClient for MetaClient {
         Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
-    async fn report_compaction_task(
-        &self,
-        compact_task: CompactTask,
-        table_stats_change: HashMap<u32, risingwave_hummock_sdk::table_stats::TableStats>,
-    ) -> Result<()> {
-        let req = ReportCompactionTasksRequest {
-            context_id: self.worker_id(),
-            compact_task: Some(compact_task),
-            table_stats_change: to_prost_table_stats_map(table_stats_change),
-        };
-        self.inner.report_compaction_tasks(req).await?;
-        Ok(())
-    }
-
     async fn commit_epoch(
         &self,
         _epoch: HummockEpoch,
@@ -1114,22 +1099,6 @@ impl HummockMetaClient for MetaClient {
 
     async fn update_current_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
         panic!("Only meta service can update_current_epoch in production.")
-    }
-
-    async fn compactor_heartbeat(
-        &self,
-        progress: Vec<CompactTaskProgress>,
-        workload: CompactorWorkload,
-        pull_task_count: Option<u32>,
-    ) -> Result<()> {
-        let req = CompactorHeartbeatRequest {
-            context_id: self.worker_id(),
-            progress,
-            workload: Some(workload),
-            pull_task_count,
-        };
-        self.inner.compactor_heartbeat(req).await?;
-        Ok(())
     }
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
@@ -1651,9 +1620,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }
-            ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
-            ,{ hummock_client, compactor_heartbeat, CompactorHeartbeatRequest, CompactorHeartbeatResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }

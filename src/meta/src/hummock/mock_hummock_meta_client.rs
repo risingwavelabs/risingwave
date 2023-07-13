@@ -21,7 +21,6 @@ use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     SstObjectIdRange,
@@ -29,8 +28,8 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    compact_task, CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot,
-    HummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
+    compact_task, CompactTask, HummockSnapshot, HummockVersion, SubscribeCompactionEventRequest,
+    SubscribeCompactionEventResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient};
@@ -152,21 +151,6 @@ impl HummockMetaClient for MockHummockMetaClient {
             })
     }
 
-    async fn report_compaction_task(
-        &self,
-        mut compact_task: CompactTask,
-        table_stats_change: TableStatsMap,
-    ) -> Result<()> {
-        self.hummock_manager
-            .report_compact_task(
-                &mut compact_task,
-                Some(to_prost_table_stats_map(table_stats_change)),
-            )
-            .await
-            .map(|_| ())
-            .map_err(mock_err)
-    }
-
     async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
@@ -185,15 +169,6 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         self.hummock_manager.update_current_epoch(epoch);
-        Ok(())
-    }
-
-    async fn compactor_heartbeat(
-        &self,
-        _progress: Vec<CompactTaskProgress>,
-        _workload: CompactorWorkload,
-        _pull_task_count: Option<u32>,
-    ) -> Result<()> {
         Ok(())
     }
 

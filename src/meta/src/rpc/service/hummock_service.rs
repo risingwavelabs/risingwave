@@ -18,7 +18,6 @@ use std::time::Duration;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
-use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
 use risingwave_pb::hummock::version_update_payload::Payload;
@@ -136,27 +135,6 @@ where
         Ok(Response::new(resp))
     }
 
-    async fn report_compaction_tasks(
-        &self,
-        request: Request<ReportCompactionTasksRequest>,
-    ) -> Result<Response<ReportCompactionTasksResponse>, Status> {
-        let req = request.into_inner();
-        match req.compact_task {
-            None => Ok(Response::new(ReportCompactionTasksResponse {
-                status: None,
-            })),
-            Some(mut compact_task) => {
-                self.hummock_manager
-                    .report_compact_task(&mut compact_task, Some(req.table_stats_change))
-                    .await?;
-
-                Ok(Response::new(ReportCompactionTasksResponse {
-                    status: None,
-                }))
-            }
-        }
-    }
-
     async fn pin_specific_snapshot(
         &self,
         request: Request<PinSpecificSnapshotRequest>,
@@ -217,48 +195,6 @@ where
             start_id: sst_id_range.start_id,
             end_id: sst_id_range.end_id,
         }))
-    }
-
-    // TODO: convert this into a stream.
-    async fn compactor_heartbeat(
-        &self,
-        request: Request<CompactorHeartbeatRequest>,
-    ) -> Result<Response<CompactorHeartbeatResponse>, Status> {
-        let req = request.into_inner();
-        let compactor_manager = self.hummock_manager.compactor_manager.clone();
-
-        let cancel_tasks = compactor_manager.update_task_heartbeats(&req.progress);
-
-        for mut task in cancel_tasks {
-            tracing::info!(
-                "Task with task_id {} with context_id {} has expired due to lack of visible progress",
-                req.context_id,
-                task.task_id
-            );
-
-            if let Err(e) = self
-                .hummock_manager
-                .cancel_compact_task(&mut task, TaskStatus::HeartbeatCanceled)
-                .await
-            {
-                tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                                until we can successfully report its status. task_id: {}, ERR: {e:?}", task.task_id);
-            }
-
-            if let Some(compactor) = compactor_manager.get_compactor(req.context_id) {
-                // Forcefully cancel the task so that it terminates
-                // early on the compactor
-                // node.
-                let _ = compactor.cancel_task(task.task_id).await;
-                tracing::info!(
-                    "CancelTask operation for task_id {} has been sent to node with context_id {}",
-                    req.context_id,
-                    task.task_id
-                );
-            }
-        }
-
-        Ok(Response::new(CompactorHeartbeatResponse { status: None }))
     }
 
     async fn report_vacuum_task(

@@ -457,18 +457,6 @@ impl Compactor {
             .inc_by(compact_task.sorted_output_ssts.len() as u64);
 
         (compact_task.clone(), table_stats_map)
-
-        // if let Err(e) = context
-        //     .hummock_meta_client
-        //     .report_compaction_task(compact_task.clone(), table_stats_map)
-        //     .await
-        // {
-        //     tracing::warn!(
-        //         "Failed to report compaction task: {}, error: {}",
-        //         compact_task.task_id,
-        //         e
-        //     );
-        // }
     }
 
     /// The background compaction thread that receives compaction tasks from hummock compaction
