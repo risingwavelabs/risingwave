@@ -171,26 +171,27 @@ impl HummockSnapshotManager {
     ///
     /// Should only be called by the observer manager.
     pub fn update(&self, snapshot: PbHummockSnapshot) {
-        // First tell the worker that a new snapshot is going to be pinned.
-        self.worker_sender
-            .send(Operation::Pin(snapshot.clone()))
-            .unwrap();
+        self.latest_snapshot.send_if_modified(move |old_snapshot| {
+            if old_snapshot.value == snapshot {
+                // ignore the same snapshot, should rarely happen
+                false
+            } else {
+                assert_le!(old_snapshot.value.committed_epoch, snapshot.committed_epoch);
+                assert_le!(old_snapshot.value.current_epoch, snapshot.current_epoch);
 
-        // Then swap the latest snapshot.
-        let snapshot = Arc::new(PinnedSnapshot {
-            value: snapshot,
-            unpin_sender: self.worker_sender.clone(),
+                // First tell the worker that a new snapshot is going to be pinned.
+                self.worker_sender
+                    .send(Operation::Pin(snapshot.clone()))
+                    .unwrap();
+                // Then set the latest snapshot.
+                *old_snapshot = Arc::new(PinnedSnapshot {
+                    value: snapshot,
+                    unpin_sender: self.worker_sender.clone(),
+                });
+
+                true
+            }
         });
-        let old_snapshot = self.latest_snapshot.send_replace(snapshot.clone());
-
-        assert_le!(
-            old_snapshot.value.committed_epoch,
-            snapshot.value.committed_epoch
-        );
-        assert_le!(
-            old_snapshot.value.current_epoch,
-            snapshot.value.current_epoch
-        );
     }
 
     /// Wait until the latest snapshot is newer than the given one.
