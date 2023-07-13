@@ -283,6 +283,10 @@ impl ProjectBuilder {
         self.exprs.get(index)
     }
 
+    pub fn get_expr_index(&self, expr: &ExprImpl) -> Option<&usize> {
+        self.exprs_index.get(expr)
+    }
+
     pub fn expr_index(&self, expr: &ExprImpl) -> Option<usize> {
         check_expr_type(expr).ok()?;
         self.exprs_index.get(expr).copied()
@@ -291,6 +295,10 @@ impl ProjectBuilder {
     /// build the `LogicalProject` from `LogicalProjectBuilder`
     pub fn build<PlanRef: GenericPlanRef>(self, input: PlanRef) -> Project<PlanRef> {
         Project::new(self.exprs, input)
+    }
+
+    pub fn exprs_len(&self) -> usize {
+        self.exprs.len()
     }
 }
 
