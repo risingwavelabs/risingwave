@@ -27,7 +27,7 @@ import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class SinkStreamObserver
+public class SinkWriterStreamObserver
         implements StreamObserver<ConnectorServiceProto.SinkWriterStreamRequest> {
     private SinkWriter sink;
 
@@ -44,13 +44,13 @@ public class SinkStreamObserver
     private Deserializer deserializer;
     private final StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> responseObserver;
 
-    private static final Logger LOG = LoggerFactory.getLogger(SinkStreamObserver.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SinkWriterStreamObserver.class);
 
     public boolean isInitialized() {
         return sink != null;
     }
 
-    public SinkStreamObserver(
+    public SinkWriterStreamObserver(
             StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> responseObserver) {
         this.responseObserver = responseObserver;
     }

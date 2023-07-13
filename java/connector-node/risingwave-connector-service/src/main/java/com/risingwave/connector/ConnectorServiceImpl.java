@@ -25,7 +25,7 @@ public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceI
     @Override
     public StreamObserver<ConnectorServiceProto.SinkWriterStreamRequest> sinkWriterStream(
             StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> responseObserver) {
-        return new SinkStreamObserver(responseObserver);
+        return new SinkWriterStreamObserver(responseObserver);
     }
 
     @Override
