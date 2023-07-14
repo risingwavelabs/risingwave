@@ -833,7 +833,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Function { schema } => write!(f, "FUNCTIONS{}", fmt_schema(schema)),
             ShowObject::Indexes { table } => write!(f, "INDEXES FROM {}", table),
             ShowObject::Cluster => {
-                write!(f, "CLUSTERS")
+                write!(f, "CLUSTER")
             }
         }
     }
