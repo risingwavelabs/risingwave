@@ -204,6 +204,10 @@ impl Date {
         ))
     }
 
+    pub fn get_nums_days_unix_epoch(&self) -> i32{
+        self.0.checked_sub_days(Days::new(UNIX_EPOCH_DAYS as u64)).unwrap().num_days_from_ce()
+    }
+
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
             .write(&(self.0.num_days_from_ce()).to_be_bytes())
@@ -296,6 +300,10 @@ impl Timestamp {
         output
             .write(&(self.0.timestamp_micros()).to_be_bytes())
             .map_err(Into::into)
+    }
+
+    pub fn get_timestamp_nsecs(&self) -> i64{
+        self.0.timestamp_nanos() 
     }
 
     pub fn with_micros(timestamp_micros: i64) -> Result<Self> {

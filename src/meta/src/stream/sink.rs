@@ -37,7 +37,7 @@ pub async fn validate_sink(
         sink_catalog.downstream_pk_indices(),
         sink_catalog.sink_type,
         sink_catalog.id,
-    )?;
+    ).await?;
 
     dispatch_sink!(sink, sink, { Ok(sink.validate(connector_client).await?) })
 }

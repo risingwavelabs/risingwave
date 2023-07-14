@@ -18,6 +18,7 @@ pub mod kinesis;
 pub mod redis;
 pub mod remote;
 pub mod utils;
+pub mod clickhouse;
 
 use std::collections::HashMap;
 
@@ -35,7 +36,9 @@ use thiserror::Error;
 pub use tracing;
 
 use self::catalog::SinkType;
+use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
 use crate::sink::catalog::SinkId;
+use crate::sink::clickhouse::CLICKHOUSE_SINK;
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
@@ -60,7 +63,7 @@ pub trait Sink {
     type Writer: SinkWriter;
     type Coordinator: SinkCommitCoordinator;
 
-    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
+    async fn validate(&mut self, client: Option<ConnectorClient>) -> Result<()>;
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
@@ -187,6 +190,7 @@ pub enum SinkConfig {
     Remote(RemoteConfig),
     Kinesis(Box<KinesisSinkConfig>),
     BlackHole,
+    ClickHouse(Box<ClickHouseConfig>),
 }
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
@@ -203,7 +207,7 @@ impl Sink for BlackHoleSink {
         Ok(Self)
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&mut self, _client: Option<ConnectorClient>) -> Result<()> {
         Ok(())
     }
 }
@@ -251,6 +255,9 @@ impl SinkConfig {
             KINESIS_SINK => Ok(SinkConfig::Kinesis(Box::new(
                 KinesisSinkConfig::from_hashmap(properties)?,
             ))),
+            CLICKHOUSE_SINK => Ok(SinkConfig::ClickHouse(Box::new(
+                ClickHouseConfig::from_hashmap(properties)?,
+            ))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
             _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
@@ -263,11 +270,12 @@ impl SinkConfig {
             SinkConfig::Remote(_) => "remote",
             SinkConfig::BlackHole => "blackhole",
             SinkConfig::Kinesis(_) => "kinesis",
+            SinkConfig::ClickHouse(_) => "clickhouse",
         }
     }
 }
 
-pub fn build_sink(
+pub async fn build_sink(
     config: SinkConfig,
     columns: &[ColumnCatalog],
     pk_indices: Vec<usize>,
@@ -279,16 +287,17 @@ pub fn build_sink(
         .iter()
         .filter_map(|column| (!column.is_hidden).then(|| column.column_desc.clone().into()))
         .collect();
-    SinkImpl::new(config, schema, pk_indices, sink_type, sink_id)
+    SinkImpl::new(config, schema, pk_indices, sink_type, sink_id).await
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub enum SinkImpl {
     Redis(RedisSink),
     Kafka(KafkaSink),
     Remote(RemoteSink),
     BlackHole(BlackHoleSink),
     Kinesis(KinesisSink),
+    ClickHouse(ClickHouseSink)
 }
 
 #[macro_export]
@@ -297,17 +306,18 @@ macro_rules! dispatch_sink {
         use $crate::sink::SinkImpl;
 
         match $impl {
-            SinkImpl::Redis($sink) => $body,
-            SinkImpl::Kafka($sink) => $body,
-            SinkImpl::Remote($sink) => $body,
-            SinkImpl::BlackHole($sink) => $body,
-            SinkImpl::Kinesis($sink) => $body,
+            SinkImpl::Redis(mut $sink) => $body,
+            SinkImpl::Kafka(mut $sink) => $body,
+            SinkImpl::Remote(mut $sink) => $body,
+            SinkImpl::BlackHole(mut $sink) => $body,
+            SinkImpl::Kinesis(mut $sink) => $body,
+            SinkImpl::ClickHouse(mut $sink) => $body,
         }
     }};
 }
 
 impl SinkImpl {
-    pub fn new(
+    pub async fn new(
         cfg: SinkConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
@@ -332,6 +342,12 @@ impl SinkImpl {
                 SinkImpl::Remote(RemoteSink::new(cfg, schema, pk_indices, sink_id, sink_type))
             }
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
+            SinkConfig::ClickHouse(cfg) => SinkImpl::ClickHouse(ClickHouseSink::new(
+                *cfg,
+                schema,
+                pk_indices,
+                sink_type.is_append_only()
+            )?),
         })
     }
 }
@@ -352,6 +368,8 @@ pub enum SinkError {
     Config(#[from] anyhow::Error),
     #[error("coordinator error: {0}")]
     Coordinator(anyhow::Error),
+    #[error("ClickHouse error: {0}")]
+    ClickHouse(String)
 }
 
 impl From<RpcError> for SinkError {

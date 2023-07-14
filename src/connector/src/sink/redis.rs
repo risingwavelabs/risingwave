@@ -41,7 +41,7 @@ impl Sink for RedisSink {
         todo!()
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&mut self, _client: Option<ConnectorClient>) -> Result<()> {
         todo!()
     }
 }
