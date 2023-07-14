@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_pb::catalog::connection::Info;
 use risingwave_pb::cloud_service::SourceType;
+use serde_json::Value;
 
 use crate::common::CtlContext;
 
@@ -42,7 +43,14 @@ pub async fn list_connections(context: &CtlContext) -> anyhow::Result<()> {
 
 pub async fn validate_source(context: &CtlContext, props: String) -> anyhow::Result<()> {
     let with_props: HashMap<String, String> =
-        serde_json::from_str(props.as_str()).expect("error parsing with props json");
+        serde_json::from_str::<HashMap<String, Value>>(props.as_str())
+            .expect("error parsing with props json")
+            .into_iter()
+            .map(|(key, val)| match val {
+                Value::String(s) => (key, s),
+                _ => (key, val.to_string()),
+            })
+            .collect();
     let source_type = match with_props
         .get("connector")
         .expect("missing 'connector' in with clause")
