@@ -51,6 +51,15 @@ impl BarrierActorInfo {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        if self.actor_map.is_empty() {
+            assert!(self.actor_map_to_send.is_empty());
+            true
+        } else {
+            false
+        }
+    }
+
     // TODO: should only collect from reachable actors, for mv on mv
     pub fn actor_ids_to_collect(&self, node_id: &WorkerId) -> impl Iterator<Item = ActorId> {
         self.actor_map

@@ -17,6 +17,7 @@ use std::iter::once;
 
 use anyhow::anyhow;
 use risingwave_common::bail;
+use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
@@ -51,7 +52,7 @@ enum ManagedBarrierStateInner {
 pub(super) struct BarrierState {
     prev_epoch: u64,
     inner: ManagedBarrierStateInner,
-    checkpoint: bool,
+    kind: BarrierKind,
 }
 
 #[derive(Debug)]
@@ -67,10 +68,6 @@ pub(super) struct ManagedBarrierState {
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
 
-    /// Whether the first barrier has been collected. Note that we don't seal the data of the first
-    /// barrier with its `prev_epoch`. This will be reset after recovery.
-    first_collected: bool,
-
     state_store: StateStoreImpl,
 }
 
@@ -81,7 +78,6 @@ impl ManagedBarrierState {
             epoch_barrier_state_map: BTreeMap::default(),
             create_mview_progress: Default::default(),
             failure_actors: Default::default(),
-            first_collected: false,
             state_store,
         }
     }
@@ -138,15 +134,18 @@ impl ManagedBarrierState {
                     })
                     .collect();
 
-                if self.first_collected {
-                    dispatch_state_store!(&self.state_store, state_store, {
-                        state_store.seal_epoch(barrier_state.prev_epoch, barrier_state.checkpoint);
-                    });
-                } else {
-                    tracing::info!(
+                let kind = barrier_state.kind;
+                match kind {
+                    BarrierKind::Unspecified => unreachable!(),
+                    BarrierKind::Initial => tracing::info!(
                         epoch = barrier_state.prev_epoch,
                         "ignore sealing data for the first barrier"
-                    )
+                    ),
+                    BarrierKind::Barrier | BarrierKind::Checkpoint => {
+                        dispatch_state_store!(&self.state_store, state_store, {
+                            state_store.seal_epoch(barrier_state.prev_epoch, kind.is_checkpoint());
+                        });
+                    }
                 }
 
                 match barrier_state.inner {
@@ -156,7 +155,7 @@ impl ManagedBarrierState {
                         // Notify about barrier finishing.
                         let result = CollectResult {
                             create_mview_progress,
-                            is_first_barrier: !self.first_collected,
+                            kind,
                         };
                         if collect_notifier.unwrap().send(Ok(result)).is_err() {
                             warn!("failed to notify barrier collection with epoch {}", epoch)
@@ -164,8 +163,6 @@ impl ManagedBarrierState {
                     }
                     _ => unreachable!(),
                 }
-
-                self.first_collected = true;
             }
         }
     }
@@ -254,7 +251,7 @@ impl ManagedBarrierState {
                         inner: ManagedBarrierStateInner::Stashed {
                             collected_actors: once(actor_id).collect(),
                         },
-                        checkpoint: barrier.checkpoint,
+                        kind: barrier.kind,
                     },
                 );
             }
@@ -322,7 +319,7 @@ impl ManagedBarrierState {
             BarrierState {
                 prev_epoch: barrier.epoch.prev,
                 inner,
-                checkpoint: barrier.checkpoint,
+                kind: barrier.kind,
             },
         );
         self.may_notify(barrier.epoch.curr);

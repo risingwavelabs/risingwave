@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use prometheus::HistogramTimer;
+use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -45,9 +46,7 @@ pub struct CollectResult {
     /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
 
-    /// Whether this barrier is the first one collected on current compute node (or after soft
-    /// reset in recovery).
-    pub is_first_barrier: bool,
+    pub kind: BarrierKind,
 }
 
 enum BarrierState {
@@ -82,7 +81,7 @@ pub struct CompleteReceiver {
     /// `barrier_inflight_timer`'s metrics.
     pub barrier_inflight_timer: Option<HistogramTimer>,
     /// Mark whether this is a checkpoint barrier.
-    pub checkpoint: bool,
+    pub kind: BarrierKind,
 }
 
 impl LocalBarrierManager {
@@ -178,7 +177,7 @@ impl LocalBarrierManager {
             CompleteReceiver {
                 complete_receiver: rx,
                 barrier_inflight_timer: timer,
-                checkpoint: barrier.checkpoint,
+                kind: barrier.kind,
             },
         );
         Ok(())

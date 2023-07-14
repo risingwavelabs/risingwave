@@ -30,11 +30,10 @@ impl BarrierManagerState {
         }
     }
 
-    pub fn update_in_flight_prev_epoch(&mut self, new_epoch: TracedEpoch) {
-        self.in_flight_prev_epoch = new_epoch;
-    }
-
-    pub fn in_flight_prev_epoch(&self) -> TracedEpoch {
-        self.in_flight_prev_epoch.clone()
+    pub fn next_epoch_pair(&mut self) -> (TracedEpoch, TracedEpoch) {
+        let prev_epoch = self.in_flight_prev_epoch.clone();
+        let next_epoch = prev_epoch.next();
+        self.in_flight_prev_epoch = next_epoch.clone();
+        (prev_epoch, next_epoch)
     }
 }

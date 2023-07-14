@@ -76,6 +76,14 @@ message PauseMutation {}
 message ResumeMutation {}
 
 message Barrier {
+  // TODO
+  enum BarrierKind {
+    BARRIER_KIND_UNSPECIFIED = 0;
+    BARRIER_KIND_INITIAL = 1;
+    BARRIER_KIND_BARRIER = 2;
+    BARRIER_KIND_CHECKPOINT = 3;
+  }
+
   data.Epoch epoch = 1;
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -95,7 +103,8 @@ message Barrier {
   // Used for tracing.
   map<string, string> tracing_context = 2;
   // Whether this barrier do checkpoint
-  bool checkpoint = 9;
+  // TODO
+  BarrierKind kind = 9;
 
   // Record the actors that the barrier has passed. Only used for debugging.
   repeated uint32 passed_actors = 255;

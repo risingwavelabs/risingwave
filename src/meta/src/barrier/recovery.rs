@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
     BarrierCompleteResponse, BroadcastActorInfoTableRequest, BuildActorsRequest,
@@ -130,26 +130,28 @@ where
                 let recovery_result: MetaResult<(TracedEpoch, Vec<BarrierCompleteResponse>)> = try {
                     let mut info = self.resolve_actor_info_for_recovery().await;
 
-                    // Migrate actors in expired CN to newly joined one.
-                    let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
-                        warn!(err = ?err, "migrate actors failed");
-                    })?;
-                    if migrated {
-                        info = self.resolve_actor_info_for_recovery().await;
+                    if !info.is_empty() {
+                        // Migrate actors in expired CN to newly joined one.
+                        let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
+                            warn!(err = ?err, "migrate actors failed");
+                        })?;
+                        if migrated {
+                            info = self.resolve_actor_info_for_recovery().await;
+                        }
+
+                        // Reset all compute nodes, stop and drop existing actors.
+                        self.reset_compute_nodes(&info).await.inspect_err(|err| {
+                            warn!(err = ?err, "reset compute nodes failed");
+                        })?;
+
+                        // update and build all actors.
+                        self.update_actors(&info).await.inspect_err(|err| {
+                            warn!(err = ?err, "update actors failed");
+                        })?;
+                        self.build_actors(&info).await.inspect_err(|err| {
+                            warn!(err = ?err, "build_actors failed");
+                        })?;
                     }
-
-                    // Reset all compute nodes, stop and drop existing actors.
-                    self.reset_compute_nodes(&info).await.inspect_err(|err| {
-                        warn!(err = ?err, "reset compute nodes failed");
-                    })?;
-
-                    // update and build all actors.
-                    self.update_actors(&info).await.inspect_err(|err| {
-                        warn!(err = ?err, "update actors failed");
-                    })?;
-                    self.build_actors(&info).await.inspect_err(|err| {
-                        warn!(err = ?err, "build_actors failed");
-                    })?;
 
                     // get split assignments for all actors
                     let source_split_assignments = self.source_manager.list_assignments().await;
@@ -171,7 +173,7 @@ where
                         prev_epoch.clone(),
                         new_epoch.clone(),
                         command,
-                        true,
+                        BarrierKind::Initial,
                         self.source_manager.clone(),
                         tracing::Span::current(), // recovery span
                     ));
