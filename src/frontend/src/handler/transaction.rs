@@ -62,7 +62,6 @@ pub async fn handle_begin(
 
     session.txn_begin_explicit(access_mode);
 
-    // TODO: pgwire integration of the transaction state
     Ok(RwPgResponse::empty_result(stmt_type))
 }
 
@@ -80,7 +79,6 @@ pub async fn handle_commit(
 
     session.txn_commit_explicit();
 
-    // TODO: pgwire integration of the transaction state
     Ok(RwPgResponse::empty_result(stmt_type))
 }
 
@@ -98,7 +96,6 @@ pub async fn handle_rollback(
 
     session.txn_rollback_explicit();
 
-    // TODO: pgwire integration of the transaction state
     Ok(RwPgResponse::empty_result(stmt_type))
 }
 
