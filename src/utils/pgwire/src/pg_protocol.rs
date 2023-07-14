@@ -39,7 +39,7 @@ use crate::pg_extended::ResultCache;
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
-    FePasswordMessage, FeStartupMessage,
+    FePasswordMessage, FeStartupMessage, TransactionStatus,
 };
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
@@ -203,9 +203,7 @@ where
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
                             .unwrap();
-                        self.stream
-                            .write_no_flush(&BeMessage::ReadyForQuery)
-                            .unwrap();
+                        self.ready_for_query().unwrap();
                     }
 
                     PsqlError::Panic(_) => {
@@ -246,7 +244,7 @@ where
             FeMessage::Bind(m) => self.process_bind_msg(m)?,
             FeMessage::Execute(m) => self.process_execute_msg(m).await?,
             FeMessage::Describe(m) => self.process_describe_msg(m)?,
-            FeMessage::Sync => self.stream.write_no_flush(&BeMessage::ReadyForQuery)?,
+            FeMessage::Sync => self.ready_for_query()?,
             FeMessage::Close(m) => self.process_close_msg(m)?,
             FeMessage::Flush => self.stream.flush().await?,
         }
@@ -259,6 +257,16 @@ where
             PgProtocolState::Startup => self.stream.read_startup().await,
             PgProtocolState::Regular => self.stream.read().await,
         }
+    }
+
+    /// Writes a `ReadyForQuery` message to the client without flushing.
+    fn ready_for_query(&mut self) -> io::Result<()> {
+        self.stream.write_no_flush(&BeMessage::ReadyForQuery(
+            self.session
+                .as_ref()
+                .map(|s| s.transaction_status())
+                .unwrap_or(TransactionStatus::Idle),
+        ))
     }
 
     async fn process_ssl_msg(&mut self) -> PsqlResult<()> {
@@ -313,7 +321,7 @@ where
                     .write_parameter_status_msg_no_flush(&ParameterStatus {
                         application_name: application_name.cloned(),
                     })?;
-                self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+                self.ready_for_query()?;
             }
             UserAuthenticator::ClearText(_) => {
                 self.stream
@@ -341,7 +349,7 @@ where
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
-        self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+        self.ready_for_query()?;
         self.state = PgProtocolState::Regular;
         Ok(())
     }
@@ -400,7 +408,7 @@ where
         }
         // Put this line inside the for loop above will lead to unfinished/stuck regress test...Not
         // sure the reason.
-        self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+        self.ready_for_query()?;
         Ok(())
     }
 

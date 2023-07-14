@@ -118,7 +118,7 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
             let nested_schema = union_schema
                 .variants()
                 .iter()
-                .find_or_first(|s| **s != Schema::Null)
+                .find_or_first(|s| !matches!(s, Schema::Null))
                 .ok_or_else(|| {
                     anyhow::format_err!("unsupported type in Avro: {:?}", union_schema)
                 })?;

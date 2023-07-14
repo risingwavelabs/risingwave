@@ -72,6 +72,20 @@ impl ColIndexMapping {
         Self::new(map)
     }
 
+    pub fn is_identity(&self) -> bool {
+        if self.map.len() != self.target_size {
+            return false;
+        }
+        for (src, tar) in self.map.iter().enumerate() {
+            if let Some(tar_value) = tar && src == *tar_value {
+                continue
+            } else {
+                return false;
+            }
+        }
+        true
+    }
+
     pub fn identity_or_none(source_size: usize, target_size: usize) -> Self {
         let map = (0..source_size)
             .map(|i| if i < target_size { Some(i) } else { None })
@@ -376,5 +390,11 @@ mod tests {
         assert_eq!(composite.map(0), 0); // 0+3 = 3， 3 -> 0
         assert_eq!(composite.try_map(1), None);
         assert_eq!(composite.map(2), 1); // 2+3 = 5, 5 -> 1
+    }
+
+    #[test]
+    fn test_identity() {
+        let mapping = ColIndexMapping::identity(10);
+        assert!(mapping.is_identity());
     }
 }
