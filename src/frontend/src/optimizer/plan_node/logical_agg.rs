@@ -29,6 +29,7 @@ use super::{
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
 };
+use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
@@ -791,12 +792,12 @@ impl LogicalAgg {
     }
 
     #[must_use]
-    fn rewrite_with_input_agg(
+    pub fn rewrite_with_input_agg(
         &self,
         input: PlanRef,
         agg_calls: &[PlanAggCall],
         mut input_col_change: ColIndexMapping,
-    ) -> Self {
+    ) -> (Self, ColIndexMapping) {
         let agg_calls = agg_calls
             .iter()
             .cloned()
@@ -811,17 +812,37 @@ impl LogicalAgg {
                 agg_call
             })
             .collect();
-        let group_key = self
+        // This is the group key order should be after rewriting.
+        let group_key_in_vec: Vec<usize> = self
             .group_key()
             .indices()
             .map(|key| input_col_change.map(key))
             .collect();
+        // This is the group key order we get after rewriting.
+        let group_key: IndexSet = group_key_in_vec.iter().cloned().collect();
         let grouping_sets = self
             .grouping_sets()
             .iter()
             .map(|set| set.indices().map(|key| input_col_change.map(key)).collect())
             .collect();
-        Agg::new_with_grouping_sets(agg_calls, group_key, grouping_sets, input).into()
+
+        let new_agg =
+            Agg::new_with_grouping_sets(agg_calls, group_key.clone(), grouping_sets, input);
+
+        // group_key remapping might cause an output column change, since group key actually is a
+        // `FixedBitSet`.
+        let mut out_col_change = vec![];
+        for idx in group_key_in_vec {
+            let pos = group_key.indices().position(|x| x == idx).unwrap();
+            out_col_change.push(pos);
+        }
+        for i in (group_key.len())..new_agg.schema().len() {
+            out_col_change.push(i);
+        }
+        let out_col_change =
+            ColIndexMapping::with_remaining_columns(&out_col_change, new_agg.schema().len());
+
+        (new_agg.into(), out_col_change)
     }
 }
 
@@ -846,10 +867,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let agg = self.rewrite_with_input_agg(input, self.agg_calls(), input_col_change);
-        // change the input columns index will not change the output column index
-        let out_col_change = ColIndexMapping::identity(agg.schema().len());
-        (agg, out_col_change)
+        self.rewrite_with_input_agg(input, self.agg_calls(), input_col_change)
     }
 }
 
@@ -910,7 +928,10 @@ impl ColPrunable for LogicalAgg {
         );
         let agg = {
             let input = self.input().prune_col(&input_required_cols, ctx);
-            self.rewrite_with_input_agg(input, &agg_calls, input_col_change)
+            let (agg, output_col_change) =
+                self.rewrite_with_input_agg(input, &agg_calls, input_col_change);
+            assert!(output_col_change.is_identity());
+            agg
         };
         let new_output_cols = {
             // group key were never pruned or even re-ordered in current impl

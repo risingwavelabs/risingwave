@@ -422,13 +422,8 @@ impl LogicalOptimizer {
     }
 
     pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
-        // FIXME: This may differ from the snapshot we use for actual execution. We should instead
-        // use a pinned snapshot consistently during optimization and execution.
-        let epoch = ctx
-            .session_ctx()
-            .env()
-            .hummock_snapshot_manager()
-            .latest_snapshot_current_epoch();
+        // TODO: if there's no `NOW()` or `PROCTIME()`, we don't need to acquire snapshot.
+        let epoch = ctx.session_ctx().pinned_snapshot().epoch();
 
         let plan = plan.rewrite_exprs_recursive(&mut InlineNowProcTime::new(epoch));
 
