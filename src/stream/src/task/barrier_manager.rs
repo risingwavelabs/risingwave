@@ -46,6 +46,7 @@ pub struct CollectResult {
     /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
 
+    /// The kind of barrier.
     pub kind: BarrierKind,
 }
 
@@ -80,7 +81,7 @@ pub struct CompleteReceiver {
     pub complete_receiver: Option<Receiver<StreamResult<CollectResult>>>,
     /// `barrier_inflight_timer`'s metrics.
     pub barrier_inflight_timer: Option<HistogramTimer>,
-    /// Mark whether this is a checkpoint barrier.
+    /// The kind of barrier.
     pub kind: BarrierKind,
 }
 

@@ -51,6 +51,7 @@ impl BarrierActorInfo {
         }
     }
 
+    /// Returns true if there's no actor to collect or send.
     pub fn is_empty(&self) -> bool {
         if self.actor_map.is_empty() {
             assert!(self.actor_map_to_send.is_empty());

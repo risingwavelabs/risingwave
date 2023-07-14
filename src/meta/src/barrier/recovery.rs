@@ -130,6 +130,8 @@ where
                 let recovery_result: MetaResult<(TracedEpoch, Vec<BarrierCompleteResponse>)> = try {
                     let mut info = self.resolve_actor_info_for_recovery().await;
 
+                    // If there is no actor to recover, skip the migration and build phase and
+                    // directly inject the `Initial` barrier.
                     if !info.is_empty() {
                         // Migrate actors in expired CN to newly joined one.
                         let migrated = self.migrate_actors(&info).await.inspect_err(|err| {

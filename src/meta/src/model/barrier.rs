@@ -30,6 +30,7 @@ impl BarrierManagerState {
         }
     }
 
+    /// Returns the epoch pair for the next barrier, and updates the state.
     pub fn next_epoch_pair(&mut self) -> (TracedEpoch, TracedEpoch) {
         let prev_epoch = self.in_flight_prev_epoch.clone();
         let next_epoch = prev_epoch.next();

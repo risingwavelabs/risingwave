@@ -570,6 +570,8 @@ where
 
             // Bootstrap recovery. Here we simply trigger a recovery process to achieve the
             // consistency.
+            // Even if there's no actor to recover, we still go through the recovery process to
+            // inject the first `Initial` barrier.
             self.set_status(BarrierManagerStatus::Recovering).await;
             let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
             let new_epoch = self.recovery(prev_epoch).instrument(span).await;
@@ -1025,7 +1027,7 @@ where
                 }
 
                 let remaining = checkpoint_control
-                    .finish_commands(kind.is_checkpoint() || kind.is_initial())
+                    .finish_commands(kind.is_checkpoint())
                     .await?;
                 // If there are remaining commands (that requires checkpoint to finish), we force
                 // the next barrier to be a checkpoint.
