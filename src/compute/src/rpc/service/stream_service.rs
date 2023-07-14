@@ -192,13 +192,6 @@ impl StreamService for StreamServiceImpl {
         // Must finish syncing data written in the epoch before respond back to ensure persistence
         // of the state.
         let synced_sstables = if is_first_barrier {
-            if let Some(hummock) = self.env.state_store().as_hummock() {
-                let mce = hummock.get_pinned_version().max_committed_epoch();
-                assert_eq!(
-                    mce, req.prev_epoch,
-                    "first epoch should match with the current version",
-                );
-            }
             tracing::info!(
                 epoch = req.prev_epoch,
                 "ignored syncing data for the first barrier"
