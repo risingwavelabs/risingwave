@@ -177,7 +177,7 @@ impl QueryManager {
             .add_query(query_id.clone(), query_execution.clone());
 
         // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let pinned_snapshot = context.session().pinned_snapshot().await?;
+        let pinned_snapshot = context.session().pinned_snapshot();
 
         let worker_node_manager_reader = WorkerNodeSelector::new(
             self.worker_node_manager.clone(),
