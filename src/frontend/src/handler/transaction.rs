@@ -110,7 +110,7 @@ pub async fn handle_set(
         `SET TRANSACTION` is not supported yet.\n\
         For compatibility, this statement will still succeed but no changes are actually made.";
 
-    return Ok(RwPgResponse::builder(StatementType::SET_TRANSACTION)
+    Ok(RwPgResponse::builder(StatementType::SET_TRANSACTION)
         .notice(MESSAGE)
-        .into());
+        .into())
 }
