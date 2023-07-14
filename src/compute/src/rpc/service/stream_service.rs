@@ -191,6 +191,13 @@ impl StreamService for StreamServiceImpl {
         let synced_sstables = match kind {
             BarrierKind::Unspecified => unreachable!(),
             BarrierKind::Initial => {
+                if let Some(hummock) = self.env.state_store().as_hummock() {
+                    let mce = hummock.get_pinned_version().max_committed_epoch();
+                    assert_eq!(
+                        mce, req.prev_epoch,
+                        "first epoch should match with the current version",
+                    );
+                }
                 tracing::info!(
                     epoch = req.prev_epoch,
                     "ignored syncing data for the first barrier"
