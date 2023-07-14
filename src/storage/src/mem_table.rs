@@ -22,6 +22,7 @@ use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::estimate_size::KvSize;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
@@ -47,7 +48,7 @@ pub enum KeyOp {
 pub struct MemTable {
     pub(crate) buffer: BTreeMap<Bytes, KeyOp>,
     pub(crate) is_consistent_op: bool,
-    pub(crate) kv_size: usize,
+    pub(crate) kv_size: KvSize,
 }
 
 #[derive(Error, Debug)]
@@ -63,12 +64,12 @@ impl MemTable {
         Self {
             buffer: BTreeMap::new(),
             is_consistent_op,
-            kv_size: 0,
+            kv_size: KvSize::new(),
         }
     }
 
     pub fn drain(&mut self) -> Self {
-        self.kv_size = 0;
+        self.kv_size.set(0);
         std::mem::replace(self, Self::new(self.is_consistent_op))
     }
 
@@ -85,7 +86,7 @@ impl MemTable {
     pub fn insert(&mut self, pk: Bytes, value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
             let key_len = pk.len();
-            self.kv_size += std::mem::size_of::<Bytes>() + key_len + value.len();
+            self.kv_size.add(&pk, &value);
             let origin_value = self.buffer.insert(pk, KeyOp::Insert(value));
             self.calculate_origin_size(origin_value, key_len);
 
@@ -94,14 +95,15 @@ impl MemTable {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                self.kv_size += std::mem::size_of::<Bytes>() + e.key().len() + value.len();
+                self.kv_size.add(e.key(), &value);
                 e.insert(KeyOp::Insert(value));
                 Ok(())
             }
             Entry::Occupied(mut e) => match e.get_mut() {
                 KeyOp::Delete(ref mut old_value) => {
                     let old_val = std::mem::take(old_value);
-                    self.kv_size += std::mem::size_of::<Bytes>() + value.len();
+
+                    self.kv_size.add_val(&value);
                     e.insert(KeyOp::Update((old_val, value)));
                     Ok(())
                 }
@@ -118,7 +120,7 @@ impl MemTable {
     pub fn delete(&mut self, pk: Bytes, old_value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
             let key_len = pk.len();
-            self.kv_size += std::mem::size_of::<Bytes>() + key_len + old_value.len();
+            self.kv_size.add(&pk, &old_value);
             let origin_value = self.buffer.insert(pk, KeyOp::Delete(old_value));
             self.calculate_origin_size(origin_value, key_len);
             return Ok(());
@@ -126,7 +128,7 @@ impl MemTable {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                self.kv_size += std::mem::size_of::<Bytes>() + e.key().len() + old_value.len();
+                self.kv_size.add(e.key(), &old_value);
                 e.insert(KeyOp::Delete(old_value));
                 Ok(())
             }
@@ -139,7 +141,7 @@ impl MemTable {
                             new: KeyOp::Delete(old_value),
                         }));
                     }
-                    self.kv_size -= std::mem::size_of::<Bytes>() + e.key().len() + old_value.len();
+                    self.kv_size.add(e.key(), &old_value);
                     e.remove();
 
                     Ok(())
@@ -159,7 +161,7 @@ impl MemTable {
                             new: KeyOp::Delete(old_value),
                         }));
                     }
-                    self.kv_size -= std::mem::size_of::<Bytes>() + original_new_value.len();
+                    self.kv_size.add_val(&original_new_value);
                     e.insert(KeyOp::Delete(original_old_value));
                     Ok(())
                 }
@@ -170,8 +172,9 @@ impl MemTable {
     pub fn update(&mut self, pk: Bytes, old_value: Bytes, new_value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
             let key_len = pk.len();
-            self.kv_size -=
-                std::mem::size_of::<Bytes>() + key_len + old_value.len() + new_value.len();
+            self.kv_size.add(&pk, &old_value);
+            self.kv_size.add_val(&new_value);
+
             let origin_value = self
                 .buffer
                 .insert(pk, KeyOp::Update((old_value, new_value)));
@@ -181,10 +184,8 @@ impl MemTable {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                self.kv_size += std::mem::size_of::<Bytes>()
-                    + e.key().len()
-                    + old_value.len()
-                    + new_value.len();
+                self.kv_size.add(e.key(), &old_value);
+                self.kv_size.add_val(&new_value);
                 e.insert(KeyOp::Update((old_value, new_value)));
                 Ok(())
             }
@@ -226,14 +227,17 @@ impl MemTable {
         if let Some(origin_value) = origin_value {
             match origin_value {
                 KeyOp::Insert(old_value) => {
-                    self.kv_size -= std::mem::size_of::<Bytes>() + old_value.len() + key_len
+                    self.kv_size.sub_val(&old_value);
+                    self.kv_size.sub_size(key_len);
                 }
                 KeyOp::Delete(old_value) => {
-                    self.kv_size -= std::mem::size_of::<Bytes>() + old_value.len() + key_len
+                    self.kv_size.sub_val(&old_value);
+                    self.kv_size.sub_size(key_len);
                 }
                 KeyOp::Update((old_value1, old_value2)) => {
-                    self.kv_size -=
-                        std::mem::size_of::<Bytes>() + old_value1.len() + old_value2.len() + key_len
+                    self.kv_size.sub_val(&old_value1);
+                    self.kv_size.sub_val(&old_value2);
+                    self.kv_size.sub_size(key_len);
                 }
             }
         }

@@ -245,7 +245,8 @@ impl LocalStateStore for LocalHummockStorage {
                 self.mem_table.update(key, old_val, new_val)?;
             }
         };
-        self.mem_table_size.set(self.mem_table.kv_size as i64);
+        self.mem_table_size
+            .set(self.mem_table.kv_size.size() as i64);
         self.mem_table_item_count
             .set(self.mem_table.buffer.len() as i64);
         Ok(())
@@ -253,7 +254,8 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
         self.mem_table.delete(key, old_val)?;
-        self.mem_table_size.set(self.mem_table.kv_size as i64);
+        self.mem_table_size
+            .set(self.mem_table.kv_size.size() as i64);
         self.mem_table_item_count
             .set(self.mem_table.buffer.len() as i64);
         Ok(())
