@@ -6,7 +6,7 @@
 # RUST_LOG="risingwave_stream=trace" ./risedev d full-without-monitoring
 RUST_LOG="risingwave_stream=trace" ./risedev d full
 sleep 10
-psql -h localhost -p 4566 -d dev -U root -f queries2.sql
+psql -h localhost -p 4566 -d dev -U root -f queries2.sql < /dev/null
 for i in $(seq 1 10000000)
 do
     psql -h localhost -p 4566 -d dev -U root -c "
