@@ -174,6 +174,8 @@ fn run_batch_query(
     context: OptimizerContextRef,
     stmt: Statement,
 ) -> Result<()> {
+    let _guard = session.txn_begin_implicit();
+
     let mut binder = Binder::new(&session);
     let bound = binder
         .bind(stmt)

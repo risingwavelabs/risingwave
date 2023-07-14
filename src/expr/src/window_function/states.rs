@@ -18,9 +18,9 @@ use itertools::Itertools;
 use risingwave_common::types::Datum;
 
 use super::state::{StateEvictHint, StateKey, WindowState};
-use crate::executor::StreamExecutorResult;
+use crate::Result;
 
-pub(super) struct WindowStates(Vec<Box<dyn WindowState + Send>>);
+pub struct WindowStates(Vec<Box<dyn WindowState + Send>>);
 
 impl WindowStates {
     pub fn new(states: Vec<Box<dyn WindowState + Send>>) -> Self {
@@ -49,7 +49,7 @@ impl WindowStates {
     }
 
     /// Get the current output of all windows.
-    pub fn curr_output(&self) -> StreamExecutorResult<Vec<Datum>> {
+    pub fn curr_output(&self) -> Result<Vec<Datum>> {
         debug_assert!(self.are_aligned());
         self.0.iter().map(|state| state.curr_output()).try_collect()
     }

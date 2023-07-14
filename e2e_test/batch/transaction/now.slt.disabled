@@ -1,0 +1,54 @@
+# Disabled, see https://github.com/risingwavelabs/risingwave/issues/10887
+
+statement ok
+create table t (ts timestamp);
+
+statement ok
+create view v as select * from t where ts at time zone 'utc' >= now();
+
+statement ok
+create materialized view mv as select * from v;
+
+statement ok
+insert into t select * from generate_series(
+    now() at time zone 'utc' - interval '10' second,
+    now() at time zone 'utc' + interval '20' second,
+    interval '1' second / 20
+);
+
+statement ok
+flush;
+
+statement ok
+start transaction read only;
+
+# the view should not be empty, so that the following check is meaningful
+query T
+select count(*) > 0 from mv;
+----
+t
+
+# the result from batch query and materialized view should be the same
+query T
+select * from v
+except
+select * from mv;
+----
+
+query T
+select * from mv
+except
+select * from v;
+----
+
+statement ok
+commit;
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop view v;
+
+statement ok
+drop table t;

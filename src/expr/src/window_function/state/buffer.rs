@@ -16,7 +16,8 @@ use std::collections::VecDeque;
 use std::ops::Range;
 
 use either::Either;
-use risingwave_expr::function::window::{Frame, FrameBounds, FrameExclusion};
+
+use crate::function::window::{Frame, FrameBounds, FrameExclusion};
 
 struct Entry<K: Ord, V> {
     key: K,
@@ -235,9 +236,9 @@ fn range_except(a: Range<usize>, b: Range<usize>) -> (Range<usize>, Range<usize>
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_expr::function::window::{Frame, FrameBound};
 
     use super::*;
+    use crate::function::window::{Frame, FrameBound};
 
     #[test]
     fn test_rows_frame_unbounded_preceding_to_current_row() {

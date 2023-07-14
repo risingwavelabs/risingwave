@@ -18,6 +18,7 @@ normal = ["workspace-hack"]
 await-tree = { workspace = true }
 console = "0.15"
 console-subscriber = "0.1.8"
+either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.3"
 opentelemetry-otlp = { version = "0.12" }

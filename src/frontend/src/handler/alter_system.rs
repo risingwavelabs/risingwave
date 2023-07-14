@@ -18,6 +18,11 @@ use risingwave_sqlparser::ast::{Ident, SetVariableValue, Value};
 
 use super::{HandlerArgs, RwPgResponse};
 
+// Warn user if barrier_interval_ms is set above 5mins.
+const NOTICE_BARRIER_INTERVAL_MS: u32 = 300000;
+// Warn user if checkpoint_frequency is set above 60.
+const NOTICE_CHECKPOINT_FREQUENCY: u64 = 60;
+
 pub async fn handle_alter_system(
     handler_args: HandlerArgs,
     param: Ident,
@@ -29,11 +34,24 @@ pub async fn handle_alter_system(
         SetVariableValue::Default => None,
         _ => Some(value.to_string()),
     };
-    handler_args
+    let params = handler_args
         .session
         .env()
         .meta_client()
         .set_system_param(param.to_string(), value)
         .await?;
-    Ok(RwPgResponse::empty_result(StatementType::ALTER_SYSTEM))
+    let mut builder = RwPgResponse::builder(StatementType::ALTER_SYSTEM);
+    if let Some(params) = params {
+        if params.barrier_interval_ms() >= NOTICE_BARRIER_INTERVAL_MS {
+            builder = builder.notice(
+                format!("Barrier interval is set to {} ms >= {} ms. This can hurt freshness and potentially cause OOM.", 
+                         params.barrier_interval_ms(), NOTICE_BARRIER_INTERVAL_MS));
+        }
+        if params.checkpoint_frequency() >= NOTICE_CHECKPOINT_FREQUENCY {
+            builder = builder.notice(
+                format!("Checkpoint frequency is set to {} >= {}. This can hurt freshness and potentially cause OOM.", 
+                         params.checkpoint_frequency(), NOTICE_CHECKPOINT_FREQUENCY));
+        }
+    }
+    Ok(builder.into())
 }
