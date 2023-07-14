@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_frontend::WithOptions;
+use std::collections::HashMap;
+
 use risingwave_pb::catalog::connection::Info;
 use risingwave_pb::cloud_service::SourceType;
-use risingwave_sqlparser::parser::Parser;
 
 use crate::common::CtlContext;
 
@@ -40,11 +40,10 @@ pub async fn list_connections(context: &CtlContext) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn validate_source(context: &CtlContext, sql: String) -> anyhow::Result<()> {
-    let statements = Parser::parse_sql(sql.as_ref()).expect("error parsing sql");
-    let with_options = WithOptions::try_from(statements.get(0).expect("no sql statement found"))
-        .expect("error parsing with clause");
-    let source_type = match with_options
+pub async fn validate_source(context: &CtlContext, props: String) -> anyhow::Result<()> {
+    let with_props: HashMap<String, String> =
+        serde_json::from_str(props.as_str()).expect("error parsing with props json");
+    let source_type = match with_props
         .get("connector")
         .expect("missing 'connector' in with clause")
         .as_str()
@@ -54,14 +53,7 @@ pub async fn validate_source(context: &CtlContext, sql: String) -> anyhow::Resul
     };
     let meta_client = context.meta_client().await?;
     let resp = meta_client
-        .rw_cloud_validate_source(
-            source_type,
-            with_options
-                .inner()
-                .iter()
-                .map(|(key, val)| (key.to_owned(), val.to_owned()))
-                .collect(),
-        )
+        .rw_cloud_validate_source(source_type, with_props)
         .await?;
     println!("validate result: {:#?}", resp);
     Ok(())

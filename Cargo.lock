@@ -6019,7 +6019,6 @@ dependencies = [
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
- "risingwave_sqlparser",
  "risingwave_storage",
  "risingwave_stream",
  "risingwave_tracing",

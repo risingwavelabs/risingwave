@@ -231,7 +231,7 @@ enum MetaCommands {
     ValidateSource {
         /// CREATE SOURCE statement
         #[clap(long)]
-        sql: String,
+        props: String,
     },
 }
 
@@ -365,8 +365,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ListConnections) => {
             cmd_impl::meta::list_connections(context).await?
         }
-        Commands::Meta(MetaCommands::ValidateSource { sql }) => {
-            cmd_impl::meta::validate_source(context, sql).await?
+        Commands::Meta(MetaCommands::ValidateSource { props }) => {
+            cmd_impl::meta::validate_source(context, props).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
