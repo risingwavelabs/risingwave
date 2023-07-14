@@ -1,26 +1,26 @@
 statement ok
-drop view v_a;
+drop materialized view v_a;
 
 statement ok
-drop view v_b;
+drop materialized view v_b;
 
 statement ok
-drop view v_c;
+drop materialized view v_c;
 
 statement ok
-drop view v_d;
+drop materialized view v_d;
 
 statement ok
-drop view v_a_b;
+drop materialized view v_a_b;
 
 statement ok
-drop view v_b_c;
+drop materialized view v_b_c;
 
 statement ok
-drop view v_a_c;
+drop materialized view v_a_c;
 
 statement ok
-drop view v_a_b_c;
+drop materialized view v_a_b_c;
 
 statement ok
 drop table t;
