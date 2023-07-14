@@ -20,8 +20,8 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{
-    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, SqlOption, Statement,
-    Value,
+    CompatibleSourceSchema, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
+    SqlOption, Statement, Value,
 };
 
 use crate::catalog::connection_catalog::resolve_private_link_connection;
@@ -200,7 +200,9 @@ impl TryFrom<&Statement> for WithOptions {
                 ..
             } => {
                 let mut options = with_properties.0.clone();
-                options.extend_from_slice(source_schema.row_options());
+                if let CompatibleSourceSchema::V2(source_schema) = source_schema {
+                    options.extend_from_slice(source_schema.row_options());
+                }
                 Self::try_from(options.as_slice())
             }
             Statement::CreateTable {
@@ -209,7 +211,7 @@ impl TryFrom<&Statement> for WithOptions {
                 ..
             } => {
                 let mut options = with_options.clone();
-                if let Some(source_schema) = source_schema {
+                if let Some(CompatibleSourceSchema::V2(source_schema)) = source_schema {
                     options.extend_from_slice(source_schema.row_options());
                 }
                 Self::try_from(options.as_slice())

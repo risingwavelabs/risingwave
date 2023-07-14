@@ -49,13 +49,13 @@ pub(crate) mod serving;
 pub mod storage;
 mod stream;
 pub(crate) mod telemetry;
-
 use std::time::Duration;
 
 use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use risingwave_common::config::OverrideConfig;
 use risingwave_common::{GIT_SHA, RW_VERSION};
+pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};

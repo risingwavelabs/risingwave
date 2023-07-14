@@ -12,3 +12,10 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: column pruning
+  sql: |
+    create table items_sold (c1 int, brand varchar, c2 int, size varchar, c3 int, sales int, c4 int,);
+    SELECT brand, size, sum(sales) FROM items_sold GROUP BY GROUPING SETS ((size), (brand), ());
+  expected_outputs:
+    - batch_plan
+    - stream_plan
