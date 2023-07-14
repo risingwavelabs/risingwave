@@ -28,7 +28,8 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::expr::{
-    Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, WindowFunction, OrderByExpr, OrderBy,
+    Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef,
+    WindowFunction,
 };
 use crate::optimizer::plan_node::{
     ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -46,7 +47,10 @@ struct LogicalOverWindowBuilder<'a> {
 }
 
 impl<'a> LogicalOverWindowBuilder<'a> {
-    fn new(input_proj_builder: &'a ProjectBuilder, window_functions: &'a mut Vec<WindowFunction>) -> Result<Self> {
+    fn new(
+        input_proj_builder: &'a ProjectBuilder,
+        window_functions: &'a mut Vec<WindowFunction>,
+    ) -> Result<Self> {
         Ok(Self {
             input_proj_builder,
             window_functions,
@@ -59,7 +63,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
         for expr in selected_items {
             let rewritten_expr = self.rewrite_expr(expr);
             if let Some(error) = self.error.take() {
-                return Err(error.into());
+                return Err(error);
             } else {
                 rewritten_items.push(rewritten_expr);
             }
@@ -72,7 +76,11 @@ impl<'a> LogicalOverWindowBuilder<'a> {
     }
 
     fn push_window_func(&mut self, window_func: WindowFunction) -> InputRef {
-        if let Some((pos, existing)) = self.window_functions.iter().find_position(|&w| w == &window_func) {
+        if let Some((pos, existing)) = self
+            .window_functions
+            .iter()
+            .find_position(|&w| w == &window_func)
+        {
             return InputRef::new(
                 self.schema_over_window_start_offset() + pos,
                 existing.return_type.clone(),
@@ -84,12 +92,6 @@ impl<'a> LogicalOverWindowBuilder<'a> {
         InputRef::new(index, data_type)
     }
 
-    fn rewrite_window_func_input(&self, input: ExprImpl) -> ExprImpl {
-
-                let index = self.input_proj_builder.get_expr_index(&input).unwrap();
-                ExprImpl::from(InputRef::new(*index, input.return_type()))
-    }
- 
     fn try_rewrite_window_function(&mut self, window_func: WindowFunction) -> Result<ExprImpl> {
         let (kind, args, return_type, partition_by, order_by, frame) = (
             window_func.kind,
@@ -99,14 +101,6 @@ impl<'a> LogicalOverWindowBuilder<'a> {
             window_func.order_by,
             window_func.frame,
         );
-
-        let args = args.into_iter().map(|expr| self.rewrite_window_func_input(expr)).collect_vec();
-        let partition_by = partition_by.into_iter().map(|expr| self.rewrite_window_func_input(expr)).collect_vec();
-        let order_by = OrderBy {sort_exprs: order_by.sort_exprs.into_iter().map(|e| OrderByExpr {
-            expr: self.rewrite_window_func_input(e.expr),
-            order_type: e.order_type,
-        })
-        .collect_vec()};
 
         if let WindowFuncKind::Aggregate(agg_kind) = kind
             && matches!(
@@ -128,14 +122,13 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                         order_by.clone(),
                         args.clone(),
                         frame.clone(),
-                    )?)).cast_explicit(return_type.clone())?;
-                    
+                    )?)).cast_explicit(return_type)?;
                     let right_ref = ExprImpl::from(self.push_window_func(WindowFunction::new(
                             WindowFuncKind::Aggregate(AggKind::Count),
-                            partition_by.clone(),
-                            order_by.clone(),
-                            args.clone(),
-                            frame.clone(),
+                            partition_by,
+                            order_by,
+                            args,
+                            frame,
                         )?));
 
                     let new_expr = ExprImpl::from(
@@ -173,10 +166,10 @@ impl<'a> LogicalOverWindowBuilder<'a> {
 
                     let count_expr = ExprImpl::from(self.push_window_func(WindowFunction::new(
                         WindowFuncKind::Aggregate(AggKind::Count),
-                        partition_by.clone(),
-                        order_by.clone(),
+                        partition_by,
+                        order_by,
                         args.clone(),
-                        frame.clone(),
+                        frame,
                     )?));
 
                     let square_of_sum_expr = ExprImpl::from(
@@ -249,7 +242,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                                 )?,
                             );
                             let null_expr =
-                                ExprImpl::from(Literal::new(None, return_type.clone()));
+                                ExprImpl::from(Literal::new(None, return_type));
 
                             let case_expr = ExprImpl::from(
                                 FunctionCall::new(
@@ -288,9 +281,15 @@ impl<'a> ExprRewriter for LogicalOverWindowBuilder<'a> {
             }
         }
     }
+
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        let input_expr = input_ref.into();
+        let index = self.input_proj_builder.expr_index(&input_expr).unwrap();
+        ExprImpl::from(InputRef::new(index, input_expr.return_type()))
+    }
 }
 
-/// Build columns from window function args/partition_by/order_by
+/// Build columns from window function `args` / `partition_by` / `order_by`
 struct OverWindowProjectBuilder<'a> {
     builder: &'a mut ProjectBuilder,
     error: Option<ErrorCode>,
@@ -304,7 +303,10 @@ impl<'a> OverWindowProjectBuilder<'a> {
         }
     }
 
-    fn try_visit_window_function(&mut self, window_function: &WindowFunction) -> std::result::Result<(), ErrorCode> {
+    fn try_visit_window_function(
+        &mut self,
+        window_function: &WindowFunction,
+    ) -> std::result::Result<(), ErrorCode> {
         if let WindowFuncKind::Aggregate(agg_kind) = window_function.kind
         && matches!(
             agg_kind,
@@ -322,28 +324,31 @@ impl<'a> OverWindowProjectBuilder<'a> {
         self.builder.add_expr(&squared_input_expr).map_err(|err| ErrorCode::NotImplemented(format!("{err} inside args"), None.into()))?;
     }
         for arg in &window_function.args {
-            self.builder.add_expr(arg).map_err(|err| ErrorCode::NotImplemented(format!("{err} inside args"), None.into()))?;
+            self.builder.add_expr(arg).map_err(|err| {
+                ErrorCode::NotImplemented(format!("{err} inside args"), None.into())
+            })?;
         }
         for partition_by in &window_function.partition_by {
-            self.builder.add_expr(partition_by).map_err(|err| ErrorCode::NotImplemented(format!("{err} inside partition_by"), None.into()))?;
+            self.builder.add_expr(partition_by).map_err(|err| {
+                ErrorCode::NotImplemented(format!("{err} inside partition_by"), None.into())
+            })?;
         }
         for order_by in window_function.order_by.sort_exprs.iter().map(|e| &e.expr) {
-            self.builder.add_expr(order_by).map_err(|err| ErrorCode::NotImplemented(format!("{err} inside order_by"), None.into()))?;
+            self.builder.add_expr(order_by).map_err(|err| {
+                ErrorCode::NotImplemented(format!("{err} inside order_by"), None.into())
+            })?;
         }
         Ok(())
     }
 }
 
 impl<'a> ExprVisitor<()> for OverWindowProjectBuilder<'a> {
-    fn merge(_a: (), _b: ()) {
-        // ()
-    }
+    fn merge(_a: (), _b: ()) {}
 
-    fn visit_window_function(&mut self, window_function: &WindowFunction) -> () {
+    fn visit_window_function(&mut self, window_function: &WindowFunction) {
         if let Err(e) = self.try_visit_window_function(window_function) {
             self.error = Some(e);
         }
-        ()
     }
 }
 
@@ -363,7 +368,7 @@ impl LogicalOverWindow {
         Self { base, core }
     }
 
-    fn build_input(input: PlanRef, select_exprs: &[ExprImpl]) -> Result<ProjectBuilder> {
+    fn build_input_proj(input: PlanRef, select_exprs: &[ExprImpl]) -> Result<ProjectBuilder> {
         let mut input_proj_builder = ProjectBuilder::default();
         // Add and check input columns
         for (idx, field) in input.schema().fields().iter().enumerate() {
@@ -383,17 +388,15 @@ impl LogicalOverWindow {
         Ok(input_proj_builder)
     }
 
-    pub fn create(
-        input: PlanRef,
-        select_exprs: Vec<ExprImpl>,
-    ) -> Result<(PlanRef, Vec<ExprImpl>)> {
-        let input_proj_builder = Self::build_input(input.clone(), &select_exprs)?;
+    pub fn create(input: PlanRef, select_exprs: Vec<ExprImpl>) -> Result<(PlanRef, Vec<ExprImpl>)> {
+        let input_proj_builder = Self::build_input_proj(input.clone(), &select_exprs)?;
 
         let mut window_functions = vec![];
-        let mut over_window_builder = LogicalOverWindowBuilder::new(&input_proj_builder, &mut window_functions)?;
+        let mut over_window_builder =
+            LogicalOverWindowBuilder::new(&input_proj_builder, &mut window_functions)?;
 
-        let rewritten_selected_items =  over_window_builder.rewrite_selected_items(select_exprs)?;
-        
+        let rewritten_selected_items = over_window_builder.rewrite_selected_items(select_exprs)?;
+
         for window_func in &window_functions {
             if window_func.kind.is_rank() {
                 if window_func.order_by.sort_exprs.is_empty() {

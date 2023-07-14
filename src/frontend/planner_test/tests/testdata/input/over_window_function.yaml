@@ -4,7 +4,7 @@
     create table t(x int);
     select 1+row_number() over(ORDER BY x) from t;
   expected_outputs:
-    - planner_error
+    - logical_plan
 - id: window function call in ORDER BY
   sql: |
     create table t(x int);
