@@ -184,8 +184,9 @@ pub struct SourceInfo {
     pub fragment_id: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SourceFormat {
+    #[default]
     Invalid,
     Json,
     UpsertJson,

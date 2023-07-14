@@ -49,7 +49,7 @@ impl JsonAccessBuilder {
         payload: Vec<u8>,
     ) -> Result<AccessImpl<'_, '_>> {
         self.value = Some(payload);
-        let value = simd_json::to_borrowed_value(self.value.as_deref_mut().unwrap())
+        let value = simd_json::to_borrowed_value(self.value.as_mut().unwrap())
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         Ok(AccessImpl::Json(JsonAccess::new_with_options(
             value,

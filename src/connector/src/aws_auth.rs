@@ -20,6 +20,7 @@ use aws_types::region::Region;
 use aws_types::SdkConfig;
 
 /// A flatten cofig map for aws auth.
+#[derive(Clone)]
 pub struct AwsAuthProps {
     pub region: Option<String>,
     pub endpoint: Option<String>,

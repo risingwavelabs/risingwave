@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::ops::Deref;
 
 use auto_enums::auto_enum;
 pub use avro::{AvroParser, AvroParserConfig};
@@ -36,7 +35,7 @@ use risingwave_pb::catalog::StreamSourceInfo;
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::{BytesAccessBuilder, BytesParser};
 pub use self::csv_parser::CsvParserConfig;
-use self::unified::{AccessImpl, AccessResult};
+use self::unified::AccessImpl;
 use self::util::get_kafka_topic;
 use crate::aws_auth::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
@@ -410,10 +409,11 @@ pub enum AccessBuilder {
     Protobuf(ProtobufAccessBuilder),
     Json(JsonAccessBuilder),
     Bytes(BytesAccessBuilder),
+    DebeziumAvro(DebeziumAvroAccessBuilder),
 }
 
 impl AccessBuilder {
-    pub async fn new(config: EncodingProperties, kv: EncodingType) -> Result<Self> {
+    pub async fn new_default(config: EncodingProperties, kv: EncodingType) -> Result<Self> {
         let accessor = match config {
             EncodingProperties::Avro(config) => {
                 AccessBuilder::Avro(AvroAccessBuilder::new(config, kv).await?)
@@ -437,6 +437,7 @@ impl AccessBuilder {
             Self::Protobuf(builder) => builder.generate_accessor(payload).await?,
             Self::Json(builder) => builder.generate_accessor(payload).await?,
             Self::Bytes(builder) => builder.generate_accessor(payload).await?,
+            Self::DebeziumAvro(builder) => builder.generate_accessor(payload).await?,
         };
         Ok(accessor)
     }
@@ -567,7 +568,7 @@ impl From<&HashMap<String, String>> for SchemaRegistryAuth {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct AvroProperties {
     pub use_schema_registry: bool,
     pub row_schema_location: String,
@@ -578,7 +579,7 @@ pub struct AvroProperties {
     pub enable_upsert: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ProtobufProperties {
     pub message_name: String,
     pub use_schema_registry: bool,
@@ -588,17 +589,18 @@ pub struct ProtobufProperties {
     pub topic: String,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct CsvProperties {
     pub delimiter: u8,
     pub has_header: bool,
 }
 
+#[derive(Default, Clone)]
 pub struct JsonProperties {
     pub format: SourceFormat,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub enum EncodingProperties {
     Avro(AvroProperties),
     Protobuf(ProtobufProperties),
@@ -609,7 +611,7 @@ pub enum EncodingProperties {
     None,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub enum ProtocolProperties {
     Debezium,
     Maxwell,

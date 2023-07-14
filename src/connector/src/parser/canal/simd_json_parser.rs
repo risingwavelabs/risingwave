@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use aws_sdk_s3::types::EncodingType;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, Mutable, ValueAccess};
@@ -19,8 +20,8 @@ use simd_json::{BorrowedValue, Mutable, ValueAccess};
 use crate::parser::canal::operators::*;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::unified::ChangeEventOperation;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::unified::{ChangeEventOperation, AccessImpl};
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard, JsonProperties};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const DATA: &str = "data";

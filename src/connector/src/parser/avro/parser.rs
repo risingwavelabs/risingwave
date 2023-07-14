@@ -38,6 +38,7 @@ use crate::parser::{
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
+// Default avro access builder
 pub struct AvroAccessBuilder {
     schema: Arc<Schema>,
     pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,

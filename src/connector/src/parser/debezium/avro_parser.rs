@@ -15,6 +15,8 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use apache_avro::schema::ResolvedSchema;
+use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
 use reqwest::Url;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
@@ -31,9 +33,10 @@ use crate::parser::unified::avro::{
 };
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
+use crate::parser::unified::AccessImpl;
 use crate::parser::{
-    ByteStreamSourceParser, EncodingProperties, ParserProperties, SourceStreamChunkRowWriter,
-    WriteGuard,
+    AvroProperties, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserProperties,
+    SourceStreamChunkRowWriter, WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -41,6 +44,73 @@ const BEFORE: &str = "before";
 const AFTER: &str = "after";
 const OP: &str = "op";
 const PAYLOAD: &str = "payload";
+
+pub struct DebeziumAvroAccessBuilder {
+    schema: Arc<Schema>,
+    schema_resolver: Arc<ConfluentSchemaResolver>,
+    resolved_schema: Option<Arc<Schema>>,
+    value: Option<Value>,
+    encoding_type: EncodingType,
+}
+
+impl DebeziumAvroAccessBuilder {
+    pub async fn new(avro_config: AvroProperties, encoding_type: EncodingType) -> Result<Self> {
+        let schema_location = &avro_config.row_schema_location;
+        let client_config = &avro_config.client_config;
+        let kafka_topic = &avro_config.topic;
+        let url = Url::parse(schema_location).map_err(|e| {
+            InternalError(format!("failed to parse url ({}): {}", schema_location, e))
+        })?;
+        let client = Client::new(url, client_config)?;
+        let raw_schema = client
+            .get_schema_by_subject(format!("{}-key", &kafka_topic).as_str())
+            .await?;
+        let resolver = ConfluentSchemaResolver::new(client);
+        let schema = match encoding_type {
+            EncodingType::Value => {
+                resolver
+                    .get_by_subject_name(&format!("{}-value", kafka_topic))
+                    .await?
+            }
+            EncodingType::Key => Arc::new(Schema::parse_str(&raw_schema.content).map_err(|e| {
+                RwError::from(ProtocolError(format!("Avro schema parse error {}", e)))
+            })?),
+        };
+        Ok(Self {
+            schema,
+            schema_resolver: Arc::new(resolver),
+            resolved_schema: None,
+            value: None,
+            encoding_type,
+        })
+    }
+
+    pub async fn generate_accessor(& mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
+        let writer_schema = self.schema_resolver.get(schema_id).await?;
+        self.value = Some(
+            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
+        );
+        self.resolved_schema = match self.encoding_type {
+            EncodingType::Key => Some(writer_schema),
+            EncodingType::Value => {
+                let resolver = apache_avro::schema::ResolvedSchema::try_from(&*self.schema)
+                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+                // todo: to_resolved may cause stackoverflow if there's a loop in the schema
+                Some(Arc::new(
+                    resolver
+                        .to_resolved(&self.schema)
+                        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?)
+                )
+            }
+        };
+        Ok(AccessImpl::Avro(AvroAccess::new(
+            self.value.as_mut().unwrap(),
+            AvroParseOptions::default().with_schema(self.resolved_schema.as_mut().unwrap()),
+        )))
+    }
+}
 
 // TODO: avoid duplicated codes with `AvroParser`
 #[derive(Debug)]
