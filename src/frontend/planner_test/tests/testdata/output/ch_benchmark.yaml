@@ -1246,16 +1246,16 @@
         └─BatchHashAgg { group_key: [$expr3], aggs: [sum($expr4), sum(order_line.ol_amount)] }
           └─BatchExchange { order: [], dist: HashShard($expr3) }
             └─BatchProject { exprs: [Extract('YEAR':Varchar, orders.o_entry_d) as $expr3, Case((nation.n_name = 'INDIA':Varchar), order_line.ol_amount, 0:Decimal) as $expr4, order_line.ol_amount] }
-              └─BatchLookupJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [order_line.ol_amount, orders.o_entry_d, nation.n_name] }
-                └─BatchExchange { order: [], dist: UpstreamHashShard(supplier.s_nationkey) }
-                  └─BatchLookupJoin { type: Inner, predicate: $expr2 = supplier.s_suppkey, output: [order_line.ol_amount, orders.o_entry_d, supplier.s_nationkey] }
+              └─BatchLookupJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey AND (region.r_name = 'ASIA':Varchar), output: [order_line.ol_amount, orders.o_entry_d, nation.n_name] }
+                └─BatchExchange { order: [], dist: UpstreamHashShard(nation.n_regionkey) }
+                  └─BatchLookupJoin { type: Inner, predicate: $expr2 = nation.n_nationkey, output: [order_line.ol_amount, orders.o_entry_d, nation.n_name, nation.n_regionkey] }
                     └─BatchExchange { order: [], dist: UpstreamHashShard($expr2) }
-                      └─BatchProject { exprs: [order_line.ol_amount, orders.o_entry_d, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr2] }
-                        └─BatchLookupJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey AND (region.r_name = 'ASIA':Varchar), output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_entry_d] }
-                          └─BatchExchange { order: [], dist: UpstreamHashShard(nation.n_regionkey) }
-                            └─BatchLookupJoin { type: Inner, predicate: $expr1 = nation.n_nationkey, output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_entry_d, nation.n_regionkey] }
+                      └─BatchProject { exprs: [order_line.ol_amount, orders.o_entry_d, nation.n_name, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr2] }
+                        └─BatchLookupJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, nation.n_name] }
+                          └─BatchExchange { order: [], dist: UpstreamHashShard(supplier.s_nationkey) }
+                            └─BatchLookupJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey] }
                               └─BatchExchange { order: [], dist: UpstreamHashShard($expr1) }
-                                └─BatchProject { exprs: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_entry_d, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr1] }
+                                └─BatchProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1] }
                                   └─BatchLookupJoin { type: Inner, predicate: orders.o_w_id = customer.c_w_id AND orders.o_d_id = customer.c_d_id AND orders.o_c_id = customer.c_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_entry_d, customer.c_state] }
                                     └─BatchExchange { order: [], dist: UpstreamHashShard(orders.o_c_id, orders.o_d_id, orders.o_w_id) }
                                       └─BatchLookupJoin { type: Inner, predicate: order_line.ol_w_id = orders.o_w_id AND order_line.ol_d_id = orders.o_d_id AND order_line.ol_o_id = orders.o_id AND (orders.o_entry_d >= '2007-01-02 00:00:00':Timestamp) AND (orders.o_entry_d <= '2032-01-02 00:00:00':Timestamp), output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d] }
