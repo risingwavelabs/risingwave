@@ -2078,7 +2078,7 @@ where
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
-            const STAT_REPORT_PERIOD_SEC: u64 = 10;
+            const STAT_REPORT_PERIOD_SEC: u64 = 20;
             const COMPACTION_HEARTBEAT_PERIOD_SEC: u64 = 1;
 
             pub enum HummockTimerEvent {
@@ -2178,12 +2178,12 @@ where
                                         branched_sst,
                                         version_stats,
                                     ) = {
-                                        let mut versioning_guard =
-                                            write_lock!(hummock_manager.as_ref(), versioning).await;
+                                        let versioning_guard =
+                                            read_lock!(hummock_manager.as_ref(), versioning).await;
 
                                         let configs =
                                             hummock_manager.get_compaction_group_map().await;
-                                        let versioning_deref = versioning_guard.deref_mut();
+                                        let versioning_deref = versioning_guard;
                                         (
                                             versioning_deref.current_version.clone(),
                                             configs,
