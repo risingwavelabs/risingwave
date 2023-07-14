@@ -33,7 +33,7 @@ use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, ViewId}
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::system_catalog::SystemCatalog;
+use crate::catalog::system_catalog::{get_sys_views_in_schema, SystemTableCatalog};
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
 
@@ -146,6 +146,15 @@ impl Catalog {
                     .get_schema_mut(proto.id)
                     .unwrap()
                     .create_sys_table(sys_table);
+            });
+        }
+        if let Some(sys_views) = get_sys_views_in_schema(proto.name.as_str()) {
+            sys_views.into_iter().for_each(|sys_view| {
+                self.get_database_mut(proto.database_id)
+                    .unwrap()
+                    .get_schema_mut(proto.id)
+                    .unwrap()
+                    .create_sys_view(sys_view);
             });
         }
     }
@@ -491,7 +500,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         table_name: &str,
-    ) -> CatalogResult<&SystemCatalog> {
+    ) -> CatalogResult<&SystemTableCatalog> {
         self.get_schema_by_name(db_name, schema_name)
             .unwrap()
             .get_system_table_by_name(table_name)

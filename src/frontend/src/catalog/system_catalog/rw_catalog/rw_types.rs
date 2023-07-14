@@ -22,30 +22,41 @@ use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub static RW_ACTORS: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
-    name: "rw_actors",
+// TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.
+pub const PG_TYPE_DATA: &[(i32, &str)] = &[
+    (16, "bool"),
+    (20, "int8"),
+    (21, "int2"),
+    (23, "int4"),
+    // Note: rw doesn't support `text` type, returning it is just a workaround to be compatible
+    // with PostgreSQL.
+    (25, "text"),
+    (700, "float4"),
+    (701, "float8"),
+    (1043, "varchar"),
+    (1082, "date"),
+    (1083, "time"),
+    (1114, "timestamp"),
+    (1184, "timestamptz"),
+    (1186, "interval"),
+    (1700, "numeric"),
+];
+
+pub static RW_TYPES: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+    name: "rw_types",
     schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[
-        (DataType::Int32, "actor_id"),
-        (DataType::Int32, "fragment_id"),
-        (DataType::Int32, "parallel_unit_id"),
-        (DataType::Varchar, "status"),
-    ],
+    columns: &[(DataType::Int32, "id"), (DataType::Varchar, "name")],
     pk: &[0],
 });
 
 impl SysCatalogReaderImpl {
-    pub async fn read_rw_actor_states_info(&self) -> Result<Vec<OwnedRow>> {
-        let states = self.meta_client.list_actor_states().await?;
-
-        Ok(states
-            .into_iter()
-            .map(|state| {
+    pub fn read_rw_types(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_TYPE_DATA
+            .iter()
+            .map(|(id, name)| {
                 OwnedRow::new(vec![
-                    Some(ScalarImpl::Int32(state.actor_id as i32)),
-                    Some(ScalarImpl::Int32(state.fragment_id as i32)),
-                    Some(ScalarImpl::Int32(state.parallel_unit_id as i32)),
-                    Some(ScalarImpl::Utf8(state.state().as_str_name().into())),
+                    Some(ScalarImpl::Int32(*id)),
+                    Some(ScalarImpl::Utf8(name.to_string().into())),
                 ])
             })
             .collect_vec())

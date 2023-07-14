@@ -14,11 +14,14 @@
 
 use std::sync::LazyLock;
 
-use risingwave_common::types::DataType;
+use itertools::Itertools;
+use risingwave_common::array::ListValue;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
-
-pub const RW_FRAGMENTS_TABLE_NAME: &str = "rw_fragments";
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 pub static RW_FRAGMENTS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
     vec![
@@ -32,3 +35,43 @@ pub static RW_FRAGMENTS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = La
         ),
     ]
 });
+
+pub static RW_FRAGMENTS: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+    name: "rw_fragments",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &RW_FRAGMENTS_COLUMNS,
+    pk: &[0],
+});
+
+impl SysCatalogReaderImpl {
+    pub async fn read_rw_fragment_distributions_info(&self) -> Result<Vec<OwnedRow>> {
+        let distributions = self.meta_client.list_fragment_distribution().await?;
+
+        Ok(distributions
+            .into_iter()
+            .map(|distribution| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int32(distribution.fragment_id as i32)),
+                    Some(ScalarImpl::Int32(distribution.table_id as i32)),
+                    Some(ScalarImpl::Utf8(
+                        distribution.distribution_type().as_str_name().into(),
+                    )),
+                    Some(ScalarImpl::List(ListValue::new(
+                        distribution
+                            .state_table_ids
+                            .into_iter()
+                            .map(|id| Some(ScalarImpl::Int32(id as i32)))
+                            .collect_vec(),
+                    ))),
+                    Some(ScalarImpl::List(ListValue::new(
+                        distribution
+                            .upstream_fragment_ids
+                            .into_iter()
+                            .map(|id| Some(ScalarImpl::Int32(id as i32)))
+                            .collect_vec(),
+                    ))),
+                ])
+            })
+            .collect_vec())
+    }
+}

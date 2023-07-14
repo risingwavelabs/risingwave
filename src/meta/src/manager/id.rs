@@ -15,7 +15,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use risingwave_common::catalog::{NON_RESERVED_PG_CATALOG_TABLE_ID, NON_RESERVED_USER_ID};
+use risingwave_common::catalog::{NON_RESERVED_SYS_CATALOG_ID, NON_RESERVED_USER_ID};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use tokio::sync::RwLock;
 
@@ -181,7 +181,7 @@ where
                 StoredIdGenerator::new(
                     meta_store.clone(),
                     "table",
-                    Some(NON_RESERVED_PG_CATALOG_TABLE_ID as u64),
+                    Some(NON_RESERVED_SYS_CATALOG_ID as u64),
                 )
                 .await,
             ),

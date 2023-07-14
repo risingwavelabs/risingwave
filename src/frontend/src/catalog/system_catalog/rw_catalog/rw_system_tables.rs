@@ -23,21 +23,22 @@ use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{get_acl_items, BuiltinTable, SysCatalogReaderImpl};
 
-pub static RW_SCHEMAS: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
-    name: "rw_schemas",
+pub static RW_SYSTEM_TABLES: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+    name: "rw_system_tables",
     schema: RW_CATALOG_SCHEMA_NAME,
     columns: &[
         (DataType::Int32, "id"),
         (DataType::Varchar, "name"),
-        (DataType::Int32, "database_id"),
+        (DataType::Int32, "schema_id"),
         (DataType::Int32, "owner"),
+        (DataType::Varchar, "definition"),
         (DataType::Varchar, "acl"),
     ],
     pk: &[0],
 });
 
 impl SysCatalogReaderImpl {
-    pub fn read_rw_schema_info(&self) -> Result<Vec<OwnedRow>> {
+    pub fn read_system_table_info(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
         let user_reader = self.user_info_reader.read_guard();
@@ -45,16 +46,24 @@ impl SysCatalogReaderImpl {
         let username_map = user_reader.get_user_name_map();
 
         Ok(schemas
-            .map(|schema| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Int32(schema.id() as i32)),
-                    Some(ScalarImpl::Utf8(schema.name().into())),
-                    Some(ScalarImpl::Int32(schema.database_id() as i32)),
-                    Some(ScalarImpl::Int32(schema.owner() as i32)),
-                    Some(ScalarImpl::Utf8(
-                        get_acl_items(&Object::SchemaId(schema.id()), &users, username_map).into(),
-                    )),
-                ])
+            .flat_map(|schema| {
+                schema.iter_system_tables().map(|table| {
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int32(table.id.table_id as i32)),
+                        Some(ScalarImpl::Utf8(table.name().into())),
+                        Some(ScalarImpl::Int32(schema.id() as i32)),
+                        Some(ScalarImpl::Int32(table.owner as i32)),
+                        None,
+                        Some(ScalarImpl::Utf8(
+                            get_acl_items(
+                                &Object::TableId(table.id.table_id),
+                                &users,
+                                username_map,
+                            )
+                            .into(),
+                        )),
+                    ])
+                })
             })
             .collect_vec())
     }

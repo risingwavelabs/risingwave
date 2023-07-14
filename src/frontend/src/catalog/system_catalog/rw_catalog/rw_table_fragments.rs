@@ -12,11 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
+use std::sync::LazyLock;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use itertools::Itertools;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
+use risingwave_common::error::Result;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, ScalarImpl};
 
-pub const RW_TABLE_FRAGMENTS_TABLE_NAME: &str = "rw_table_fragments";
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_TABLE_FRAGMENTS_COLUMNS: &[SystemCatalogColumnsDef<'_>] =
-    &[(DataType::Int32, "table_id"), (DataType::Varchar, "status")];
+pub static RW_TABLE_FRAGMENTS: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+    name: "rw_table_fragments",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &[(DataType::Int32, "table_id"), (DataType::Varchar, "status")],
+    pk: &[0],
+});
+
+impl SysCatalogReaderImpl {
+    /// FIXME: we need to introduce revision snapshot read on meta to avoid any inconsistency when
+    /// we are trying to join any table fragments related system tables.
+    pub async fn read_rw_table_fragments_info(&self) -> Result<Vec<OwnedRow>> {
+        let states = self.meta_client.list_table_fragment_states().await?;
+
+        Ok(states
+            .into_iter()
+            .map(|state| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int32(state.table_id as i32)),
+                    Some(ScalarImpl::Utf8(state.state().as_str_name().into())),
+                ])
+            })
+            .collect_vec())
+    }
+}

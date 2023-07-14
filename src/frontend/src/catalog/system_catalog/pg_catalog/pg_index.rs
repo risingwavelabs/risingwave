@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Into;
 use std::sync::LazyLock;
 
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{BuiltinView, SystemCatalogColumnsDef};
 
-/// The catalog `pg_index` contains part of the information about indexes.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-index.html`]
 pub const PG_INDEX_TABLE_NAME: &str = "pg_index";
 pub static PG_INDEX_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
     vec![
@@ -32,4 +32,20 @@ pub static PG_INDEX_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLo
         // None. We don't have `pg_node_tree` type yet, so we use `text` instead.
         (DataType::Varchar, "indpred"),
     ]
+});
+
+/// The catalog `pg_index` contains part of the information about indexes.
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-index.html`]
+pub static PG_INDEX: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: PG_INDEX_TABLE_NAME,
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &PG_INDEX_COLUMNS,
+    sql: "SELECT id AS indexrelid,
+                primary_table_id AS indrelid,
+                ARRAY_LENGTH(original_column_ids)::smallint AS indnatts,
+                original_column_ids AS indkey,
+                NULL AS indexprs,
+                NULL AS indpred
+            FROM rw_catalog.rw_indexes"
+        .into(),
 });
