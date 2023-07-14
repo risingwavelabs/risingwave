@@ -19,10 +19,11 @@ use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
     AccessBuilder, EncodingProperties, EncodingType, ParserProperties, SourceStreamChunkRowWriter,
-    WriteGuard,
+    WriteGuard, ByteStreamSourceParser,
 };
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContextRef, SourceContext};
 
+#[derive(Debug)]
 pub struct DebeziumParser {
     key_builder: AccessBuilder,
     payload_builder: AccessBuilder,
@@ -71,14 +72,40 @@ impl DebeziumParser {
 
     pub async fn parse_inner(
         &mut self,
-        mut key: Vec<u8>,
-        mut payload: Vec<u8>,
+        mut key: Option<Vec<u8>>,
+        mut payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let key_accessor = self.key_builder.generate_accessor(key).await?;
-        let payload_accessor = self.payload_builder.generate_accessor(payload).await?;
-        let row_op = DebeziumChangeEvent::new(Some(key_accessor), Some(payload_accessor));
+        let key_accessor = match key {
+            None => None,
+            Some(data) => Some(self.key_builder.generate_accessor(data).await?),
+        };
+        let payload_accessor = match payload {
+            None => None,
+            Some(data) => Some(self.payload_builder.generate_accessor(data).await?),
+
+        };
+        let row_op = DebeziumChangeEvent::new(key_accessor, payload_accessor);
 
         apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
+    }
+}
+
+impl ByteStreamSourceParser for DebeziumParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(key, payload, writer).await
     }
 }

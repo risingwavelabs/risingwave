@@ -39,6 +39,7 @@ use crate::parser::{
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 // Default avro access builder
+#[derive(Debug)]
 pub struct AvroAccessBuilder {
     schema: Arc<Schema>,
     pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
@@ -290,32 +291,17 @@ impl AvroParser {
 
     pub(crate) async fn parse_inner(
         &self,
-        payload: Vec<u8>,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let (raw_key, raw_value) = if self.is_enable_upsert() {
-            let msg: UpsertMessage<'_> = bincode::deserialize(&payload).map_err(|e| {
-                RwError::from(ProtocolError(format!(
-                    "extract payload err {:?}, you may need to check the 'upsert' parameter",
-                    e
-                )))
-            })?;
-            if !msg.record.is_empty() {
-                (Some(msg.primary_key), Some(msg.record))
-            } else {
-                (Some(msg.primary_key), None)
-            }
-        } else {
-            (None, Some(Cow::from(&payload)))
-        };
-
-        let avro_value = if let Some(payload) = raw_value {
+        let avro_value = if let Some(payload) = payload {
             self.parse_avro_value(payload.as_ref(), Some(&*self.schema))
                 .await?
         } else {
             None
         };
-        let avro_key = if let Some(payload) = raw_key {
+        let avro_key = if let Some(payload) = key {
             self.parse_avro_value(payload.as_ref(), self.key_schema.as_deref())
                 .await?
         } else {
@@ -360,10 +346,11 @@ impl ByteStreamSourceParser for AvroParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        self.parse_inner(key, payload, writer).await
     }
 }
 

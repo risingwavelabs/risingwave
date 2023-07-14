@@ -14,7 +14,7 @@
 
 use std::fmt::Debug;
 
-use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::ErrorCode::{ProtocolError, self};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use simd_json::{BorrowedValue, Mutable};
@@ -113,10 +113,17 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        _key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        if payload.is_some() {
+            self.parse_inner(payload.unwrap(), writer).await
+        } else {
+            Err(RwError::from(ErrorCode::InternalError(
+                "Empty payload with nonempty key".into(),
+            )))
+        }
     }
 }
 

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod operators;
-mod simd_json_parser;
-
-pub use simd_json_parser::*;
+mod maxwell_parser;
+pub use maxwell_parser::*;
+// mod simd_json_parser;
+// pub use simd_json_parser::*;

@@ -45,6 +45,7 @@ const AFTER: &str = "after";
 const OP: &str = "op";
 const PAYLOAD: &str = "payload";
 
+#[derive(Debug)]
 pub struct DebeziumAvroAccessBuilder {
     schema: Arc<Schema>,
     schema_resolver: Arc<ConfluentSchemaResolver>,
@@ -85,7 +86,7 @@ impl DebeziumAvroAccessBuilder {
         })
     }
 
-    pub async fn generate_accessor(& mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
         let writer_schema = self.schema_resolver.get(schema_id).await?;
         self.value = Some(
@@ -101,8 +102,8 @@ impl DebeziumAvroAccessBuilder {
                 Some(Arc::new(
                     resolver
                         .to_resolved(&self.schema)
-                        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?)
-                )
+                        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
+                ))
             }
         };
         Ok(AccessImpl::Avro(AvroAccess::new(
@@ -189,6 +190,7 @@ impl DebeziumAvroParser {
 
     pub(crate) async fn parse_inner(
         &self,
+        key: Vec<u8>,
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
@@ -199,11 +201,6 @@ impl DebeziumAvroParser {
         // - A tombstone record that has the same key as the deleted row and a value of null. This
         // record is a marker for Apache Kafka. It indicates that log compaction can remove
         // all records that have this key.
-
-        let UpsertMessage {
-            primary_key: key,
-            record: payload,
-        } = bincode::deserialize(&payload[..]).unwrap();
 
         // If message value == null, it must be a tombstone message. Emit DELETE to downstream using
         // message key as the DELETE row. Throw an error if message key is empty.
@@ -253,10 +250,11 @@ impl ByteStreamSourceParser for DebeziumAvroParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        self.parse_inner(key.unwrap_or(vec![]), payload.unwrap_or(vec![]), writer).await
     }
 }
 

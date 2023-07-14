@@ -434,6 +434,7 @@ pub type SplitId = Arc<str>;
 /// The third-party message structs will eventually be transformed into this struct.
 #[derive(Debug, Clone)]
 pub struct SourceMessage {
+    pub key: Option<Vec<u8>>,
     pub payload: Option<Vec<u8>>,
     pub offset: String,
     pub split_id: SplitId,

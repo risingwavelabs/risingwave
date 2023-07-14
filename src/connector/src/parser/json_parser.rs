@@ -25,6 +25,7 @@ use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
+#[derive(Debug)]
 pub struct JsonAccessBuilder {
     value: Option<Vec<u8>>,
     option: JsonParseOptions,
@@ -32,16 +33,16 @@ pub struct JsonAccessBuilder {
 
 impl JsonAccessBuilder {
     pub fn new(config: JsonProperties) -> Result<Self> {
-        Ok(Self {value: None,
-        option: match config.format {
-            crate::source::SourceFormat::Json => JsonParseOptions::DEFAULT,
-            crate::source::SourceFormat::UpsertJson => JsonParseOptions::DEFAULT,
-            crate::source::SourceFormat::DebeziumJson => JsonParseOptions::DEBEZIUM,
-            crate::source::SourceFormat::Maxwell => JsonParseOptions::DEFAULT,
-            crate::source::SourceFormat::CanalJson => JsonParseOptions::CANAL,
-            _ => unreachable!(),
-
-        }})
+        Ok(Self {
+            value: None,
+            option: match config.format {
+                crate::source::SourceFormat::Json => JsonParseOptions::DEFAULT,
+                crate::source::SourceFormat::UpsertJson => JsonParseOptions::DEFAULT,
+                crate::source::SourceFormat::DebeziumJson => JsonParseOptions::DEBEZIUM,
+                crate::source::SourceFormat::Maxwell => JsonParseOptions::DEFAULT,
+                _ => unreachable!(),
+            },
+        })
     }
 
     pub async fn generate_accessor<'a>(
@@ -97,15 +98,13 @@ impl JsonParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        mut payload: Vec<u8>,
+        mut key: Option<Vec<u8>>,
+        mut payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         if self.enable_upsert {
-            let msg: UpsertMessage<'_> = bincode::deserialize(&payload)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-            let mut primary_key = msg.primary_key.to_vec();
-            let mut record = msg.record.to_vec();
+            let mut primary_key = key.unwrap_or(vec![]);
+            let mut record = payload.unwrap_or(vec![]);
             let key_decoded = simd_json::to_borrowed_value(&mut primary_key)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
@@ -124,7 +123,12 @@ impl JsonParser {
             }
             apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
         } else {
-            let value = simd_json::to_borrowed_value(&mut payload)
+            if payload.is_none() {
+                return Err(RwError::from(ErrorCode::InternalError(
+                    "Empty payload with nonempty key for non-upsert".into(),
+                )));
+            }
+            let value = simd_json::to_borrowed_value(payload.as_mut().unwrap())
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
             let values = if let simd_json::BorrowedValue::Array(arr) = value {
                 arr
@@ -169,10 +173,11 @@ impl ByteStreamSourceParser for JsonParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        self.parse_inner(key, payload, writer).await
     }
 }
 

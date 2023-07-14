@@ -88,3 +88,17 @@ pub(super) fn at_least_one_ok(mut results: Vec<Result<WriteGuard>>) -> Result<Wr
         ))))
     }
 }
+
+// For parser that doesn't support key currently
+#[macro_export]
+macro_rules! only_parse_payload {
+    ($self: ident, $payload: ident, $writer: ident) => {
+        if $payload.is_some() {
+            $self.parse_inner($payload.unwrap(), $writer).await
+        } else {
+            Err(RwError::from(ErrorCode::InternalError(
+                "Empty payload with nonempty key".into(),
+            )))
+        }
+    }
+}

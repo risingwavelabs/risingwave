@@ -20,7 +20,7 @@ use prost_reflect::{
     ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
+use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError, self};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, F32, F64};
@@ -29,15 +29,17 @@ use url::Url;
 
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
+use crate::only_parse_payload;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::AccessImpl;
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::{
     ByteStreamSourceParser, EncodingProperties, ParserProperties, SourceStreamChunkRowWriter,
-    WriteGuard, EncodingType, ProtobufProperties,
+    WriteGuard, ProtobufProperties,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
+#[derive(Debug)]
 pub struct ProtobufAccessBuilder {
     confluent_wire_type: bool,
     message_descriptor: MessageDescriptor,
@@ -353,10 +355,11 @@ impl ByteStreamSourceParser for ProtobufParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        only_parse_payload!(self, payload, writer)
     }
 }
 
