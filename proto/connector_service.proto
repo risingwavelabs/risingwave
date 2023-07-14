@@ -99,6 +99,43 @@ message ValidateSinkResponse {
   ValidationError error = 1;
 }
 
+message SinkMetadata {
+  message SerializedMetadata {
+    bytes metadata = 1;
+  }
+
+  oneof metadata {
+    SerializedMetadata serialized = 1;
+  }
+}
+
+message SinkCoordinatorStreamRequest {
+  message StartCoordinator {
+    SinkParam param = 1;
+  }
+
+  message CommitMetadata {
+    uint64 epoch = 1;
+    repeated SinkMetadata metadata = 2;
+  }
+
+  oneof request {
+    StartCoordinator start = 1;
+    CommitMetadata commit = 2;
+  }
+}
+
+message SinkCoordinatorStreamResponse {
+  message StartResponse {}
+
+  message CommitResponse {}
+
+  oneof response {
+    StartResponse start = 1;
+    CommitResponse commit = 2;
+  }
+}
+
 /* Source Service */
 
 message CdcMessage {
@@ -141,11 +178,11 @@ message ValidateSourceResponse {
 
 service ConnectorService {
   rpc SinkWriterStream(stream SinkWriterStreamRequest) returns (stream SinkWriterStreamResponse);
+  rpc SinkCoordinatorStream(stream SinkCoordinatorStreamRequest) returns (stream SinkCoordinatorStreamResponse);
   rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
 }
-
 
 message SinkWriterToCoordinatorMsg {
   message StartCoordinationRequest {
@@ -154,8 +191,8 @@ message SinkWriterToCoordinatorMsg {
   }
 
   message CommitRequest {
-    bytes metadata = 1;
-    uint64 epoch = 2;
+    uint64 epoch = 1;
+    SinkMetadata metadata = 2;
   }
 
   oneof msg {
@@ -165,8 +202,7 @@ message SinkWriterToCoordinatorMsg {
 }
 
 message SinkCoordinatorToWriterMsg {
-  message StartCoordinationResponse {
-  }
+  message StartCoordinationResponse {}
 
   message CommitResponse {
     uint64 epoch = 1;

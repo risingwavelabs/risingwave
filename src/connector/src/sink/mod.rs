@@ -30,11 +30,12 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::catalog::PbSinkType;
+use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
 use risingwave_pb::connector_service::sink_writer_to_coordinator_msg::{
     CommitRequest, StartCoordinationRequest,
 };
 use risingwave_pb::connector_service::{
-    sink_writer_to_coordinator_msg, PbSinkParam, SinkCoordinatorToWriterMsg,
+    sink_writer_to_coordinator_msg, PbSinkParam, SinkCoordinatorToWriterMsg, SinkMetadata,
     SinkWriterToCoordinatorMsg, TableSchema,
 };
 use risingwave_rpc_client::error::RpcError;
@@ -241,7 +242,7 @@ pub trait SinkCommitCoordinator {
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
     /// serialized bytes.
-    async fn commit(&mut self, epoch: u64, metadata: Vec<Bytes>) -> Result<()>;
+    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
 }
 
 pub struct DummySinkCommitCoordinator;
@@ -252,7 +253,7 @@ impl SinkCommitCoordinator for DummySinkCommitCoordinator {
         Ok(())
     }
 
-    async fn commit(&mut self, _epoch: u64, _metadata: Vec<Bytes>) -> Result<()> {
+    async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
         Ok(())
     }
 }
@@ -440,7 +441,11 @@ impl SinkWriter for CoordinatorTestSinkWriter {
                 .send(SinkWriterToCoordinatorMsg {
                     msg: Some(sink_writer_to_coordinator_msg::Msg::CommitRequest(
                         CommitRequest {
-                            metadata: Vec::from("hello"),
+                            metadata: Some(SinkMetadata {
+                                metadata: Some(Metadata::Serialized(SerializedMetadata {
+                                    metadata: Vec::from("hello"),
+                                })),
+                            }),
                             epoch: self.epoch,
                         },
                     )),
@@ -469,14 +474,13 @@ impl SinkCommitCoordinator for CoordinatorTestSinkCoordinator {
         Ok(())
     }
 
-    async fn commit(&mut self, epoch: u64, metadata: Vec<Bytes>) -> Result<()> {
+    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         info!("commit at {}", epoch);
         for (i, m) in metadata.into_iter().enumerate() {
-            info!(
-                "commit metadata {} {:?}",
-                i,
-                String::from_utf8(m.to_vec()).unwrap()
-            );
+            let v = match m.metadata.unwrap() {
+                Metadata::Serialized(m) => m.metadata,
+            };
+            info!("commit metadata {} {:?}", i, String::from_utf8(v).unwrap());
         }
         Ok(())
     }

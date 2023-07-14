@@ -29,6 +29,12 @@ public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceI
     }
 
     @Override
+    public StreamObserver<ConnectorServiceProto.SinkCoordinatorStreamRequest> sinkCoordinatorStream(
+            StreamObserver<ConnectorServiceProto.SinkCoordinatorStreamResponse> responseObserver) {
+        return new SinkCoordinatorStreamObserver(responseObserver);
+    }
+
+    @Override
     public void validateSink(
             ConnectorServiceProto.ValidateSinkRequest request,
             StreamObserver<ConnectorServiceProto.ValidateSinkResponse> responseObserver) {

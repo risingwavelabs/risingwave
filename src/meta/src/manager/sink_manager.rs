@@ -18,7 +18,6 @@ use std::future::{pending, Future};
 use std::iter::once;
 use std::pin::pin;
 
-use bytes::Bytes;
 use futures::future::{select, try_join_all, BoxFuture, Either};
 use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
@@ -33,7 +32,7 @@ use risingwave_pb::connector_service::sink_coordinator_to_writer_msg::{
 use risingwave_pb::connector_service::sink_writer_to_coordinator_msg::{CommitRequest, Msg};
 use risingwave_pb::connector_service::{
     sink_coordinator_to_writer_msg, sink_writer_to_coordinator_msg, SinkCoordinatorToWriterMsg,
-    SinkWriterToCoordinatorMsg,
+    SinkMetadata, SinkWriterToCoordinatorMsg,
 };
 use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -513,7 +512,7 @@ impl SinkCoordinatorWorker {
     ) {
         let result: Result<(), Status> = try {
             loop {
-                let commit_infos: Vec<(Vec<u8>, u64)> =
+                let commit_infos: Vec<(SinkMetadata, u64)> =
                     try_join_all(request_streams.iter_mut().map(|stream| {
                         stream.next().map(|event| {
                             event
@@ -527,9 +526,10 @@ impl SinkCoordinatorWorker {
                                     })
                                 })
                                 .and_then(|msg| match msg.msg {
-                                    Some(Msg::CommitRequest(CommitRequest { metadata, epoch })) => {
-                                        Ok((metadata, epoch))
-                                    }
+                                    Some(Msg::CommitRequest(CommitRequest {
+                                        metadata: Some(metadata),
+                                        epoch,
+                                    })) => Ok((metadata, epoch)),
                                     msg => Err(Status::invalid_argument(format!(
                                         "expect CommitRequest, get {:?}",
                                         msg
@@ -541,7 +541,7 @@ impl SinkCoordinatorWorker {
                 let epoch = commit_infos[0].1;
                 let mut metadatas = Vec::with_capacity(commit_infos.len());
                 for (metadata, other_epoch) in commit_infos {
-                    metadatas.push(Bytes::from(metadata));
+                    metadatas.push(metadata);
                     // TODO: may return error
                     if other_epoch != epoch {
                         warn!("unaligned epoch {} {}", other_epoch, epoch);
