@@ -37,7 +37,8 @@ public class JDBCSink extends SinkBase {
     private final List<String> pkColumnNames;
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
 
-    private final PreparedStatement upsertPreparedStmt;
+    private PreparedStatement insertPreparedStmt;
+    private PreparedStatement upsertPreparedStmt;
     private PreparedStatement deletePreparedStmt;
 
     private boolean updateFlag = false;
@@ -72,18 +73,30 @@ public class JDBCSink extends SinkBase {
             var schemaTableName =
                     jdbcDialect.createSchemaTableName(
                             config.getSchemaName(), config.getTableName());
-            var upsertSql =
-                    jdbcDialect.getUpsertStatement(
-                            schemaTableName, List.of(tableSchema.getColumnNames()), pkColumnNames);
-            // MySQL and Postgres have upsert SQL
-            assert (upsertSql.isPresent());
-            this.upsertPreparedStmt =
-                    conn.prepareStatement(upsertSql.get(), Statement.RETURN_GENERATED_KEYS);
-            // upsert sink will handle DELETE events
             if (config.isUpsertSink()) {
+                var upsertSql =
+                        jdbcDialect.getUpsertStatement(
+                                schemaTableName,
+                                List.of(tableSchema.getColumnNames()),
+                                pkColumnNames);
+                // MySQL and Postgres have upsert SQL
+                if (upsertSql.isEmpty()) {
+                    throw Status.FAILED_PRECONDITION
+                            .withDescription("Failed to get upsert SQL")
+                            .asRuntimeException();
+                }
+                this.upsertPreparedStmt =
+                        conn.prepareStatement(upsertSql.get(), Statement.RETURN_GENERATED_KEYS);
+                // upsert sink will handle DELETE events
                 var deleteSql = jdbcDialect.getDeleteStatement(schemaTableName, pkColumnNames);
                 this.deletePreparedStmt =
                         conn.prepareStatement(deleteSql, Statement.RETURN_GENERATED_KEYS);
+            } else {
+                var insertSql =
+                        jdbcDialect.getInsertIntoStatement(
+                                schemaTableName, List.of(tableSchema.getColumnNames()));
+                this.insertPreparedStmt =
+                        conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS);
             }
         } catch (SQLException e) {
             throw Status.INTERNAL
@@ -111,23 +124,41 @@ public class JDBCSink extends SinkBase {
         return pkColumnNames;
     }
 
+    private PreparedStatement prepareInsertStatement(SinkRow row) {
+        if (row.getOp() != Data.Op.INSERT) {
+            throw Status.FAILED_PRECONDITION
+                    .withDescription("unexpected op type: " + row.getOp())
+                    .asRuntimeException();
+        }
+        try {
+            var preparedStmt = insertPreparedStmt;
+            jdbcDialect.bindInsertIntoStatement(preparedStmt, conn, getTableSchema(), row);
+            return preparedStmt;
+        } catch (SQLException e) {
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .withCause(e)
+                    .asRuntimeException();
+        }
+    }
+
     private PreparedStatement prepareUpsertStatement(SinkRow row) {
         try {
+            var preparedStmt = upsertPreparedStmt;
             switch (row.getOp()) {
                 case INSERT:
-                    jdbcDialect.bindUpsertStatement(
-                            upsertPreparedStmt, conn, getTableSchema(), row);
-                    return upsertPreparedStmt;
+                    jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
+                    return preparedStmt;
                 case UPDATE_INSERT:
                     if (!updateFlag) {
                         throw Status.FAILED_PRECONDITION
                                 .withDescription("an UPDATE_DELETE should precede an UPDATE_INSERT")
                                 .asRuntimeException();
                     }
-                    jdbcDialect.bindUpsertStatement(
-                            upsertPreparedStmt, conn, getTableSchema(), row);
+                    jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
                     updateFlag = false;
-                    return upsertPreparedStmt;
+                    return preparedStmt;
                 default:
                     throw Status.FAILED_PRECONDITION
                             .withDescription("unexpected op type: " + row.getOp())
@@ -143,7 +174,6 @@ public class JDBCSink extends SinkBase {
     }
 
     private PreparedStatement prepareDeleteStatement(SinkRow row) {
-        assert row.getOp() == Data.Op.DELETE;
         if (!config.isUpsertSink()) {
             throw Status.FAILED_PRECONDITION
                     .withDescription("Non-upsert sink cannot handle DELETE event")
@@ -181,10 +211,10 @@ public class JDBCSink extends SinkBase {
                     continue;
                 }
 
-                if (row.getOp() == Data.Op.DELETE) {
-                    stmt = prepareDeleteStatement(row);
+                if (config.isUpsertSink()) {
+                    stmt = prepareForUpsert(row);
                 } else {
-                    stmt = prepareUpsertStatement(row);
+                    stmt = prepareForAppendOnly(row);
                 }
 
                 try {
@@ -201,6 +231,20 @@ public class JDBCSink extends SinkBase {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    private PreparedStatement prepareForUpsert(SinkRow row) {
+        PreparedStatement stmt;
+        if (row.getOp() == Data.Op.DELETE) {
+            stmt = prepareDeleteStatement(row);
+        } else {
+            stmt = prepareUpsertStatement(row);
+        }
+        return stmt;
+    }
+
+    private PreparedStatement prepareForAppendOnly(SinkRow row) {
+        return prepareInsertStatement(row);
     }
 
     @Override
