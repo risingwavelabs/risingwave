@@ -82,11 +82,11 @@ impl Aggregator for Distinct {
         self.exists_estimated_heap_size = 0;
     }
 
-    fn get(&self) -> Datum {
-        self.inner.get()
+    fn get_state(&self) -> Datum {
+        self.inner.get_state()
     }
 
-    fn set(&mut self, _: Datum) {
+    fn set_state(&mut self, _: Datum) {
         unimplemented!("set is not supported for distinct");
     }
 

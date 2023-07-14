@@ -342,9 +342,13 @@ impl FunctionAttr {
             Some(s) => s.parse().unwrap(),
             _ => quote! { None },
         };
-        let set_body = match &self.state {
+        let get_state = match &self.state {
+            Some(s) if s != "ref" => quote! { unimplemented!("getting state is not supported") },
+            _ => quote! { self.state.clone().map(|s| s.into()) },
+        };
+        let set_state = match &self.state {
             Some(s) if s != "ref" => quote! { unimplemented!("setting state is not supported") },
-            _ => quote! { self.state = state.map(|s| <#state_type>::try_from(s).unwrap()); },
+            _ => quote! { self.state = state.map(|s| s.try_into().unwrap()); },
         };
         let fn_name = format_ident!("{}", self.user_fn.name);
         let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
@@ -438,11 +442,11 @@ impl FunctionAttr {
                     fn reset(&mut self) {
                         self.state = #init_state;
                     }
-                    fn get(&self) -> Datum {
-                        self.state.clone().map(|s| <#ret_owned>::from(s).into())
+                    fn get_state(&self) -> Datum {
+                        #get_state
                     }
-                    fn set(&mut self, state: Datum) {
-                        #set_body
+                    fn set_state(&mut self, state: Datum) {
+                        #set_state
                     }
                     fn output(&mut self) -> Result<Datum> {
                         #[allow(clippy::mem_replace_option_with_none)]

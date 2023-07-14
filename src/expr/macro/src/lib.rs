@@ -473,6 +473,7 @@ impl FunctionAttr {
         format!("{}_{}_{}", self.name, self.args.join("_"), self.ret)
             .replace("[]", "list")
             .replace(['<', '>', ' ', ','], "_")
+            .replace("__", "_")
     }
 }
 

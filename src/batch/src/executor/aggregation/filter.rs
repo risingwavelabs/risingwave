@@ -100,12 +100,12 @@ impl Aggregator for Filter {
         self.inner.reset();
     }
 
-    fn get(&self) -> Datum {
-        self.inner.get()
+    fn get_state(&self) -> Datum {
+        self.inner.get_state()
     }
 
-    fn set(&mut self, state: Datum) {
-        self.inner.set(state);
+    fn set_state(&mut self, state: Datum) {
+        self.inner.set_state(state);
     }
 
     fn estimated_size(&self) -> usize {
@@ -153,11 +153,11 @@ mod tests {
             unimplemented!()
         }
 
-        fn get(&self) -> Datum {
+        fn get_state(&self) -> Datum {
             unimplemented!()
         }
 
-        fn set(&mut self, _: Datum) {
+        fn set_state(&mut self, _: Datum) {
             unimplemented!()
         }
 

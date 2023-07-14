@@ -126,12 +126,12 @@ impl Aggregator for Mode {
         self.cur_item_freq = 0;
     }
 
-    fn get(&self) -> Datum {
-        self.cur_mode.clone()
+    fn get_state(&self) -> Datum {
+        unimplemented!("get_state is not supported for mode");
     }
 
-    fn set(&mut self, _: Datum) {
-        unimplemented!("set is not supported for mode");
+    fn set_state(&mut self, _: Datum) {
+        unimplemented!("set_state is not supported for mode");
     }
 
     fn estimated_size(&self) -> usize {

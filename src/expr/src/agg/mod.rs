@@ -65,10 +65,10 @@ pub trait Aggregator: Send + Sync + DynClone + 'static {
     fn reset(&mut self);
 
     /// Get the current value state.
-    fn get(&self) -> Datum;
+    fn get_state(&self) -> Datum;
 
     /// Set the current value state.
-    fn set(&mut self, state: Datum);
+    fn set_state(&mut self, state: Datum);
 
     /// The estimated size of the state.
     fn estimated_size(&self) -> usize;

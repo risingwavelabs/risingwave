@@ -127,11 +127,11 @@ impl Aggregator for ProjectionOrderBy {
         unimplemented!("reset is not supported for orderby");
     }
 
-    fn get(&self) -> Datum {
+    fn get_state(&self) -> Datum {
         unimplemented!("get is not supported for orderby");
     }
 
-    fn set(&mut self, _: Datum) {
+    fn set_state(&mut self, _: Datum) {
         unimplemented!("set is not supported for orderby");
     }
 

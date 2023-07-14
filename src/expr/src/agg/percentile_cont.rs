@@ -109,15 +109,7 @@ impl Aggregator for PercentileCont {
     }
 
     fn output(&mut self) -> Result<Datum> {
-        Ok(self.get())
-    }
-
-    fn reset(&mut self) {
-        self.data.clear();
-    }
-
-    fn get(&self) -> Datum {
-        if let Some(fractions) = self.fractions && !self.data.is_empty() {
+        Ok(if let Some(fractions) = self.fractions && !self.data.is_empty() {
             let rn = fractions * (self.data.len() - 1) as f64;
             let crn = f64::ceil(rn);
             let frn = f64::floor(rn);
@@ -130,10 +122,18 @@ impl Aggregator for PercentileCont {
             Some(result.into())
         } else {
             None
-        }
+        })
     }
 
-    fn set(&mut self, _: Datum) {
+    fn reset(&mut self) {
+        self.data.clear();
+    }
+
+    fn get_state(&self) -> Datum {
+        unimplemented!()
+    }
+
+    fn set_state(&mut self, _: Datum) {
         unimplemented!()
     }
 

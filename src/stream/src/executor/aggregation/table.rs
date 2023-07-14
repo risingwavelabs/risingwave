@@ -81,7 +81,7 @@ impl TableState {
         };
         if let Some(state_row) = state_row {
             let state = state_row[group_key.map_or(0, GroupKey::len)].clone();
-            self.inner.set(state);
+            self.inner.set_state(state);
         }
         Ok(())
     }
@@ -92,7 +92,7 @@ impl TableState {
         state_table: &mut StateTable<impl StateStore>,
         group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<()> {
-        let state = self.inner.get();
+        let state = self.inner.get_state();
         let current_row = group_key.map(GroupKey::table_row).chain(row::once(state));
 
         let state_row = {
@@ -121,6 +121,6 @@ impl TableState {
 
     /// Get the output of the state.
     pub fn get_output(&mut self) -> StreamExecutorResult<Datum> {
-        Ok(self.inner.get())
+        Ok(self.inner.clone().output()?)
     }
 }

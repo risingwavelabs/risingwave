@@ -77,7 +77,7 @@ impl AggState {
             AggStateStorage::ResultValue => {
                 let mut state = build(agg_call)?;
                 if let Some(prev) = prev_output {
-                    state.set(prev.clone());
+                    state.set_state(prev.clone());
                 }
                 Self::Value(state)
             }
@@ -117,7 +117,7 @@ impl AggState {
         match self {
             Self::Value(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::ResultValue));
-                Ok(state.get())
+                Ok(state.get_state())
             }
             Self::Table(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::Table { .. }));
