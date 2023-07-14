@@ -54,6 +54,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         128 << 20,
         0,
         FileCache::none(),
+        FileCache::none(),
     ))
 }
 

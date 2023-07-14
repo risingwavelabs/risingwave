@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
@@ -539,35 +540,65 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
-        let file_cache = if opts.file_cache_dir.is_empty() {
+        let data_file_cache = if opts.data_file_cache_dir.is_empty() {
             FileCache::none()
         } else {
             const MB: usize = 1024 * 1024;
 
             let foyer_store_config = FoyerStoreConfig {
-                dir: opts.file_cache_dir.clone(),
-                capacity: opts.file_cache_capacity_mb * MB,
-                file_capacity: opts.file_cache_file_capacity_mb * MB,
-                buffer_pool_size: opts.file_cache_buffer_pool_size_mb * MB,
-                device_align: opts.file_cache_device_align,
-                device_io_size: opts.file_cache_device_io_size,
-                lfu_window_to_cache_size_ratio: opts.file_cache_lfu_window_to_cache_size_ratio,
-                lfu_tiny_lru_capacity_ratio: opts.file_cache_lfu_tiny_lru_capacity_ratio,
-                rated_random_rate: opts.file_cache_rated_random_rate_mb * MB,
-                flushers: opts.file_cache_flushers,
-                reclaimers: opts.file_cache_reclaimers,
-                flush_rate_limit: opts.file_cache_flush_rate_limit_mb * MB,
-                reclaim_rate_limit: opts.file_cache_reclaim_rate_limit_mb * MB,
-                recover_concurrency: opts.file_cache_recover_concurrency,
+                dir: PathBuf::from(opts.data_file_cache_dir.clone()),
+                capacity: opts.data_file_cache_capacity_mb * MB,
+                file_capacity: opts.data_file_cache_file_capacity_mb * MB,
+                buffer_pool_size: opts.data_file_cache_buffer_pool_size_mb * MB,
+                device_align: opts.data_file_cache_device_align,
+                device_io_size: opts.data_file_cache_device_io_size,
+                lfu_window_to_cache_size_ratio: opts.data_file_cache_lfu_window_to_cache_size_ratio,
+                lfu_tiny_lru_capacity_ratio: opts.data_file_cache_lfu_tiny_lru_capacity_ratio,
+                rated_random_rate: opts.data_file_cache_rated_random_rate_mb * MB,
+                flushers: opts.data_file_cache_flushers,
+                reclaimers: opts.data_file_cache_reclaimers,
+                flush_rate_limit: opts.data_file_cache_flush_rate_limit_mb * MB,
+                reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
+                recover_concurrency: opts.data_file_cache_recover_concurrency,
                 prometheus_registry: Some(state_store_metrics.registry().clone()),
+                prometheus_namespace: Some("data".to_string()),
             };
             let config = FoyerRuntimeConfig {
                 foyer_store_config,
                 runtime_worker_threads: None,
             };
-            // FileCache::foyer(foyer_store_config)
-            //     .await
-            //     .map_err(HummockError::file_cache)?
+            FileCache::foyer_runtime(config)
+                .await
+                .map_err(HummockError::file_cache)?
+        };
+
+        let meta_file_cache = if opts.meta_file_cache_dir.is_empty() {
+            FileCache::none()
+        } else {
+            const MB: usize = 1024 * 1024;
+
+            let foyer_store_config = FoyerStoreConfig {
+                dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
+                capacity: opts.meta_file_cache_capacity_mb * MB,
+                file_capacity: opts.meta_file_cache_file_capacity_mb * MB,
+                buffer_pool_size: opts.meta_file_cache_buffer_pool_size_mb * MB,
+                device_align: opts.meta_file_cache_device_align,
+                device_io_size: opts.meta_file_cache_device_io_size,
+                lfu_window_to_cache_size_ratio: opts.meta_file_cache_lfu_window_to_cache_size_ratio,
+                lfu_tiny_lru_capacity_ratio: opts.meta_file_cache_lfu_tiny_lru_capacity_ratio,
+                rated_random_rate: opts.meta_file_cache_rated_random_rate_mb * MB,
+                flushers: opts.meta_file_cache_flushers,
+                reclaimers: opts.meta_file_cache_reclaimers,
+                flush_rate_limit: opts.meta_file_cache_flush_rate_limit_mb * MB,
+                reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
+                recover_concurrency: opts.meta_file_cache_recover_concurrency,
+                prometheus_registry: Some(state_store_metrics.registry().clone()),
+                prometheus_namespace: Some("meta".to_string()),
+            };
+            let config = FoyerRuntimeConfig {
+                foyer_store_config,
+                runtime_worker_threads: None,
+            };
             FileCache::foyer_runtime(config)
                 .await
                 .map_err(HummockError::file_cache)?
@@ -594,7 +625,8 @@ impl StateStoreImpl {
                     opts.block_cache_capacity_mb * (1 << 20),
                     opts.meta_cache_capacity_mb * (1 << 20),
                     opts.high_priority_ratio,
-                    file_cache,
+                    data_file_cache,
+                    meta_file_cache,
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());

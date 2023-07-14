@@ -457,7 +457,10 @@ pub struct StorageConfig {
     pub sstable_id_remote_fetch_number: u32,
 
     #[serde(default)]
-    pub file_cache: FileCacheConfig,
+    pub data_file_cache: FileCacheConfig,
+
+    #[serde(default)]
+    pub meta_file_cache: FileCacheConfig,
 
     /// Whether to enable streaming upload for sstable.
     #[serde(default = "default::storage::min_sst_size_for_streaming_upload")]
@@ -1047,7 +1050,8 @@ pub struct StorageMemoryConfig {
     pub block_cache_capacity_mb: usize,
     pub meta_cache_capacity_mb: usize,
     pub shared_buffer_capacity_mb: usize,
-    pub file_cache_buffer_pool_size_mb: usize,
+    pub data_file_cache_buffer_pool_capacity_mb: usize,
+    pub meta_file_cache_buffer_pool_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
     pub high_priority_ratio_in_percent: usize,
 }
@@ -1065,9 +1069,14 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or(default::storage::shared_buffer_capacity_mb());
-    let file_cache_total_buffer_capacity_mb = s
+    let data_file_cache_buffer_pool_size_mb = s
         .storage
-        .file_cache
+        .data_file_cache
+        .buffer_pool_size_mb
+        .unwrap_or(default::file_cache::buffer_pool_size_mb());
+    let meta_file_cache_buffer_pool_size_mb = s
+        .storage
+        .meta_file_cache
         .buffer_pool_size_mb
         .unwrap_or(default::file_cache::buffer_pool_size_mb());
     let compactor_memory_limit_mb = s
@@ -1083,7 +1092,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         block_cache_capacity_mb,
         meta_cache_capacity_mb,
         shared_buffer_capacity_mb,
-        file_cache_buffer_pool_size_mb: file_cache_total_buffer_capacity_mb,
+        data_file_cache_buffer_pool_capacity_mb: data_file_cache_buffer_pool_size_mb,
+        meta_file_cache_buffer_pool_capacity_mb: meta_file_cache_buffer_pool_size_mb,
         compactor_memory_limit_mb,
         high_priority_ratio_in_percent,
     }

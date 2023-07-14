@@ -143,6 +143,7 @@ fn bench_builder(
         128 << 20,
         0,
         FileCache::none(),
+        FileCache::none(),
     ));
 
     let mut group = c.benchmark_group("bench_multi_builder");

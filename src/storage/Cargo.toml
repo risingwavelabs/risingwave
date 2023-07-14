@@ -25,7 +25,7 @@ dyn-clone = "1.0.4"
 either = "1"
 enum-as-inner = "0.5"
 fail = "0.5"
-foyer ={ git = "https://github.com/mrcroxx/foyer", rev = "8381f02" }
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "ef2999f" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"

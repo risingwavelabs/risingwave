@@ -168,6 +168,7 @@ For `./risedev apply-compose-deploy` users,
             opts.meta_cache_capacity_mb * (1 << 20),
             0,
             FileCache::none(),
+            FileCache::none(),
         )))
     }
 }

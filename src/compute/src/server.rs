@@ -471,7 +471,8 @@ fn total_storage_memory_limit_bytes(storage_memory_config: &StorageMemoryConfig)
     let total_storage_memory_mb = storage_memory_config.block_cache_capacity_mb
         + storage_memory_config.meta_cache_capacity_mb
         + storage_memory_config.shared_buffer_capacity_mb
-        + storage_memory_config.file_cache_buffer_pool_size_mb
+        + storage_memory_config.data_file_cache_buffer_pool_capacity_mb
+        + storage_memory_config.meta_file_cache_buffer_pool_capacity_mb
         + storage_memory_config.compactor_memory_limit_mb;
     total_storage_memory_mb << 20
 }
@@ -502,7 +503,8 @@ fn print_memory_config(
         >         block_cache_capacity: {}\n\
         >         meta_cache_capacity: {}\n\
         >         shared_buffer_capacity: {}\n\
-        >         file_cache_total_buffer_capacity: {}\n\
+        >         data_file_cache_buffer_pool_capacity: {}\n\
+        >         meta_file_cache_buffer_pool_capacity: {}\n\
         >         compactor_memory_limit: {}\n\
         >     compute_memory: {}\n\
         >     reserved_memory: {}",
@@ -511,7 +513,8 @@ fn print_memory_config(
         convert((storage_memory_config.block_cache_capacity_mb << 20) as _),
         convert((storage_memory_config.meta_cache_capacity_mb << 20) as _),
         convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _),
-        convert((storage_memory_config.file_cache_buffer_pool_size_mb << 20) as _),
+        convert((storage_memory_config.data_file_cache_buffer_pool_capacity_mb << 20) as _),
+        convert((storage_memory_config.meta_file_cache_buffer_pool_capacity_mb << 20) as _),
         if embedded_compactor_enabled {
             convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
         } else {

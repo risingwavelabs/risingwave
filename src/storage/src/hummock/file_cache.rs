@@ -21,13 +21,15 @@ use bytes::{Buf, BufMut, Bytes};
 use foyer::common::code::{Key, Value};
 use foyer::storage::admission::rated_random::RatedRandom;
 use foyer::storage::admission::AdmissionPolicy;
+use foyer::storage::store::PrometheusConfig;
 use foyer::storage::LfuFsStoreConfig;
 use prometheus::Registry;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::{mpsc, oneshot};
 
-use super::Block;
+use super::{Block, Sstable};
+use crate::hummock::SstableMeta;
 
 #[derive(thiserror::Error, Debug)]
 pub enum FileCacheError {
@@ -48,10 +50,10 @@ pub type Result<T> = core::result::Result<T, FileCacheError>;
 pub type EvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
 pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
-pub type FoyerStore = foyer::storage::LfuFsStore<SstableBlockIndex, Box<Block>>;
+pub type FoyerStore<K, V> = foyer::storage::LfuFsStore<K, V>;
 
 pub struct FoyerStoreConfig {
-    pub dir: String,
+    pub dir: PathBuf,
     pub capacity: usize,
     pub file_capacity: usize,
     pub buffer_pool_size: usize,
@@ -66,6 +68,7 @@ pub struct FoyerStoreConfig {
     pub lfu_tiny_lru_capacity_ratio: f64,
     pub rated_random_rate: usize,
     pub prometheus_registry: Option<Registry>,
+    pub prometheus_namespace: Option<String>,
 }
 
 pub struct FoyerRuntimeConfig {
@@ -74,19 +77,26 @@ pub struct FoyerRuntimeConfig {
 }
 
 #[derive(Debug)]
-pub enum FoyerRuntimeTask {
+pub enum FoyerRuntimeTask<K, V>
+where
+    K: Key + Copy,
+    V: Value,
+{
     Insert {
-        key: SstableBlockIndex,
-        value: Box<Block>,
+        key: K,
+        value: V,
         tx: Option<oneshot::Sender<Result<()>>>,
     },
     Remove {
-        key: SstableBlockIndex,
-        tx: oneshot::Sender<Result<()>>,
+        key: K,
+        tx: Option<oneshot::Sender<Result<()>>>,
+    },
+    Clear {
+        tx: Option<oneshot::Sender<Result<()>>>,
     },
     Lookup {
-        key: SstableBlockIndex,
-        tx: oneshot::Sender<Result<Option<Box<Block>>>>,
+        key: K,
+        tx: oneshot::Sender<Result<Option<V>>>,
     },
 }
 
@@ -129,17 +139,49 @@ impl Value for Box<Block> {
     }
 }
 
+impl Value for Box<Sstable> {
+    fn weight(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
+
+    fn serialized_len(&self) -> usize {
+        8 + self.meta.encoded_size()
+    }
+
+    fn write(&self, mut buf: &mut [u8]) {
+        buf.put_u64(self.id);
+        // TODO(MrCroxx): avoid buffer copy
+        let mut buffer = vec![];
+        self.meta.encode_to(&mut buffer);
+        buf.put_slice(&buffer[..])
+    }
+
+    fn read(mut buf: &[u8]) -> Self {
+        let id = buf.get_u64();
+        let meta = SstableMeta::decode(&mut buf).unwrap();
+        Box::new(Sstable::new(id, meta))
+    }
+}
+
 #[derive(Clone)]
-pub enum FileCache {
+pub enum FileCache<K, V>
+where
+    K: Key + Copy,
+    V: Value,
+{
     None,
-    Foyer(Arc<FoyerStore>),
+    Foyer(Arc<FoyerStore<K, V>>),
     FoyerRuntime {
         runtime: Arc<BackgroundShutdownRuntime>,
-        task_tx: Arc<mpsc::UnboundedSender<FoyerRuntimeTask>>,
+        task_tx: Arc<mpsc::UnboundedSender<FoyerRuntimeTask<K, V>>>,
     },
 }
 
-impl FileCache {
+impl<K, V> FileCache<K, V>
+where
+    K: Key + Copy,
+    V: Value,
+{
     pub fn none() -> Self {
         Self::None
     }
@@ -149,9 +191,7 @@ impl FileCache {
         let capacity = config.capacity;
         let capacity = capacity - (capacity % file_capacity);
 
-        let mut admissions: Vec<
-            Arc<dyn AdmissionPolicy<Key = SstableBlockIndex, Value = Box<Block>>>,
-        > = vec![];
+        let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>> = vec![];
         if config.rated_random_rate > 0 {
             let rr = RatedRandom::new(config.rated_random_rate, Duration::from_millis(100));
             admissions.push(Arc::new(rr));
@@ -163,7 +203,7 @@ impl FileCache {
                 tiny_lru_capacity_ratio: config.lfu_tiny_lru_capacity_ratio,
             },
             device_config: DeviceConfig {
-                dir: PathBuf::from(config.dir.clone()),
+                dir: config.dir,
                 capacity,
                 file_capacity,
                 align: config.device_align,
@@ -177,7 +217,10 @@ impl FileCache {
             reclaimers: config.reclaimers,
             reclaim_rate_limit: config.reclaim_rate_limit,
             recover_concurrency: config.recover_concurrency,
-            prometheus_registry: config.prometheus_registry,
+            prometheus_config: PrometheusConfig {
+                registry: config.prometheus_registry,
+                namespace: config.prometheus_namespace,
+            },
         };
         let store = FoyerStore::open(c).await.map_err(FileCacheError::foyer)?;
         Ok(Self::Foyer(store))
@@ -203,9 +246,7 @@ impl FileCache {
             let capacity = foyer_store_config.capacity;
             let capacity = capacity - (capacity % file_capacity);
 
-            let mut admissions: Vec<
-                Arc<dyn AdmissionPolicy<Key = SstableBlockIndex, Value = Box<Block>>>,
-            > = vec![];
+            let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>> = vec![];
             if foyer_store_config.rated_random_rate > 0 {
                 let rr = RatedRandom::new(
                     foyer_store_config.rated_random_rate,
@@ -220,7 +261,7 @@ impl FileCache {
                     tiny_lru_capacity_ratio: foyer_store_config.lfu_tiny_lru_capacity_ratio,
                 },
                 device_config: DeviceConfig {
-                    dir: PathBuf::from(foyer_store_config.dir.clone()),
+                    dir: foyer_store_config.dir.clone(),
                     capacity,
                     file_capacity,
                     align: foyer_store_config.device_align,
@@ -234,7 +275,10 @@ impl FileCache {
                 reclaimers: foyer_store_config.reclaimers,
                 reclaim_rate_limit: foyer_store_config.reclaim_rate_limit,
                 recover_concurrency: foyer_store_config.recover_concurrency,
-                prometheus_registry: foyer_store_config.prometheus_registry,
+                prometheus_config: PrometheusConfig {
+                    registry: foyer_store_config.prometheus_registry,
+                    namespace: foyer_store_config.prometheus_namespace,
+                },
             };
             match FoyerStore::open(c).await.map_err(FileCacheError::foyer) {
                 Err(e) => tx.send(Err(e)).unwrap(),
@@ -254,7 +298,15 @@ impl FileCache {
                             }
                             FoyerRuntimeTask::Remove { key, tx } => {
                                 store.remove(&key);
-                                tx.send(Ok(())).unwrap();
+                                if let Some(tx) = tx {
+                                    tx.send(Ok(())).unwrap();
+                                }
+                            }
+                            FoyerRuntimeTask::Clear { tx } => {
+                                store.clear();
+                                if let Some(tx) = tx {
+                                    tx.send(Ok(())).unwrap();
+                                }
                             }
                             FoyerRuntimeTask::Lookup { key, tx } => {
                                 let res = store.lookup(&key).await.map_err(FileCacheError::foyer);
@@ -275,7 +327,7 @@ impl FileCache {
     }
 
     #[tracing::instrument(skip(self, value))]
-    pub async fn insert(&self, key: SstableBlockIndex, value: Box<Block>) -> Result<()> {
+    pub async fn insert(&self, key: K, value: V) -> Result<()> {
         match self {
             FileCache::None => Ok(()),
             FileCache::Foyer(store) => store
@@ -298,7 +350,7 @@ impl FileCache {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn insert_without_wait(&self, key: SstableBlockIndex, value: Box<Block>) {
+    pub fn insert_without_wait(&self, key: K, value: V) {
         match self {
             FileCache::None => {}
             FileCache::Foyer(_) => panic!("unsupported"),
@@ -315,7 +367,7 @@ impl FileCache {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn remove(&self, key: &SstableBlockIndex) -> Result<()> {
+    pub async fn remove(&self, key: &K) -> Result<()> {
         match self {
             FileCache::None => Ok(()),
             FileCache::Foyer(store) => {
@@ -325,7 +377,10 @@ impl FileCache {
             FileCache::FoyerRuntime { task_tx, .. } => {
                 let (tx, rx) = oneshot::channel();
                 task_tx
-                    .send(FoyerRuntimeTask::Remove { key: *key, tx })
+                    .send(FoyerRuntimeTask::Remove {
+                        key: *key,
+                        tx: Some(tx),
+                    })
                     .unwrap();
                 rx.await.unwrap()
             }
@@ -333,7 +388,52 @@ impl FileCache {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn lookup(&self, key: &SstableBlockIndex) -> Result<Option<Box<Block>>> {
+    pub fn remove_without_wait(&self, key: &K) {
+        match self {
+            FileCache::None => {}
+            FileCache::Foyer(_) => panic!("unsupported"),
+            FileCache::FoyerRuntime { task_tx, .. } => {
+                task_tx
+                    .send(FoyerRuntimeTask::Remove {
+                        key: *key,
+                        tx: None,
+                    })
+                    .unwrap();
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn clear(&self) -> Result<()> {
+        match self {
+            FileCache::None => Ok(()),
+            FileCache::Foyer(store) => {
+                store.clear();
+                Ok(())
+            }
+            FileCache::FoyerRuntime { task_tx, .. } => {
+                let (tx, rx) = oneshot::channel();
+                task_tx
+                    .send(FoyerRuntimeTask::Clear { tx: Some(tx) })
+                    .unwrap();
+                rx.await.unwrap()
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub fn clear_without_wait(&self) {
+        match self {
+            FileCache::None => {}
+            FileCache::Foyer(_) => panic!("unsupported"),
+            FileCache::FoyerRuntime { task_tx, .. } => {
+                task_tx.send(FoyerRuntimeTask::Clear { tx: None }).unwrap();
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn lookup(&self, key: &K) -> Result<Option<V>> {
         match self {
             FileCache::None => Ok(None),
             FileCache::Foyer(store) => store.lookup(key).await.map_err(FileCacheError::foyer),

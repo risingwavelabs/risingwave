@@ -86,7 +86,7 @@ impl From<CachePolicy> for TracedCachePolicy {
     }
 }
 
-struct BlockCacheEventListener(FileCache);
+struct BlockCacheEventListener(FileCache<SstableBlockIndex, Box<Block>>);
 
 impl LruCacheEventListener for BlockCacheEventListener {
     type K = (u64, u64);
@@ -101,12 +101,24 @@ impl LruCacheEventListener for BlockCacheEventListener {
     }
 }
 
+struct MetaCacheEventListener(FileCache<HummockSstableObjectId, Box<Sstable>>);
+
+impl LruCacheEventListener for MetaCacheEventListener {
+    type K = HummockSstableObjectId;
+    type T = Box<Sstable>;
+
+    fn on_release(&self, key: Self::K, value: Self::T) {
+        self.0.insert_without_wait(key, value);
+    }
+}
+
 pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
     meta_cache: Arc<LruCache<HummockSstableObjectId, Box<Sstable>>>,
-    file_cache: FileCache,
+    data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
+    meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
 }
 
 impl SstableStore {
@@ -116,7 +128,8 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
         high_priority_ratio: usize,
-        file_cache: FileCache,
+        data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
+        meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
     ) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
@@ -124,8 +137,8 @@ impl SstableStore {
         while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
             shard_bits -= 1;
         }
-        let meta_cache = Arc::new(LruCache::new(shard_bits, meta_cache_capacity, 0));
-        let listener = Arc::new(BlockCacheEventListener(file_cache.clone()));
+        let block_cache_listener = Arc::new(BlockCacheEventListener(data_file_cache.clone()));
+        let meta_cache_listener = Arc::new(MetaCacheEventListener(meta_file_cache.clone()));
 
         Self {
             path,
@@ -134,10 +147,16 @@ impl SstableStore {
                 block_cache_capacity,
                 MAX_CACHE_SHARD_BITS,
                 high_priority_ratio,
-                listener,
+                block_cache_listener,
             ),
-            meta_cache,
-            file_cache,
+            meta_cache: Arc::new(LruCache::with_event_listener(
+                shard_bits,
+                meta_cache_capacity,
+                0,
+                meta_cache_listener,
+            )),
+            data_file_cache,
+            meta_file_cache,
         }
     }
 
@@ -150,13 +169,13 @@ impl SstableStore {
         meta_cache_capacity: usize,
     ) -> Self {
         let meta_cache = Arc::new(LruCache::new(0, meta_cache_capacity, 0));
-        let file_cache = FileCache::none();
         Self {
             path,
             store,
             block_cache: BlockCache::new(block_cache_capacity, 0, 0),
             meta_cache,
-            file_cache,
+            data_file_cache: FileCache::none(),
+            meta_file_cache: FileCache::none(),
         }
     }
 
@@ -166,6 +185,7 @@ impl SstableStore {
             .delete(self.get_sst_data_path(object_id).as_str())
             .await?;
         self.meta_cache.erase(object_id, &object_id);
+        self.meta_file_cache.remove_without_wait(&object_id);
         Ok(())
     }
 
@@ -185,6 +205,7 @@ impl SstableStore {
         // Delete from cache.
         for &object_id in object_id_list {
             self.meta_cache.erase(object_id, &object_id);
+            self.meta_file_cache.remove_without_wait(&object_id);
         }
 
         Ok(())
@@ -192,6 +213,7 @@ impl SstableStore {
 
     pub fn delete_cache(&self, object_id: HummockSstableObjectId) {
         self.meta_cache.erase(object_id, &object_id);
+        self.meta_file_cache.remove_without_wait(&object_id);
     }
 
     async fn put_sst_data(
@@ -218,7 +240,7 @@ impl SstableStore {
 
         stats.cache_data_block_total += 1;
         let mut fetch_block = || {
-            let file_cache = self.file_cache.clone();
+            let file_cache = self.data_file_cache.clone();
             stats.cache_data_block_miss += 1;
             let data_path = self.get_sst_data_path(object_id);
             let store = self.store.clone();
@@ -314,22 +336,16 @@ impl SstableStore {
         self.store.clone()
     }
 
-    pub fn get_meta_cache(&self) -> Arc<LruCache<HummockSstableObjectId, Box<Sstable>>> {
-        self.meta_cache.clone()
-    }
-
-    pub fn get_block_cache(&self) -> BlockCache {
-        self.block_cache.clone()
-    }
-
     #[cfg(any(test, feature = "test"))]
     pub fn clear_block_cache(&self) {
         self.block_cache.clear();
+        self.data_file_cache.clear_without_wait();
     }
 
     #[cfg(any(test, feature = "test"))]
     pub fn clear_meta_cache(&self) {
         self.meta_cache.clear();
+        self.meta_file_cache.clear_without_wait();
     }
 
     /// Returns `table_holder`, `local_cache_meta_block_miss` (1 if cache miss) and
@@ -349,6 +365,7 @@ impl SstableStore {
                 object_id,
                 CachePriority::High,
                 || {
+                    let meta_file_cache = self.meta_file_cache.clone();
                     let store = self.store.clone();
                     let meta_path = self.get_sst_data_path(object_id);
                     local_cache_meta_block_miss += 1;
@@ -358,6 +375,15 @@ impl SstableStore {
                         size: (sst.file_size - sst.meta_offset) as usize,
                     };
                     async move {
+                        if let Some(sst) = meta_file_cache
+                            .lookup(&object_id)
+                            .await
+                            .map_err(HummockError::file_cache)?
+                        {
+                            let charge = sst.estimate_size();
+                            return Ok((sst, charge));
+                        }
+
                         let now = Instant::now();
                         let buf = store
                             .read(&meta_path, Some(loc))

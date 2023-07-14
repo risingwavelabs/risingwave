@@ -84,6 +84,7 @@ impl HummockJavaBindingIterator {
             1 << 10,
             0,
             FileCache::none(),
+            FileCache::none(),
         ));
         let reader =
             HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
