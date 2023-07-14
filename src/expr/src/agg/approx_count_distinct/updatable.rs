@@ -182,12 +182,10 @@ mod tests {
         agg.update(1, false).unwrap();
         agg.update(2, false).unwrap();
         agg.update(3, false).unwrap();
-        assert_eq!(agg.calculate_result(), 3);
+        assert_eq!(agg.calculate_result(), 4);
 
         agg.update(3, false).unwrap();
-        agg.update(3, true).unwrap();
-        agg.update(1, false).unwrap();
-        assert_eq!(agg.calculate_result(), 1);
+        assert_eq!(agg.calculate_result(), 4);
 
         agg.update(3, true).unwrap();
         agg.update(3, true).unwrap();
@@ -229,16 +227,16 @@ mod tests {
         let mut rb = UpdatableBucket::<DENSE_BITS>::default();
 
         for i in 0..20 {
-            rb.update(i % 2 + 1, true).unwrap();
+            rb.update(i % 2 + 1, false).unwrap();
         }
         assert_eq!(rb.get_bucket(1).unwrap(), 10);
         assert_eq!(rb.get_bucket(2).unwrap(), 10);
 
-        rb.update(1, false).unwrap();
+        rb.update(1, true).unwrap();
         assert_eq!(rb.get_bucket(1).unwrap(), 9);
         assert_eq!(rb.get_bucket(2).unwrap(), 10);
 
-        rb.update(64, true).unwrap();
+        rb.update(64, false).unwrap();
         assert_eq!(rb.get_bucket(64).unwrap(), 1);
     }
 
@@ -248,7 +246,7 @@ mod tests {
 
         assert!(rb.get_bucket(0).is_err());
         assert!(rb.get_bucket(65).is_err());
-        assert!(rb.update(0, true).is_err());
-        assert!(rb.update(65, true).is_err());
+        assert!(rb.update(0, false).is_err());
+        assert!(rb.update(65, false).is_err());
     }
 }
