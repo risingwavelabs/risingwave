@@ -6180,6 +6180,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "md5",
+ "more-asserts",
  "num-integer",
  "parking_lot 0.12.1",
  "parse-display",
