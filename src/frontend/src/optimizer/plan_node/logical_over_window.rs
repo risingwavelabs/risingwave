@@ -668,9 +668,13 @@ impl ToBatch for LogicalOverWindow {
 
 impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        if self.core.has_rank_function() {
+        if self
+            .window_functions()
+            .iter()
+            .any(|x| matches!(x.kind, WindowFuncKind::Rank | WindowFuncKind::DenseRank))
+        {
             return Err(ErrorCode::NotImplemented(
-                "Rank function calls that don't match TopN pattern are not supported yet"
+                "`rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet"
                     .to_string(),
                 8965.into(),
             )

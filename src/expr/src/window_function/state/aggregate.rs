@@ -20,15 +20,15 @@ use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
-use risingwave_expr::agg::{build as builg_agg, AggArgs, AggCall};
-use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
 use super::buffer::WindowBuffer;
 use super::{StateEvictHint, StateKey, StatePos, WindowState};
-use crate::executor::StreamExecutorResult;
+use crate::agg::{build as builg_agg, AggArgs, AggCall};
+use crate::function::window::{WindowFuncCall, WindowFuncKind};
+use crate::Result;
 
-pub(super) struct AggregateState {
+pub struct AggregateState {
     agg_call: AggCall,
     arg_data_types: Vec<DataType>,
     buffer: WindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
@@ -36,7 +36,7 @@ pub(super) struct AggregateState {
 }
 
 impl AggregateState {
-    pub fn new(call: &WindowFuncCall) -> StreamExecutorResult<Self> {
+    pub fn new(call: &WindowFuncCall) -> Result<Self> {
         if !call.frame.bounds.is_valid() {
             bail!("the window frame must be valid");
         }
@@ -84,7 +84,7 @@ impl WindowState for AggregateState {
         }
     }
 
-    fn curr_output(&self) -> StreamExecutorResult<Datum> {
+    fn curr_output(&self) -> Result<Datum> {
         let wrapper = BatchAggregatorWrapper {
             agg_call: &self.agg_call,
             arg_data_types: &self.arg_data_types,
@@ -131,10 +131,7 @@ struct BatchAggregatorWrapper<'a> {
 }
 
 impl BatchAggregatorWrapper<'_> {
-    fn aggregate<'a>(
-        &'a self,
-        values: impl Iterator<Item = &'a [Datum]>,
-    ) -> StreamExecutorResult<Datum> {
+    fn aggregate<'a>(&'a self, values: impl Iterator<Item = &'a [Datum]>) -> Result<Datum> {
         // TODO(rc): switch to a better general version of aggregator implementation
 
         let mut args_builders = self

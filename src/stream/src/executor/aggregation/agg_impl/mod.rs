@@ -25,8 +25,8 @@ pub use foldable::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, BytesArray, DateArray,
-    DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray,
-    StructArray, TimeArray, TimestampArray, TimestamptzArray, Utf8Array,
+    DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array, Int256Array, IntervalArray,
+    JsonbArray, ListArray, StructArray, TimeArray, TimestampArray, TimestamptzArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
@@ -181,6 +181,9 @@ pub fn create_streaming_agg_impl(
                     (Count, time, int64, StreamingCountAgg::<TimeArray>),
                     (Count, struct_type, int64, StreamingCountAgg::<StructArray>),
                     (Count, list, int64, StreamingCountAgg::<ListArray>),
+                    (Count, bytea, int64, StreamingCountAgg::<BytesArray>),
+                    (Count, jsonb, int64, StreamingCountAgg::<JsonbArray>),
+                    (Count, int256, int64, StreamingCountAgg::<Int256Array>),
                     // Sum0
                     (Sum0, int64, int64, StreamingSum0Agg),
                     // Sum
@@ -210,6 +213,12 @@ pub fn create_streaming_agg_impl(
                         interval,
                         StreamingSumAgg::<IntervalArray, IntervalArray>
                     ),
+                    (
+                        Sum,
+                        int256,
+                        int256,
+                        StreamingSumAgg::<Int256Array, Int256Array>
+                    ),
                     // Min
                     (Min, int16, int16, StreamingMinAgg::<I16Array>),
                     (Min, int32, int32, StreamingMinAgg::<I32Array>),
@@ -229,6 +238,7 @@ pub fn create_streaming_agg_impl(
                     ),
                     (Min, varchar, varchar, StreamingMinAgg::<Utf8Array>),
                     (Min, bytea, bytea, StreamingMinAgg::<BytesArray>),
+                    (Min, int256, int256, StreamingMinAgg::<Int256Array>),
                     // Max
                     (Max, int16, int16, StreamingMaxAgg::<I16Array>),
                     (Max, int32, int32, StreamingMaxAgg::<I32Array>),
@@ -248,6 +258,7 @@ pub fn create_streaming_agg_impl(
                     ),
                     (Max, varchar, varchar, StreamingMaxAgg::<Utf8Array>),
                     (Max, bytea, bytea, StreamingMaxAgg::<BytesArray>),
+                    (Max, int256, int256, StreamingMaxAgg::<Int256Array>),
                     // BitXor
                     (BitXor, int16, int16, StreamingBitXorAgg::<I16Array>),
                     (BitXor, int32, int32, StreamingBitXorAgg::<I32Array>),
@@ -271,7 +282,7 @@ pub fn create_streaming_agg_impl(
                 }
             }
         }
-        _ => todo!(),
+        _ => unreachable!(),
     };
     Ok(agg)
 }
