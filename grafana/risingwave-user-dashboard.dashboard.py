@@ -296,6 +296,10 @@ def section_memory(outer_panels):
                             f"sum({metric('uploading_memory_size')}) by (job,instance)",
                             "storage write buffer - {{job}} @ {{instance}}",
                         ),
+                        panels.target(
+                            f"sum(stream_memory_usage * on(table_id, actor_id) group_left(materialized_view_id) table_info) by (materialized_view_id)",
+                            "materialized_view {{materialized_view_id}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_actor_ops(
