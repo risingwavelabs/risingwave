@@ -21,7 +21,6 @@ use bytes::Bytes;
 use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
@@ -259,18 +258,18 @@ impl StateStore for HummockStorage {
         StoreLocalStatistic::flush_all();
     }
 
-    fn clear_shared_buffer(&self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-        self.min_current_epoch
-            .store(HummockEpoch::MAX, MemOrdering::SeqCst);
-        self.seal_epoch.store(INVALID_EPOCH, MemOrdering::SeqCst);
-        async move {
-            let (tx, rx) = oneshot::channel();
-            self.hummock_event_sender
-                .send(HummockEvent::Clear(tx))
-                .expect("should send success");
-            rx.await.expect("should wait success");
-            Ok(())
-        }
+    async fn clear_shared_buffer(&self) -> StorageResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.hummock_event_sender
+            .send(HummockEvent::Clear(tx))
+            .expect("should send success");
+        rx.await.expect("should wait success");
+
+        let epoch = self.pinned_version.load().max_committed_epoch();
+        self.min_current_epoch.store(epoch, MemOrdering::SeqCst);
+        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
+
+        Ok(())
     }
 
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_ {
