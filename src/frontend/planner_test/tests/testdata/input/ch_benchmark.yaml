@@ -163,7 +163,7 @@
   expected_outputs: []
 - id: ch_q1
   before:
-    - create_tables
+  - create_tables
   sql: |
     select   ol_number,
      sum(ol_quantity) as sum_qty,
@@ -175,14 +175,14 @@
     where	 ol_delivery_d > '2007-01-02 00:00:00.000000'
     group by ol_number order by ol_number;
   expected_outputs:
-    - logical_plan
-    - optimized_logical_plan_for_batch
-    - batch_plan
-    - stream_dist_plan
-    - stream_plan
+  - logical_plan
+  - optimized_logical_plan_for_batch
+  - batch_plan
+  - stream_dist_plan
+  - stream_plan
 - id: ch_q2
   before:
-    - create_tables
+  - create_tables
   sql: |
     select 	 s_suppkey, s_name, n_name, i_id, i_name, s_address, s_phone, s_comment
     from	 item, supplier, stock, nation, region,
@@ -204,14 +204,14 @@
       and s_quantity = m_s_quantity
     order by n_name, s_name, i_id;
   expected_outputs:
-    - batch_plan
-    - stream_plan
-    - stream_dist_plan
-    - logical_plan
-    - optimized_logical_plan_for_batch
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+  - logical_plan
+  - optimized_logical_plan_for_batch
 - id: ch_q3
   before:
-    - create_tables
+  - create_tables
   sql: |
     select   ol_o_id, ol_w_id, ol_d_id,
              sum(ol_amount) as revenue, o_entry_d
@@ -230,14 +230,14 @@
     group by ol_o_id, ol_w_id, ol_d_id, o_entry_d
     order by revenue desc, o_entry_d;
   expected_outputs:
-    - stream_plan
-    - stream_dist_plan
-    - optimized_logical_plan_for_batch
-    - logical_plan
-    - batch_plan
+  - stream_plan
+  - stream_dist_plan
+  - optimized_logical_plan_for_batch
+  - logical_plan
+  - batch_plan
 - id: ch_q4
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	o_ol_cnt, count(*) as order_count
     from	orders
@@ -253,14 +253,14 @@
     group	by o_ol_cnt
     order	by o_ol_cnt;
   expected_outputs:
-    - optimized_logical_plan_for_batch
-    - stream_dist_plan
-    - batch_plan
-    - stream_plan
-    - logical_plan
+  - optimized_logical_plan_for_batch
+  - stream_dist_plan
+  - batch_plan
+  - stream_plan
+  - logical_plan
 - id: ch_q5
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 n_name,
            sum(ol_amount) as revenue
@@ -281,14 +281,14 @@
     and o_entry_d >= '2007-01-02 00:00:00.000000'
     group by n_name;
   expected_outputs:
-    - stream_plan
-    - logical_plan
-    - batch_plan
-    - stream_dist_plan
-    - optimized_logical_plan_for_batch
+  - stream_plan
+  - logical_plan
+  - batch_plan
+  - stream_dist_plan
+  - optimized_logical_plan_for_batch
 - id: ch_q6
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	sum(ol_amount) as revenue
     from	order_line
@@ -297,14 +297,14 @@
     and ol_delivery_d < '2030-01-01 00:00:00'
     and ol_quantity between 1 and 100000;
   expected_outputs:
-    - stream_dist_plan
-    - optimized_logical_plan_for_batch
-    - stream_plan
-    - logical_plan
-    - batch_plan
+  - stream_dist_plan
+  - optimized_logical_plan_for_batch
+  - stream_plan
+  - logical_plan
+  - batch_plan
 - id: ch_q7
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 s_nationkey as supp_nation,
                substr(c_state,1,1) as cust_nation,
@@ -331,14 +331,14 @@
     group by s_nationkey, substr(c_state,1,1), extract(year from o_entry_d)
     order by s_nationkey, cust_nation, l_year;
   expected_outputs:
-    - stream_dist_plan
-    - optimized_logical_plan_for_batch
-    - batch_plan
-    - logical_plan
-    - stream_plan
+  - stream_dist_plan
+  - optimized_logical_plan_for_batch
+  - batch_plan
+  - logical_plan
+  - stream_plan
 - id: ch_q8
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 extract(year from o_entry_d) as l_year,
            sum(case when n2.n_name = 'INDIA' then ol_amount else 0 end) / sum(ol_amount) as mkt_share
@@ -363,14 +363,14 @@
     group by extract(year from o_entry_d)
     order by l_year;
   expected_outputs:
-    - batch_plan
-    - stream_plan
-    - stream_dist_plan
-    - optimized_logical_plan_for_batch
-    - logical_plan
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+  - optimized_logical_plan_for_batch
+  - logical_plan
 - id: ch_q9
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 n_name, extract(year from o_entry_d) as l_year, sum(ol_amount) as sum_profit
     from	 item, stock, supplier, order_line, orders, nation
@@ -386,14 +386,14 @@
     group by n_name, extract(year from o_entry_d)
     order by n_name, l_year desc;
   expected_outputs:
-    - stream_plan
-    - batch_plan
-    - stream_dist_plan
-    - logical_plan
-    - optimized_logical_plan_for_batch
+  - stream_plan
+  - batch_plan
+  - stream_dist_plan
+  - logical_plan
+  - optimized_logical_plan_for_batch
 - id: ch_q10
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 c_id, c_last, sum(ol_amount) as revenue, c_city, c_phone, n_name
     from	 customer, orders, order_line, nation
@@ -409,14 +409,14 @@
     group by c_id, c_last, c_city, c_phone, n_name
     order by revenue desc;
   expected_outputs:
-    - stream_plan
-    - batch_plan
-    - logical_plan
-    - stream_dist_plan
-    - optimized_logical_plan_for_batch
+  - stream_plan
+  - batch_plan
+  - logical_plan
+  - stream_dist_plan
+  - optimized_logical_plan_for_batch
 - id: ch_q11
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 s_i_id, sum(s_order_cnt) as ordercount
     from	 stock, supplier, nation
@@ -432,14 +432,14 @@
                 and n_name = 'CHINA')
     order by ordercount desc;
   expected_outputs:
-    - stream_dist_plan
-    - batch_plan
-    - optimized_logical_plan_for_batch
-    - stream_plan
-    - logical_plan
+  - stream_dist_plan
+  - batch_plan
+  - optimized_logical_plan_for_batch
+  - stream_plan
+  - logical_plan
 - id: ch_q12
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 o_ol_cnt,
                sum(case when o_carrier_id = 1 or o_carrier_id = 2 then 1 else 0 end) as high_line_count,
@@ -453,14 +453,14 @@
     group by o_ol_cnt
     order by o_ol_cnt;
   expected_outputs:
-    - logical_plan
-    - optimized_logical_plan_for_batch
-    - batch_plan
-    - stream_plan
-    - stream_dist_plan
+  - logical_plan
+  - optimized_logical_plan_for_batch
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
 - id: ch_q13
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 c_count, count(*) as custdist
     from	 (select c_id, count(o_id) as c_count
@@ -473,28 +473,28 @@
     group by c_count
     order by custdist desc, c_count desc;
   expected_outputs:
-    - batch_plan
-    - stream_dist_plan
-    - logical_plan
-    - optimized_logical_plan_for_batch
-    - stream_plan
+  - batch_plan
+  - stream_dist_plan
+  - logical_plan
+  - optimized_logical_plan_for_batch
+  - stream_plan
 - id: ch_q14
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	100.00 * sum(case when i_data like 'PR%' then ol_amount else 0 end) / (1+sum(ol_amount)) as promo_revenue
     from	order_line, item
     where	ol_i_id = i_id and ol_delivery_d >= '2007-01-02 00:00:00.000000'
       and ol_delivery_d < '2030-01-02 00:00:00.000000';
   expected_outputs:
-    - logical_plan
-    - stream_plan
-    - optimized_logical_plan_for_batch
-    - stream_dist_plan
-    - batch_plan
+  - logical_plan
+  - stream_plan
+  - optimized_logical_plan_for_batch
+  - stream_dist_plan
+  - batch_plan
 - id: ch_q15
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 s_suppkey, s_name, s_address, s_phone, total_revenue
     from	 supplier, revenue1
@@ -502,13 +502,13 @@
     and total_revenue = (select max(total_revenue) from revenue1)
     order by s_suppkey;
   expected_outputs:
-    - optimized_logical_plan_for_batch
-    - logical_plan
-    - stream_dist_plan
-    - stream_plan
+  - optimized_logical_plan_for_batch
+  - logical_plan
+  - stream_dist_plan
+  - stream_plan
 - id: ch_q16
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 i_name,
                substr(i_data, 1, 3) as brand,
@@ -524,14 +524,14 @@
     group by i_name, substr(i_data, 1, 3), i_price
     order by supplier_cnt desc;
   expected_outputs:
-    - logical_plan
-    - optimized_logical_plan_for_batch
-    - stream_plan
-    - stream_dist_plan
-    - batch_plan
+  - logical_plan
+  - optimized_logical_plan_for_batch
+  - stream_plan
+  - stream_dist_plan
+  - batch_plan
 - id: ch_q17
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	sum(ol_amount) / 2.0 as avg_yearly
     from	order_line, (select   i_id, avg(ol_quantity) as a
@@ -542,14 +542,14 @@
     where	ol_i_id = t.i_id
     and ol_quantity < t.a;
   expected_outputs:
-    - stream_plan
-    - batch_plan
-    - optimized_logical_plan_for_batch
-    - stream_dist_plan
-    - logical_plan
+  - stream_plan
+  - batch_plan
+  - optimized_logical_plan_for_batch
+  - stream_dist_plan
+  - logical_plan
 - id: ch_q18
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 c_last, c_id o_id, o_entry_d, o_ol_cnt, sum(ol_amount)
     from	 customer, orders, order_line
@@ -563,14 +563,14 @@
     having	 sum(ol_amount) > 200
     order by sum(ol_amount) desc, o_entry_d;
   expected_outputs:
-    - stream_dist_plan
-    - batch_plan
-    - optimized_logical_plan_for_batch
-    - logical_plan
-    - stream_plan
+  - stream_dist_plan
+  - batch_plan
+  - optimized_logical_plan_for_batch
+  - logical_plan
+  - stream_plan
 - id: ch_q19
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	sum(ol_amount) as revenue
     from	order_line, item
@@ -597,14 +597,14 @@
     and ol_w_id in (1,5,3)
     )
   expected_outputs:
-    - logical_plan
-    - batch_plan
-    - stream_plan
-    - stream_dist_plan
-    - optimized_logical_plan_for_batch
+  - logical_plan
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+  - optimized_logical_plan_for_batch
 - id: ch_q20
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 s_name, s_address
     from	 supplier, nation
@@ -623,14 +623,14 @@
       and n_name = 'CHINA'
     order by s_name;
   expected_outputs:
-    - optimized_logical_plan_for_batch
-    - stream_dist_plan
-    - batch_plan
-    - logical_plan
-    - stream_plan
+  - optimized_logical_plan_for_batch
+  - stream_dist_plan
+  - batch_plan
+  - logical_plan
+  - stream_plan
 - id: ch_q21
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 s_name, count(*) as numwait
     from	 supplier, order_line l1, orders, stock, nation
@@ -652,14 +652,14 @@
     group by s_name
     order by numwait desc, s_name;
   expected_outputs:
-    - logical_plan
-    - batch_plan
-    - stream_dist_plan
-    - optimized_logical_plan_for_batch
-    - stream_plan
+  - logical_plan
+  - batch_plan
+  - stream_dist_plan
+  - optimized_logical_plan_for_batch
+  - stream_plan
 - id: ch_q22
   before:
-    - create_tables
+  - create_tables
   sql: |
     select	 substr(c_state,1,1) as country,
                count(*) as numcust,
@@ -678,7 +678,7 @@
     group by substr(c_state,1,1)
     order by substr(c_state,1,1);
   expected_outputs:
-    - logical_plan
-    - stream_plan
-    - batch_plan
-    - optimized_logical_plan_for_batch
+  - logical_plan
+  - stream_plan
+  - batch_plan
+  - optimized_logical_plan_for_batch
