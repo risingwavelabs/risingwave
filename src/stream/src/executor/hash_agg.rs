@@ -89,13 +89,6 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
 
-    /// Column mappings from input chunk to agg input for each agg call.
-    ///
-    /// Example:
-    /// agg_calls   = [sum(#1), string_agg(#0, #2)]
-    /// arg_indices = [[1], [0, 2]]
-    arg_indices: Vec<Vec<usize>>,
-
     /// Index of row count agg call (`count(*)`) in the call list.
     row_count_index: usize,
 
@@ -232,11 +225,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
                 group_key_table_pk_projection: group_key_table_pk_projection.to_vec().into(),
-                arg_indices: args
-                    .agg_calls
-                    .iter()
-                    .map(|agg| agg.args.val_indices().to_vec())
-                    .collect(),
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
@@ -395,7 +383,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 }
             }
             agg_group
-                .apply_chunk(&chunk, &this.arg_indices, visibilities)
+                .apply_chunk(&chunk, &this.agg_calls, visibilities)
                 .await?;
             // Mark the group as changed.
             vars.group_change_set.insert(key);

@@ -64,13 +64,6 @@ struct ExecutorInner<S: StateStore> {
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
 
-    /// Column mappings from input chunk to agg input for each agg call.
-    ///
-    /// Example:
-    /// agg_calls   = [sum(#1), string_agg(#0, #2)]
-    /// arg_indices = [[1], [0, 2]]
-    arg_indices: Vec<Vec<usize>>,
-
     /// Index of row count agg call (`count(*)`) in the call list.
     row_count_index: usize,
 
@@ -151,11 +144,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 },
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
-                arg_indices: args
-                    .agg_calls
-                    .iter()
-                    .map(|agg| agg.args.val_indices().to_vec())
-                    .collect(),
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
@@ -210,7 +198,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         // Apply chunk to each of the state (per agg_call).
         vars.agg_group
-            .apply_chunk(&chunk, &this.arg_indices, visibilities)
+            .apply_chunk(&chunk, &this.agg_calls, visibilities)
             .await?;
 
         // Mark state as changed.

@@ -253,14 +253,14 @@ impl AggGroup {
     pub async fn apply_chunk(
         &mut self,
         chunk: &StreamChunk,
-        mappings: &[Vec<usize>],
+        calls: &[AggCall],
         visibilities: Vec<Vis>,
     ) -> StreamExecutorResult<()> {
-        for ((state, mapping), visibility) in (self.states.iter_mut())
-            .zip_eq_fast(mappings)
+        for ((state, call), visibility) in (self.states.iter_mut())
+            .zip_eq_fast(calls)
             .zip_eq_fast(visibilities)
         {
-            let mut chunk = chunk.clone().project(mapping);
+            let mut chunk = chunk.clone().project(call.args.val_indices());
             chunk.set_vis(visibility);
             state.apply_chunk(&chunk).await?;
         }
