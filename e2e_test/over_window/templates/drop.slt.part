@@ -1,26 +1,26 @@
 statement ok
-drop view mv_a;
+drop view v_a;
 
 statement ok
-drop view mv_b;
+drop view v_b;
 
 statement ok
-drop view mv_c;
+drop view v_c;
 
 statement ok
-drop view mv_d;
+drop view v_d;
 
 statement ok
-drop view mv_a_b;
+drop view v_a_b;
 
 statement ok
-drop view mv_b_c;
+drop view v_b_c;
 
 statement ok
-drop view mv_a_c;
+drop view v_a_c;
 
 statement ok
-drop view mv_a_b_c;
+drop view v_a_b_c;
 
 statement ok
 drop table t;

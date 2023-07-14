@@ -1,1 +1,0 @@
-Just replace `materialized view` with `view` from `e2e_test/streaming/over_window/over_window`.
