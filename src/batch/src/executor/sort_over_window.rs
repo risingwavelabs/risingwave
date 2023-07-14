@@ -26,6 +26,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::task::{BatchTaskContext, ShutdownToken};
 
+/// [`SortOverWindowExecutor`] accepts input chunks sorted by partition key and order key, and
+/// outputs chunks with window function result columns.
 pub struct SortOverWindowExecutor {
     child: BoxedExecutor,
     schema: Schema,
