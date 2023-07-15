@@ -126,7 +126,7 @@ impl CacheRefillPolicy {
 
         let mut futures = vec![];
 
-        for (meta, level, removed_sst_object_ids) in &args {
+        for (meta, _level, removed_sst_object_ids) in &args {
             let mut in_data_file_cache = false;
             for id in removed_sst_object_ids {
                 if self
@@ -141,8 +141,7 @@ impl CacheRefillPolicy {
                 }
             }
 
-            // refill l0 and l1 only
-            if (*level == 0 || *level == 1) && in_data_file_cache {
+            if in_data_file_cache {
                 for block_index in 0..meta.value().block_count() {
                     let meta = meta.value().clone();
                     let mut stat = StoreLocalStatistic::default();
