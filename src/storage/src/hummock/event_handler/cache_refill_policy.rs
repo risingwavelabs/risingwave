@@ -52,6 +52,7 @@ impl CacheRefillPolicy {
                 let stats = StoreLocalStatistic::default();
                 let mut flatten_reqs = Vec::new();
                 let mut levels = vec![];
+                let mut removed_sst_object_ids = vec![];
                 for group_delta in delta.group_deltas.values() {
                     let mut is_bottommost_level = false;
                     let last_pos = flatten_reqs.len();
@@ -67,6 +68,8 @@ impl CacheRefillPolicy {
                                 flatten_reqs
                                     .push(policy.sstable_store.sstable_syncable(sst, &stats));
                                 levels.push(level_delta.level_idx as usize);
+                                removed_sst_object_ids
+                                    .push(level_delta.removed_table_object_ids.clone());
                             }
                             preload_count += level_delta.inserted_table_infos.len();
                         }
@@ -82,7 +85,14 @@ impl CacheRefillPolicy {
 
                 tokio::spawn({
                     async move {
-                        if let Err(e) = Self::refill_data_file_cache(policy, res, levels).await {
+                        if let Err(e) = Self::refill_data_file_cache(
+                            policy,
+                            res,
+                            levels,
+                            removed_sst_object_ids,
+                        )
+                        .await
+                        {
                             tracing::warn!("fill data file cache error: {:?}", e);
                         }
                     }
@@ -101,19 +111,38 @@ impl CacheRefillPolicy {
         self: Arc<Self>,
         fetch_meta_results: HummockResult<Vec<(TableHolder, u64, u64)>>,
         sstable_levels: Vec<usize>,
+        removed_sst_object_ids: Vec<Vec<u64>>,
     ) -> HummockResult<()> {
         let metas = fetch_meta_results?
             .into_iter()
             .map(|(meta, _, _)| meta)
             .collect_vec();
-        let meta_levels = metas.into_iter().zip_eq_fast(sstable_levels).collect_vec();
+        let args = metas
+            .into_iter()
+            .zip_eq_fast(sstable_levels)
+            .zip_eq_fast(removed_sst_object_ids)
+            .map(|((t0, t1), t2)| (t0, t1, t2))
+            .collect_vec();
 
         let mut futures = vec![];
 
-        for (meta, level) in &meta_levels {
+        for (meta, level, removed_sst_object_ids) in &args {
+            let mut in_data_file_cache = false;
+            for id in removed_sst_object_ids {
+                if self
+                    .sstable_store
+                    .data_file_cache_ssts()
+                    .read()
+                    .get(id)
+                    .is_some()
+                {
+                    in_data_file_cache = true;
+                    break;
+                }
+            }
+
             // refill l0 and l1 only
-            // TODO(MrCroxx): only refill if old sst id exists
-            if *level == 0 || *level == 1 {
+            if (*level == 0 || *level == 1) && in_data_file_cache {
                 for block_index in 0..meta.value().block_count() {
                     let meta = meta.value().clone();
                     let mut stat = StoreLocalStatistic::default();

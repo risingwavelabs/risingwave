@@ -2529,6 +2529,11 @@ fn gen_version_delta<'a>(
                         sst_id
                     })
                     .collect_vec(),
+                removed_table_object_ids: level
+                    .table_infos
+                    .iter()
+                    .map(|sst| sst.get_object_id())
+                    .collect_vec(),
                 ..Default::default()
             })),
         };
