@@ -320,7 +320,6 @@ where
     }
 }
 
-const RW_DECIMAL_MAX_PRECISION: usize = 28;
 pub(crate) fn avro_decimal_to_rust_decimal(
     avro_decimal: AvroDecimal,
     _precision: usize,
