@@ -93,7 +93,10 @@ impl From<CachePolicy> for TracedCachePolicy {
     }
 }
 
-struct BlockCacheEventListener(FileCache<SstableBlockIndex, Box<Block>>);
+struct BlockCacheEventListener {
+    data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
+    ssts: Arc<RwLock<BTreeMap<HummockSstableObjectId, usize>>>,
+}
 
 impl LruCacheEventListener for BlockCacheEventListener {
     type K = (u64, u64);
@@ -104,7 +107,22 @@ impl LruCacheEventListener for BlockCacheEventListener {
             sst_id: key.0,
             block_idx: key.1,
         };
-        self.0.insert_without_wait(key, value);
+        match self.ssts.write().entry(key.sst_id) {
+            Entry::Vacant(_) => {
+                tracing::warn!(
+                    "[on remove] sstable {} not in data file cache, cannot dec",
+                    key.sst_id
+                );
+            }
+            Entry::Occupied(mut o) => {
+                if *o.get() == 1 {
+                    o.remove();
+                } else {
+                    *o.get_mut() -= 1;
+                }
+            }
+        }
+        self.data_file_cache.insert_without_wait(key, value);
     }
 }
 
@@ -231,9 +249,12 @@ impl SstableStore {
         while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
             shard_bits -= 1;
         }
-        let block_cache_listener = Arc::new(BlockCacheEventListener(data_file_cache.clone()));
-        let meta_cache_listener = Arc::new(MetaCacheEventListener(meta_file_cache.clone()));
         let data_file_cache_ssts = data_file_cache_ssts.unwrap_or_default();
+        let block_cache_listener = Arc::new(BlockCacheEventListener {
+            data_file_cache: data_file_cache.clone(),
+            ssts: data_file_cache_ssts.clone(),
+        });
+        let meta_cache_listener = Arc::new(MetaCacheEventListener(meta_file_cache.clone()));
 
         Self {
             path,
@@ -376,12 +397,22 @@ impl SstableStore {
         };
 
         match policy {
-            CachePolicy::Fill(priority) => Ok(self.block_cache.get_or_insert_with(
-                object_id,
-                block_index as u64,
-                priority,
-                fetch_block,
-            )),
+            CachePolicy::Fill(priority) => {
+                match self.data_file_cache_ssts.write().entry(object_id) {
+                    Entry::Vacant(v) => {
+                        v.insert(1);
+                    }
+                    Entry::Occupied(mut o) => {
+                        *o.get_mut() += 1;
+                    }
+                }
+                Ok(self.block_cache.get_or_insert_with(
+                    object_id,
+                    block_index as u64,
+                    priority,
+                    fetch_block,
+                ))
+            }
             CachePolicy::FillFileCache => {
                 let block = fetch_block().await?;
                 self.data_file_cache.insert_without_wait(
@@ -572,6 +603,14 @@ impl SstableStore {
         block_index: u64,
         block: Box<Block>,
     ) {
+        match self.data_file_cache_ssts.write().entry(object_id) {
+            Entry::Vacant(v) => {
+                v.insert(1);
+            }
+            Entry::Occupied(mut o) => {
+                *o.get_mut() += 1;
+            }
+        }
         self.block_cache
             .insert(object_id, block_index, block, CachePriority::High);
     }
