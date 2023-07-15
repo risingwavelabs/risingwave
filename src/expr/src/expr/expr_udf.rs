@@ -51,7 +51,7 @@ impl Expression for UdfExpression {
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
             let array = child.eval_checked(input).await?;
-            columns.push(array.as_ref().into());
+            columns.push(array.as_ref().try_into()?);
         }
         self.eval_inner(columns, vis).await
     }
@@ -64,7 +64,11 @@ impl Expression for UdfExpression {
         }
         let arg_row = OwnedRow::new(columns);
         let chunk = DataChunk::from_rows(std::slice::from_ref(&arg_row), &self.arg_types);
-        let arg_columns = chunk.columns().iter().map(|c| c.as_ref().into()).collect();
+        let arg_columns = chunk
+            .columns()
+            .iter()
+            .map::<Result<_>, _>(|c| Ok(c.as_ref().try_into()?))
+            .try_collect()?;
         let output_array = self
             .eval_inner(arg_columns, chunk.vis().to_bitmap())
             .await?;
@@ -114,8 +118,16 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
         let arg_schema = Arc::new(Schema::new(
             udf.arg_types
                 .iter()
-                .map(|t| Field::new("", DataType::from(t).into(), true))
-                .collect(),
+                .map::<Result<_>, _>(|t| {
+                    Ok(Field::new(
+                        "",
+                        DataType::from(t)
+                            .try_into()
+                            .map_err(risingwave_udf::Error::Unsupported)?,
+                        true,
+                    ))
+                })
+                .try_collect()?,
         ));
         // connect to UDF service
         let client = get_or_create_client(&udf.link)?;
