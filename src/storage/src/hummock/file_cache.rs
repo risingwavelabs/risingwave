@@ -21,6 +21,7 @@ use bytes::{Buf, BufMut, Bytes};
 use foyer::common::code::{Key, Value};
 use foyer::storage::admission::rated_random::RatedRandom;
 use foyer::storage::admission::AdmissionPolicy;
+use foyer::storage::event::EventListener;
 use foyer::storage::store::PrometheusConfig;
 use foyer::storage::LfuFsStoreConfig;
 use prometheus::Registry;
@@ -52,7 +53,11 @@ pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
 pub type FoyerStore<K, V> = foyer::storage::LfuFsStore<K, V>;
 
-pub struct FoyerStoreConfig {
+pub struct FoyerStoreConfig<K, V>
+where
+    K: Key,
+    V: Value,
+{
     pub dir: PathBuf,
     pub capacity: usize,
     pub file_capacity: usize,
@@ -69,10 +74,15 @@ pub struct FoyerStoreConfig {
     pub rated_random_rate: usize,
     pub prometheus_registry: Option<Registry>,
     pub prometheus_namespace: Option<String>,
+    pub event_listener: Vec<Arc<dyn EventListener<K = K, V = V>>>,
 }
 
-pub struct FoyerRuntimeConfig {
-    pub foyer_store_config: FoyerStoreConfig,
+pub struct FoyerRuntimeConfig<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    pub foyer_store_config: FoyerStoreConfig<K, V>,
     pub runtime_worker_threads: Option<usize>,
 }
 
@@ -85,11 +95,11 @@ where
     Insert {
         key: K,
         value: V,
-        tx: Option<oneshot::Sender<Result<()>>>,
+        tx: Option<oneshot::Sender<Result<bool>>>,
     },
     Remove {
         key: K,
-        tx: Option<oneshot::Sender<Result<()>>>,
+        tx: Option<oneshot::Sender<Result<bool>>>,
     },
     Clear {
         tx: Option<oneshot::Sender<Result<()>>>,
@@ -186,7 +196,7 @@ where
         Self::None
     }
 
-    pub async fn foyer(config: FoyerStoreConfig) -> Result<Self> {
+    pub async fn foyer(config: FoyerStoreConfig<K, V>) -> Result<Self> {
         let file_capacity = config.file_capacity;
         let capacity = config.capacity;
         let capacity = capacity - (capacity % file_capacity);
@@ -217,6 +227,7 @@ where
             reclaimers: config.reclaimers,
             reclaim_rate_limit: config.reclaim_rate_limit,
             recover_concurrency: config.recover_concurrency,
+            event_listeners: config.event_listener,
             prometheus_config: PrometheusConfig {
                 registry: config.prometheus_registry,
                 namespace: config.prometheus_namespace,
@@ -226,7 +237,7 @@ where
         Ok(Self::Foyer(store))
     }
 
-    pub async fn foyer_runtime(config: FoyerRuntimeConfig) -> Result<Self> {
+    pub async fn foyer_runtime(config: FoyerRuntimeConfig<K, V>) -> Result<Self> {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         if let Some(runtime_worker_threads) = config.runtime_worker_threads {
             builder.worker_threads(runtime_worker_threads);
@@ -275,6 +286,7 @@ where
                 reclaimers: foyer_store_config.reclaimers,
                 reclaim_rate_limit: foyer_store_config.reclaim_rate_limit,
                 recover_concurrency: foyer_store_config.recover_concurrency,
+                event_listeners: foyer_store_config.event_listener,
                 prometheus_config: PrometheusConfig {
                     registry: foyer_store_config.prometheus_registry,
                     namespace: foyer_store_config.prometheus_namespace,
@@ -290,22 +302,21 @@ where
                                 let res = store
                                     .insert(key, value)
                                     .await
-                                    .map(|_| ())
                                     .map_err(FileCacheError::foyer);
                                 if let Some(tx) = tx {
                                     tx.send(res).unwrap();
                                 }
                             }
                             FoyerRuntimeTask::Remove { key, tx } => {
-                                store.remove(&key);
+                                let res = store.remove(&key).await.map_err(FileCacheError::foyer);
                                 if let Some(tx) = tx {
-                                    tx.send(Ok(())).unwrap();
+                                    tx.send(res).unwrap();
                                 }
                             }
                             FoyerRuntimeTask::Clear { tx } => {
-                                store.clear();
+                                let res = store.clear().await.map_err(FileCacheError::foyer);
                                 if let Some(tx) = tx {
-                                    tx.send(Ok(())).unwrap();
+                                    tx.send(res).unwrap();
                                 }
                             }
                             FoyerRuntimeTask::Lookup { key, tx } => {
@@ -327,13 +338,12 @@ where
     }
 
     #[tracing::instrument(skip(self, value))]
-    pub async fn insert(&self, key: K, value: V) -> Result<()> {
+    pub async fn insert(&self, key: K, value: V) -> Result<bool> {
         match self {
-            FileCache::None => Ok(()),
+            FileCache::None => Ok(false),
             FileCache::Foyer(store) => store
                 .insert(key, value)
                 .await
-                .map(|_| ())
                 .map_err(FileCacheError::foyer),
             FileCache::FoyerRuntime { task_tx, .. } => {
                 let (tx, rx) = oneshot::channel();
@@ -367,13 +377,10 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn remove(&self, key: &K) -> Result<()> {
+    pub async fn remove(&self, key: &K) -> Result<bool> {
         match self {
-            FileCache::None => Ok(()),
-            FileCache::Foyer(store) => {
-                store.remove(key);
-                Ok(())
-            }
+            FileCache::None => Ok(false),
+            FileCache::Foyer(store) => store.remove(key).await.map_err(FileCacheError::foyer),
             FileCache::FoyerRuntime { task_tx, .. } => {
                 let (tx, rx) = oneshot::channel();
                 task_tx
@@ -407,10 +414,7 @@ where
     pub async fn clear(&self) -> Result<()> {
         match self {
             FileCache::None => Ok(()),
-            FileCache::Foyer(store) => {
-                store.clear();
-                Ok(())
-            }
+            FileCache::Foyer(store) => store.clear().await.map_err(FileCacheError::foyer),
             FileCache::FoyerRuntime { task_tx, .. } => {
                 let (tx, rx) = oneshot::channel();
                 task_tx
