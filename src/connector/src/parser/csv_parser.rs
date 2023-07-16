@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use std::str::FromStr;
-use risingwave_common::error::ErrorCode;
 
 use anyhow::anyhow;
 use risingwave_common::cast::{str_to_date, str_to_timestamp};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{Datum, Decimal, ScalarImpl, Timestamptz};
 
@@ -173,7 +172,7 @@ impl ByteStreamSourceParser for CsvParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        key: Option<Vec<u8>>,
+        _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {

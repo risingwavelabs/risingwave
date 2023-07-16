@@ -20,7 +20,7 @@ use prost_reflect::{
     ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError, self};
+use risingwave_common::error::ErrorCode::{self, InternalError, NotImplemented, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, F32, F64};
@@ -31,11 +31,11 @@ use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::only_parse_payload;
 use crate::parser::schema_registry::{extract_schema_id, Client};
-use crate::parser::unified::AccessImpl;
 use crate::parser::unified::protobuf::ProtobufAccess;
+use crate::parser::unified::AccessImpl;
 use crate::parser::{
-    ByteStreamSourceParser, EncodingProperties, ParserProperties, SourceStreamChunkRowWriter,
-    WriteGuard, ProtobufProperties,
+    AccessBuilder, ByteStreamSourceParser, EncodingProperties, ParserProperties,
+    ProtobufProperties, SourceStreamChunkRowWriter, WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -43,6 +43,21 @@ use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 pub struct ProtobufAccessBuilder {
     confluent_wire_type: bool,
     message_descriptor: MessageDescriptor,
+}
+
+impl AccessBuilder for ProtobufAccessBuilder {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        let payload = if self.confluent_wire_type {
+            resolve_pb_header(&payload)?
+        } else {
+            &payload
+        };
+
+        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
+            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
+
+        Ok(AccessImpl::Protobuf(ProtobufAccess::new(message)))
+    }
 }
 
 impl ProtobufAccessBuilder {
@@ -107,19 +122,6 @@ impl ProtobufAccessBuilder {
         })
     }
 
-    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_,'_>> {
-        let payload = if self.confluent_wire_type {
-            resolve_pb_header(&payload)?
-        } else {
-            &payload
-        };
-
-        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
-            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
-
-        Ok(AccessImpl::Protobuf(ProtobufAccess::new(message)))
-    }
-
     /// read binary schema from a local file
     fn local_read_to_bytes(path: &Path) -> Result<Vec<u8>> {
         std::fs::read(path).map_err(|e| {
@@ -130,7 +132,6 @@ impl ProtobufAccessBuilder {
             )))
         })
     }
-
 }
 
 #[derive(Debug, Clone)]
@@ -355,7 +356,7 @@ impl ByteStreamSourceParser for ProtobufParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        key: Option<Vec<u8>>,
+        _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {

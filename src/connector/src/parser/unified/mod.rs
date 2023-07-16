@@ -45,7 +45,7 @@ pub enum AccessImpl<'a, 'b> {
     Json(JsonAccess<'a, 'b>),
 }
 
-impl Access for AccessImpl<'_,'_> {
+impl Access for AccessImpl<'_, '_> {
     fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
         match self {
             Self::Avro(accessor) => accessor.access(path, type_expected),

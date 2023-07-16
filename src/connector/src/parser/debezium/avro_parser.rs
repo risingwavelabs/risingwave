@@ -15,7 +15,6 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use apache_avro::schema::ResolvedSchema;
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
 use reqwest::Url;
@@ -24,7 +23,6 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
 
-use crate::common::UpsertMessage;
 use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::avro::util::avro_schema_to_column_descs;
 use crate::parser::schema_registry::{extract_schema_id, Client};
@@ -35,8 +33,8 @@ use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{
-    AvroProperties, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserProperties,
-    SourceStreamChunkRowWriter, WriteGuard,
+    AccessBuilder, AvroProperties, ByteStreamSourceParser, EncodingProperties, EncodingType,
+    ParserProperties, SourceStreamChunkRowWriter, WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -52,6 +50,34 @@ pub struct DebeziumAvroAccessBuilder {
     resolved_schema: Option<Arc<Schema>>,
     value: Option<Value>,
     encoding_type: EncodingType,
+}
+
+impl AccessBuilder for DebeziumAvroAccessBuilder {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
+        let writer_schema = self.schema_resolver.get(schema_id).await?;
+        self.value = Some(
+            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
+        );
+        self.resolved_schema = match self.encoding_type {
+            EncodingType::Key => Some(writer_schema),
+            EncodingType::Value => {
+                let resolver = apache_avro::schema::ResolvedSchema::try_from(&*self.schema)
+                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+                // todo: to_resolved may cause stackoverflow if there's a loop in the schema
+                Some(Arc::new(
+                    resolver
+                        .to_resolved(&self.schema)
+                        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
+                ))
+            }
+        };
+        Ok(AccessImpl::Avro(AvroAccess::new(
+            self.value.as_mut().unwrap(),
+            AvroParseOptions::default().with_schema(self.resolved_schema.as_mut().unwrap()),
+        )))
+    }
 }
 
 impl DebeziumAvroAccessBuilder {
@@ -84,32 +110,6 @@ impl DebeziumAvroAccessBuilder {
             value: None,
             encoding_type,
         })
-    }
-
-    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
-        let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
-        let writer_schema = self.schema_resolver.get(schema_id).await?;
-        self.value = Some(
-            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
-        );
-        self.resolved_schema = match self.encoding_type {
-            EncodingType::Key => Some(writer_schema),
-            EncodingType::Value => {
-                let resolver = apache_avro::schema::ResolvedSchema::try_from(&*self.schema)
-                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-                // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-                Some(Arc::new(
-                    resolver
-                        .to_resolved(&self.schema)
-                        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
-                ))
-            }
-        };
-        Ok(AccessImpl::Avro(AvroAccess::new(
-            self.value.as_mut().unwrap(),
-            AvroParseOptions::default().with_schema(self.resolved_schema.as_mut().unwrap()),
-        )))
     }
 }
 
@@ -254,7 +254,8 @@ impl ByteStreamSourceParser for DebeziumAvroParser {
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(key.unwrap_or(vec![]), payload.unwrap_or(vec![]), writer).await
+        self.parse_inner(key.unwrap_or(vec![]), payload.unwrap_or(vec![]), writer)
+            .await
     }
 }
 
@@ -294,7 +295,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         {
             let writer = builder.row_writer();
-            parser.parse_inner(payload, writer).await.unwrap();
+            parser.parse_inner(vec![], payload, writer).await.unwrap();
         }
         let chunk = builder.finish();
         chunk

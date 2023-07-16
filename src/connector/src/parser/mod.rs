@@ -405,6 +405,10 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 // 6. dispatch
 // 7. correct parser trait
 
+pub trait AccessBuilder {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>>;
+}
+
 #[derive(Debug)]
 pub enum EncodingType {
     Key,
@@ -412,7 +416,7 @@ pub enum EncodingType {
 }
 
 #[derive(Debug)]
-pub enum AccessBuilder {
+pub enum AccessBuilderImpl {
     Avro(AvroAccessBuilder),
     Protobuf(ProtobufAccessBuilder),
     Json(JsonAccessBuilder),
@@ -420,18 +424,18 @@ pub enum AccessBuilder {
     DebeziumAvro(DebeziumAvroAccessBuilder),
 }
 
-impl AccessBuilder {
+impl AccessBuilderImpl {
     pub async fn new_default(config: EncodingProperties, kv: EncodingType) -> Result<Self> {
         let accessor = match config {
             EncodingProperties::Avro(config) => {
-                AccessBuilder::Avro(AvroAccessBuilder::new(config, kv).await?)
+                AccessBuilderImpl::Avro(AvroAccessBuilder::new(config, kv).await?)
             }
             EncodingProperties::Protobuf(config) => {
-                AccessBuilder::Protobuf(ProtobufAccessBuilder::new(config).await?)
+                AccessBuilderImpl::Protobuf(ProtobufAccessBuilder::new(config).await?)
             }
-            EncodingProperties::Bytes => AccessBuilder::Bytes(BytesAccessBuilder::new()?),
+            EncodingProperties::Bytes => AccessBuilderImpl::Bytes(BytesAccessBuilder::new()?),
             EncodingProperties::Json(config) => {
-                AccessBuilder::Json(JsonAccessBuilder::new(config)?)
+                AccessBuilderImpl::Json(JsonAccessBuilder::new(config)?)
             }
             EncodingProperties::Csv(_) => unreachable!(),
             EncodingProperties::None => unreachable!(),
@@ -515,10 +519,14 @@ impl ByteStreamSourceParserImpl {
                 unreachable!("Native parser should not be created")
             }
             SpecificParserConfig::Debezium(config) => {
-                DebeziumParser::new(config, rw_columns, source_ctx).await.map(Self::Debezium)
+                DebeziumParser::new(config, rw_columns, source_ctx)
+                    .await
+                    .map(Self::Debezium)
             }
             SpecificParserConfig::Maxwell(config) => {
-                MaxwellParser::new(config, rw_columns, source_ctx).await.map(Self::Maxwell)
+                MaxwellParser::new(config, rw_columns, source_ctx)
+                    .await
+                    .map(Self::Maxwell)
             }
         }
     }
@@ -695,7 +703,7 @@ impl ParserProperties {
             _ => EncodingProperties::None,
         };
         let protocol_config = ProtocolProperties::Plain;
-        /// TODO: need to build correct key encoding config
+        // TODO: need to build correct key encoding config
         Ok(ParserProperties {
             key_encoding_config: None,
             encoding_config,

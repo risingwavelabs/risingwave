@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{Result, RwError, ErrorCode};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use crate::parser::unified::maxwell::MaxwellChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::{AccessBuilder, ParserProperties, EncodingProperties, EncodingType, SourceStreamChunkRowWriter, WriteGuard, ByteStreamSourceParser};
-use crate::source::{SourceColumnDesc, SourceContextRef, SourceContext};
+use crate::parser::{
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserProperties,
+    SourceStreamChunkRowWriter, WriteGuard,
+};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct MaxwellParser {
-    payload_builder: AccessBuilder,
+    payload_builder: AccessBuilderImpl,
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
 }
@@ -35,7 +38,8 @@ impl MaxwellParser {
         match props.encoding_config {
             EncodingProperties::Json(_) => {
                 let payload_builder =
-                    AccessBuilder::new_default(props.encoding_config, EncodingType::Value).await?;
+                    AccessBuilderImpl::new_default(props.encoding_config, EncodingType::Value)
+                        .await?;
                 Ok(Self {
                     payload_builder,
                     rw_columns,
@@ -48,7 +52,7 @@ impl MaxwellParser {
 
     pub async fn parse_inner(
         &mut self,
-        mut payload: Vec<u8>,
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let payload_accessor = self.payload_builder.generate_accessor(payload).await?;

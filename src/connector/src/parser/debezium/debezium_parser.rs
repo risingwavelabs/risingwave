@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 
 use super::DebeziumAvroAccessBuilder;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    AccessBuilder, EncodingProperties, EncodingType, ParserProperties, SourceStreamChunkRowWriter,
-    WriteGuard, ByteStreamSourceParser,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserProperties,
+    SourceStreamChunkRowWriter, WriteGuard,
 };
-use crate::source::{SourceColumnDesc, SourceContextRef, SourceContext};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct DebeziumParser {
-    key_builder: AccessBuilder,
-    payload_builder: AccessBuilder,
+    key_builder: AccessBuilderImpl,
+    payload_builder: AccessBuilderImpl,
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
 }
@@ -43,22 +43,28 @@ impl DebeziumParser {
                     DebeziumAvroAccessBuilder::new(config.clone(), EncodingType::Value).await?;
                 let key_builder = DebeziumAvroAccessBuilder::new(config, EncodingType::Key).await?;
                 Ok(Self {
-                    key_builder: AccessBuilder::DebeziumAvro(key_builder),
-                    payload_builder: AccessBuilder::DebeziumAvro(payload_builder),
+                    key_builder: AccessBuilderImpl::DebeziumAvro(key_builder),
+                    payload_builder: AccessBuilderImpl::DebeziumAvro(payload_builder),
                     rw_columns,
                     source_ctx,
                 })
             }
             EncodingProperties::Json(_) | EncodingProperties::Protobuf(_) => {
                 let key_builder = match props.key_encoding_config {
-                    None => AccessBuilder::new_default(
-                        props.encoding_config.clone(),
-                        EncodingType::Key,
-                    ).await?,
-                    Some(config) => AccessBuilder::new_default(config, EncodingType::Key).await?,
+                    None => {
+                        AccessBuilderImpl::new_default(
+                            props.encoding_config.clone(),
+                            EncodingType::Key,
+                        )
+                        .await?
+                    }
+                    Some(config) => {
+                        AccessBuilderImpl::new_default(config, EncodingType::Key).await?
+                    }
                 };
                 let payload_builder =
-                    AccessBuilder::new_default(props.encoding_config, EncodingType::Value).await?;
+                    AccessBuilderImpl::new_default(props.encoding_config, EncodingType::Value)
+                        .await?;
                 Ok(Self {
                     key_builder,
                     payload_builder,
@@ -72,8 +78,8 @@ impl DebeziumParser {
 
     pub async fn parse_inner(
         &mut self,
-        mut key: Option<Vec<u8>>,
-        mut payload: Option<Vec<u8>>,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let key_accessor = match key {
@@ -83,7 +89,6 @@ impl DebeziumParser {
         let payload_accessor = match payload {
             None => None,
             Some(data) => Some(self.payload_builder.generate_accessor(data).await?),
-
         };
         let row_op = DebeziumChangeEvent::new(key_accessor, payload_accessor);
 

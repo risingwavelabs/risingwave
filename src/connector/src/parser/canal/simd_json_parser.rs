@@ -20,10 +20,8 @@ use crate::only_parse_payload;
 use crate::parser::canal::operators::*;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::unified::{AccessImpl, ChangeEventOperation};
-use crate::parser::{
-    ByteStreamSourceParser, JsonProperties, SourceStreamChunkRowWriter, WriteGuard,
-};
+use crate::parser::unified::ChangeEventOperation;
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const DATA: &str = "data";
@@ -123,7 +121,6 @@ impl ByteStreamSourceParser for CanalJsonParser {
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
         only_parse_payload!(self, payload, writer)
-
     }
 }
 

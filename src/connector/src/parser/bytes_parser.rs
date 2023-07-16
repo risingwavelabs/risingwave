@@ -17,26 +17,22 @@ use risingwave_common::error::{Result, RwError};
 
 use super::unified::bytes::{BytesAccess, BytesChangeEvent};
 use super::unified::{AccessImpl, ChangeEvent};
-use super::{
-    ByteStreamSourceParser, SourceStreamChunkRowWriter,
-    WriteGuard,
-};
+use super::{AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
 use crate::only_parse_payload;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct BytesAccessBuilder {}
 
+impl AccessBuilder for BytesAccessBuilder {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        Ok(AccessImpl::Bytes(BytesAccess::new(payload)))
+    }
+}
+
 impl BytesAccessBuilder {
     pub fn new() -> Result<Self> {
         Ok(Self {})
-    }
-
-    pub async fn generate_accessor<'a>(
-        &'a mut self,
-        payload: Vec<u8>,
-    ) -> Result<AccessImpl<'_, '_>> {
-        Ok(AccessImpl::Bytes(BytesAccess::new(payload)))
     }
 }
 
