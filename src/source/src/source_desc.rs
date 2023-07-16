@@ -68,7 +68,7 @@ impl SourceDescBuilder {
         row_id_index: Option<usize>,
         properties: HashMap<String, String>,
         source_info: PbStreamSourceInfo,
-        connector_params: ConnectorParams,
+        // connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
         pk_indices: Vec<usize>,
     ) -> Self {
@@ -78,7 +78,7 @@ impl SourceDescBuilder {
             row_id_index,
             properties,
             source_info,
-            connector_params,
+            // connector_params,
             connector_message_buffer_size,
             pk_indices,
         }
@@ -130,10 +130,10 @@ impl SourceDescBuilder {
             self.properties,
             columns.clone(),
             // TODO: may reuse the connector client
-            self.connector_params
-                .connector_client
-                .as_ref()
-                .map(|client| client.endpoint().clone()),
+            // self.connector_params
+            //     .connector_client
+            //     .as_ref()
+            //     .map(|client| client.endpoint().clone()),
             self.connector_message_buffer_size,
             psrser_config,
         )?;

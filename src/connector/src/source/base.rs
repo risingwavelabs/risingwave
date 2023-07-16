@@ -66,7 +66,10 @@ use crate::source::pulsar::source::reader::PulsarSplitReader;
 use crate::source::pulsar::{
     PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
 };
-use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
+use crate::{
+    impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader,
+    ConnectorParams,
+};
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
@@ -108,6 +111,7 @@ impl Default for SourceCtrlOpts {
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,
     pub metrics: Arc<EnumeratorMetrics>,
+    pub connector_params: ConnectorParams,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -117,6 +121,7 @@ pub struct SourceEnumeratorInfo {
 
 #[derive(Debug, Default)]
 pub struct SourceContext {
+    pub connector_params: ConnectorParams,
     pub source_info: SourceInfo,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
@@ -129,16 +134,19 @@ impl SourceContext {
         fragment_id: u32,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
+        connector_params: ConnectorParams,
+        error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
     ) -> Self {
         Self {
+            connector_params,
             source_info: SourceInfo {
                 actor_id,
                 source_id: table_id,
                 fragment_id,
             },
             metrics,
-            error_suppressor: None,
             source_ctrl_opts,
+            error_suppressor,
         }
     }
 

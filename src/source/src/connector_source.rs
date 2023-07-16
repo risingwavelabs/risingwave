@@ -40,7 +40,6 @@ impl ConnectorSource {
     pub fn new(
         properties: HashMap<String, String>,
         columns: Vec<SourceColumnDesc>,
-        connector_node_addr: Option<String>,
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
     ) -> Result<Self> {
@@ -111,8 +110,6 @@ impl ConnectorSource {
             // source_ctx to live in a single actor.
             let source_ctx = source_ctx.clone();
             async move {
-                // InnerConnectorSourceReader::new(props, split, columns, metrics,
-                // source_info).await
                 let parser_config = ParserConfig {
                     specific: self.parser_config.clone(),
                     common: CommonParserConfig {

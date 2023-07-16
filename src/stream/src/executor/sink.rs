@@ -145,7 +145,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         })
     }
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
+    // #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_write_log(
         input: BoxedExecutor,
         mut log_writer: impl LogWriter,

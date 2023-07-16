@@ -61,7 +61,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 source.row_id_index.map(|x| x as _),
                 source.properties.clone(),
                 source.get_info()?.clone(),
-                params.env.connector_params(),
+                // params.env.connector_params(),
                 params.env.config().developer.connector_message_buffer_size,
                 // `pk_indices` is used to ensure that a message will be skipped instead of parsed
                 // with null pk when the pk column is missing.
@@ -139,6 +139,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     barrier_interval_ms,
                     params.executor_id,
                     source_ctrl_opts,
+                    params.env.connector_params(),
                 )))
             }
         } else {
@@ -155,6 +156,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 params.executor_id,
                 // we don't expect any data in, so no need to set chunk_sizes
                 SourceCtrlOpts::default(),
+                params.env.connector_params(),
             )))
         }
     }
