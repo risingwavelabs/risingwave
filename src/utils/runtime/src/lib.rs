@@ -246,10 +246,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
         );
     };
 
-    /// If `RW_QUERY_LOG_PATH` env var is set to a directory, turn on query log files.
+    // If `RW_QUERY_LOG_PATH` env var is set to a directory, turn on query log files.
     let query_log_path = std::env::var("RW_QUERY_LOG_PATH");
-    if query_log_path.is_ok() {
-        let query_log_path = query_log_path.unwrap();
+    if let Ok(query_log_path) = query_log_path {
         let query_log_path = PathBuf::from(query_log_path);
         std::fs::create_dir_all(query_log_path.clone()).unwrap_or_else(|e| {
             panic!(
