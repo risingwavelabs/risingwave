@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::hummock::{group_delta, HummockVersionDelta};
 
@@ -83,20 +85,22 @@ impl CacheRefillPolicy {
                 policy.metrics.preload_io_count.inc_by(preload_count as u64);
                 let res = try_join_all(flatten_reqs).await;
 
-                tokio::spawn({
-                    async move {
-                        if let Err(e) = Self::refill_data_file_cache(
-                            policy,
-                            res,
-                            levels,
-                            removed_sst_object_ids,
-                        )
-                        .await
-                        {
-                            tracing::warn!("fill data file cache error: {:?}", e);
+                if policy.sstable_store.cache_refill_filter().is_some() {
+                    tokio::spawn({
+                        async move {
+                            if let Err(e) = Self::refill_data_file_cache(
+                                policy,
+                                res,
+                                levels,
+                                removed_sst_object_ids,
+                            )
+                            .await
+                            {
+                                tracing::warn!("fill data file cache error: {:?}", e);
+                            }
                         }
-                    }
-                });
+                    });
+                }
                 timer.observe_duration();
             });
             let _ = tokio::time::timeout(
@@ -125,17 +129,12 @@ impl CacheRefillPolicy {
             .collect_vec();
 
         let mut futures = vec![];
+        let cache_refill_filter = self.sstable_store.cache_refill_filter().as_ref().unwrap();
 
         for (meta, _level, removed_sst_object_ids) in &args {
             let mut in_data_file_cache = false;
             for id in removed_sst_object_ids {
-                if self
-                    .sstable_store
-                    .data_file_cache_ssts()
-                    .read()
-                    .get(id)
-                    .is_some()
-                {
+                if cache_refill_filter.contains(id) {
                     in_data_file_cache = true;
                     break;
                 }
@@ -165,5 +164,65 @@ impl CacheRefillPolicy {
         // TODO(MrCroxx): set timeout
 
         Ok(())
+    }
+}
+
+pub struct CacheRefillFilter<K>
+where
+    K: Eq + Ord,
+{
+    refresh_interval: Duration,
+    inner: RwLock<CacheRefillFilterInner<K>>,
+}
+
+struct CacheRefillFilterInner<K>
+where
+    K: Eq + Ord,
+{
+    last_refresh: Instant,
+    layers: VecDeque<RwLock<BTreeSet<K>>>,
+}
+
+impl<K> CacheRefillFilter<K>
+where
+    K: Eq + Ord,
+{
+    pub fn new(layers: usize, refresh_interval: Duration) -> Self {
+        assert!(layers > 0);
+        let layers = (0..layers)
+            .map(|_| BTreeSet::new())
+            .map(RwLock::new)
+            .collect();
+        let inner = CacheRefillFilterInner {
+            last_refresh: Instant::now(),
+            layers,
+        };
+        let inner = RwLock::new(inner);
+        Self {
+            refresh_interval,
+            inner,
+        }
+    }
+
+    pub fn insert(&self, key: K) {
+        if let Some(mut inner) = self.inner.try_write() {
+            if inner.last_refresh.elapsed() > self.refresh_interval {
+                inner.layers.pop_front();
+                inner.layers.push_back(RwLock::new(BTreeSet::new()));
+            }
+        }
+
+        let inner = self.inner.read();
+        inner.layers.back().unwrap().write().insert(key);
+    }
+
+    pub fn contains(&self, key: &K) -> bool {
+        let inner = self.inner.read();
+        for layer in inner.layers.iter().rev() {
+            if layer.read().contains(key) {
+                return true;
+            }
+        }
+        false
     }
 }

@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
-use parking_lot::RwLock;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_object_store::object::parse_remote_object_store;
 
@@ -30,8 +28,8 @@ use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    DataFileCacheEventListener, FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError,
-    HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore,
+    FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError, HummockStorage, MemoryLimiter,
+    SstableObjectIdManagerRef, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -542,14 +540,10 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
-        let ssts = Arc::new(RwLock::new(BTreeMap::new()));
-
         let data_file_cache = if opts.data_file_cache_dir.is_empty() {
             FileCache::none()
         } else {
             const MB: usize = 1024 * 1024;
-
-            let listener = Arc::new(DataFileCacheEventListener::new(ssts.clone()));
 
             let foyer_store_config = FoyerStoreConfig {
                 dir: PathBuf::from(opts.data_file_cache_dir.clone()),
@@ -566,7 +560,7 @@ impl StateStoreImpl {
                 flush_rate_limit: opts.data_file_cache_flush_rate_limit_mb * MB,
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
-                event_listener: vec![listener],
+                event_listener: vec![],
                 prometheus_registry: Some(state_store_metrics.registry().clone()),
                 prometheus_namespace: Some("data".to_string()),
             };
@@ -633,7 +627,6 @@ impl StateStoreImpl {
                     opts.block_cache_capacity_mb * (1 << 20),
                     opts.meta_cache_capacity_mb * (1 << 20),
                     opts.high_priority_ratio,
-                    Some(ssts),
                     data_file_cache,
                     meta_file_cache,
                 ));

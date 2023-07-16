@@ -142,7 +142,6 @@ fn bench_builder(
         64 << 20,
         128 << 20,
         0,
-        None,
         FileCache::none(),
         FileCache::none(),
     ));

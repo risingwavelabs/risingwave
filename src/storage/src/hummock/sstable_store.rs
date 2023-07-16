@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::clone::Clone;
-use std::collections::btree_map::{BTreeMap, Entry};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 
-use async_trait::async_trait;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use itertools::Itertools;
-use parking_lot::RwLock;
 use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
@@ -35,6 +33,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
 
+use super::event_handler::CacheRefillFilter;
 use super::utils::MemoryTracker;
 use super::{
     Block, BlockCache, BlockMeta, BlockResponse, FileCache, Sstable, SstableBlockIndex,
@@ -95,7 +94,6 @@ impl From<CachePolicy> for TracedCachePolicy {
 
 struct BlockCacheEventListener {
     data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
-    ssts: Arc<RwLock<BTreeMap<HummockSstableObjectId, usize>>>,
 }
 
 impl LruCacheEventListener for BlockCacheEventListener {
@@ -107,107 +105,7 @@ impl LruCacheEventListener for BlockCacheEventListener {
             sst_id: key.0,
             block_idx: key.1,
         };
-        match self.ssts.write().entry(key.sst_id) {
-            Entry::Vacant(_) => {
-                tracing::warn!(
-                    "[on remove] sstable {} not in data file cache, cannot dec",
-                    key.sst_id
-                );
-            }
-            Entry::Occupied(mut o) => {
-                if *o.get() == 1 {
-                    o.remove();
-                } else {
-                    *o.get_mut() -= 1;
-                }
-            }
-        }
         self.data_file_cache.insert_without_wait(key, value);
-    }
-}
-
-pub struct DataFileCacheEventListener {
-    /// sst ids existing in data file cache
-    /// TODO: integrate this into foyer multi-indexer.
-    ssts: Arc<RwLock<BTreeMap<HummockSstableObjectId, usize>>>,
-}
-
-impl DataFileCacheEventListener {
-    pub fn new(ssts: Arc<RwLock<BTreeMap<HummockSstableObjectId, usize>>>) -> Self {
-        Self { ssts }
-    }
-}
-
-#[async_trait]
-impl foyer::storage::event::EventListener for DataFileCacheEventListener {
-    type K = SstableBlockIndex;
-    type V = Box<Block>;
-
-    async fn on_recover(&self, key: &Self::K) -> foyer::storage::error::Result<()> {
-        match self.ssts.write().entry(key.sst_id) {
-            Entry::Vacant(v) => {
-                v.insert(1);
-            }
-            Entry::Occupied(mut o) => {
-                *o.get_mut() += 1;
-            }
-        }
-        Ok(())
-    }
-
-    async fn on_insert(&self, key: &Self::K) -> foyer::storage::error::Result<()> {
-        match self.ssts.write().entry(key.sst_id) {
-            Entry::Vacant(v) => {
-                v.insert(1);
-            }
-            Entry::Occupied(mut o) => {
-                *o.get_mut() += 1;
-            }
-        }
-        Ok(())
-    }
-
-    async fn on_remove(&self, key: &Self::K) -> foyer::storage::error::Result<()> {
-        match self.ssts.write().entry(key.sst_id) {
-            Entry::Vacant(_) => {
-                tracing::warn!(
-                    "[on remove] sstable {} not in data file cache, cannot dec",
-                    key.sst_id
-                );
-            }
-            Entry::Occupied(mut o) => {
-                if *o.get() == 1 {
-                    o.remove();
-                } else {
-                    *o.get_mut() -= 1;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    async fn on_evict(&self, key: &Self::K) -> foyer::storage::error::Result<()> {
-        match self.ssts.write().entry(key.sst_id) {
-            Entry::Vacant(_) => {
-                tracing::warn!(
-                    "[on evict] sstable {} not in data file cache, cannot dec",
-                    key.sst_id
-                );
-            }
-            Entry::Occupied(mut o) => {
-                if *o.get() == 1 {
-                    o.remove();
-                } else {
-                    *o.get_mut() -= 1;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    async fn on_clear(&self) -> foyer::storage::error::Result<()> {
-        self.ssts.write().clear();
-        Ok(())
     }
 }
 
@@ -227,9 +125,11 @@ pub struct SstableStore {
     store: ObjectStoreRef,
     block_cache: BlockCache,
     meta_cache: Arc<LruCache<HummockSstableObjectId, Box<Sstable>>>,
-    data_file_cache_ssts: Arc<RwLock<BTreeMap<HummockSstableObjectId, usize>>>,
+
     data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
     meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
+
+    cache_refill_filter: Option<Arc<CacheRefillFilter<HummockSstableObjectId>>>,
 }
 
 impl SstableStore {
@@ -239,7 +139,6 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
         high_priority_ratio: usize,
-        data_file_cache_ssts: Option<Arc<RwLock<BTreeMap<HummockSstableObjectId, usize>>>>,
         data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
         meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
     ) -> Self {
@@ -249,12 +148,11 @@ impl SstableStore {
         while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
             shard_bits -= 1;
         }
-        let data_file_cache_ssts = data_file_cache_ssts.unwrap_or_default();
         let block_cache_listener = Arc::new(BlockCacheEventListener {
             data_file_cache: data_file_cache.clone(),
-            ssts: data_file_cache_ssts.clone(),
         });
         let meta_cache_listener = Arc::new(MetaCacheEventListener(meta_file_cache.clone()));
+        let cache_refill_filter = Arc::new(CacheRefillFilter::new(6, Duration::from_secs(10)));
 
         Self {
             path,
@@ -271,9 +169,11 @@ impl SstableStore {
                 0,
                 meta_cache_listener,
             )),
-            data_file_cache_ssts,
+
             data_file_cache,
             meta_file_cache,
+
+            cache_refill_filter: Some(cache_refill_filter),
         }
     }
 
@@ -291,9 +191,9 @@ impl SstableStore {
             store,
             block_cache: BlockCache::new(block_cache_capacity, 0, 0),
             meta_cache,
-            data_file_cache_ssts: Arc::new(RwLock::new(BTreeMap::new())),
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),
+            cache_refill_filter: None,
         }
     }
 
@@ -396,23 +296,17 @@ impl SstableStore {
             policy
         };
 
+        if let Some(filter) = self.cache_refill_filter.as_ref() {
+            filter.insert(object_id);
+        }
+
         match policy {
-            CachePolicy::Fill(priority) => {
-                match self.data_file_cache_ssts.write().entry(object_id) {
-                    Entry::Vacant(v) => {
-                        v.insert(1);
-                    }
-                    Entry::Occupied(mut o) => {
-                        *o.get_mut() += 1;
-                    }
-                }
-                Ok(self.block_cache.get_or_insert_with(
-                    object_id,
-                    block_index as u64,
-                    priority,
-                    fetch_block,
-                ))
-            }
+            CachePolicy::Fill(priority) => Ok(self.block_cache.get_or_insert_with(
+                object_id,
+                block_index as u64,
+                priority,
+                fetch_block,
+            )),
             CachePolicy::FillFileCache => {
                 let block = fetch_block().await?;
                 self.data_file_cache.insert_without_wait(
@@ -603,13 +497,8 @@ impl SstableStore {
         block_index: u64,
         block: Box<Block>,
     ) {
-        match self.data_file_cache_ssts.write().entry(object_id) {
-            Entry::Vacant(v) => {
-                v.insert(1);
-            }
-            Entry::Occupied(mut o) => {
-                *o.get_mut() += 1;
-            }
+        if let Some(filter) = self.cache_refill_filter.as_ref() {
+            filter.insert(object_id);
         }
         self.block_cache
             .insert(object_id, block_index, block, CachePriority::High);
@@ -650,8 +539,8 @@ impl SstableStore {
         ))
     }
 
-    pub fn data_file_cache_ssts(&self) -> &Arc<RwLock<BTreeMap<HummockSstableObjectId, usize>>> {
-        &self.data_file_cache_ssts
+    pub fn cache_refill_filter(&self) -> &Option<Arc<CacheRefillFilter<HummockSstableObjectId>>> {
+        &self.cache_refill_filter
     }
 
     pub fn data_file_cache(&self) -> &FileCache<SstableBlockIndex, Box<Block>> {
@@ -826,6 +715,10 @@ impl SstableWriter for BatchUploadWriter {
                 .put_sst_data(self.object_id, data)
                 .await?;
             self.sstable_store.insert_meta_cache(self.object_id, meta);
+
+            if let Some(filter) = self.sstable_store.cache_refill_filter().as_ref() {
+                filter.insert(self.object_id);
+            }
 
             // Add block cache.
             if let CachePolicy::Fill(fill_cache_priority) = self.policy {
