@@ -390,7 +390,6 @@ impl TestSuite {
 
     async fn simple_cancel(&self, is_distributed: bool) -> anyhow::Result<()> {
         let client = self.create_client(is_distributed).await?;
-
         client.execute("create table t(id int)", &[]).await?;
 
         let insert_statement = client
