@@ -447,10 +447,10 @@ mod tests {
     #[tokio::test]
     async fn test_json_upsert_parser() {
         let items = [
-            [r#"{"a":1}"#, r#"{"a":1,"b":2}"#],
-            [r#"{"a":1}"#, r#"{"a":1,"b":3}"#],
-            [r#"{"a":2}"#, r#"{"a":2,"b":2}"#],
-            [r#"{"a":2}"#, r#""#],
+            (r#"{"a":1}"#, r#"{"a":1,"b":2}"#),
+            (r#"{"a":1}"#, r#"{"a":1,"b":3}"#),
+            (r#"{"a":2}"#, r#"{"a":2,"b":2}"#),
+            (r#"{"a":2}"#, r#""#),
         ]
         .to_vec();
         let descs = vec![
@@ -462,8 +462,8 @@ mod tests {
         for item in items {
             parser
                 .parse_inner(
-                    Some(item[0].as_bytes().to_vec()),
-                    Some(item[1].as_bytes().to_vec()),
+                    Some(item.0.as_bytes().to_vec()),
+                    Some(item.1.as_bytes().to_vec()),
                     builder.row_writer(),
                 )
                 .await
