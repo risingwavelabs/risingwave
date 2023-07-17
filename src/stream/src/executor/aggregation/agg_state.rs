@@ -97,14 +97,23 @@ impl AggState {
     }
 
     /// Apply input chunk to the state.
-    pub async fn apply_chunk(&mut self, chunk: &StreamChunk) -> StreamExecutorResult<()> {
+    pub async fn apply_chunk(
+        &mut self,
+        chunk: StreamChunk,
+        call: &AggCall,
+    ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => {
-                state.update(chunk).await?;
+                let chunk = chunk.project(call.args.val_indices());
+                state.update(&chunk).await?;
                 Ok(())
             }
-            Self::Table(state) => state.apply_chunk(chunk).await,
-            Self::MaterializedInput(state) => state.apply_chunk(chunk),
+            Self::Table(state) => {
+                let chunk = chunk.project(call.args.val_indices());
+                state.apply_chunk(&chunk).await
+            }
+            // the input chunk for minput is unprojected
+            Self::MaterializedInput(state) => state.apply_chunk(&chunk),
         }
     }
 

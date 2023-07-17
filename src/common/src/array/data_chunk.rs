@@ -163,16 +163,12 @@ impl DataChunk {
     }
 
     pub fn set_vis(&mut self, vis: Vis) {
-        for column in &self.columns {
-            assert_eq!(vis.len(), column.len())
-        }
+        assert_eq!(vis.len(), self.capacity());
         self.vis2 = vis;
     }
 
     pub fn set_visibility(&mut self, visibility: Bitmap) {
-        for column in &self.columns {
-            assert_eq!(visibility.len(), column.len())
-        }
+        assert_eq!(visibility.len(), self.capacity());
         self.vis2 = Vis::Bitmap(visibility);
     }
 

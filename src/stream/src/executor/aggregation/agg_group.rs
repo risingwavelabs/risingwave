@@ -260,9 +260,9 @@ impl AggGroup {
             .zip_eq_fast(calls)
             .zip_eq_fast(visibilities)
         {
-            let mut chunk = chunk.clone().project(call.args.val_indices());
+            let mut chunk = chunk.clone();
             chunk.set_vis(visibility);
-            state.apply_chunk(&chunk).await?;
+            state.apply_chunk(chunk, call).await?;
         }
         Ok(())
     }
