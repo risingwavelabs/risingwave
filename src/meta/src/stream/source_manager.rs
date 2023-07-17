@@ -27,7 +27,6 @@ use risingwave_connector::source::{
     SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::Source;
-use risingwave_pb::connector_service::table_schema::Column;
 use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -198,10 +197,7 @@ impl ConnectorSourceWorker {
                 .columns
                 .iter()
                 .flat_map(|col| &col.column_desc)
-                .map(|col| Column {
-                    name: col.name.clone(),
-                    data_type: col.column_type.clone(),
-                })
+                .cloned()
                 .collect(),
             pk_indices,
         }
