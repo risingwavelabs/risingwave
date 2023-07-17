@@ -381,6 +381,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let hummock_manager = hummock::HummockManager::new(
         env.clone(),
         cluster_manager.clone(),
+        fragment_manager.clone(),
         meta_metrics.clone(),
         compactor_manager.clone(),
         catalog_manager.clone(),

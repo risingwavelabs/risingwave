@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
     StreamChunkWithState,
@@ -55,8 +56,8 @@ pub struct SourceExecutor<S: StateStore> {
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
 
-    /// Expected barrier latency.
-    expected_barrier_latency_ms: u64,
+    /// System parameter reader to read barrier interval
+    system_params: SystemParamsReaderRef,
 
     // control options for connector level
     source_ctrl_opts: SourceCtrlOpts,
@@ -74,7 +75,7 @@ impl<S: StateStore> SourceExecutor<S> {
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
-        expected_barrier_latency_ms: u64,
+        system_params: SystemParamsReaderRef,
         executor_id: u64,
         source_ctrl_opts: SourceCtrlOpts,
         connector_params: ConnectorParams,
@@ -87,7 +88,7 @@ impl<S: StateStore> SourceExecutor<S> {
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
-            expected_barrier_latency_ms,
+            system_params,
             source_ctrl_opts,
             connector_params,
         }
@@ -417,8 +418,8 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` * `expected_barrier_latency_ms`
         // milliseconds, considering some other latencies like network and cost in Meta.
-        let max_wait_barrier_time_ms =
-            self.expected_barrier_latency_ms as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
+        let mut max_wait_barrier_time_ms =
+            self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
         let mut metric_row_per_barrier: u64 = 0;
@@ -506,6 +507,12 @@ impl<S: StateStore> SourceExecutor<S> {
                             last_barrier_time.elapsed()
                         );
                         stream.pause_stream();
+
+                        // Only update `max_wait_barrier_time_ms` to capture `barrier_interval_ms`
+                        // changes here to avoid frequently accessing the shared `system_params`.
+                        max_wait_barrier_time_ms = self.system_params.load().barrier_interval_ms()
+                            as u128
+                            * WAIT_BARRIER_MULTIPLE_TIMES;
                     }
                     if let Some(mapping) = split_offset_mapping {
                         let state: HashMap<_, _> = mapping
@@ -621,6 +628,7 @@ mod tests {
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+    use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_connector::source::datagen::DatagenSplit;
@@ -676,6 +684,8 @@ mod tests {
             source_name: MOCK_SOURCE_NAME.to_string(),
         };
 
+        let system_params_manager = LocalSystemParamsManager::for_test();
+
         let executor = SourceExecutor::new(
             ActorContext::create(0),
             schema,
@@ -683,7 +693,7 @@ mod tests {
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
-            u64::MAX,
+            system_params_manager.get_params(),
             1,
             SourceCtrlOpts::default(),
             ConnectorParams::default(),
@@ -765,6 +775,8 @@ mod tests {
             source_name: MOCK_SOURCE_NAME.to_string(),
         };
 
+        let system_params_manager = LocalSystemParamsManager::for_test();
+
         let executor = SourceExecutor::new(
             ActorContext::create(0),
             schema,
@@ -772,7 +784,7 @@ mod tests {
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
-            u64::MAX,
+            system_params_manager.get_params(),
             1,
             SourceCtrlOpts::default(),
             ConnectorParams::default(),

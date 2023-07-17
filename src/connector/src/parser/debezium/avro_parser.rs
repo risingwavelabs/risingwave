@@ -45,7 +45,7 @@ const PAYLOAD: &str = "payload";
 // TODO: avoid duplicated codes with `AvroParser`
 #[derive(Debug)]
 pub struct DebeziumAvroParser {
-    outer_schema: Arc<Schema>,
+    schema: Schema,
     schema_resolver: Arc<ConfluentSchemaResolver>,
     rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
@@ -109,8 +109,14 @@ impl DebeziumAvroParser {
             schema_resolver,
             ..
         } = config;
+        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        // todo: to_resolved may cause stackoverflow if there's a loop in the schema
+        let schema = resolver
+            .to_resolved(&outer_schema)
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         Ok(Self {
-            outer_schema,
+            schema,
             schema_resolver,
             rw_columns,
             source_ctx,
@@ -155,16 +161,9 @@ impl DebeziumAvroParser {
             let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-            let resolver = apache_avro::schema::ResolvedSchema::try_from(&*self.outer_schema)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-            // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-            let schema = resolver
-                .to_resolved(&self.outer_schema)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
             let row_op = DebeziumChangeEvent::with_value(AvroAccess::new(
                 &avro_value,
-                AvroParseOptions::default().with_schema(&schema),
+                AvroParseOptions::default().with_schema(&self.schema),
             ));
 
             apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)

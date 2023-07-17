@@ -15,6 +15,8 @@
 use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
@@ -141,6 +143,11 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             .map(|&x| x as usize)
             .collect_vec();
 
+        let join_key_data_types = left_join_keys
+            .iter()
+            .map(|idx| source_l.schema().fields[*idx].data_type())
+            .collect_vec();
+
         let dispatcher_args = TemporalJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
             left: source_l,
@@ -158,6 +165,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             chunk_size: params.env.config().developer.chunk_size,
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
+            join_key_data_types,
         };
 
         dispatcher_args.dispatch()
@@ -181,31 +189,38 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     chunk_size: usize,
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,
+    join_key_data_types: Vec<DataType>,
 }
 
-impl<S: StateStore> TemporalJoinExecutorDispatcherArgs<S> {
-    pub fn dispatch(self) -> StreamResult<BoxedExecutor> {
+impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> {
+    type Output = StreamResult<BoxedExecutor>;
+
+    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
+        /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
             ($join_type:ident) => {
-                Ok(Box::new(
-                    TemporalJoinExecutor::<S, { JoinType::$join_type }>::new(
-                        self.ctx,
-                        self.left,
-                        self.right,
-                        self.right_table,
-                        self.left_join_keys,
-                        self.right_join_keys,
-                        self.null_safe,
-                        self.condition,
-                        self.pk_indices,
-                        self.output_indices,
-                        self.table_output_indices,
-                        self.executor_id,
-                        self.watermark_epoch,
-                        self.metrics,
-                        self.chunk_size,
-                    ),
-                ))
+                Ok(Box::new(TemporalJoinExecutor::<
+                    K,
+                    S,
+                    { JoinType::$join_type },
+                >::new(
+                    self.ctx,
+                    self.left,
+                    self.right,
+                    self.right_table,
+                    self.left_join_keys,
+                    self.right_join_keys,
+                    self.null_safe,
+                    self.condition,
+                    self.pk_indices,
+                    self.output_indices,
+                    self.table_output_indices,
+                    self.executor_id,
+                    self.watermark_epoch,
+                    self.metrics,
+                    self.chunk_size,
+                    self.join_key_data_types,
+                )))
             };
         }
         match self.join_type_proto {
@@ -213,5 +228,9 @@ impl<S: StateStore> TemporalJoinExecutorDispatcherArgs<S> {
             JoinTypeProto::LeftOuter => build!(LeftOuter),
             _ => unreachable!(),
         }
+    }
+
+    fn data_types(&self) -> &[DataType] {
+        &self.join_key_data_types
     }
 }
