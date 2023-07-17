@@ -428,17 +428,10 @@ impl DataChunk {
     /// e.g. if `indices` is `[2, 1, 0]`, and the chunk contains column `[a, b, c]`, then the output
     /// will be `[c, b, a]`. If `indices` is [2, 0], then the output will be `[c, a]`.
     /// If the input mapping is identity mapping, no reorder will be performed.
-    pub fn project(self, indices: &[usize]) -> Self {
-        if indices.iter().copied().eq(0..self.columns().len()) {
-            return self;
-        }
-        let mut new_columns = Vec::with_capacity(indices.len());
-        for &idx in indices {
-            new_columns.push(self.columns[idx].clone());
-        }
+    pub fn project(&self, indices: &[usize]) -> Self {
         Self {
-            columns: new_columns,
-            ..self
+            columns: indices.iter().map(|i| self.columns[*i].clone()).collect(),
+            vis2: self.vis2.clone(),
         }
     }
 
@@ -1025,7 +1018,7 @@ mod tests {
              6 9 3",
         );
         assert_eq!(
-            chunk.clone().project(&[2, 1, 0]),
+            chunk.project(&[2, 1, 0]),
             DataChunk::from_pretty(
                 "I I I
                  1 5 2
@@ -1034,7 +1027,7 @@ mod tests {
             )
         );
         assert_eq!(
-            chunk.clone().project(&[2, 0]),
+            chunk.project(&[2, 0]),
             DataChunk::from_pretty(
                 "I I
                  1 2
@@ -1042,7 +1035,7 @@ mod tests {
                  3 6",
             )
         );
-        assert_eq!(chunk.clone().project(&[0, 1, 2]), chunk);
+        assert_eq!(chunk.project(&[0, 1, 2]), chunk);
         assert_eq!(chunk.project(&[]).cardinality(), 3);
     }
 

@@ -707,7 +707,7 @@ where
         );
 
         let value_chunk = if let Some(ref value_indices) = self.value_indices {
-            chunk.clone().project(value_indices)
+            chunk.project(value_indices)
         } else {
             chunk.clone()
         };

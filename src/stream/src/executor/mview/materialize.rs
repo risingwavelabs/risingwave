@@ -310,7 +310,7 @@ impl MaterializeBuffer {
         let (data_chunk, ops) = stream_chunk.into_parts();
 
         let value_chunk = if let Some(ref value_indices) = value_indices {
-            data_chunk.clone().project(value_indices)
+            data_chunk.project(value_indices)
         } else {
             data_chunk.clone()
         };

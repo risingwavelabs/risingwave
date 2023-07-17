@@ -42,11 +42,7 @@ impl Aggregator for Projection {
         end_row_id: usize,
     ) -> Result<()> {
         self.inner
-            .update_multi(
-                &input.clone().project(&self.indices),
-                start_row_id,
-                end_row_id,
-            )
+            .update_multi(&input.project(&self.indices), start_row_id, end_row_id)
             .await
     }
 

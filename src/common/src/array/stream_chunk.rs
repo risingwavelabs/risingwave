@@ -235,9 +235,9 @@ impl StreamChunk {
     /// e.g. if `indices` is `[2, 1, 0]`, and the chunk contains column `[a, b, c]`, then the output
     /// will be `[c, b, a]`. If `indices` is [2, 0], then the output will be `[c, a]`.
     /// If the input mapping is identity mapping, no reorder will be performed.
-    pub fn project(self, indices: &[usize]) -> Self {
+    pub fn project(&self, indices: &[usize]) -> Self {
         Self {
-            ops: self.ops,
+            ops: self.ops.clone(),
             data: self.data.project(indices),
         }
     }

@@ -190,7 +190,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         let chunk_to_connector = if visible_columns.len() != columns.len() {
                             // Do projection here because we may have columns that aren't visible to
                             // the downstream.
-                            chunk.clone().project(&visible_columns)
+                            chunk.project(&visible_columns)
                         } else {
                             chunk.clone()
                         };
