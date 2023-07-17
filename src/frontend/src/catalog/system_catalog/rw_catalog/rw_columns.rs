@@ -60,24 +60,28 @@ impl SysCatalogReaderImpl {
 
                 schema
                     .iter_valid_table()
-                    .map(|table| (table.id.table_id(), table.name().clone(), table.columns()))
+                    .map(|table| (table.id.table_id(), table.columns()))
                     .chain(
-                        schema.iter_system_tables().map(|table| {
-                            (table.id.table_id(), table.name().clone(), table.columns())
-                        }),
+                        schema
+                            .iter_system_tables()
+                            .map(|table| (table.id.table_id(), table.columns())),
                     )
-                    .flat_map(|(id, name, columns)| {
-                        columns.iter().enumerate().map(move |(index, column)| {
-                            OwnedRow::new(vec![
-                                Some(ScalarImpl::Int32(id as i32)),
-                                Some(ScalarImpl::Utf8(name.clone().into())),
-                                Some(ScalarImpl::Int16(index as i16 + 1)),
-                                Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
-                                Some(ScalarImpl::Int32(column.data_type().to_oid())),
-                                Some(ScalarImpl::Int16(column.data_type().type_len())),
-                                Some(ScalarImpl::Utf8(column.data_type().pg_name().into())),
-                            ])
-                        })
+                    .flat_map(|(id, columns)| {
+                        columns
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, column)| !column.is_hidden())
+                            .map(move |(index, column)| {
+                                OwnedRow::new(vec![
+                                    Some(ScalarImpl::Int32(id as i32)),
+                                    Some(ScalarImpl::Utf8(column.name().into())),
+                                    Some(ScalarImpl::Int16(index as i16 + 1)),
+                                    Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
+                                    Some(ScalarImpl::Int32(column.data_type().to_oid())),
+                                    Some(ScalarImpl::Int16(column.data_type().type_len())),
+                                    Some(ScalarImpl::Utf8(column.data_type().pg_name().into())),
+                                ])
+                            })
                     })
                     .chain(view_rows)
             })

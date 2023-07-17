@@ -43,7 +43,6 @@ pub mod pg_type;
 pub mod pg_user;
 pub mod pg_views;
 
-use itertools::Itertools;
 pub use pg_am::*;
 pub use pg_attrdef::*;
 pub use pg_attribute::*;
@@ -74,52 +73,3 @@ pub use pg_tablespace::*;
 pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::ScalarImpl;
-
-use super::SysCatalogReaderImpl;
-use crate::user::user_authentication::encrypted_raw_password;
-
-impl SysCatalogReaderImpl {
-    pub(super) fn read_user_info_shadow(&self) -> Result<Vec<OwnedRow>> {
-        let reader = self.user_info_reader.read_guard();
-        // Since this catalog contains passwords, it must not be publicly readable.
-        match reader.get_user_by_name(&self.auth_context.user_name) {
-            None => {
-                return Err(ErrorCode::CatalogError(
-                    format!("user {} not found", self.auth_context.user_name).into(),
-                )
-                .into());
-            }
-            Some(user) => {
-                if !user.is_super {
-                    return Err(ErrorCode::PermissionDenied(
-                        "permission denied for table pg_shadow".to_string(),
-                    )
-                    .into());
-                }
-            }
-        }
-
-        let users = reader.get_all_users();
-        Ok(users
-            .iter()
-            .map(|user| {
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Utf8(user.name.clone().into())),
-                    Some(ScalarImpl::Int32(user.id as i32)),
-                    Some(ScalarImpl::Bool(user.can_create_db)),
-                    Some(ScalarImpl::Bool(user.is_super)),
-                    Some(ScalarImpl::Bool(false)),
-                    Some(ScalarImpl::Bool(false)),
-                    user.auth_info
-                        .as_ref()
-                        .map(|info| ScalarImpl::Utf8(encrypted_raw_password(info).into())),
-                    None,
-                    None,
-                ])
-            })
-            .collect_vec())
-    }
-}
