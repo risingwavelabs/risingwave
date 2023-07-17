@@ -266,7 +266,7 @@ impl StateStore for HummockStorage {
         rx.await.expect("should wait success");
 
         let epoch = self.pinned_version.load().max_committed_epoch();
-        self.min_current_epoch.store(epoch, MemOrdering::SeqCst);
+        self.min_current_epoch.store(HummockEpoch::MAX, MemOrdering::SeqCst);
         self.seal_epoch.store(epoch, MemOrdering::SeqCst);
 
         Ok(())
