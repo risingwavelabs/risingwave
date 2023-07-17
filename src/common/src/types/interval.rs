@@ -29,7 +29,6 @@ use regex::Regex;
 use risingwave_pb::data::PbInterval;
 use rust_decimal::prelude::Decimal;
 
-use super::ops::IsNegative;
 use super::to_binary::ToBinary;
 use super::*;
 use crate::error::{ErrorCode, Result, RwError};
@@ -571,6 +570,22 @@ impl Interval {
             usecs: 0,
         }
     }
+
+    // Assuming 1 day = 24 hours, adjust `abs(usecs)` to be less than 24 hours, and has the same
+    // sign with `days`.
+    pub fn justify_hour(self) -> Option<Self> {
+        let whole_day = (self.usecs / USECS_PER_DAY) as i32;
+        let mut usecs = self.usecs % USECS_PER_DAY;
+        let mut days = self.days.checked_add(whole_day)?;
+        if days > 0 && usecs < 0 {
+            usecs += USECS_PER_DAY;
+            days -= 1;
+        } else if days < 0 && usecs > 0 {
+            usecs -= USECS_PER_DAY;
+            days += 1;
+        }
+        Some(Self::from_month_day_usec(self.months, days, usecs))
+    }
 }
 
 /// A separate mod so that `use types::*` or `use interval::*` does not `use IntervalTestExt` by
@@ -955,12 +970,6 @@ impl Zero for Interval {
 
     fn is_zero(&self) -> bool {
         self.months == 0 && self.days == 0 && self.usecs == 0
-    }
-}
-
-impl IsNegative for Interval {
-    fn is_negative(&self) -> bool {
-        self < &Self::from_month_day_usec(0, 0, 0)
     }
 }
 
@@ -1459,6 +1468,7 @@ mod tests {
 
     use super::*;
     use crate::types::ordered_float::OrderedFloat;
+    use crate::util::panic::rw_catch_unwind;
 
     #[test]
     fn test_parse() {
@@ -1559,7 +1569,7 @@ mod tests {
         for (lhs, rhs, expected) in cases {
             let lhs = Interval::from_month_day_usec(lhs.0, lhs.1, lhs.2 as i64);
             let rhs = Interval::from_month_day_usec(rhs.0, rhs.1, rhs.2 as i64);
-            let result = std::panic::catch_unwind(|| {
+            let result = rw_catch_unwind(|| {
                 let actual = lhs.exact_div(&rhs);
                 assert_eq!(actual, expected);
             });
@@ -1740,7 +1750,7 @@ mod tests {
         assert!(Interval::deserialize(&mut deserializer).is_err());
 
         let buf = i128::MIN.to_ne_bytes();
-        std::panic::catch_unwind(|| {
+        rw_catch_unwind(|| {
             <Interval as crate::hash::HashKeyDe>::deserialize(&DataType::Interval, &mut &buf[..])
         })
         .unwrap_err();

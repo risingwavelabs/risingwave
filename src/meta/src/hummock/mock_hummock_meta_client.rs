@@ -48,6 +48,8 @@ pub struct MockHummockMetaClient {
     hummock_manager: Arc<HummockManager<MemStore>>,
     context_id: HummockContextId,
     compact_context_id: AtomicU32,
+    // used for hummock replay to avoid collision with existing sst files
+    sst_offset: u64,
 }
 
 impl MockHummockMetaClient {
@@ -59,6 +61,20 @@ impl MockHummockMetaClient {
             hummock_manager,
             context_id,
             compact_context_id: AtomicU32::new(context_id),
+            sst_offset: 0,
+        }
+    }
+
+    pub fn with_sst_offset(
+        hummock_manager: Arc<HummockManager<MemStore>>,
+        context_id: HummockContextId,
+        sst_offset: u64,
+    ) -> Self {
+        Self {
+            hummock_manager,
+            context_id,
+            compact_context_id: AtomicU32::new(context_id),
+            sst_offset,
         }
     }
 
@@ -130,6 +146,10 @@ impl HummockMetaClient for MockHummockMetaClient {
             .get_new_sst_ids(number)
             .await
             .map_err(mock_err)
+            .map(|range| SstObjectIdRange {
+                start_id: range.start_id + self.sst_offset,
+                end_id: range.end_id + self.sst_offset,
+            })
     }
 
     async fn report_compaction_task(
@@ -175,8 +195,6 @@ impl HummockMetaClient for MockHummockMetaClient {
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let (sched_tx, mut sched_rx) = tokio::sync::mpsc::unbounded_channel();
         let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
-        self.hummock_manager
-            .init_compaction_scheduler(sched_channel.clone(), None);
 
         let worker_node = self
             .hummock_manager

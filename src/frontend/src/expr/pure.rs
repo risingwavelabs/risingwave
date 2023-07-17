@@ -65,6 +65,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::DateTrunc
             | expr_node::Type::ToTimestamp1
             | expr_node::Type::CastWithTimeZone
+            | expr_node::Type::AddWithTimeZone
+            | expr_node::Type::SubtractWithTimeZone
             | expr_node::Type::Cast
             | expr_node::Type::Substr
             | expr_node::Type::Length
@@ -122,6 +124,9 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Atan2
             | expr_node::Type::Sqrt
             | expr_node::Type::Cbrt
+            | expr_node::Type::Sign
+            | expr_node::Type::Left
+            | expr_node::Type::Right
             | expr_node::Type::Degrees
             | expr_node::Type::Radians
             | expr_node::Type::IsTrue
@@ -144,10 +149,13 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayPrepend
             | expr_node::Type::FormatType
             | expr_node::Type::ArrayDistinct
+            | expr_node::Type::ArrayDims
             | expr_node::Type::ArrayLength
             | expr_node::Type::Cardinality
             | expr_node::Type::TrimArray
             | expr_node::Type::ArrayRemove
+            | expr_node::Type::ArrayReplace
+            | expr_node::Type::ArrayPosition
             | expr_node::Type::HexToInt256
             | expr_node::Type::JsonbAccessInner
             | expr_node::Type::JsonbAccessStr

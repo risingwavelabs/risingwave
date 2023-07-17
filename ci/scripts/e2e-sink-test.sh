@@ -23,10 +23,9 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
 
-download_java_binding "$profile"
-
-# TODO: Switch to stream_chunk encoding once it's completed, and then remove json encoding as well as this env var.
-export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
+# Change process number limit
+echo "--- os limits"
+ulimit -a
 
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
@@ -84,7 +83,6 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/remote/types.slt'
 sleep 1
 
 echo "--- testing remote sinks"
-
 # check sink destination postgres
 sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
@@ -110,12 +108,31 @@ else
   exit 1
 fi
 
+diff -u ./e2e_test/sink/remote/mysql_expected_result_2.tsv \
+<(mysql --host=mysql --port=3306 -u root -p123456 -s -N -r test -e "SELECT * FROM test.t_types ORDER BY id")
+if [ $? -eq 0 ]; then
+  echo "mysql sink check 0 passed"
+else
+  echo "The output is not as expected."
+  exit 1
+fi
+
 echo "--- testing kafka sink"
 ./ci/scripts/e2e-kafka-sink-test.sh
 if [ $? -eq 0 ]; then
   echo "kafka sink check passed"
 else
   echo "kafka sink test failed"
+  exit 1
+fi
+
+echo "--- testing elasticsearch sink"
+chmod +x ./ci/scripts/e2e-elasticsearch-sink-test.sh
+./ci/scripts/e2e-elasticsearch-sink-test.sh
+if [ $? -eq 0 ]; then
+  echo "elasticsearch sink check passed"
+else
+  echo "elasticsearch sink test failed"
   exit 1
 fi
 

@@ -123,8 +123,6 @@ pub struct HummockStorage {
 
     read_version_mapping: Arc<ReadVersionMappingType>,
 
-    tracing: Arc<risingwave_tracing::RwTracingService>,
-
     backup_reader: BackupReaderRef,
 
     /// current_epoch < min_current_epoch cannot be read.
@@ -143,7 +141,6 @@ impl HummockStorage {
         notification_client: impl NotificationClient,
         filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
-        tracing: Arc<risingwave_tracing::RwTracingService>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
@@ -217,7 +214,6 @@ impl HummockStorage {
                 shutdown_sender: event_tx,
             }),
             read_version_mapping: hummock_event_handler.read_version_mapping(),
-            tracing,
             backup_reader,
             min_current_epoch,
             write_limiter,
@@ -234,6 +230,7 @@ impl HummockStorage {
             .send(HummockEvent::RegisterReadVersion {
                 table_id: option.table_id,
                 new_read_version_sender: tx,
+                is_replicated: option.is_replicated,
             })
             .unwrap();
 
@@ -244,7 +241,6 @@ impl HummockStorage {
             self.hummock_version_reader.clone(),
             self.hummock_event_sender.clone(),
             self.buffer_tracker.get_memory_limiter().clone(),
-            self.tracing.clone(),
             self.write_limiter.clone(),
             option,
         )
@@ -286,7 +282,6 @@ impl HummockStorage {
                 version_update_payload::Payload::PinnedVersion(version),
             ))
             .unwrap();
-
         loop {
             if self.pinned_version.load().id() >= version_id {
                 break;
@@ -332,7 +327,6 @@ impl HummockStorage {
             notification_client,
             Arc::new(FilterKeyExtractorManager::default()),
             Arc::new(HummockStateStoreMetrics::unused()),
-            Arc::new(risingwave_tracing::RwTracingService::disabled()),
             Arc::new(CompactorMetrics::unused()),
         )
         .await
@@ -344,6 +338,18 @@ impl HummockStorage {
 
     pub fn version_reader(&self) -> &HummockVersionReader {
         &self.hummock_version_reader
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn wait_version_update(&self, old_id: u64) -> u64 {
+        use tokio::task::yield_now;
+        loop {
+            let cur_id = self.pinned_version.load().id();
+            if cur_id > old_id {
+                return cur_id;
+            }
+            yield_now().await;
+        }
     }
 }
 

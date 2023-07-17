@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::I32ArrayBuilder;
+
 use super::*;
 
 /// Repeat an expression n times.
@@ -43,10 +45,10 @@ impl RepeatN {
     async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
         let array = self.expr.eval(input).await?;
 
-        let mut index_builder = I64ArrayBuilder::new(0x100);
+        let mut index_builder = I32ArrayBuilder::new(0x100);
         let mut value_builder = self.return_type().create_array_builder(0x100);
         for (i, value) in array.iter().enumerate() {
-            index_builder.append_n(self.n, Some(i as i64));
+            index_builder.append_n(self.n, Some(i as i32));
             value_builder.append_n(self.n, value);
         }
         let len = index_builder.len();

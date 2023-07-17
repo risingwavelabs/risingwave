@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::DeleteNode;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
@@ -43,12 +42,6 @@ impl BatchDelete {
     }
 }
 
-impl fmt::Display for BatchDelete {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchDelete")
-    }
-}
-
 impl PlanTreeNodeUnary for BatchDelete {
     fn input(&self) -> PlanRef {
         self.logical.input.clone()
@@ -62,6 +55,7 @@ impl PlanTreeNodeUnary for BatchDelete {
 }
 
 impl_plan_tree_node_for_unary! { BatchDelete }
+impl_distill_by_unit!(BatchDelete, logical, "BatchDelete");
 
 impl ToDistributedBatch for BatchDelete {
     fn to_distributed(&self) -> Result<PlanRef> {

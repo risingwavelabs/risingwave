@@ -15,10 +15,11 @@
 use std::collections::HashSet;
 
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::estimate_size::{EstimateSize, VecWithKvSize};
+use risingwave_common::estimate_size::{EstimateSize, KvSize, VecWithKvSize};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 
 use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::task::AtomicU64Ref;
 
 /// A cache for lookup's arrangement side.
@@ -73,8 +74,8 @@ impl LookupCache {
         self.data.clear();
     }
 
-    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
-        let cache = new_unbounded(watermark_epoch);
+    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = new_unbounded(watermark_epoch, metrics_info);
         Self { data: cache }
     }
 }
@@ -82,25 +83,23 @@ impl LookupCache {
 #[derive(Default)]
 pub struct LookupEntryState {
     inner: HashSet<OwnedRow>,
-    kv_heap_size: usize,
+    kv_heap_size: KvSize,
 }
 
 impl EstimateSize for LookupEntryState {
     fn estimated_heap_size(&self) -> usize {
         // TODO: Add hashset internal size.
         // https://github.com/risingwavelabs/risingwave/issues/9713
-        self.kv_heap_size
+        self.kv_heap_size.size()
     }
 }
 
 impl LookupEntryState {
     /// Insert into the cache.
     fn insert(&mut self, value: OwnedRow) {
-        let kv_heap_size = self
-            .kv_heap_size
-            .saturating_add(value.estimated_heap_size());
+        let kv_heap_size = self.kv_heap_size.add_val(&value);
         if self.inner.insert(value) {
-            self.kv_heap_size = kv_heap_size;
+            self.kv_heap_size.set(kv_heap_size);
         } else {
             panic!("inserting a duplicated value");
         }
@@ -109,9 +108,7 @@ impl LookupEntryState {
     /// Delete from the cache.
     fn remove(&mut self, value: &OwnedRow) {
         if self.inner.remove(value) {
-            self.kv_heap_size = self
-                .kv_heap_size
-                .saturating_sub(value.estimated_heap_size());
+            self.kv_heap_size.sub_val(value);
         } else {
             panic!("value {:?} should be in the cache", value);
         }
@@ -121,7 +118,7 @@ impl LookupEntryState {
         let kv_heap_size = value.get_kv_size();
         Self {
             inner: HashSet::from_iter(value.into_iter()),
-            kv_heap_size,
+            kv_heap_size: KvSize::with_size(kv_heap_size),
         }
     }
 

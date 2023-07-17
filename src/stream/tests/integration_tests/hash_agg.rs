@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
+use risingwave_expr::agg::AggCall;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 
 use crate::prelude::*;
@@ -32,31 +32,10 @@ async fn test_hash_agg_count_sum() {
     // This is local hash aggregation, so we add another sum state
     let key_indices = vec![0];
     let agg_calls = vec![
-        AggCall {
-            kind: AggKind::Count, // as row count, index: 0
-            args: AggArgs::None,
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        },
-        AggCall {
-            kind: AggKind::Sum,
-            args: AggArgs::Unary(DataType::Int64, 1),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        },
+        AggCall::from_pretty("(count:int8)"),
+        AggCall::from_pretty("(sum:int8 $1:int8)"),
         // This is local hash aggregation, so we add another sum state
-        AggCall {
-            kind: AggKind::Sum,
-            args: AggArgs::Unary(DataType::Int64, 2),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        },
+        AggCall::from_pretty("(sum:int8 $2:int8)"),
     ];
 
     let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
@@ -111,7 +90,7 @@ async fn test_hash_agg_count_sum() {
               +----+---+---+---+---+
             - !barrier 3
         "#]],
-        SnapshotOptions { sort_chunk: true },
+        SnapshotOptions::default().sort_chunk(true),
     );
 }
 
@@ -133,22 +112,8 @@ async fn test_hash_agg_min() {
     // This is local hash aggregation, so we add another row count state
     let keys = vec![0];
     let agg_calls = vec![
-        AggCall {
-            kind: AggKind::Count, // as row count, index: 0
-            args: AggArgs::None,
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        },
-        AggCall {
-            kind: AggKind::Min,
-            args: AggArgs::Unary(DataType::Int64, 1),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        },
+        AggCall::from_pretty("(count:int8)"),
+        AggCall::from_pretty("(min:int8 $1:int8)"),
     ];
 
     let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
@@ -201,7 +166,7 @@ async fn test_hash_agg_min() {
               +----+---+---+-------+
             - !barrier 3
         "#]],
-        SnapshotOptions { sort_chunk: true },
+        SnapshotOptions::default().sort_chunk(true),
     );
 }
 
@@ -222,22 +187,8 @@ async fn test_hash_agg_min_append_only() {
 
     let keys = vec![0];
     let agg_calls = vec![
-        AggCall {
-            kind: AggKind::Count, // as row count, index: 0
-            args: AggArgs::None,
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        },
-        AggCall {
-            kind: AggKind::Min,
-            args: AggArgs::Unary(DataType::Int64, 1),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        },
+        AggCall::from_pretty("(count:int8)"),
+        AggCall::from_pretty("(min:int8 $1:int8)"),
     ];
 
     let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
@@ -296,7 +247,7 @@ async fn test_hash_agg_min_append_only() {
               +----+---+---+---+
             - !barrier 3
         "#]],
-        SnapshotOptions { sort_chunk: true },
+        SnapshotOptions::default().sort_chunk(true),
     );
 }
 
@@ -312,14 +263,7 @@ async fn test_hash_agg_emit_on_window_close() {
     };
     let input_window_col = 1;
     let group_key_indices = vec![input_window_col];
-    let agg_calls = vec![AggCall {
-        kind: AggKind::Count, // as row count, index: 0
-        args: AggArgs::None,
-        return_type: DataType::Int64,
-        column_orders: vec![],
-        filter: None,
-        distinct: false,
-    }];
+    let agg_calls = vec![AggCall::from_pretty("(count:int8)")];
 
     let create_executor = || async {
         let (tx, source) = MockSource::channel(input_schema.clone(), PkIndices::new());
@@ -394,7 +338,7 @@ async fn test_hash_agg_emit_on_window_close() {
               output: []
             - input: !watermark
                 col_idx: 1
-                val: 3
+                val: '3'
               output: []
             - input: !barrier 3
               output:
@@ -404,11 +348,11 @@ async fn test_hash_agg_emit_on_window_close() {
                 +---+---+---+
               - !watermark
                 col_idx: 0
-                val: 3
+                val: '3'
               - !barrier 3
             - input: !watermark
                 col_idx: 1
-                val: 4
+                val: '4'
               output: []
             - input: !barrier 4
               output:
@@ -418,11 +362,11 @@ async fn test_hash_agg_emit_on_window_close() {
                 +---+---+---+
               - !watermark
                 col_idx: 0
-                val: 4
+                val: '4'
               - !barrier 4
             - input: !watermark
                 col_idx: 1
-                val: 10
+                val: '10'
               output: []
             - input: !barrier 5
               output:
@@ -432,20 +376,20 @@ async fn test_hash_agg_emit_on_window_close() {
                 +---+---+---+
               - !watermark
                 col_idx: 0
-                val: 10
+                val: '10'
               - !barrier 5
             - input: !watermark
                 col_idx: 1
-                val: 20
+                val: '20'
               output: []
             - input: !barrier 6
               output:
               - !watermark
                 col_idx: 0
-                val: 20
+                val: '20'
               - !barrier 6
         "#]],
-        SnapshotOptions { sort_chunk: true },
+        SnapshotOptions::default().sort_chunk(true),
     )
     .await;
 }

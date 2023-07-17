@@ -12,15 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem::replace;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use futures::{pin_mut, TryStreamExt};
+use futures::stream::{FuturesUnordered, StreamFuture};
+use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::constants::log_store::{
+    EPOCH_COLUMN_INDEX, EPOCH_COLUMN_TYPE, KV_LOG_STORE_PREDEFINED_COLUMNS, PK_TYPES,
+    ROW_OP_COLUMN_INDEX, SEQ_ID_COLUMN_INDEX,
+};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -28,28 +36,19 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
-    BasicSerde, ValueRowDeserializer, ValueRowSerdeNew, ValueRowSerializer,
+    BasicSerde, ValueRowDeserializer, ValueRowSerializer,
 };
 use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
+use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::StateStoreReadIterStream;
 use risingwave_storage::table::{compute_vnode, Distribution};
 
 use crate::common::log_store::kv_log_store::{
     ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
 };
-use crate::common::log_store::{LogStoreError, LogStoreResult};
-
-/// `epoch`, `seq_id`, `op`
-const PREDEFINED_COLUMNS_TYPES: [DataType; 3] = [DataType::Int64, DataType::Int32, DataType::Int16];
-const EPOCH_INDEX: usize = 0;
-const SEQ_ID_INDEX: usize = 1;
-const ROW_OP_INDEX: usize = 2;
-/// `epoch`, `seq_id`
-const PK_TYPES: [DataType; 2] = [DataType::Int64, DataType::Int32];
-/// epoch
-const EPOCH_TYPES: [DataType; 1] = [DataType::Int64];
+use crate::common::log_store::{LogStoreError, LogStoreReadItem, LogStoreResult};
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
 const DELETE_OP_CODE: RowOpCodeType = 2;
@@ -65,7 +64,7 @@ enum LogStoreRowOp {
 }
 
 #[derive(Clone)]
-pub struct LogStoreRowSerde {
+pub(crate) struct LogStoreRowSerde {
     /// Used for serializing and deserializing the primary key.
     pk_serde: OrderedRowSerde,
 
@@ -92,7 +91,7 @@ pub struct LogStoreRowSerde {
 }
 
 impl LogStoreRowSerde {
-    pub fn new(table_catalog: &Table, vnodes: Option<Arc<Bitmap>>) -> Self {
+    pub(crate) fn new(table_catalog: &Table, vnodes: Option<Arc<Bitmap>>) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()
@@ -116,14 +115,14 @@ impl LogStoreRowSerde {
             .collect_vec();
 
         // There are 3 predefined columns for kv log store:
-        assert!(data_types.len() > PREDEFINED_COLUMNS_TYPES.len());
-        for i in 0..PREDEFINED_COLUMNS_TYPES.len() {
-            assert_eq!(data_types[i], PREDEFINED_COLUMNS_TYPES[i]);
+        assert!(data_types.len() > KV_LOG_STORE_PREDEFINED_COLUMNS.len());
+        for i in 0..KV_LOG_STORE_PREDEFINED_COLUMNS.len() {
+            assert_eq!(data_types[i], KV_LOG_STORE_PREDEFINED_COLUMNS[i].1);
         }
 
-        let payload_schema = data_types[PREDEFINED_COLUMNS_TYPES.len()..].to_vec();
+        let payload_schema = data_types[KV_LOG_STORE_PREDEFINED_COLUMNS.len()..].to_vec();
 
-        let row_serde = BasicSerde::new(&[], Arc::from(data_types.into_boxed_slice()));
+        let row_serde = BasicSerde::new(input_value_indices.into(), table_columns.into());
 
         let vnodes = match vnodes {
             Some(vnodes) => vnodes,
@@ -139,7 +138,7 @@ impl LogStoreRowSerde {
         );
 
         let epoch_serde =
-            OrderedRowSerde::new(Vec::from(EPOCH_TYPES), vec![OrderType::ascending()]);
+            OrderedRowSerde::new(vec![EPOCH_COLUMN_TYPE], vec![OrderType::ascending()]);
 
         Self {
             pk_serde,
@@ -151,25 +150,25 @@ impl LogStoreRowSerde {
         }
     }
 
-    pub fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) {
+    pub(crate) fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) {
         self.vnodes = vnodes;
     }
 
-    pub fn vnodes(&self) -> &Bitmap {
+    pub(crate) fn vnodes(&self) -> &Bitmap {
         self.vnodes.as_ref()
     }
 
-    fn encode_epoch(epoch: u64) -> i64 {
+    pub(crate) fn encode_epoch(epoch: u64) -> i64 {
         epoch as i64 ^ (1i64 << 63)
     }
 
-    fn decode_epoch(encoded_epoch: i64) -> u64 {
+    pub(crate) fn decode_epoch(encoded_epoch: i64) -> u64 {
         encoded_epoch as u64 ^ (1u64 << 63)
     }
 }
 
 impl LogStoreRowSerde {
-    pub fn serialize_data_row(
+    pub(crate) fn serialize_data_row(
         &self,
         epoch: u64,
         seq_id: SeqIdType,
@@ -196,7 +195,7 @@ impl LogStoreRowSerde {
         (vnode, key_bytes, value_bytes)
     }
 
-    pub fn serialize_barrier(
+    pub(crate) fn serialize_barrier(
         &self,
         epoch: u64,
         vnode: VirtualNode,
@@ -219,7 +218,7 @@ impl LogStoreRowSerde {
         (key_bytes, value_bytes)
     }
 
-    pub fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> Bytes {
+    pub(crate) fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> Bytes {
         serialize_pk_with_vnode(
             [Some(ScalarImpl::Int64(Self::encode_epoch(epoch)))],
             &self.epoch_serde,
@@ -227,7 +226,7 @@ impl LogStoreRowSerde {
         )
     }
 
-    pub fn serialize_log_store_pk(
+    pub(crate) fn serialize_log_store_pk(
         &self,
         vnode: VirtualNode,
         epoch: u64,
@@ -243,7 +242,7 @@ impl LogStoreRowSerde {
         )
     }
 
-    pub fn serialize_truncation_offset_watermark(
+    pub(crate) fn serialize_truncation_offset_watermark(
         &self,
         vnode: VirtualNode,
         offset: ReaderTruncationOffsetType,
@@ -259,9 +258,9 @@ impl LogStoreRowSerde {
     fn deserialize(&self, value_bytes: Bytes) -> LogStoreResult<(u64, LogStoreRowOp)> {
         let row_data = self.row_serde.deserialize(&value_bytes)?;
 
-        let payload_row = OwnedRow::new(row_data[PREDEFINED_COLUMNS_TYPES.len()..].to_vec());
-        let epoch = Self::decode_epoch(*row_data[EPOCH_INDEX].as_ref().unwrap().as_int64());
-        let row_op_code = *row_data[ROW_OP_INDEX].as_ref().unwrap().as_int16();
+        let payload_row = OwnedRow::new(row_data[KV_LOG_STORE_PREDEFINED_COLUMNS.len()..].to_vec());
+        let epoch = Self::decode_epoch(*row_data[EPOCH_COLUMN_INDEX].as_ref().unwrap().as_int64());
+        let row_op_code = *row_data[ROW_OP_COLUMN_INDEX].as_ref().unwrap().as_int16();
 
         let op = match row_op_code {
             INSERT_OP_CODE => LogStoreRowOp::Row {
@@ -281,13 +280,13 @@ impl LogStoreRowSerde {
                 row: payload_row,
             },
             BARRIER_OP_CODE => {
-                assert!(row_data[SEQ_ID_INDEX].is_none());
+                assert!(row_data[SEQ_ID_COLUMN_INDEX].is_none());
                 LogStoreRowOp::Barrier {
                     is_checkpoint: false,
                 }
             }
             CHECKPOINT_BARRIER_OP_CODE => {
-                assert!(row_data[SEQ_ID_INDEX].is_none());
+                assert!(row_data[SEQ_ID_COLUMN_INDEX].is_none());
                 LogStoreRowOp::Barrier {
                     is_checkpoint: true,
                 }
@@ -297,7 +296,7 @@ impl LogStoreRowSerde {
         Ok((epoch, op))
     }
 
-    pub async fn deserialize_stream_chunk(
+    pub(crate) async fn deserialize_stream_chunk(
         &self,
         stream: impl StateStoreReadIterStream,
         start_seq_id: SeqIdType,
@@ -352,77 +351,256 @@ impl LogStoreRowSerde {
     }
 }
 
+#[derive(Debug)]
+enum StreamState {
+    /// The stream has not emitted any row op yet.
+    Uninitialized,
+    /// All parallelism of stream are consuming row.
+    AllConsumingRow { curr_epoch: u64 },
+    /// Some parallelism has reached the barrier, and is waiting for other parallelism to reach the
+    /// barrier.
+    BarrierAligning {
+        curr_epoch: u64,
+        is_checkpoint: bool,
+    },
+    /// All parallelism has reached the barrier, and the barrier is emitted.
+    BarrierEmitted { prev_epoch: u64 },
+}
+
+struct LogStoreRowOpStream<S: StateStoreReadIterStream> {
+    serde: LogStoreRowSerde,
+
+    /// Streams that have not reached a barrier
+    row_streams: FuturesUnordered<StreamFuture<Pin<Box<S>>>>,
+
+    /// Streams that have reached a barrier
+    barrier_streams: Vec<Pin<Box<S>>>,
+
+    stream_state: StreamState,
+}
+
+impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
+    pub(crate) fn new(streams: Vec<S>, serde: LogStoreRowSerde) -> Self {
+        assert!(!streams.is_empty());
+        Self {
+            serde,
+            barrier_streams: Vec::with_capacity(streams.len()),
+            row_streams: streams
+                .into_iter()
+                .map(|s| Box::pin(s).into_future())
+                .collect(),
+            stream_state: StreamState::Uninitialized,
+        }
+    }
+
+    fn check_epoch(&self, epoch: u64) -> LogStoreResult<()> {
+        match &self.stream_state {
+            StreamState::Uninitialized => Ok(()),
+            StreamState::AllConsumingRow { curr_epoch }
+            | StreamState::BarrierAligning { curr_epoch, .. } => {
+                if *curr_epoch != epoch {
+                    Err(LogStoreError::Internal(anyhow!(
+                        "epoch {} does not match with current epoch {}",
+                        epoch,
+                        curr_epoch
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
+
+            StreamState::BarrierEmitted { prev_epoch } => {
+                if *prev_epoch >= epoch {
+                    Err(LogStoreError::Internal(anyhow!(
+                        "epoch {} should be greater than prev epoch {}",
+                        epoch,
+                        prev_epoch
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    fn check_is_checkpoint(&self, is_checkpoint: bool) -> LogStoreResult<()> {
+        if let StreamState::BarrierAligning {
+            is_checkpoint: curr_is_checkpoint,
+            ..
+        } = &self.stream_state
+        {
+            if is_checkpoint == *curr_is_checkpoint {
+                Ok(())
+            } else {
+                Err(LogStoreError::Internal(anyhow!(
+                    "current aligning barrier is_checkpoint: {}, current barrier is_checkpoint {}",
+                    curr_is_checkpoint,
+                    is_checkpoint
+                )))
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    #[try_stream(ok = (u64, LogStoreReadItem), error = LogStoreError)]
+    async fn into_log_store_item_stream(self, chunk_size: usize) {
+        let mut ops = Vec::with_capacity(chunk_size);
+        let mut data_chunk_builder =
+            DataChunkBuilder::new(self.serde.payload_schema.clone(), chunk_size);
+
+        let this = self;
+        pin_mut!(this);
+
+        while let Some((epoch, row_op)) = this.next_op().await? {
+            match row_op {
+                LogStoreRowOp::Row { op, row } => {
+                    ops.push(op);
+                    if let Some(chunk) = data_chunk_builder.append_one_row(row) {
+                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
+                        yield (
+                            epoch,
+                            LogStoreReadItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                        );
+                    }
+                }
+                LogStoreRowOp::Barrier { is_checkpoint } => {
+                    if let Some(chunk) = data_chunk_builder.consume_all() {
+                        let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
+                        yield (
+                            epoch,
+                            LogStoreReadItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                        );
+                    }
+                    yield (epoch, LogStoreReadItem::Barrier { is_checkpoint })
+                }
+            }
+        }
+    }
+}
+
+pub(crate) type LogStoreItemStream<S> = impl Stream<Item = LogStoreResult<(u64, LogStoreReadItem)>>;
+pub(crate) fn new_log_store_item_stream<S: StateStoreReadIterStream>(
+    streams: Vec<S>,
+    serde: LogStoreRowSerde,
+    chunk_size: usize,
+) -> LogStoreItemStream<S> {
+    LogStoreRowOpStream::new(streams, serde).into_log_store_item_stream(chunk_size)
+}
+
+impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
+    async fn next_op(&mut self) -> LogStoreResult<Option<(u64, LogStoreRowOp)>> {
+        assert!(!self.row_streams.is_empty());
+        while let (Some(result), stream) = self
+            .row_streams
+            .next()
+            .await
+            .expect("row stream should not be empty when polled")
+        {
+            let (_key, value): (_, Bytes) = result?;
+            let (decoded_epoch, op) = self.serde.deserialize(value)?;
+            self.check_epoch(decoded_epoch)?;
+            match op {
+                LogStoreRowOp::Row { op, row } => {
+                    match &self.stream_state {
+                        StreamState::Uninitialized | StreamState::BarrierEmitted { .. } => {
+                            self.stream_state = StreamState::AllConsumingRow {
+                                curr_epoch: decoded_epoch,
+                            }
+                        }
+                        _ => {}
+                    };
+                    self.row_streams.push(stream.into_future());
+                    return Ok(Some((decoded_epoch, LogStoreRowOp::Row { op, row })));
+                }
+                LogStoreRowOp::Barrier { is_checkpoint } => {
+                    self.check_is_checkpoint(is_checkpoint)?;
+                    // Put the current stream to the barrier streams
+                    self.barrier_streams.push(stream);
+
+                    if self.row_streams.is_empty() {
+                        self.stream_state = StreamState::BarrierEmitted {
+                            prev_epoch: decoded_epoch,
+                        };
+                        while let Some(stream) = self.barrier_streams.pop() {
+                            self.row_streams.push(stream.into_future());
+                        }
+                        return Ok(Some((
+                            decoded_epoch,
+                            LogStoreRowOp::Barrier { is_checkpoint },
+                        )));
+                    } else {
+                        self.stream_state = StreamState::BarrierAligning {
+                            curr_epoch: decoded_epoch,
+                            is_checkpoint,
+                        };
+                        continue;
+                    }
+                }
+            }
+        }
+        // End of stream
+        match &self.stream_state {
+            StreamState::BarrierEmitted { .. } | StreamState::Uninitialized => {},
+            s => return Err(LogStoreError::Internal(
+                anyhow!(
+                    "when any of the stream reaches the end, it should be right after emitting an barrier. Current state: {:?}",
+                    s)
+                )
+            ),
+        }
+        assert!(
+            self.barrier_streams.is_empty(),
+            "should not have any pending barrier received stream after barrier emit"
+        );
+        if cfg!(debug_assertion) {
+            while let Some((opt, _stream)) = self.row_streams.next().await {
+                if let Some(result) = opt {
+                    return Err(LogStoreError::Internal(
+                        anyhow!("when any of the stream reaches the end, other stream should also reaches the end, but poll result: {:?}", result))
+                    );
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use futures::{stream, StreamExt};
+    use std::future::poll_fn;
+    use std::task::Poll;
+
+    use futures::stream::empty;
+    use futures::{pin_mut, stream, StreamExt, TryStreamExt};
     use itertools::Itertools;
+    use rand::prelude::SliceRandom;
+    use rand::thread_rng;
     use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::row::{OwnedRow, Row};
-    use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
-    use risingwave_pb::catalog::PbTable;
     use risingwave_storage::store::StateStoreReadIterStream;
     use risingwave_storage::table::DEFAULT_VNODE;
     use tokio::sync::oneshot;
     use tokio::sync::oneshot::Sender;
 
-    use crate::common::log_store::kv_log_store::serde::{LogStoreRowOp, LogStoreRowSerde};
+    use crate::common::log_store::kv_log_store::serde::{
+        new_log_store_item_stream, LogStoreRowOp, LogStoreRowOpStream, LogStoreRowSerde,
+    };
+    use crate::common::log_store::kv_log_store::test_utils::{
+        gen_test_data, gen_test_log_store_table, TEST_TABLE_ID,
+    };
     use crate::common::log_store::kv_log_store::SeqIdType;
-    use crate::common::table::test_utils::gen_prost_table;
+    use crate::common::log_store::LogStoreReadItem;
 
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     const EPOCH1: u64 = 233;
-
-    fn gen_test_table() -> PbTable {
-        let column_descs = vec![
-            ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64), // epoch
-            ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32), // Seq id
-            ColumnDesc::unnamed(ColumnId::from(2), DataType::Int16), // op code
-            // Payload
-            ColumnDesc::unnamed(ColumnId::from(3), DataType::Int64), // id
-            ColumnDesc::unnamed(ColumnId::from(2), DataType::Varchar), // name
-        ];
-        let order_types = vec![OrderType::ascending(), OrderType::ascending_nulls_last()];
-        let pk_index = vec![0_usize, 1_usize];
-        let read_prefix_len_hint = 0;
-        gen_prost_table(
-            TEST_TABLE_ID,
-            column_descs,
-            order_types,
-            pk_index,
-            read_prefix_len_hint,
-        )
-    }
-
-    fn gen_test_data(base: i64) -> (Vec<Op>, Vec<OwnedRow>) {
-        let ops = vec![Op::Insert, Op::Delete, Op::UpdateDelete, Op::UpdateInsert];
-        let rows = vec![
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(1 + base)),
-                Some(ScalarImpl::Utf8("name1".to_owned_scalar())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(2 + base)),
-                Some(ScalarImpl::Utf8("name2".to_owned_scalar())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(3 + base)),
-                Some(ScalarImpl::Utf8("name3".to_owned_scalar())),
-            ]),
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int64(3 + base)),
-                Some(ScalarImpl::Utf8("name4".to_owned_scalar())),
-            ]),
-        ];
-        (ops, rows)
-    }
+    const EPOCH2: u64 = EPOCH1 + 1;
 
     #[test]
     fn test_serde() {
-        let table = gen_test_table();
+        let table = gen_test_log_store_table();
 
         let serde = LogStoreRowSerde::new(&table, None);
 
@@ -542,7 +720,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deserialize_stream_chunk() {
-        let table = gen_test_table();
+        let table = gen_test_log_store_table();
         let serde = LogStoreRowSerde::new(&table, None);
 
         let (ops, rows) = gen_test_data(0);
@@ -594,5 +772,259 @@ mod tests {
             .flatten(),
             tx,
         )
+    }
+
+    fn gen_single_test_stream(
+        serde: LogStoreRowSerde,
+        seq_id: &mut SeqIdType,
+        base: i64,
+    ) -> (
+        impl StateStoreReadIterStream,
+        oneshot::Sender<()>,
+        oneshot::Sender<()>,
+    ) {
+        let (ops, rows) = gen_test_data(base);
+        let (row_stream, tx1) =
+            gen_row_stream(serde.clone(), ops.clone(), rows.clone(), EPOCH1, seq_id);
+        let stream = row_stream.chain(stream::once({
+            let serde = serde.clone();
+            async move {
+                let (key, value) = serde.serialize_barrier(EPOCH1, DEFAULT_VNODE, false);
+                Ok((FullKey::new(TEST_TABLE_ID, TableKey(key), EPOCH1), value))
+            }
+        }));
+        let (row_stream, tx2) = gen_row_stream(serde.clone(), ops, rows, EPOCH2, seq_id);
+        let stream = stream.chain(row_stream).chain(stream::once({
+            async move {
+                let (key, value) = serde.serialize_barrier(EPOCH2, DEFAULT_VNODE, true);
+                Ok((FullKey::new(TEST_TABLE_ID, TableKey(key), EPOCH2), value))
+            }
+        }));
+        (stream, tx1, tx2)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn gen_multi_test_stream(
+        serde: LogStoreRowSerde,
+        size: usize,
+    ) -> (
+        LogStoreRowOpStream<impl StateStoreReadIterStream>,
+        Vec<Option<Sender<()>>>,
+        Vec<Option<Sender<()>>>,
+        Vec<Vec<Op>>,
+        Vec<Vec<OwnedRow>>,
+    ) {
+        let mut seq_id = 1;
+        let mut streams = Vec::new();
+        let mut tx1 = Vec::new();
+        let mut tx2 = Vec::new();
+        for i in 0..size {
+            let (s, t1, t2) = gen_single_test_stream(serde.clone(), &mut seq_id, (100 * i) as _);
+            streams.push(s);
+            tx1.push(Some(t1));
+            tx2.push(Some(t2));
+        }
+
+        let stream = LogStoreRowOpStream::new(streams, serde);
+
+        let mut ops = Vec::new();
+        let mut rows = Vec::new();
+
+        for i in 0..size {
+            let (o, r) = gen_test_data((100 * i) as _);
+            ops.push(o);
+            rows.push(r);
+        }
+
+        (stream, tx1, tx2, ops, rows)
+    }
+
+    #[tokio::test]
+    async fn test_row_stream_basic() {
+        let table = gen_test_log_store_table();
+
+        let serde = LogStoreRowSerde::new(&table, None);
+
+        const MERGE_SIZE: usize = 10;
+
+        let (stream, mut tx1, mut tx2, ops, rows) = gen_multi_test_stream(serde, MERGE_SIZE);
+
+        pin_mut!(stream);
+
+        let mut index = (0..MERGE_SIZE).collect_vec();
+        index.shuffle(&mut thread_rng());
+
+        for i in index {
+            tx1[i].take().unwrap().send(()).unwrap();
+            for j in 0..ops[i].len() {
+                assert_eq!(
+                    (
+                        EPOCH1,
+                        LogStoreRowOp::Row {
+                            op: ops[i][j],
+                            row: rows[i][j].clone(),
+                        }
+                    ),
+                    stream.next_op().await.unwrap().unwrap()
+                );
+            }
+        }
+
+        assert_eq!(
+            (
+                EPOCH1,
+                LogStoreRowOp::Barrier {
+                    is_checkpoint: false
+                }
+            ),
+            stream.next_op().await.unwrap().unwrap()
+        );
+
+        let mut index = (0..MERGE_SIZE).collect_vec();
+        index.shuffle(&mut thread_rng());
+
+        for i in index {
+            tx2[i].take().unwrap().send(()).unwrap();
+            for j in 0..ops[i].len() {
+                assert_eq!(
+                    (
+                        EPOCH2,
+                        LogStoreRowOp::Row {
+                            op: ops[i][j],
+                            row: rows[i][j].clone(),
+                        }
+                    ),
+                    stream.next_op().await.unwrap().unwrap()
+                );
+            }
+        }
+
+        assert_eq!(
+            (
+                EPOCH2,
+                LogStoreRowOp::Barrier {
+                    is_checkpoint: true,
+                }
+            ),
+            stream.next_op().await.unwrap().unwrap()
+        );
+
+        assert!(stream.next_op().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_log_store_stream_basic() {
+        let table = gen_test_log_store_table();
+
+        let serde = LogStoreRowSerde::new(&table, None);
+
+        let mut seq_id = 1;
+        let (stream, tx1, tx2) = gen_single_test_stream(serde.clone(), &mut seq_id, 0);
+        let (ops, rows) = gen_test_data(0);
+
+        const CHUNK_SIZE: usize = 3;
+
+        let stream = new_log_store_item_stream(vec![stream], serde, CHUNK_SIZE);
+
+        pin_mut!(stream);
+
+        assert!(poll_fn(|cx| Poll::Ready(stream.poll_next_unpin(cx)))
+            .await
+            .is_pending());
+
+        tx1.send(()).unwrap();
+
+        let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
+        assert_eq!(EPOCH1, epoch);
+        match item {
+            LogStoreReadItem::StreamChunk(chunk) => {
+                assert_eq!(chunk.cardinality(), CHUNK_SIZE);
+                for (i, (op, row)) in chunk.rows().enumerate() {
+                    assert_eq!(op, ops[i]);
+                    assert_eq!(row.to_owned_row(), rows[i]);
+                }
+            }
+            LogStoreReadItem::Barrier { .. } => unreachable!(),
+        }
+
+        let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
+        assert_eq!(EPOCH1, epoch);
+        match item {
+            LogStoreReadItem::StreamChunk(chunk) => {
+                assert_eq!(chunk.cardinality(), ops.len() - CHUNK_SIZE);
+                for (i, (op, row)) in chunk.rows().skip(CHUNK_SIZE).enumerate() {
+                    assert_eq!(op, ops[i + CHUNK_SIZE]);
+                    assert_eq!(row.to_owned_row(), rows[i + CHUNK_SIZE]);
+                }
+            }
+            LogStoreReadItem::Barrier { .. } => unreachable!(),
+        }
+
+        let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
+        assert_eq!(EPOCH1, epoch);
+        match item {
+            LogStoreReadItem::StreamChunk(_) => unreachable!(),
+            LogStoreReadItem::Barrier { is_checkpoint } => {
+                assert!(!is_checkpoint);
+            }
+        }
+
+        assert!(poll_fn(|cx| Poll::Ready(stream.poll_next_unpin(cx)))
+            .await
+            .is_pending());
+
+        tx2.send(()).unwrap();
+
+        let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
+        assert_eq!(EPOCH2, epoch);
+        match item {
+            LogStoreReadItem::StreamChunk(chunk) => {
+                assert_eq!(chunk.cardinality(), CHUNK_SIZE);
+                for (i, (op, row)) in chunk.rows().enumerate() {
+                    assert_eq!(op, ops[i]);
+                    assert_eq!(row.to_owned_row(), rows[i]);
+                }
+            }
+            LogStoreReadItem::Barrier { .. } => unreachable!(),
+        }
+
+        let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
+        assert_eq!(EPOCH2, epoch);
+        match item {
+            LogStoreReadItem::StreamChunk(chunk) => {
+                assert_eq!(chunk.cardinality(), ops.len() - CHUNK_SIZE);
+                for (i, (op, row)) in chunk.rows().skip(CHUNK_SIZE).enumerate() {
+                    assert_eq!(op, ops[i + CHUNK_SIZE]);
+                    assert_eq!(row.to_owned_row(), rows[i + CHUNK_SIZE]);
+                }
+            }
+            LogStoreReadItem::Barrier { .. } => unreachable!(),
+        }
+
+        let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
+        assert_eq!(EPOCH2, epoch);
+        match item {
+            LogStoreReadItem::StreamChunk(_) => unreachable!(),
+            LogStoreReadItem::Barrier { is_checkpoint } => {
+                assert!(is_checkpoint);
+            }
+        }
+
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_empty_stream() {
+        let table = gen_test_log_store_table();
+
+        let serde = LogStoreRowSerde::new(&table, None);
+
+        const CHUNK_SIZE: usize = 3;
+
+        let stream = new_log_store_item_stream(vec![empty(), empty()], serde, CHUNK_SIZE);
+
+        pin_mut!(stream);
+
+        assert!(stream.next().await.is_none());
     }
 }

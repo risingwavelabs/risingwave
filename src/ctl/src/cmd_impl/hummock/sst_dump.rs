@@ -24,9 +24,7 @@ use risingwave_common::types::ToText;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{
-    BasicSerde, EitherSerde, ValueRowDeserializer, ValueRowSerdeNew,
-};
+use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
@@ -39,6 +37,7 @@ use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, Sstable, SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
+use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 
 use crate::common::HummockServiceOpts;
 use crate::CtlContext;
@@ -369,21 +368,31 @@ fn print_table_column(
             .iter()
             .map(|idx| table_catalog.columns[*idx].column_desc.name.clone())
             .collect_vec();
-        let data_types = table_catalog
-            .value_indices
-            .iter()
-            .map(|idx| table_catalog.columns[*idx].data_type().clone())
-            .collect_vec();
-        let column_ids = table_catalog
-            .value_indices
-            .iter()
-            .map(|idx| table_catalog.columns[*idx].column_id())
-            .collect_vec();
-        let schema = Arc::from(data_types.into_boxed_slice());
+
         let row_deserializer: EitherSerde = if table_catalog.version().is_some() {
-            ColumnAwareSerde::new(&column_ids, schema).into()
+            ColumnAwareSerde::new(
+                table_catalog.value_indices.clone().into(),
+                Arc::from_iter(
+                    table_catalog
+                        .columns()
+                        .iter()
+                        .cloned()
+                        .map(|c| c.column_desc),
+                ),
+            )
+            .into()
         } else {
-            BasicSerde::new(&column_ids, schema).into()
+            BasicSerde::new(
+                table_catalog.value_indices.clone().into(),
+                Arc::from_iter(
+                    table_catalog
+                        .columns()
+                        .iter()
+                        .cloned()
+                        .map(|c| c.column_desc),
+                ),
+            )
+            .into()
         };
         let row = row_deserializer.deserialize(user_val)?;
         for (c, v) in column_desc.iter().zip_eq_fast(row.iter()) {

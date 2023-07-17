@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use paste::paste;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
@@ -28,6 +29,8 @@ use risingwave_common::catalog::{
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
+use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::UserInfo;
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::system_catalog::information_schema::*;
@@ -36,7 +39,9 @@ use crate::catalog::system_catalog::rw_catalog::*;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;
+use crate::user::user_privilege::available_prost_privilege;
 use crate::user::user_service::UserInfoReader;
+use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SystemCatalog {
@@ -81,7 +86,6 @@ impl SystemCatalog {
     }
 }
 
-#[expect(dead_code)]
 pub struct SysCatalogReaderImpl {
     // Read catalog info: database/schema/source/table.
     catalog_reader: CatalogReader,
@@ -110,6 +114,73 @@ impl SysCatalogReaderImpl {
             auth_context,
         }
     }
+}
+
+/// get acl items of `object` in string, ignore public.
+fn get_acl_items(
+    object: &Object,
+    users: &Vec<UserInfo>,
+    username_map: &HashMap<UserId, String>,
+) -> String {
+    let mut res = String::from("{");
+    let mut empty_flag = true;
+    let super_privilege = available_prost_privilege(object.clone());
+    for user in users {
+        let privileges = if user.get_is_super() {
+            vec![&super_privilege]
+        } else {
+            user.get_grant_privileges()
+                .iter()
+                .filter(|&privilege| privilege.object.as_ref().unwrap() == object)
+                .collect_vec()
+        };
+        if privileges.is_empty() {
+            continue;
+        };
+        let mut grantor_map = HashMap::new();
+        privileges.iter().for_each(|&privilege| {
+            privilege.action_with_opts.iter().for_each(|ao| {
+                grantor_map.entry(ao.granted_by).or_insert_with(Vec::new);
+                grantor_map
+                    .get_mut(&ao.granted_by)
+                    .unwrap()
+                    .push((ao.action, ao.with_grant_option));
+            })
+        });
+        for key in grantor_map.keys() {
+            if empty_flag {
+                empty_flag = false;
+            } else {
+                res.push(',');
+            }
+            res.push_str(user.get_name());
+            res.push('=');
+            grantor_map
+                .get(key)
+                .unwrap()
+                .iter()
+                .for_each(|(action, option)| {
+                    let str = match Action::from_i32(*action).unwrap() {
+                        Action::Select => "r",
+                        Action::Insert => "a",
+                        Action::Update => "w",
+                        Action::Delete => "d",
+                        Action::Create => "C",
+                        Action::Connect => "c",
+                        _ => unreachable!(),
+                    };
+                    res.push_str(str);
+                    if *option {
+                        res.push('*');
+                    }
+                });
+            res.push('/');
+            // should be able to query grantor's name
+            res.push_str(username_map.get(key).as_ref().unwrap());
+        }
+    }
+    res.push('}');
+    res
 }
 
 // TODO: support struct column and type name when necessary.
@@ -207,9 +278,29 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_INDEXES, vec![0, 2], read_indexes_info },
     { PG_CATALOG, PG_INHERITS, vec![0], read_inherits_info },
     { PG_CATALOG, PG_CONSTRAINT, vec![0], read_constraint_info },
+    { PG_CATALOG, PG_TABLES, vec![], read_pg_tables_info },
+    { PG_CATALOG, PG_PROC, vec![0], read_pg_proc_info },
+    { PG_CATALOG, PG_SHADOW, vec![1], read_user_info_shadow },
     { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
+    { RW_CATALOG, RW_DATABASES, vec![0], read_rw_database_info },
+    { RW_CATALOG, RW_SCHEMAS, vec![0], read_rw_schema_info },
+    { RW_CATALOG, RW_USERS, vec![0], read_rw_user_info },
+    { RW_CATALOG, RW_TABLES, vec![0], read_rw_table_info },
+    { RW_CATALOG, RW_MATERIALIZED_VIEWS, vec![0], read_rw_mview_info },
+    { RW_CATALOG, RW_INDEXES, vec![0], read_rw_indexes_info },
+    { RW_CATALOG, RW_SOURCES, vec![0], read_rw_sources_info },
+    { RW_CATALOG, RW_SINKS, vec![0], read_rw_sinks_info },
+    { RW_CATALOG, RW_CONNECTIONS, vec![0], read_rw_connections_info },
+    { RW_CATALOG, RW_FUNCTIONS, vec![0], read_rw_functions_info },
+    { RW_CATALOG, RW_VIEWS, vec![0], read_rw_views_info },
+    { RW_CATALOG, RW_WORKER_NODES, vec![0], read_rw_worker_nodes_info },
+    { RW_CATALOG, RW_PARALLEL_UNITS, vec![0], read_rw_parallel_units_info },
+    { RW_CATALOG, RW_TABLE_FRAGMENTS, vec![0], read_rw_table_fragments_info await },
+    { RW_CATALOG, RW_FRAGMENTS, vec![0], read_rw_fragment_distributions_info await },
+    { RW_CATALOG, RW_ACTORS, vec![0], read_rw_actor_states_info await },
     { RW_CATALOG, RW_META_SNAPSHOT, vec![], read_meta_snapshot await },
     { RW_CATALOG, RW_DDL_PROGRESS, vec![], read_ddl_progress await },
+    { RW_CATALOG, RW_TABLE_STATS, vec![], read_table_stats },
     { RW_CATALOG, RW_RELATION_INFO, vec![], read_relation_info await },
 }

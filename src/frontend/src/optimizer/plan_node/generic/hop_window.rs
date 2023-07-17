@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::num::NonZeroUsize;
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, Interval, IntervalDisplay};
+use risingwave_common::types::{DataType, Interval};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::ExprError;
 
 use super::super::utils::IndicesDisplay;
-use super::{GenericPlanNode, GenericPlanRef};
+use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
@@ -51,17 +51,12 @@ pub struct HopWindow<PlanRef> {
 impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
     fn schema(&self) -> Schema {
         let output_type = DataType::window_of(&self.time_col.data_type).unwrap();
-        let original_schema: Schema = self
-            .input
-            .schema()
-            .clone()
-            .into_fields()
-            .into_iter()
-            .chain([
-                Field::with_name(output_type.clone(), "window_start"),
-                Field::with_name(output_type, "window_end"),
-            ])
-            .collect();
+        let mut original_schema = self.input.schema().clone();
+        original_schema.fields.reserve_exact(2);
+        let window_start = Field::with_name(output_type.clone(), "window_start");
+        let window_end = Field::with_name(output_type, "window_end");
+        original_schema.fields.push(window_start);
+        original_schema.fields.push(window_end);
         self.output_indices
             .iter()
             .map(|&idx| original_schema[idx].clone())
@@ -284,30 +279,18 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
         Ok((window_start_exprs, window_end_exprs))
     }
 
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+    pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
+        let mut out = Vec::with_capacity(5);
         let output_type = DataType::window_of(&self.time_col.data_type).unwrap();
-        builder.field(
+        out.push((
             "time_col",
-            &InputRefDisplay {
+            Pretty::display(&InputRefDisplay {
                 input_ref: &self.time_col,
                 input_schema: self.input.schema(),
-            },
-        );
-
-        builder.field(
-            "slide",
-            &IntervalDisplay {
-                core: &self.window_slide,
-            },
-        );
-
-        builder.field(
-            "size",
-            &IntervalDisplay {
-                core: &self.window_size,
-            },
-        );
-
+            }),
+        ));
+        out.push(("slide", Pretty::display(&self.window_slide)));
+        out.push(("size", Pretty::display(&self.window_size)));
         if self
             .output_indices
             .iter()
@@ -315,7 +298,7 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
             // Behavior is the same as `LogicalHopWindow::internal_column_num`
             .eq(0..(self.input.schema().len() + 2))
         {
-            builder.field("output", &format_args!("all"));
+            out.push(("output", Pretty::from("all")));
         } else {
             let original_schema: Schema = self
                 .input
@@ -328,19 +311,14 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
                     Field::with_name(output_type, "window_end"),
                 ])
                 .collect();
-            builder.field(
-                "output",
-                &IndicesDisplay {
-                    indices: &self.output_indices,
-                    input_schema: &original_schema,
-                },
-            );
+            let id = IndicesDisplay {
+                indices: &self.output_indices,
+                schema: &original_schema,
+            };
+            out.push(("output", id.distill()));
         }
-    }
-
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        self.fmt_fields_with_builder(&mut builder);
-        builder.finish()
+        out
     }
 }
+
+impl_distill_unit_from_fields!(HopWindow, GenericPlanRef);

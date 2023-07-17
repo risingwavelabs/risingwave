@@ -17,6 +17,7 @@ use std::convert::TryFrom;
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
 use arrow_schema::{Field, Schema, SchemaRef};
+use await_tree::InstrumentAwait;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
@@ -35,6 +36,7 @@ pub struct UdfExpression {
     arg_schema: SchemaRef,
     client: Arc<ArrowFlightUdfClient>,
     identifier: String,
+    span: await_tree::Span,
 }
 
 #[cfg(not(madsim))]
@@ -49,7 +51,7 @@ impl Expression for UdfExpression {
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
             let array = child.eval_checked(input).await?;
-            columns.push(array.as_ref().into());
+            columns.push(array.as_ref().try_into()?);
         }
         self.eval_inner(columns, vis).await
     }
@@ -62,7 +64,11 @@ impl Expression for UdfExpression {
         }
         let arg_row = OwnedRow::new(columns);
         let chunk = DataChunk::from_rows(std::slice::from_ref(&arg_row), &self.arg_types);
-        let arg_columns = chunk.columns().iter().map(|c| c.as_ref().into()).collect();
+        let arg_columns = chunk
+            .columns()
+            .iter()
+            .map::<Result<_>, _>(|c| Ok(c.as_ref().try_into()?))
+            .try_collect()?;
         let output_array = self
             .eval_inner(arg_columns, chunk.vis().to_bitmap())
             .await?;
@@ -80,7 +86,11 @@ impl UdfExpression {
         let input =
             arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
                 .expect("failed to build record batch");
-        let output = self.client.call(&self.identifier, input).await?;
+        let output = self
+            .client
+            .call(&self.identifier, input)
+            .instrument_await(self.span.clone())
+            .await?;
         if output.num_rows() != vis.len() {
             bail!(
                 "UDF returned {} rows, but expected {}",
@@ -108,8 +118,16 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
         let arg_schema = Arc::new(Schema::new(
             udf.arg_types
                 .iter()
-                .map(|t| Field::new("", DataType::from(t).into(), true))
-                .collect(),
+                .map::<Result<_>, _>(|t| {
+                    Ok(Field::new(
+                        "",
+                        DataType::from(t)
+                            .try_into()
+                            .map_err(risingwave_udf::Error::Unsupported)?,
+                        true,
+                    ))
+                })
+                .try_collect()?,
         ));
         // connect to UDF service
         let client = get_or_create_client(&udf.link)?;
@@ -121,6 +139,7 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
             arg_schema,
             client,
             identifier: udf.identifier.clone(),
+            span: format!("expr_udf_call ({})", udf.identifier).into(),
         })
     }
 }

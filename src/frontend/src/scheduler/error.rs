@@ -18,6 +18,7 @@ use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
 use tonic::{Code, Status};
 
+use crate::catalog::FragmentId;
 use crate::scheduler::plan_fragmenter::QueryId;
 
 #[derive(Error, Debug)]
@@ -31,6 +32,12 @@ pub enum SchedulerError {
     #[error("Empty workers found")]
     EmptyWorkerNodes,
 
+    #[error("Serving vnode mapping not found for fragment {0}")]
+    ServingVnodeMappingNotFound(FragmentId),
+
+    #[error("Streaming vnode mapping not found for fragment {0}")]
+    StreamingVnodeMappingNotFound(FragmentId),
+
     #[error("{0}")]
     TaskExecutionError(String),
 
@@ -38,8 +45,8 @@ pub enum SchedulerError {
     TaskRunningOutOfMemory,
 
     /// Used when receive cancel request (ctrl-c) from user.
-    #[error("Canceled by user")]
-    QueryCancelError,
+    #[error("Cancelled by user")]
+    QueryCancelled,
 
     #[error("Reject query: the {0} query number reaches the limit: {1}")]
     QueryReachLimit(QueryMode, u64),

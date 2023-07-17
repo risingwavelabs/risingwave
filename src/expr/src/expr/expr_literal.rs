@@ -25,7 +25,7 @@ use crate::expr::Expression;
 use crate::{ExprError, Result};
 
 /// A literal expression.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LiteralExpression {
     return_type: DataType,
     literal: Datum,

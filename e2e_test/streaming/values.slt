@@ -35,3 +35,21 @@ drop materialized view mv;
 
 statement ok
 drop table t;
+
+statement ok
+create materialized view mv as select * from abs(-1);
+
+# TODO: support this
+statement error not yet implemented: LogicalTableFunction::logical_rewrite_for_stream
+create materialized view mv2 as select * from range(1,2);
+
+statement ok
+flush;
+
+query IR
+select * from mv;
+----
+1
+
+statement ok
+drop materialized view mv;

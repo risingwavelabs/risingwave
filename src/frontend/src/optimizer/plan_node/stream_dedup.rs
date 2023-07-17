@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::DedupNode;
 
 use super::generic::{self, GenericPlanNode, GenericPlanRef};
-use super::utils::TableCatalogBuilder;
+use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::PlanRef;
@@ -71,12 +69,8 @@ impl StreamDedup {
     }
 }
 
-impl fmt::Display for StreamDedup {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        assert!(self.base.append_only());
-        self.logical.fmt_with_name(f, "StreamAppendOnlyDedup")
-    }
-}
+// assert!(self.base.append_only());
+impl_distill_by_unit!(StreamDedup, logical, "StreamAppendOnlyDedup");
 
 impl PlanTreeNodeUnary for StreamDedup {
     fn input(&self) -> PlanRef {

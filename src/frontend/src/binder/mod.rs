@@ -37,7 +37,7 @@ mod struct_field;
 mod update;
 mod values;
 
-pub use bind_context::{BindContext, LateralBindContext};
+pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use delete::BoundDelete;
 pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
@@ -45,7 +45,8 @@ use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundWindowTableFunction, Relation, ResolveQualifiedNameError, ResolveQualifiedNameErrorKind,
+    WindowTableFunctionKind,
 };
 use risingwave_common::error::ErrorCode;
 pub use select::{BoundDistinct, BoundSelect};
@@ -55,7 +56,8 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::{TableId, ViewId};
+use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::{CatalogResult, TableId, ViewId};
 use crate::session::{AuthContext, SessionImpl};
 
 pub type ShareId = usize;
@@ -98,6 +100,8 @@ pub struct Binder {
     /// The `ShareId` is used to identify the share relation which could be a CTE, a source, a view
     /// and so on.
     next_share_id: ShareId,
+
+    session_config: HashMap<String, String>,
 
     search_path: SearchPath,
     /// The type of binding statement.
@@ -207,6 +211,12 @@ impl Binder {
             next_subquery_id: 0,
             next_values_id: 0,
             next_share_id: 0,
+            session_config: session
+                .config()
+                .get_all()
+                .into_iter()
+                .map(|var| (var.name, var.setting))
+                .collect(),
             search_path: session.config().get_search_path(),
             bind_for,
             shared_views: HashMap::new(),
@@ -341,6 +351,18 @@ impl Binder {
         let id = self.next_share_id;
         self.next_share_id += 1;
         id
+    }
+
+    fn first_valid_schema(&self) -> CatalogResult<&SchemaCatalog> {
+        self.catalog.first_valid_schema(
+            &self.db_name,
+            &self.search_path,
+            &self.auth_context.user_name,
+        )
+    }
+
+    pub fn set_clause(&mut self, clause: Option<Clause>) {
+        self.context.clause = clause;
     }
 }
 

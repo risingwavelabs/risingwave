@@ -31,10 +31,8 @@ fn string_agg(
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::*;
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
-    use crate::agg::{AggArgs, AggCall, AggKind};
+    use crate::agg::AggCall;
     use crate::Result;
 
     #[tokio::test]
@@ -46,14 +44,9 @@ mod tests {
              ccc ,
              ddd ,",
         );
-        let mut agg = crate::agg::build(AggCall {
-            kind: AggKind::StringAgg,
-            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
-            return_type: DataType::Varchar,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        })?;
+        let mut agg = crate::agg::build(AggCall::from_pretty(
+            "(string_agg:varchar $0:varchar $1:varchar)",
+        ))?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -74,14 +67,9 @@ mod tests {
              ccc _
              ddd .",
         );
-        let mut agg = crate::agg::build(AggCall {
-            kind: AggKind::StringAgg,
-            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
-            return_type: DataType::Varchar,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        })?;
+        let mut agg = crate::agg::build(AggCall::from_pretty(
+            "(string_agg:varchar $0:varchar $1:varchar)",
+        ))?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
@@ -102,18 +90,9 @@ mod tests {
              ccc _ 0 8
              ddd _ 1 3",
         );
-        let mut agg = crate::agg::build(AggCall {
-            kind: AggKind::StringAgg,
-            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
-            return_type: DataType::Varchar,
-            column_orders: vec![
-                ColumnOrder::new(2, OrderType::ascending()),
-                ColumnOrder::new(3, OrderType::descending()),
-                ColumnOrder::new(0, OrderType::descending()),
-            ],
-            filter: None,
-            distinct: false,
-        })?;
+        let mut agg = crate::agg::build(AggCall::from_pretty(
+            "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $3:desc $0:desc)",
+        ))?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;

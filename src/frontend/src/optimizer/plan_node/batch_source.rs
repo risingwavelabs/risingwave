@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::rc::Rc;
 
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
+use super::utils::{childless_record, column_names_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
@@ -45,11 +46,7 @@ impl BatchSource {
     }
 
     pub fn column_names(&self) -> Vec<&str> {
-        self.schema()
-            .fields()
-            .iter()
-            .map(|f| f.name.as_str())
-            .collect()
+        self.schema().names_str()
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
@@ -72,14 +69,15 @@ impl BatchSource {
 
 impl_plan_tree_node_for_leaf! { BatchSource }
 
-impl fmt::Display for BatchSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("BatchSource");
-        builder
-            .field("source", &self.source_catalog().unwrap().name)
-            .field("columns", &self.column_names())
-            .field("filter", &self.kafka_timestamp_range_value())
-            .finish()
+impl Distill for BatchSource {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let src = Pretty::from(self.source_catalog().unwrap().name.clone());
+        let fields = vec![
+            ("source", src),
+            ("columns", column_names_pretty(self.schema())),
+            ("filter", Pretty::debug(&self.kafka_timestamp_range_value())),
+        ];
+        childless_record("BatchSource", fields)
     }
 }
 

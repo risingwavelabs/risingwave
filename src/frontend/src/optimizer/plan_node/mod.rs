@@ -28,7 +28,7 @@
 //! - all field should be valued in construction, so the properties' derivation should be finished
 //!   in the `new()` function.
 
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -39,6 +39,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
+use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
@@ -49,6 +50,7 @@ use smallvec::SmallVec;
 use self::batch::BatchPlanRef;
 use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
+use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
 pub trait PlanNodeMeta {
@@ -66,8 +68,8 @@ pub trait PlanNode:
     + DynClone
     + DynEq
     + DynHash
+    + Distill
     + Debug
-    + Display
     + Downcast
     + ColPrunable
     + ExprRewritable
@@ -123,12 +125,6 @@ impl Deref for PlanRef {
 impl<T: PlanNode> From<T> for PlanRef {
     fn from(value: T) -> Self {
         PlanRef(Rc::new(value))
-    }
-}
-
-impl Display for PlanRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.0, f)
     }
 }
 
@@ -430,63 +426,40 @@ pub fn reorganize_elements_id(plan: PlanRef) -> PlanRef {
 
 pub trait Explain {
     /// Write explain the whole plan tree.
-    fn explain(
-        &self,
-        is_last: &mut Vec<bool>,
-        level: usize,
-        f: &mut impl std::fmt::Write,
-    ) -> std::fmt::Result;
+    fn explain<'a>(&self) -> Pretty<'a>;
 
     /// Explain the plan node and return a string.
-    fn explain_to_string(&self) -> Result<String>;
+    fn explain_to_string(&self) -> String;
 }
 
 impl Explain for PlanRef {
     /// Write explain the whole plan tree.
-    fn explain(
-        &self,
-        is_last: &mut Vec<bool>,
-        level: usize,
-        f: &mut impl std::fmt::Write,
-    ) -> std::fmt::Result {
-        if level > 0 {
-            let mut last_iter = is_last.iter().peekable();
-            while let Some(last) = last_iter.next() {
-                // We are at the current level
-                if last_iter.peek().is_none() {
-                    if *last {
-                        writeln!(f, "└─{}", self)?;
-                    } else {
-                        writeln!(f, "├─{}", self)?;
-                    }
-                } else if *last {
-                    write!(f, "  ")?;
-                } else {
-                    write!(f, "| ")?;
-                }
-            }
-        } else {
-            writeln!(f, "{}", self)?;
-        }
+    fn explain<'a>(&self) -> Pretty<'a> {
+        let mut node = self.distill();
         let inputs = self.inputs();
-        let mut inputs_iter = inputs.iter().peekable();
-        while let Some(input) = inputs_iter.next() {
-            let last = inputs_iter.peek().is_none();
-            is_last.push(last);
-            input.explain(is_last, level + 1, f)?;
-            is_last.pop();
+        for input in inputs.iter().peekable() {
+            node.children.push(input.explain());
         }
-        Ok(())
+        Pretty::Record(node)
     }
 
     /// Explain the plan node and return a string.
-    fn explain_to_string(&self) -> Result<String> {
+    fn explain_to_string(&self) -> String {
         let plan = reorganize_elements_id(self.clone());
 
-        let mut output = String::new();
-        plan.explain(&mut vec![], 0, &mut output)
-            .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
-        Ok(output)
+        let mut output = String::with_capacity(2048);
+        let mut config = pretty_config();
+        config.unicode(&mut output, &plan.explain());
+        output
+    }
+}
+
+pub(crate) fn pretty_config() -> PrettyConfig {
+    PrettyConfig {
+        indent: 3,
+        need_boundaries: false,
+        width: 2048,
+        reduced_spaces: true,
     }
 }
 
@@ -552,7 +525,7 @@ impl dyn PlanNode {
         // TODO: support pk_indices and operator_id
         StreamPlanPb {
             input,
-            identity: format!("{}", self),
+            identity: self.explain_myself_to_string(),
             node_body: node,
             operator_id: self.id().0 as _,
             stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
@@ -578,12 +551,16 @@ impl dyn PlanNode {
         BatchPlanPb {
             children,
             identity: if identity {
-                format!("{:?}", self)
+                self.explain_myself_to_string()
             } else {
                 "".into()
             },
             node_body,
         }
+    }
+
+    pub fn explain_myself_to_string(&self) -> String {
+        self.distill_to_string()
     }
 }
 
@@ -628,6 +605,7 @@ mod batch_insert;
 mod batch_limit;
 mod batch_lookup_join;
 mod batch_nested_loop_join;
+mod batch_over_window;
 mod batch_project;
 mod batch_project_set;
 mod batch_seq_scan;
@@ -679,6 +657,7 @@ mod stream_hash_join;
 mod stream_hop_window;
 mod stream_materialize;
 mod stream_now;
+mod stream_over_window;
 mod stream_project;
 mod stream_project_set;
 mod stream_row_id_gen;
@@ -710,6 +689,7 @@ pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
+pub use batch_over_window::BatchOverWindow;
 pub use batch_project::BatchProject;
 pub use batch_project_set::BatchProjectSet;
 pub use batch_seq_scan::BatchSeqScan;
@@ -761,6 +741,7 @@ pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_now::StreamNow;
+pub use stream_over_window::StreamOverWindow;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
@@ -848,6 +829,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Union }
             , { Batch, GroupTopN }
             , { Batch, Source }
+            , { Batch, OverWindow }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -877,6 +859,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
             , { Stream, Sort }
+            , { Stream, OverWindow }
         }
     };
 }
@@ -944,6 +927,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Union }
             , { Batch, GroupTopN }
             , { Batch, Source }
+            , { Batch, OverWindow }
         }
     };
 }
@@ -982,6 +966,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
             , { Stream, Sort }
+            , { Stream, OverWindow }
         }
     };
 }

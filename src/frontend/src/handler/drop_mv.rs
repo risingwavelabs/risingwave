@@ -43,13 +43,12 @@ pub async fn handle_drop_mv(
                 Ok((t, s)) => (t, s),
                 Err(e) => {
                     return if if_exists {
-                        Ok(RwPgResponse::empty_result_with_notice(
-                            StatementType::DROP_MATERIALIZED_VIEW,
-                            format!(
+                        Ok(RwPgResponse::builder(StatementType::DROP_MATERIALIZED_VIEW)
+                            .notice(format!(
                                 "materialized view \"{}\" does not exist, skipping",
                                 table_name
-                            ),
-                        ))
+                            ))
+                            .into())
                     } else {
                         match e {
                             CatalogError::NotFound(kind, name) if kind == "table" => {
@@ -71,7 +70,7 @@ pub async fn handle_drop_mv(
         table.id()
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_materialized_view(table_id).await?;
 
     Ok(PgResponse::empty_result(

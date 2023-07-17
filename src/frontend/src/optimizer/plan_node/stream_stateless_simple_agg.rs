@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
+use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -45,7 +44,7 @@ impl StreamStatelessSimpleAgg {
 
         let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
         // Watermark column(s) must be in group key.
-        for (idx, input_idx) in logical.group_key.ones().enumerate() {
+        for (idx, input_idx) in logical.group_key.indices().enumerate() {
             if input.watermark_columns().contains(input_idx) {
                 watermark_columns.insert(idx);
             }
@@ -65,12 +64,11 @@ impl StreamStatelessSimpleAgg {
         &self.logical.agg_calls
     }
 }
-
-impl fmt::Display for StreamStatelessSimpleAgg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamStatelessSimpleAgg")
-    }
-}
+impl_distill_by_unit!(
+    StreamStatelessSimpleAgg,
+    logical,
+    "StreamStatelessSimpleAgg"
+);
 
 impl PlanTreeNodeUnary for StreamStatelessSimpleAgg {
     fn input(&self) -> PlanRef {

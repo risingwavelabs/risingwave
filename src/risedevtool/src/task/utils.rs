@@ -17,7 +17,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 
-use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig};
+use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig, TempoConfig};
 
 #[allow(dead_code)]
 pub(crate) const DEFAULT_QUERY_LOG_PATH: &str = ".risingwave/log/";
@@ -39,6 +39,27 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
             );
         }
     };
+
+    Ok(())
+}
+
+/// Add the tempo endpoint to the environment variables.
+pub fn add_tempo_endpoint(provide_tempo: &[TempoConfig], cmd: &mut Command) -> Result<()> {
+    match provide_tempo {
+        [] => {}
+        [tempo] => {
+            cmd.env(
+                "RW_TRACING_ENDPOINT",
+                format!("http://{}:{}", tempo.otlp_address, tempo.otlp_port),
+            );
+        }
+        _ => {
+            return Err(anyhow!(
+                "{} Tempo instance found in config, but only 1 is needed",
+                provide_tempo.len()
+            ))
+        }
+    }
 
     Ok(())
 }
@@ -91,13 +112,8 @@ pub fn add_hummock_backend(
             (true, true)
         }
         ([], [aws_s3], []) => {
-            // if s3-compatible is true, using some s3 compatible object store.
-            match aws_s3.s3_compatible{
-                true => cmd.arg("--state-store")
-                .arg(format!("hummock+s3-compatible://{}", aws_s3.bucket)),
-                false => cmd.arg("--state-store")
-                .arg(format!("hummock+s3://{}", aws_s3.bucket)),
-            };
+            cmd.arg("--state-store")
+                .arg(format!("hummock+s3://{}", aws_s3.bucket));
             (true, true)
         }
         ([], [], [opendal]) => {

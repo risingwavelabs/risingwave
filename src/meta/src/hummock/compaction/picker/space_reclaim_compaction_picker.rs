@@ -14,9 +14,8 @@
 
 use std::collections::HashSet;
 
-use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{InputLevel, KeyRange, SstableInfo};
+use risingwave_pb::hummock::{InputLevel, SstableInfo};
 
 use super::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -35,35 +34,7 @@ pub struct SpaceReclaimCompactionPicker {
 // designed to record the state of each round of scanning
 #[derive(Default)]
 pub struct SpaceReclaimPickerState {
-    // Because of the right_exclusive, we use KeyRangeCommon to determine if the end_bounds
-    // overlap instead of directly comparing Vec<u8>. We don't need to use the start_bound in the
-    // filter, set it to -inf
-
-    // record the end_bound that has been scanned
-    pub last_select_end_bound: KeyRange,
-
-    // record the end_bound in the current round of scanning tasks
-    pub end_bound_in_round: KeyRange,
-}
-
-impl SpaceReclaimPickerState {
-    pub fn valid(&self) -> bool {
-        !self.end_bound_in_round.right.is_empty()
-    }
-
-    pub fn init(&mut self, key_range: KeyRange) {
-        self.last_select_end_bound = KeyRange {
-            left: vec![],
-            right: key_range.left.clone(),
-            right_exclusive: true,
-        };
-        self.end_bound_in_round = key_range;
-    }
-
-    pub fn clear(&mut self) {
-        self.end_bound_in_round = KeyRange::default();
-        self.last_select_end_bound = KeyRange::default();
-    }
+    pub last_level: usize,
 }
 
 impl SpaceReclaimCompactionPicker {
@@ -74,12 +45,12 @@ impl SpaceReclaimCompactionPicker {
         }
     }
 
-    fn filter(&self, sst: &SstableInfo) -> bool {
-        let table_id_in_sst = sst.table_ids.iter().cloned().collect::<HashSet<u32>>();
+    fn exist_table_count(&self, sst: &SstableInfo) -> usize {
         // it means all the table exist , so we not need to pick this sst
-        table_id_in_sst
+        sst.table_ids
             .iter()
-            .all(|id| self.all_table_ids.contains(id))
+            .filter(|id| self.all_table_ids.contains(id))
+            .count()
     }
 }
 
@@ -91,96 +62,99 @@ impl SpaceReclaimCompactionPicker {
         state: &mut SpaceReclaimPickerState,
     ) -> Option<CompactionInput> {
         assert!(!levels.levels.is_empty());
-        let reclaimed_level = levels.levels.last().unwrap();
         let mut select_input_ssts = vec![];
-        let level_handler = &level_handlers[reclaimed_level.level_idx as usize];
-
-        if reclaimed_level.table_infos.is_empty() {
-            // no file to be picked
-            state.clear();
-            return None;
-        }
-
-        if state.valid()
-            && state
-                .last_select_end_bound
-                .compare_right_with(&state.end_bound_in_round.right)
-                == std::cmp::Ordering::Greater
-        {
-            // in round but end_key overflow
-            // turn to next_round
-            state.clear();
-            return None;
-        }
-
-        if !state.valid() {
-            // new round init key_range bound with table_infos
-            let first_sst = reclaimed_level.table_infos.first().unwrap();
-            let last_sst = reclaimed_level.table_infos.last().unwrap();
-
-            let key_range_this_round = KeyRange {
-                left: first_sst.key_range.as_ref().unwrap().left.clone(),
-                right: last_sst.key_range.as_ref().unwrap().right.clone(),
-                right_exclusive: last_sst.key_range.as_ref().unwrap().right_exclusive,
-            };
-            state.init(key_range_this_round);
-        }
-
-        let mut select_file_size = 0;
-        for sst in &reclaimed_level.table_infos {
-            let unmatched_sst = sst
-                .key_range
-                .as_ref()
-                .unwrap()
-                .sstable_overlap(&state.last_select_end_bound);
-            if unmatched_sst || (level_handler.is_pending_compact(&sst.sst_id) || self.filter(sst))
-            {
+        if let Some(l0) = levels.l0.as_ref() && state.last_level == 0 {
+            // only pick trivial reclaim sstables because this kind of task could be optimized and do not need send to compactor.
+            for level in &l0.sub_levels {
+                for sst in &level.table_infos {
+                    let exist_count = self.exist_table_count(sst);
+                    if exist_count == sst.table_ids.len() ||  level_handlers[0].is_pending_compact( &sst.sst_id) {
+                        if !select_input_ssts.is_empty() {
+                            break;
+                        }
+                    } else if exist_count == 0 {
+                        select_input_ssts.push(sst.clone());
+                    } else if !select_input_ssts.is_empty() {
+                        break;
+                    }
+                }
                 if !select_input_ssts.is_empty() {
-                    // Our goal is to pick as many complete layers of data as possible and keep the
-                    // picked files contiguous to avoid overlapping key_ranges, so the strategy is
-                    // to pick as many contiguous files as possible (at least one)
-                    break;
+                    return Some(CompactionInput {
+                        input_levels: vec![
+                            InputLevel {
+                                level_idx: level.level_idx,
+                                level_type: level.level_type,
+                                table_infos: select_input_ssts,
+                            },
+                            InputLevel {
+                                level_idx: 0,
+                                level_type: level.level_type,
+                                table_infos: vec![],
+                            },
+                        ],
+                        target_level: level.level_idx as usize,
+                        target_sub_level_id: level.sub_level_id,
+                    });
+                }
+            }
+            state.last_level = 1;
+        }
+        while state.last_level <= levels.levels.len() {
+            let mut is_trivial_task = true;
+            let mut select_file_size = 0;
+            for sst in &levels.levels[state.last_level - 1].table_infos {
+                let exist_count = self.exist_table_count(sst);
+                let need_reclaim = exist_count < sst.table_ids.len();
+                let is_trivial_sst = exist_count == 0;
+                if !need_reclaim || level_handlers[state.last_level].is_pending_compact(&sst.sst_id)
+                {
+                    if !select_input_ssts.is_empty() {
+                        // Our goal is to pick as many complete layers of data as possible and keep
+                        // the picked files contiguous to avoid overlapping
+                        // key_ranges, so the strategy is to pick as many
+                        // contiguous files as possible (at least one)
+                        break;
+                    }
+                    continue;
                 }
 
-                continue;
+                if !is_trivial_sst {
+                    if !select_input_ssts.is_empty() && is_trivial_task {
+                        break;
+                    }
+                    is_trivial_task = false;
+                }
+
+                select_input_ssts.push(sst.clone());
+                select_file_size += sst.file_size;
+                if select_file_size > self.max_space_reclaim_bytes && !is_trivial_task {
+                    break;
+                }
             }
 
-            select_input_ssts.push(sst.clone());
-            select_file_size += sst.file_size;
-            if select_file_size > self.max_space_reclaim_bytes {
-                break;
+            // turn to next_round
+            if !select_input_ssts.is_empty() {
+                return Some(CompactionInput {
+                    input_levels: vec![
+                        InputLevel {
+                            level_idx: state.last_level as u32,
+                            level_type: levels.levels[state.last_level - 1].level_type,
+                            table_infos: select_input_ssts,
+                        },
+                        InputLevel {
+                            level_idx: state.last_level as u32,
+                            level_type: levels.levels[state.last_level - 1].level_type,
+                            table_infos: vec![],
+                        },
+                    ],
+                    target_level: state.last_level,
+                    target_sub_level_id: 0,
+                });
             }
+            state.last_level += 1;
         }
-
-        // turn to next_round
-        if select_input_ssts.is_empty() {
-            state.clear();
-            return None;
-        }
-
-        let select_last_sst = select_input_ssts.last().unwrap();
-        state.last_select_end_bound.full_key_extend(&KeyRange {
-            left: vec![],
-            right: select_last_sst.key_range.as_ref().unwrap().right.clone(),
-            right_exclusive: select_last_sst.key_range.as_ref().unwrap().right_exclusive,
-        });
-
-        Some(CompactionInput {
-            input_levels: vec![
-                InputLevel {
-                    level_idx: reclaimed_level.level_idx,
-                    level_type: reclaimed_level.level_type,
-                    table_infos: select_input_ssts,
-                },
-                InputLevel {
-                    level_idx: reclaimed_level.level_idx,
-                    level_type: reclaimed_level.level_type,
-                    table_infos: vec![],
-                },
-            ],
-            target_level: reclaimed_level.level_idx as usize,
-            target_sub_level_id: 0,
-        })
+        state.last_level = 0;
+        None
     }
 }
 
@@ -277,6 +251,20 @@ mod test {
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 3);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 2);
+            levels_handler[4].add_pending_task(0, 4, &levels.levels[3].table_infos[5..6]);
+            let task = selector
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                    HashMap::default(),
+                )
+                .unwrap();
+            assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 4);
             assert_eq!(task.input.input_levels[0].table_infos.len(), 5);
 
@@ -304,14 +292,7 @@ mod test {
         }
 
         {
-            // test state
-            for level_handler in &mut levels_handler {
-                for pending_task_id in &level_handler.pending_tasks_ids() {
-                    level_handler.remove_task(*pending_task_id);
-                }
-            }
-
-            // pick space reclaim
+            // test pick next range
             let task = selector
                 .pick_compaction(
                     1,
@@ -325,46 +306,13 @@ mod test {
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 4);
-
-            // test select index, picker will select file from state
-            assert_eq!(task.input.input_levels[0].table_infos.len(), 4,);
-
-            let mut start_id = 7;
-            for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.get_sst_id());
-                start_id += 1;
-            }
-
-            assert_eq!(task.input.input_levels[1].level_idx, 4);
-            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 4);
             assert_eq!(task.input.target_level, 4);
             assert!(matches!(
                 task.compaction_task_type,
                 compact_task::TaskType::SpaceReclaim
             ));
-
-            // test pick key_range right exclusive
-            let task = selector
-                .pick_compaction(
-                    1,
-                    &group_config,
-                    &levels,
-                    &mut levels_handler,
-                    &mut local_stats,
-                    HashMap::default(),
-                )
-                .unwrap();
-            assert_compaction_task(&task, &levels_handler);
-            assert_eq!(task.input.input_levels.len(), 2);
-            assert_eq!(task.input.input_levels[0].level_idx, 4);
-            assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
-            assert_eq!(task.input.input_levels[1].level_idx, 4);
-            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
-            assert_eq!(task.input.target_level, 4);
-            assert!(matches!(
-                task.compaction_task_type,
-                compact_task::TaskType::SpaceReclaim
-            ));
+            let mut start_id = 8;
             for sst in &task.input.input_levels[0].table_infos {
                 assert_eq!(start_id, sst.get_sst_id());
                 start_id += 1;
@@ -391,7 +339,7 @@ mod test {
                 }
             }
 
-            levels.member_table_ids = vec![2, 3, 4, 5, 6, 7, 8, 9, 10];
+            levels.member_table_ids = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
             // pick space reclaim
             let task = selector.pick_compaction(
                 1,
@@ -425,19 +373,9 @@ mod test {
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
-            assert_eq!(task.input.input_levels[0].level_idx, 4);
-
-            assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
-
-            let mut start_id = 10;
-            for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.get_sst_id());
-                start_id += 1;
-            }
-
-            assert_eq!(task.input.input_levels[1].level_idx, 4);
-            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
-            assert_eq!(task.input.target_level, 4);
+            assert_eq!(task.input.input_levels[0].level_idx, 3);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 2);
+            assert_eq!(task.input.target_level, 3);
             assert!(matches!(
                 task.compaction_task_type,
                 compact_task::TaskType::SpaceReclaim
@@ -455,9 +393,9 @@ mod test {
             // rebuild selector
             selector = SpaceReclaimCompactionSelector::default();
             // cut range [3,4] [6] [8,9,10]
-            levels.member_table_ids = vec![2, 5, 7];
-            let expect_task_file_count = vec![2, 1, 3];
-            let expect_task_sst_id_range = vec![vec![3, 4], vec![6], vec![8, 9, 10]];
+            levels.member_table_ids = vec![0, 1, 2, 5, 7];
+            let expect_task_file_count = vec![2, 1, 4];
+            let expect_task_sst_id_range = vec![vec![3, 4], vec![6], vec![8, 9, 10, 11]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 // // pick space reclaim
                 let task = selector
@@ -505,9 +443,9 @@ mod test {
             // rebuild selector
             selector = SpaceReclaimCompactionSelector::default();
             // cut range [3,4] [6] [8,9,10]
-            levels.member_table_ids = vec![2, 5, 7];
-            let expect_task_file_count = vec![2, 1, 4];
-            let expect_task_sst_id_range = vec![vec![3, 4], vec![6], vec![7, 8, 9, 10]];
+            levels.member_table_ids = vec![0, 1, 2, 5, 7];
+            let expect_task_file_count = vec![2, 1, 5];
+            let expect_task_sst_id_range = vec![vec![3, 4], vec![6], vec![7, 8, 9, 10, 11]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 if index == expect_task_file_count.len() - 1 {
                     levels.member_table_ids = vec![2, 5];

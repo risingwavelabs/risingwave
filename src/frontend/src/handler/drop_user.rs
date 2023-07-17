@@ -40,15 +40,14 @@ pub async fn handle_drop_user(
         .cloned();
     match user {
         Some(user) => {
-            let user_info_writer = session.env().user_info_writer();
+            let user_info_writer = session.user_info_writer()?;
             user_info_writer.drop_user(user.id).await?;
         }
         None => {
             return if if_exists {
-                Ok(PgResponse::empty_result_with_notice(
-                    StatementType::DROP_USER,
-                    format!("user \"{}\" does not exist, skipping", user_name),
-                ))
+                Ok(PgResponse::builder(StatementType::DROP_USER)
+                    .notice(format!("user \"{}\" does not exist, skipping", user_name))
+                    .into())
             } else {
                 Err(CatalogError::NotFound("user", user_name).into())
             };

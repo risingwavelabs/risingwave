@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -61,10 +61,6 @@ impl LogicalExpand {
 
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         &self.core.column_subsets
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
     }
 }
 
@@ -110,16 +106,18 @@ impl PlanTreeNodeUnary for LogicalExpand {
 }
 
 impl_plan_tree_node_for_unary! {LogicalExpand}
-
-impl fmt::Display for LogicalExpand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalExpand")
-    }
-}
+impl_distill_by_unit!(LogicalExpand, core, "LogicalExpand");
 
 impl ColPrunable for LogicalExpand {
-    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        todo!("prune_col of LogicalExpand is not implemented yet.");
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        // No pruning.
+        let input_required_cols = (0..self.input().schema().len()).collect_vec();
+        LogicalProject::with_out_col_idx(
+            self.clone_with_input(self.input().prune_col(&input_required_cols, ctx))
+                .into(),
+            required_cols.iter().cloned(),
+        )
+        .into()
     }
 }
 
@@ -131,11 +129,7 @@ impl PredicatePushdown for LogicalExpand {
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // TODO: how to do predicate pushdown for Expand?
-        //
-        // let new_input = self.input.predicate_pushdown(predicate);
-        // self.clone_with_input(new_input).into()
-
+        // No pushdown.
         gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }

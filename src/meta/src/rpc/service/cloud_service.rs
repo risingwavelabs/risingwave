@@ -18,7 +18,9 @@ use std::sync::LazyLock;
 use async_trait::async_trait;
 use regex::Regex;
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
-use risingwave_connector::source::{ConnectorProperties, SplitEnumeratorImpl};
+use risingwave_connector::source::{
+    ConnectorProperties, SourceEnumeratorContext, SplitEnumeratorImpl,
+};
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
 use risingwave_pb::cloud_service::rw_cloud_validate_source_response::{Error, ErrorType};
@@ -150,7 +152,9 @@ where
                 e.to_string(),
             ));
         };
-        let enumerator = SplitEnumeratorImpl::create(props.unwrap()).await;
+        let enumerator =
+            SplitEnumeratorImpl::create(props.unwrap(), SourceEnumeratorContext::default().into())
+                .await;
         if let Err(e) = enumerator {
             return Ok(new_rwc_validate_fail_response(
                 ErrorType::KafkaInvalidProperties,

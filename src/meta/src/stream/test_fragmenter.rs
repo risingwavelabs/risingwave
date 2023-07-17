@@ -72,6 +72,7 @@ fn make_sum_aggcall(idx: u32) -> AggCall {
         distinct: false,
         order_by: vec![],
         filter: None,
+        direct_args: vec![],
     }
 }
 
@@ -429,6 +430,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
             )
         })
         .collect();
+
     let worker_nodes = std::iter::once((
         0,
         WorkerNode {
@@ -437,9 +439,11 @@ fn make_cluster_info() -> StreamingClusterInfo {
         },
     ))
     .collect();
+    let unschedulable_parallel_units = Default::default();
     StreamingClusterInfo {
         worker_nodes,
         parallel_units,
+        unschedulable_parallel_units,
     }
 }
 
@@ -456,7 +460,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let actor_graph_builder = ActorGraphBuilder::new(
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
-        Some(NonZeroUsize::new(parallel_degree).unwrap()),
+        NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
     let ActorGraphBuildResult { graph, .. } = actor_graph_builder
         .generate_graph(env.id_gen_manager_ref(), &job)

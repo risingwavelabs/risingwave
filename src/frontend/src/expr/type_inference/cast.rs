@@ -46,8 +46,6 @@ pub fn least_restrictive(lhs: DataType, rhs: DataType) -> std::result::Result<Da
 pub fn align_types<'a>(
     exprs: impl Iterator<Item = &'a mut ExprImpl>,
 ) -> std::result::Result<DataType, ErrorCode> {
-    use std::mem::swap;
-
     let exprs = exprs.collect_vec();
     // Essentially a filter_map followed by a try_reduce, which is unstable.
     let mut ret_type = None;
@@ -62,10 +60,8 @@ pub fn align_types<'a>(
     }
     let ret_type = ret_type.unwrap_or(DataType::Varchar);
     for e in exprs {
-        let mut dummy = ExprImpl::literal_bool(false);
-        swap(&mut dummy, e);
         // unwrap: cast to least_restrictive type always succeeds
-        *e = dummy.cast_implicit(ret_type.clone()).unwrap();
+        e.cast_implicit_mut(ret_type.clone()).unwrap();
     }
     Ok(ret_type)
 }
@@ -106,8 +102,7 @@ pub fn align_array_and_element(
     let array_type = DataType::List(Box::new(common_element_type));
 
     // elements are already casted by `align_types`, we cast the array argument here
-    let array_owned = std::mem::replace(&mut inputs[array_idx], ExprImpl::literal_bool(false));
-    inputs[array_idx] = array_owned.cast_implicit(array_type.clone())?;
+    inputs[array_idx].cast_implicit_mut(array_type.clone())?;
 
     Ok(array_type)
 }
@@ -126,17 +121,16 @@ pub fn cast_ok_base(source: DataTypeName, target: DataTypeName, allows: CastCont
 fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> bool {
     match (source, target) {
         (DataType::Struct(lty), DataType::Struct(rty)) => {
-            if lty.fields.is_empty() || rty.fields.is_empty() {
+            if lty.is_empty() || rty.is_empty() {
                 unreachable!("record type should be already processed at this point");
             }
-            if lty.fields.len() != rty.fields.len() {
+            if lty.len() != rty.len() {
                 // only cast structs of the same length
                 return false;
             }
             // ... and all fields are castable
-            lty.fields
-                .iter()
-                .zip_eq_fast(rty.fields.iter())
+            lty.types()
+                .zip_eq_fast(rty.types())
                 .all(|(src, dst)| src == dst || cast_ok(src, dst, allows))
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic

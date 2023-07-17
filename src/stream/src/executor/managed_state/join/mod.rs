@@ -111,6 +111,12 @@ type PkType = Vec<u8>;
 pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = Box<JoinEntryState>;
 
+impl EstimateSize for HashValueType {
+    fn estimated_heap_size(&self) -> usize {
+        self.as_ref().estimated_heap_size()
+    }
+}
+
 /// The wrapper for [`JoinEntryState`] which should be `Some` most of the time in the hash table.
 ///
 /// When the executor is operating on the specific entry of the map, it can hold the ownership of
@@ -120,7 +126,7 @@ struct HashValueWrapper(Option<HashValueType>);
 
 impl EstimateSize for HashValueWrapper {
     fn estimated_heap_size(&self) -> usize {
-        0
+        self.0.estimated_heap_size()
     }
 }
 

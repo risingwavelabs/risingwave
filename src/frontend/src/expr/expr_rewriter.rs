@@ -46,14 +46,14 @@ pub trait ExprRewriter {
         FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
-        let (func_type, inputs, distinct, order_by, filter) = agg_call.decompose();
+        let (func_type, inputs, distinct, order_by, filter, direct_args) = agg_call.decompose();
         let inputs = inputs
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         let order_by = order_by.rewrite_expr(self);
         let filter = filter.rewrite_expr(self);
-        AggCall::new(func_type, inputs, distinct, order_by, filter)
+        AggCall::new(func_type, inputs, distinct, order_by, filter, direct_args)
             .unwrap()
             .into()
     }

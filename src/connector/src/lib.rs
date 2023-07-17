@@ -26,13 +26,17 @@
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
+#![feature(return_position_impl_trait_in_trait)]
+#![feature(async_fn_in_trait)]
 
 use std::time::Duration;
 
 use duration_str::parse_std;
 use risingwave_pb::connector_service::SinkPayloadFormat;
+use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 
+pub mod aws_auth;
 pub mod aws_utils;
 pub mod error;
 mod macros;
@@ -45,17 +49,17 @@ pub mod common;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
-    pub connector_rpc_endpoint: Option<String>,
+    pub connector_client: Option<ConnectorClient>,
     pub sink_payload_format: SinkPayloadFormat,
 }
 
 impl ConnectorParams {
     pub fn new(
-        connector_rpc_endpoint: Option<String>,
+        connector_client: Option<ConnectorClient>,
         sink_payload_format: SinkPayloadFormat,
     ) -> Self {
         Self {
-            connector_rpc_endpoint,
+            connector_client,
             sink_payload_format,
         }
     }

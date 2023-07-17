@@ -26,6 +26,7 @@ use prometheus::{
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables;
+use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
@@ -91,8 +92,20 @@ pub struct MetaMetrics {
     pub min_pinned_version_id: IntGauge,
     /// The smallest version id that is being guarded by meta node safe points.
     pub min_safepoint_version_id: IntGauge,
+    /// Compaction groups that is in write stop state.
+    pub write_stop_compaction_groups: IntGaugeVec,
+    /// The object id watermark used in last full GC.
+    pub full_gc_last_object_id_watermark: IntGauge,
+    /// The number of attempts to trigger full GC.
+    pub full_gc_trigger_count: IntGauge,
+    /// The number of candidate object to delete after scanning object store.
+    pub full_gc_candidate_object_count: Histogram,
+    /// The number of object to delete after filtering by meta node.
+    pub full_gc_selected_object_count: Histogram,
     /// Hummock version stats
     pub version_stats: IntGaugeVec,
+    /// Hummock version stats
+    pub materialized_view_stats: IntGaugeVec,
     /// Total number of objects that is no longer referenced by versions.
     pub stale_object_count: IntGauge,
     /// Total size of objects that is no longer referenced by versions.
@@ -119,14 +132,15 @@ pub struct MetaMetrics {
     pub compact_pending_bytes: IntGaugeVec,
     /// Per level compression ratio
     pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
-    /// The number of compactor CPU need to be scale.
-    pub scale_compactor_core_num: IntGauge,
     /// Per level number of running compaction task
     pub level_compact_task_cnt: IntGaugeVec,
     pub time_after_last_observation: AtomicU64,
     pub l0_compact_level_count: HistogramVec,
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
+    pub move_state_table_count: IntCounterVec,
+    pub state_table_count: IntGaugeVec,
+    pub branched_sst_count: IntGaugeVec,
 
     /// ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
@@ -135,12 +149,19 @@ pub struct MetaMetrics {
     /// ********************************** Source ************************************
     /// supervisor for which source is still up.
     pub source_is_up: IntGaugeVec,
+    pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     /// ********************************** Fragment ************************************
     /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
     pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
+    /// A dummpy gauge metrics with its label to be the mapping from materialized view id to table
+    /// id.
+    pub mv_info: IntGaugeVec,
+
+    /// Write throughput of commit epoch for each stable
+    pub table_write_throughput: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -172,7 +193,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_send_duration_seconds",
             "barrier send latency",
-            exponential_buckets(0.001, 2.0, 19).unwrap() // max 262s
+            exponential_buckets(0.1, 1.5, 19).unwrap() // max 148s
         );
         let barrier_send_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -263,6 +284,44 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let write_stop_compaction_groups = register_int_gauge_vec_with_registry!(
+            "storage_write_stop_compaction_groups",
+            "compaction groups of write stop state",
+            &["compaction_group_id"],
+            registry
+        )
+        .unwrap();
+
+        let full_gc_last_object_id_watermark = register_int_gauge_with_registry!(
+            "storage_full_gc_last_object_id_watermark",
+            "the object id watermark used in last full GC",
+            registry
+        )
+        .unwrap();
+
+        let full_gc_trigger_count = register_int_gauge_with_registry!(
+            "storage_full_gc_trigger_count",
+            "the number of attempts to trigger full GC",
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "storage_full_gc_candidate_object_count",
+            "the number of candidate object to delete after scanning object store",
+            exponential_buckets(1.0, 10.0, 6).unwrap()
+        );
+        let full_gc_candidate_object_count =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "storage_full_gc_selected_object_count",
+            "the number of object to delete after filtering by meta node",
+            exponential_buckets(1.0, 10.0, 6).unwrap()
+        );
+        let full_gc_selected_object_count =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
         let min_safepoint_version_id = register_int_gauge_with_registry!(
             "storage_min_safepoint_version_id",
             "min safepoint version id",
@@ -281,6 +340,14 @@ impl MetaMetrics {
         let version_stats = register_int_gauge_vec_with_registry!(
             "storage_version_stats",
             "per table stats in current hummock version",
+            &["table_id", "metric"],
+            registry
+        )
+        .unwrap();
+
+        let materialized_view_stats = register_int_gauge_vec_with_registry!(
+            "storage_materialized_view_stats",
+            "per materialized view stats in current hummock version",
             &["table_id", "metric"],
             registry
         )
@@ -365,12 +432,6 @@ impl MetaMetrics {
             registry,
         )
         .unwrap();
-        let scale_compactor_core_num = register_int_gauge_with_registry!(
-            "storage_compactor_suggest_core_count",
-            "num of CPU to be scale to meet compaction need",
-            registry
-        )
-        .unwrap();
 
         let meta_type = register_int_gauge_vec_with_registry!(
             "meta_num",
@@ -425,6 +486,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::new(registry.clone()));
 
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
@@ -437,7 +499,15 @@ impl MetaMetrics {
         let table_info = register_int_gauge_vec_with_registry!(
             "table_info",
             "Mapping from table id to (actor id, table name)",
-            &["table_id", "actor_id", "table_name"],
+            &["materialized_view_id", "table_id", "actor_id", "table_name"],
+            registry
+        )
+        .unwrap();
+
+        let mv_info = register_int_gauge_vec_with_registry!(
+            "materialized_info",
+            "Mapping from materialized view id to (table id, table name)",
+            &["id", "table_id", "table_name"],
             registry
         )
         .unwrap();
@@ -466,6 +536,37 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let table_write_throughput = register_int_counter_vec_with_registry!(
+            "storage_commit_write_throughput",
+            "The number of compactions from one level to another level that have been skipped.",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let move_state_table_count = register_int_counter_vec_with_registry!(
+            "storage_move_state_table_count",
+            "Count of trigger move state table",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let state_table_count = register_int_gauge_vec_with_registry!(
+            "storage_state_table_count",
+            "Count of stable table per compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let branched_sst_count = register_int_gauge_vec_with_registry!(
+            "storage_branched_sst_count",
+            "Count of branched sst per compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
 
         Self {
             registry,
@@ -488,6 +589,7 @@ impl MetaMetrics {
             level_file_size,
             version_size,
             version_stats,
+            materialized_view_stats,
             stale_object_count,
             stale_object_size,
             old_version_object_count,
@@ -500,6 +602,11 @@ impl MetaMetrics {
             checkpoint_version_id,
             min_pinned_version_id,
             min_safepoint_version_id,
+            write_stop_compaction_groups,
+            full_gc_last_object_id_watermark,
+            full_gc_trigger_count,
+            full_gc_candidate_object_count,
+            full_gc_selected_object_count,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
@@ -507,15 +614,20 @@ impl MetaMetrics {
             meta_type,
             compact_pending_bytes,
             compact_level_compression_ratio,
-            scale_compactor_core_num,
             level_compact_task_cnt,
             object_store_metric,
             source_is_up,
+            source_enumerator_metrics,
             actor_info,
             table_info,
+            mv_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
+            table_write_throughput,
+            move_state_table_count,
+            state_table_count,
+            branched_sst_count,
         }
     }
 
@@ -604,13 +716,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
             // report full info on each interval.
             meta_metrics.actor_info.reset();
             meta_metrics.table_info.reset();
-            let fragments = match fragment_manager.list_table_fragments().await {
-                Ok(f) => f,
-                Err(e) => {
-                    tracing::error!("Error when in list_table_fragments: {:?}", e);
-                    continue;
-                }
-            };
+            let fragments = fragment_manager.list_table_fragments().await;
             let workers: HashMap<u32, String> = cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, None)
                 .await
@@ -621,8 +727,9 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                 })
                 .collect();
             for table_fragments in fragments {
+                let mv_id_str = table_fragments.table_id().to_string();
                 for (fragment_id, fragment) in table_fragments.fragments {
-                    let frament_id_str = fragment_id.to_string();
+                    let fragment_id_str = fragment_id.to_string();
                     for actor in fragment.actors {
                         let actor_id_str = actor.actor_id.to_string();
                         // Report a dummay gauge metrics with (fragment id, actor id, node
@@ -636,7 +743,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                         .actor_info
                                         .with_label_values(&[
                                             &actor_id_str,
-                                            &frament_id_str,
+                                            &fragment_id_str,
                                             address,
                                         ])
                                         .set(1);
@@ -651,7 +758,16 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                 let table_id_str = table.id.to_string();
                                 meta_metrics
                                     .table_info
-                                    .with_label_values(&[&table_id_str, &actor_id_str, &table.name])
+                                    .with_label_values(&[
+                                        &mv_id_str,
+                                        &table_id_str,
+                                        &actor_id_str,
+                                        &table.name,
+                                    ])
+                                    .set(1);
+                                meta_metrics
+                                    .mv_info
+                                    .with_label_values(&[&mv_id_str, &table_id_str, &table.name])
                                     .set(1);
                             });
                         }

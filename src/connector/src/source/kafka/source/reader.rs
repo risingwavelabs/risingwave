@@ -21,11 +21,12 @@ use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
-use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
+use crate::source::base::SourceMessage;
 use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
@@ -149,6 +150,19 @@ impl SplitReader for KafkaSplitReader {
 }
 
 impl KafkaSplitReader {
+    fn report_latest_message_id(&self, offset: i64) {
+        self.source_ctx
+            .metrics
+            .latest_message_id
+            .with_label_values(&[
+                // source name is not available here
+                &self.source_ctx.source_info.source_id.to_string(),
+                &self.source_ctx.source_info.actor_id.to_string(),
+                &self.split_id,
+            ])
+            .set(offset);
+    }
+
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_data_stream(self) {
         if let Some(stop_offset) = self.stop_offset {
@@ -164,11 +178,22 @@ impl KafkaSplitReader {
         interval.tick().await;
         let mut bytes_current_second = 0;
         let mut num_messages = 0;
-        let mut res = Vec::with_capacity(MAX_CHUNK_SIZE);
+        let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
+        let mut res = Vec::with_capacity(max_chunk_size);
         #[for_await]
-        'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(MAX_CHUNK_SIZE) {
+        'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
+            self.report_latest_message_id(match msgs.last() {
+                Some(msg) => {
+                    if let Ok(msg) = msg {
+                        msg.offset()
+                    } else {
+                        continue;
+                    }
+                }
+                None => continue,
+            });
             for msg in msgs {
-                let msg = msg?;
+                let msg: BorrowedMessage<'_> = msg?;
                 let cur_offset = msg.offset();
                 bytes_current_second += match &msg.payload() {
                     None => 0,
@@ -176,9 +201,9 @@ impl KafkaSplitReader {
                 };
                 num_messages += 1;
                 if self.enable_upsert {
-                    res.push(SourceMessage::from_kafka_message_upsert(msg));
+                    res.push(SourceMessage::from_kafka_message_upsert(&msg));
                 } else {
-                    res.push(SourceMessage::from(msg));
+                    res.push(SourceMessage::from_kafka_message(&msg));
                 }
 
                 if let Some(stop_offset) = self.stop_offset {

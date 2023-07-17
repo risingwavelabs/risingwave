@@ -15,16 +15,16 @@
 use std::str::FromStr;
 
 use anyhow::anyhow;
-use futures_async_stream::try_stream;
-use risingwave_common::cast::{str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz};
+use risingwave_common::cast::{str_to_date, str_to_timestamp};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{Datum, Decimal, ScalarImpl};
+use risingwave_common::try_match_expand;
+use risingwave_common::types::{Datum, Decimal, ScalarImpl, Timestamptz};
 
-use crate::impl_common_parser_logic;
+use super::{ByteStreamSourceParser, EncodingProperties, ParserProperties};
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{DataType, SourceColumnDesc, SourceContextRef};
-impl_common_parser_logic!(CsvParser);
+use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
+
 macro_rules! to_rust_type {
     ($v:ident, $t:ty) => {
         $v.parse::<$t>()
@@ -35,6 +35,17 @@ macro_rules! to_rust_type {
 pub struct CsvParserConfig {
     pub delimiter: u8,
     pub has_header: bool,
+}
+
+impl CsvParserConfig {
+    pub fn new(parser_properties: ParserProperties) -> Result<Self> {
+        let csv_config =
+            try_match_expand!(parser_properties.encoding_config, EncodingProperties::Csv)?;
+        Ok(Self {
+            delimiter: csv_config.delimiter,
+            has_header: csv_config.has_header,
+        })
+    }
 }
 
 /// Parser for CSV format
@@ -97,7 +108,7 @@ impl CsvParser {
             DataType::Date => str_to_date(v.as_str())?.into(),
             DataType::Time => str_to_date(v.as_str())?.into(),
             DataType::Timestamp => str_to_timestamp(v.as_str())?.into(),
-            DataType::Timestamptz => str_with_time_zone_to_timestamptz(v.as_str())?.into(),
+            DataType::Timestamptz => ScalarImpl::Timestamptz(to_rust_type!(v, Timestamptz)),
             _ => {
                 return Err(RwError::from(InternalError(format!(
                     "CSV data source not support type {}",
@@ -146,6 +157,24 @@ impl CsvParser {
                 }
             })
         }
+    }
+}
+
+impl ByteStreamSourceParser for CsvParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 

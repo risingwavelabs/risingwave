@@ -17,3 +17,28 @@ query I
 SELECT abs(2134) 
 ----
 2134
+
+query TRRRR
+with t(s) as (values
+	('-inf'),
+	('-2'),
+	('-0'),
+	('0'),
+	('2'),
+	('inf'),
+	('nan')
+) select
+	s,
+	sign(s::decimal),
+	sign(s::double precision),
+	abs(s::decimal),
+	abs(s::double precision)
+from t;
+----
+-inf  -1 -1 Infinity Infinity
+-2    -1 -1        2        2
+-0     0  0        0        0
+0      0  0        0        0
+2      1  1        2        2
+inf    1  1 Infinity Infinity
+nan  NaN  0      NaN      NaN

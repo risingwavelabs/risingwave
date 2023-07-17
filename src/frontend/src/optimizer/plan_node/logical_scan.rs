@@ -13,16 +13,17 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::fmt;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
+use super::utils::{childless_record, Distill};
 use super::{
     generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
@@ -287,62 +288,50 @@ impl LogicalScan {
 
 impl_plan_tree_node_for_leaf! {LogicalScan}
 
-impl fmt::Display for LogicalScan {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Distill for LogicalScan {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
-        let output_col_names = if verbose {
-            self.core.column_names_with_table_prefix()
+        let mut vec = Vec::with_capacity(5);
+        vec.push(("table", Pretty::from(self.table_name().to_owned())));
+        let key_is_columns =
+            self.predicate().always_true() || self.output_col_idx() == self.required_col_idx();
+        let key = if key_is_columns {
+            "columns"
         } else {
-            self.core.column_names()
+            "output_columns"
+        };
+        vec.push((key, self.core.columns_pretty(verbose)));
+        if !key_is_columns {
+            vec.push((
+                "required_columns",
+                Pretty::Array(
+                    self.required_col_idx()
+                        .iter()
+                        .map(|i| {
+                            let col_name = &self.table_desc().columns[*i].name;
+                            Pretty::from(if verbose {
+                                format!("{}.{}", self.table_name(), col_name)
+                            } else {
+                                col_name.to_string()
+                            })
+                        })
+                        .collect(),
+                ),
+            ));
         }
-        .join(", ");
 
-        if self.predicate().always_true() {
-            write!(
-                f,
-                "LogicalScan {{ table: {}, columns: [{}] }}",
-                self.table_name(),
-                output_col_names,
-            )
-        } else {
-            write!(f, "LogicalScan {{ table: {}", self.table_name())?;
-            if self.output_col_idx() == self.required_col_idx() {
-                write!(f, ", columns: [{}]", output_col_names)?;
-            } else {
-                write!(
-                    f,
-                    ", output_columns: [{}], required_columns: [{}]",
-                    output_col_names,
-                    self.required_col_idx().iter().format_with(", ", |i, f| {
-                        if verbose {
-                            f(&format_args!(
-                                "{}.{}",
-                                self.table_name(),
-                                self.table_desc().columns[*i].name
-                            ))
-                        } else {
-                            f(&format_args!("{}", self.table_desc().columns[*i].name))
-                        }
-                    })
-                )?;
-            }
-
-            let fields = self
-                .table_desc()
-                .columns
-                .iter()
-                .map(|col| Field::from_with_table_name_prefix(col, self.table_name()))
-                .collect_vec();
-            let input_schema = Schema { fields };
-            write!(
-                f,
-                ", predicate: {} }}",
-                ConditionDisplay {
+        if !self.predicate().always_true() {
+            let input_schema = self.core.fields_pretty_schema();
+            vec.push((
+                "predicate",
+                Pretty::display(&ConditionDisplay {
                     condition: self.predicate(),
                     input_schema: &input_schema,
-                }
-            )
+                }),
+            ))
         }
+
+        childless_record("LogicalScan", vec)
     }
 }
 

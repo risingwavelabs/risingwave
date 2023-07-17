@@ -28,6 +28,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use await_tree::InstrumentAwait;
 pub use compaction_executor::CompactionExecutor;
 pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
@@ -35,13 +36,13 @@ pub use compaction_filter::{
 };
 pub use context::CompactorContext;
 use futures::future::try_join_all;
-use futures::{stream, StreamExt};
+use futures::{stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -54,7 +55,7 @@ use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
-use self::task_progress::TaskProgress;
+pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
@@ -69,7 +70,7 @@ use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     validate_ssts, BatchSstableWriterFactory, FilterBuilder, HummockError, SstableWriterFactory,
-    StreamingSstableWriterFactory, Xor8FilterBuilder,
+    StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -165,15 +166,8 @@ impl Compactor {
             ])
             .start_timer();
 
-        let (need_quota, file_counts) = estimate_state_for_compaction(&compact_task);
-        tracing::info!(
-            "Ready to handle compaction task: {} need memory: {} input_file_counts {} target_level {} compression_algorithm {:?}",
-            compact_task.task_id,
-            need_quota,
-            file_counts,
-            compact_task.target_level,
-            compact_task.compression_algorithm,
-        );
+        let (need_quota, total_file_count, total_key_count) =
+            estimate_state_for_compaction(&compact_task);
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
@@ -208,7 +202,7 @@ impl Compactor {
         };
 
         if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
-            let found_tables = multi.get_exsting_table_ids();
+            let found_tables = multi.get_existing_table_ids();
             let removed_tables = compact_table_ids
                 .iter()
                 .filter(|table_id| !found_tables.contains(table_id))
@@ -260,6 +254,7 @@ impl Compactor {
         assert_ne!(parallelism, 0, "splits cannot be empty");
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
+        let mut abort_handles = vec![];
         let task_progress_guard =
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
@@ -281,6 +276,18 @@ impl Compactor {
 
         let task_memory_capacity_with_parallelism =
             estimate_task_memory_capacity(context.clone(), &compact_task) * parallelism;
+
+        tracing::info!(
+                "Ready to handle compaction task: {} need memory: {} input_file_counts {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+                compact_task.task_id,
+                need_quota,
+                total_file_count,
+                total_key_count,
+                compact_task.target_level,
+                compact_task.compression_algorithm,
+                parallelism,
+                task_memory_capacity_with_parallelism
+            );
 
         // If the task does not have enough memory, it should cancel the task and let the meta
         // reschedule it, so that it does not occupy the compactor's resources.
@@ -309,11 +316,27 @@ impl Compactor {
                 CompactorRunner::new(split_index, compactor_context.clone(), compact_task.clone());
             let del_agg = delete_range_agg.clone();
             let task_progress = task_progress_guard.progress.clone();
-            let handle = tokio::spawn(async move {
+            let runner = async move {
                 compactor_runner
                     .run(filter, multi_filter_key_extractor, del_agg, task_progress)
                     .await
-            });
+            };
+            let traced = match context.await_tree_reg.as_ref() {
+                None => runner.right_future(),
+                Some(await_tree_reg) => await_tree_reg
+                    .write()
+                    .register(
+                        format!("{}-{}", compact_task.task_id, split_index),
+                        format!(
+                            "Compaction Task {} Split {} ",
+                            compact_task.task_id, split_index
+                        ),
+                    )
+                    .instrument(runner)
+                    .left_future(),
+            };
+            let handle = tokio::spawn(traced);
+            abort_handles.push(handle.abort_handle());
             compaction_futures.push(handle);
         }
 
@@ -355,6 +378,9 @@ impl Compactor {
         }
 
         if task_status != TaskStatus::Success {
+            for abort_handle in abort_handles {
+                abort_handle.abort();
+            }
             output_ssts.clear();
         }
         // Sort by split/key range index.
@@ -490,7 +516,7 @@ impl Compactor {
 
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
-                    let message = tokio::select! {
+                    let message: Option<Result<SubscribeCompactTasksResponse, _>> = tokio::select! {
                         _ = task_progress_interval.tick() => {
                             let mut progress_list = Vec::new();
                             for (&task_id, progress) in task_progress.lock().iter() {
@@ -498,6 +524,9 @@ impl Compactor {
                                     task_id,
                                     num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
                                     num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
+                                    num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
+                                    num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
+                                    num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
                                 });
                             }
 
@@ -623,6 +652,7 @@ impl Compactor {
         compactor_metrics: Arc<CompactorMetrics>,
         mut iter: impl HummockIterator<Direction = Forward>,
         mut compaction_filter: impl CompactionFilter,
+        task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<CompactionStatistics>
     where
         F: TableBuilderFactory,
@@ -631,10 +661,12 @@ impl Compactor {
 
         if !task_config.key_range.left.is_empty() {
             let full_key = FullKey::decode(&task_config.key_range.left);
-            iter.seek(full_key).await?;
+            iter.seek(full_key)
+                .verbose_instrument_await("iter_seek")
+                .await?;
             del_iter.seek(full_key.user_key);
         } else {
-            iter.rewind().await?;
+            iter.rewind().verbose_instrument_await("rewind").await?;
             del_iter.rewind();
         }
 
@@ -655,7 +687,16 @@ impl Compactor {
         let mut last_table_stats = TableStats::default();
         let mut last_table_id = None;
         let mut compaction_statistics = CompactionStatistics::default();
+        let mut progress_key_num: u64 = 0;
+        const PROGRESS_KEY_INTERVAL: u64 = 100;
         while iter.is_valid() {
+            progress_key_num += 1;
+
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
+            }
+
             let mut iter_key = iter.key();
             compaction_statistics.iter_total_key_counts += 1;
 
@@ -726,7 +767,9 @@ impl Compactor {
                     last_table_stats.total_key_size -= last_key.encoded_len() as i64;
                     last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
                 }
-                iter.next().await?;
+                iter.next()
+                    .verbose_instrument_await("iter_next_in_drop")
+                    .await?;
                 continue;
             }
 
@@ -748,7 +791,11 @@ impl Compactor {
                 iter_key.epoch = earliest_range_delete_which_can_see_iter_key;
                 sst_builder
                     .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
+                    .verbose_instrument_await("add_full_key_delete")
                     .await?;
+                last_table_stats.total_key_count += 1;
+                last_table_stats.total_key_size += iter_key.encoded_len() as i64;
+                last_table_stats.total_value_size += 1;
                 iter_key.epoch = epoch;
                 is_new_user_key = false;
             }
@@ -756,10 +803,17 @@ impl Compactor {
             // Don't allow two SSTs to share same user key
             sst_builder
                 .add_full_key(iter_key, value, is_new_user_key)
+                .verbose_instrument_await("add_full_key")
                 .await?;
 
-            iter.next().await?;
+            iter.next().verbose_instrument_await("iter_next").await?;
         }
+
+        if let Some(task_progress) = task_progress.as_ref() && progress_key_num > 0 {
+            // Avoid losing the progress_key_num in the last Interval
+            task_progress.inc_progress_key(progress_key_num);
+        }
+
         if let Some(last_table_id) = last_table_id.take() {
             table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
         }
@@ -797,6 +851,8 @@ impl Compactor {
         del_agg: Arc<CompactionDeleteRanges>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
+        task_id: Option<HummockCompactionTaskId>,
+        split_index: Option<usize>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
@@ -813,52 +869,35 @@ impl Compactor {
 
         let (split_table_outputs, table_stats_map) = if self.options.capacity as u64
             > self.context.storage_opts.min_sst_size_for_streaming_upload
+            && self
+                .context
+                .sstable_store
+                .store()
+                .support_streaming_upload()
         {
             let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
-            if self.task_config.is_target_l0_or_lbase {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .await?
-            } else {
-                self.compact_key_range_impl::<_, Xor8FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .await?
-            }
+            self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                factory,
+                iter,
+                compaction_filter,
+                del_agg,
+                filter_key_extractor,
+                task_progress.clone(),
+            )
+            .verbose_instrument_await("compact")
+            .await?
         } else {
             let factory = BatchSstableWriterFactory::new(self.context.sstable_store.clone());
-            if self.task_config.is_target_l0_or_lbase {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .await?
-            } else {
-                self.compact_key_range_impl::<_, Xor8FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    del_agg,
-                    filter_key_extractor,
-                    task_progress.clone(),
-                )
-                .await?
-            }
+            self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                factory,
+                iter,
+                compaction_filter,
+                del_agg,
+                filter_key_extractor,
+                task_progress.clone(),
+            )
+            .verbose_instrument_await("compact")
+            .await?
         };
 
         compact_timer.observe_duration();
@@ -878,10 +917,14 @@ impl Compactor {
             let context_cloned = self.context.clone();
             upload_join_handles.push(async move {
                 upload_join_handle
+                    .verbose_instrument_await("upload")
                     .await
                     .map_err(HummockError::sstable_upload_error)??;
                 if let Some(tracker) = tracker_cloned {
                     tracker.inc_ssts_uploaded();
+                    tracker
+                        .num_pending_write_io
+                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 }
                 if context_cloned.is_share_buffer_compact {
                     context_cloned
@@ -899,7 +942,9 @@ impl Compactor {
         }
 
         // Check if there are any failed uploads. Report all of those SSTs.
-        try_join_all(upload_join_handles).await?;
+        try_join_all(upload_join_handles)
+            .verbose_instrument_await("join")
+            .await?;
         self.context
             .compactor_metrics
             .get_table_id_total_time_duration
@@ -908,6 +953,16 @@ impl Compactor {
         debug_assert!(ssts
             .iter()
             .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
+
+        if task_id.is_some() {
+            // skip shared buffer compaction
+            tracing::info!(
+                "Finish Task {:?} split_index {:?} sst count {}",
+                task_id,
+                split_index,
+                ssts.len()
+            );
+        }
         Ok((ssts, table_stats_map))
     }
 
@@ -934,7 +989,7 @@ impl Compactor {
         let mut sst_builder = CapacitySplitTableBuilder::new(
             builder_factory,
             self.context.compactor_metrics.clone(),
-            task_progress,
+            task_progress.clone(),
             del_agg,
             self.task_config.key_range.clone(),
             self.task_config.is_target_l0_or_lbase,
@@ -947,10 +1002,15 @@ impl Compactor {
             self.context.compactor_metrics.clone(),
             iter,
             compaction_filter,
+            task_progress,
         )
+        .verbose_instrument_await("compact_and_build_sst")
         .await?;
 
-        let ssts = sst_builder.finish().await?;
+        let ssts = sst_builder
+            .finish()
+            .verbose_instrument_await("builder_finish")
+            .await?;
 
         Ok((ssts, compaction_statistics))
     }

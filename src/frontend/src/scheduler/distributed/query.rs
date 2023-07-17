@@ -29,7 +29,7 @@ use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Instrument};
 
 use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
@@ -39,9 +39,7 @@ use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
-use crate::scheduler::{
-    ExecutionContextRef, PinnedHummockSnapshot, SchedulerError, SchedulerResult,
-};
+use crate::scheduler::{ExecutionContextRef, ReadSnapshot, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
@@ -116,7 +114,7 @@ impl QueryExecution {
         &self,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
-        pinned_snapshot: PinnedHummockSnapshot,
+        pinned_snapshot: ReadSnapshot,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
@@ -154,10 +152,16 @@ impl QueryExecution {
                     query_metrics,
                 };
 
+                let span = tracing::info_span!(
+                    "distributed_execute",
+                    query_id = self.query.query_id.id,
+                    epoch = ?pinned_snapshot.batch_query_epoch(),
+                );
+
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run(pinned_snapshot).await });
+                tokio::spawn(async move { runner.run(pinned_snapshot).instrument(span).await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -194,7 +198,7 @@ impl QueryExecution {
 
     fn gen_stage_executions(
         &self,
-        pinned_snapshot: &PinnedHummockSnapshot,
+        pinned_snapshot: &ReadSnapshot,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
         compute_client_pool: ComputeClientPoolRef,
@@ -213,7 +217,7 @@ impl QueryExecution {
                 .collect::<Vec<Arc<StageExecution>>>();
 
             let stage_exec = Arc::new(StageExecution::new(
-                pinned_snapshot.get_batch_query_epoch(),
+                pinned_snapshot.batch_query_epoch(),
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),
@@ -262,7 +266,7 @@ impl Debug for QueryRunner {
 }
 
 impl QueryRunner {
-    async fn run(mut self, pinned_snapshot: PinnedHummockSnapshot) {
+    async fn run(mut self, pinned_snapshot: ReadSnapshot) {
         self.query_metrics.running_query_num.inc();
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
@@ -340,7 +344,7 @@ impl QueryRunner {
                     }
                 }
                 QueryMessage::CancelQuery => {
-                    self.clean_all_stages(Some(SchedulerError::QueryCancelError))
+                    self.clean_all_stages(Some(SchedulerError::QueryCancelled))
                         .await;
                     // One stage failed, not necessary to execute schedule stages.
                     break;
@@ -454,8 +458,8 @@ pub(crate) mod tests {
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeSelector};
     use crate::scheduler::{
-        DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot,
-        QueryExecutionInfo,
+        DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, QueryExecutionInfo,
+        ReadSnapshot,
     };
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
@@ -473,7 +477,7 @@ pub(crate) mod tests {
             CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
         let query = create_query().await;
         let query_id = query.query_id().clone();
-        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
+        let pinned_snapshot = hummock_snapshot_manager.acquire();
         let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
@@ -483,7 +487,10 @@ pub(crate) mod tests {
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
                 worker_node_selector,
-                PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, true),
+                ReadSnapshot::FrontendPinned {
+                    snapshot: pinned_snapshot,
+                    is_barrier_read: true
+                },
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
@@ -599,9 +606,11 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(0, 0),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
+            transactional_id: Some(0),
         };
         let worker2 = WorkerNode {
             id: 1,
@@ -613,9 +622,11 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(8, 1),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
+            transactional_id: Some(1),
         };
         let worker3 = WorkerNode {
             id: 2,
@@ -627,15 +638,22 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(16, 2),
             property: Some(Property {
-                is_streaming: true,
+                is_unschedulable: false,
                 is_serving: true,
+                is_streaming: true,
             }),
+            transactional_id: Some(2),
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
         worker_node_manager
             .insert_streaming_fragment_mapping(0, ParallelUnitMapping::new_single(0));
+        worker_node_manager.set_serving_fragment_mapping(
+            vec![(0, ParallelUnitMapping::new_single(0))]
+                .into_iter()
+                .collect(),
+        );
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);

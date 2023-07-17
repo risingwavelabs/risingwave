@@ -55,7 +55,7 @@ public class DbzCdcEventConsumer
         // only serialize the value part
         configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.VALUE.getName());
         // include record schema
-        configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, true);
+        configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, false);
         jsonConverter.configure(configs);
         this.converter = jsonConverter;
     }

@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
-use risingwave_common::catalog::FieldDisplay;
+use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::Limit;
+use super::generic::{DistillUnit, TopNLimit};
+use super::utils::{plan_node_name, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::property::{Order, OrderDisplay};
+use crate::optimizer::property::Order;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
@@ -68,7 +66,7 @@ impl StreamGroupTopN {
         }
     }
 
-    pub fn limit_attr(&self) -> Limit {
+    pub fn limit_attr(&self) -> TopNLimit {
         self.logical.limit_attr
     }
 
@@ -116,45 +114,16 @@ impl StreamNode for StreamGroupTopN {
     }
 }
 
-impl fmt::Display for StreamGroupTopN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct(if self.input().append_only() {
-            "StreamAppendOnlyGroupTopN"
-        } else {
-            "StreamGroupTopN"
-        });
-        let input = self.input();
-        let input_schema = input.schema();
-        builder.field(
-            "order",
-            &format!(
-                "{}",
-                OrderDisplay {
-                    order: self.topn_order(),
-                    input_schema
-                }
-            ),
+impl Distill for StreamGroupTopN {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let name = plan_node_name!("StreamGroupTopN",
+            { "append_only", self.input().append_only() },
         );
-        builder
-            .field("limit", &self.limit_attr().limit())
-            .field("offset", &self.offset())
-            .field("group_key", &self.group_key());
-        if self.limit_attr().with_ties() {
-            builder.field("with_ties", &true);
+        let mut node = self.logical.distill_with_name(name);
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+            node.fields.push(("output_watermarks".into(), ow));
         }
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        builder.finish()
+        node
     }
 }
 

@@ -633,7 +633,7 @@ pub fn to_stream_prost_body(
                     .infer_distinct_dedup_tables(base, me.vnode_col_idx, me.window_col_idx);
 
             PbNodeBody::HashAgg(HashAggNode {
-                group_key: me.core.group_key.ones().map(|idx| idx as u32).collect(),
+                group_key: me.core.group_key.indices().map(|idx| idx as u32).collect(),
                 agg_calls: me
                     .core
                     .agg_calls
@@ -734,6 +734,7 @@ pub fn to_stream_prost_body(
         }),
         Node::Sink(me) => PbNodeBody::Sink(SinkNode {
             sink_desc: Some(me.sink_desc.to_proto()),
+            table: None, // TODO: Refactor sink to have a generic core.
         }),
         Node::Source(me) => {
             let me = &me.core.catalog;

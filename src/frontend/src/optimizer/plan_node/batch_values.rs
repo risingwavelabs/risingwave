@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
+use pretty_xmlish::XmlNode;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::values_node::ExprTuple;
 use risingwave_pb::batch_plan::ValuesNode;
 
+use super::utils::{childless_record, Distill};
 use super::{
     ExprRewritable, LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb,
     ToDistributedBatch,
@@ -59,11 +59,10 @@ impl BatchValues {
     }
 }
 
-impl fmt::Display for BatchValues {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BatchValues")
-            .field("rows", &self.logical.rows())
-            .finish()
+impl Distill for BatchValues {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = self.logical.rows_pretty();
+        childless_record("BatchValues", vec![("rows", data)])
     }
 }
 

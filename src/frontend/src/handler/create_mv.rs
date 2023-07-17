@@ -23,13 +23,14 @@ use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::catalog::CatalogError;
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::SessionImpl;
+use crate::session::{CheckRelationError, SessionImpl};
 use crate::stream_fragmenter::build_graph;
 
 pub(super) fn get_column_names(
@@ -133,7 +134,7 @@ pub fn gen_create_mv_plan(
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Materialized View:");
-        ctx.trace(plan.explain_to_string().unwrap());
+        ctx.trace(plan.explain_to_string());
     }
 
     Ok((plan, table))
@@ -149,16 +150,15 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    if let Err(e) = session.check_relation_name_duplicated(name.clone()) {
-        if if_not_exists {
-            return Ok(PgResponse::empty_result_with_notice(
-                StatementType::CREATE_MATERIALIZED_VIEW,
-                format!("relation \"{}\" already exists, skipping", name),
-            ));
-        } else {
-            return Err(e);
+    match session.check_relation_name_duplicated(name.clone()) {
+        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
+            return Ok(PgResponse::builder(StatementType::CREATE_MATERIALIZED_VIEW)
+                .notice(format!("relation \"{}\" already exists, skipping", name))
+                .into());
         }
-    }
+        Err(e) => return Err(e.into()),
+        Ok(_) => {}
+    };
 
     let (table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
@@ -196,7 +196,7 @@ It only indicates the physical clustering of the data, which may improve the per
                 table.name.clone(),
             ));
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_materialized_view(table, graph)
         .await?;
@@ -239,7 +239,7 @@ pub mod tests {
         let sql = format!(
             r#"CREATE SOURCE t1
     WITH (connector = 'kinesis')
-    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+    FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;
@@ -333,12 +333,12 @@ pub mod tests {
         // Without order by
         let sql = "create materialized view mv1 as select * from t";
         let response = frontend.run_sql(sql).await.unwrap();
-        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
-        assert!(response.get_notices().is_empty());
+        assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert!(response.notices().is_empty());
 
         // With order by
         let sql = "create materialized view mv2 as select * from t order by x";
         let response = frontend.run_sql(sql).await.unwrap();
-        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
     }
 }

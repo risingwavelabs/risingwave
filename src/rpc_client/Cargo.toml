@@ -16,8 +16,10 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+easy-ext = "1"
 either = "1.8.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+hyper = "0.14"
 itertools = "0.10.5"
 lru = "0.10.0"
 rand = "0.8"
@@ -36,6 +38,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
+tower = "0.4"
 tracing = "0.1"
 url = "2.3.1"
 

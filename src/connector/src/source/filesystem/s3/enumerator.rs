@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::Context;
 use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
 use itertools::Itertools;
 
-use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
+use crate::aws_auth::AwsAuthProps;
+use crate::aws_utils::{default_conn_config, s3_client};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::SplitEnumerator;
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 /// Get the prefix from a glob
 fn get_prefix(glob: &str) -> String {
@@ -71,9 +70,12 @@ impl SplitEnumerator for S3SplitEnumerator {
     type Properties = S3Properties;
     type Split = FsSplit;
 
-    async fn new(properties: Self::Properties) -> anyhow::Result<Self> {
-        let config = AwsConfigV2::from(HashMap::from(properties.clone()));
-        let sdk_config = config.load_config(None).await;
+    async fn new(
+        properties: Self::Properties,
+        _context: SourceEnumeratorContextRef,
+    ) -> anyhow::Result<Self> {
+        let config = AwsAuthProps::from(&properties);
+        let sdk_config = config.build_config().await?;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
         let (prefix, matcher) = if let Some(pattern) = properties.match_pattern.as_ref() {
             let prefix = get_prefix(pattern);
@@ -145,6 +147,7 @@ mod tests {
     }
 
     use super::*;
+    use crate::source::SourceEnumeratorContext;
     #[tokio::test]
     #[ignore]
     async fn test_s3_split_enumerator() {
@@ -156,7 +159,10 @@ mod tests {
             secret: None,
             endpoint_url: None,
         };
-        let mut enumerator = S3SplitEnumerator::new(props.clone()).await.unwrap();
+        let mut enumerator =
+            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+                .await
+                .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
         let names = splits.into_iter().map(|split| split.name).collect_vec();
         assert_eq!(names.len(), 2);

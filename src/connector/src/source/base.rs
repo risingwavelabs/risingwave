@@ -20,6 +20,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
+use futures::Stream;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
@@ -38,7 +39,7 @@ use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 use crate::source::cdc::{
-    CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, CITUS_CDC_CONNECTOR,
+    CdcProperties, CdcSplitReader, DebeziumCdcSplit, DebeziumSplitEnumerator, CITUS_CDC_CONNECTOR,
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use crate::source::datagen::{
@@ -56,6 +57,7 @@ use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
 use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
+use crate::source::monitor::EnumeratorMetrics;
 use crate::source::nexmark::source::reader::NexmarkSplitReader;
 use crate::source::nexmark::{
     NexmarkProperties, NexmarkSplit, NexmarkSplitEnumerator, NEXMARK_CONNECTOR,
@@ -76,16 +78,48 @@ pub trait SplitEnumerator: Sized {
     type Split: SplitMetaData + Send + Sync;
     type Properties;
 
-    async fn new(properties: Self::Properties) -> Result<Self>;
+    async fn new(properties: Self::Properties, context: SourceEnumeratorContextRef)
+        -> Result<Self>;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 
 pub type SourceContextRef = Arc<SourceContext>;
+pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
+
+/// The max size of a chunk yielded by source stream.
+pub const MAX_CHUNK_SIZE: usize = 1024;
+
+#[derive(Debug, Clone)]
+pub struct SourceCtrlOpts {
+    // comes from developer::stream_chunk_size in stream scenario and developer::batch_chunk_size
+    // in batch scenario
+    pub chunk_size: usize,
+}
+
+impl Default for SourceCtrlOpts {
+    fn default() -> Self {
+        Self {
+            chunk_size: MAX_CHUNK_SIZE,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SourceEnumeratorContext {
+    pub info: SourceEnumeratorInfo,
+    pub metrics: Arc<EnumeratorMetrics>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SourceEnumeratorInfo {
+    pub source_id: u32,
+}
 
 #[derive(Debug, Default)]
 pub struct SourceContext {
     pub source_info: SourceInfo,
     pub metrics: Arc<SourceMetrics>,
+    pub source_ctrl_opts: SourceCtrlOpts,
     error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
 impl SourceContext {
@@ -94,6 +128,7 @@ impl SourceContext {
         table_id: TableId,
         fragment_id: u32,
         metrics: Arc<SourceMetrics>,
+        source_ctrl_opts: SourceCtrlOpts,
     ) -> Self {
         Self {
             source_info: SourceInfo {
@@ -103,6 +138,7 @@ impl SourceContext {
             },
             metrics,
             error_suppressor: None,
+            source_ctrl_opts,
         }
     }
 
@@ -163,10 +199,15 @@ pub enum SourceFormat {
     Native,
     DebeziumAvro,
     DebeziumMongoJson,
+    Bytes,
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+
+pub trait SourceWithStateStream =
+    Stream<Item = Result<StreamChunkWithState, RwError>> + Send + 'static;
 pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
+pub type BoxTryStream<M> = BoxStream<'static, Result<M, RwError>>;
 
 /// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
 /// current design, one connector source can have multiple split reader. The keys are unique
@@ -204,9 +245,6 @@ pub trait SplitReader: Sized {
 
     fn into_stream(self) -> BoxSourceWithStateStream;
 }
-
-/// The max size of a chunk yielded by source stream.
-pub const MAX_CHUNK_SIZE: usize = 1024;
 
 #[derive(Clone, Debug, Deserialize)]
 pub enum ConnectorProperties {
@@ -275,9 +313,9 @@ pub enum SplitImpl {
     Nexmark(NexmarkSplit),
     Datagen(DatagenSplit),
     GooglePubsub(PubsubSplit),
-    MySqlCdc(CdcSplit),
-    PostgresCdc(CdcSplit),
-    CitusCdc(CdcSplit),
+    MySqlCdc(DebeziumCdcSplit),
+    PostgresCdc(DebeziumCdcSplit),
+    CitusCdc(DebeziumCdcSplit),
     S3(FsSplit),
 }
 
@@ -359,9 +397,9 @@ impl_split! {
     { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
     { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit },
-    { MySqlCdc, MYSQL_CDC_CONNECTOR, CdcSplit },
-    { PostgresCdc, POSTGRES_CDC_CONNECTOR, CdcSplit },
-    { CitusCdc, CITUS_CDC_CONNECTOR, CdcSplit },
+    { MySqlCdc, MYSQL_CDC_CONNECTOR, DebeziumCdcSplit },
+    { PostgresCdc, POSTGRES_CDC_CONNECTOR, DebeziumCdcSplit },
+    { CitusCdc, CITUS_CDC_CONNECTOR, DebeziumCdcSplit },
     { S3, S3_CONNECTOR, FsSplit }
 }
 
@@ -451,6 +489,7 @@ mod tests {
     use nexmark::event::EventType;
 
     use super::*;
+    use crate::source::cdc::MySqlCdcSplit;
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {
@@ -467,7 +506,9 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let split_impl = SplitImpl::MySqlCdc(CdcSplit::new(1001, offset_str.to_string()));
+        let mysql_split = MySqlCdcSplit::new(1001, offset_str.to_string());
+        let split = DebeziumCdcSplit::new(Some(mysql_split), None);
+        let split_impl = SplitImpl::MySqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
         assert_eq!(

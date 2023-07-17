@@ -215,7 +215,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
 
     // Test release hummock contexts
     env.notification_manager()
-        .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
+        .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker_node))
         .await;
     sync_point::wait_timeout(
         "AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC",

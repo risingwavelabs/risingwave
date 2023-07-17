@@ -26,10 +26,9 @@ def section_actor_info(panels):
         panels.table_info("Actor Id Info",
                           "Mapping from actor id to fragment id",
                           [panels.table_target(f"{metric('actor_info')}")], excluded_cols),
-        panels.table_info("Table Id Info",
-                          "Mapping from table id to actor id and table name",
-                          [panels.table_target(f"{metric('table_info')}")], excluded_cols),
-
+        panels.table_info("Materialized View Info",
+                          "Mapping from materialized view table id to it's internal table ids",
+                           [panels.table_target(f"{metric('materialized_info')}")], excluded_cols),
     ]
 
 
@@ -153,6 +152,17 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytesps(
+                    "Commit Flush Bytes by Table",
+                    "The  of bytes that have been written by commit epoch per second.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_commit_write_throughput')}[$__rate_interval])) by (table_id)",
+                            "write - {{table_id}}",
+                        ),
+                    ],
+                ),
+
                 panels.timeseries_count(
                     "Compactor Core Count To Scale",
                     "The number of CPUs needed to meet the demand of compaction.",
@@ -236,39 +246,39 @@ def section_compaction(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_task_duration_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_task_duration_bucket')}[$__rate_interval])) by (le, job))",
                                 f"compact-task p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [50, 90, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_sst_duration_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compact_sst_duration_bucket')}[$__rate_interval])) by (le, job))",
                                 f"compact-key-range p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [90, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_get_table_id_total_time_duration_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_get_table_id_total_time_duration_bucket')}[$__rate_interval])) by (le, job))",
                                 f"get-table-id p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [90, "max"],
                         ),
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_remote_read_time_per_task_bucket')}[$__rate_interval])) by (le, job, instance))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_remote_read_time_bucket')}[$__rate_interval])) by (le, job))",
                                 f"remote-io p{legend}" +
-                                " - {{job}} @ {{instance}}",
+                                " - {{job}}",
                             ),
                             [90, "max"],
                         ),
                         panels.target(
-                            f"histogram_quantile(0.99, sum(rate({metric('compute_refill_cache_duration_bucket')}[$__rate_interval])) by (le, instance))",
-                            "compute_apply_version_duration_p99 - {{instance}}",
+                            f"histogram_quantile(0.99, sum(rate({metric('compute_refill_cache_duration_bucket')}[$__rate_interval])) by (le))",
+                            "compute_apply_version_duration_p99",
                         ),
                         panels.target(
                             f"sum by(le)(rate({metric('compactor_compact_task_duration_sum')}[$__rate_interval])) / sum by(le)(rate({metric('compactor_compact_task_duration_count')}[$__rate_interval]))",
@@ -555,6 +565,21 @@ def section_object_storage(outer_panels):
                         )
                     ],
                 ),
+                panels.timeseries_ops(
+                    "Operation Retry Rate",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(irate({metric('aws_sdk_retry_counts')}[$__rate_interval])) by (instance, job, type)",
+                            "{{type}} - {{job}} @ {{instance}}",
+                        ),
+
+                        panels.target(
+                            f"sum(irate({metric('s3_read_request_retry_count')}[$__rate_interval])) by (instance, job, type)",
+                            "{{type}} - {{job}} @ {{instance}}",
+                        )
+                    ],
+                ),
                 panels.timeseries_dollar(
                     "Estimated S3 Cost (Realtime)",
                     "There are two types of operations: 1. GET, SELECT, and DELETE, they cost 0.0004 USD per 1000 "
@@ -660,6 +685,30 @@ def section_streaming(panels):
                 panels.target(
                     f"{metric('source_status_is_up')}",
                     "source_id={{source_id}}, source_name={{source_name}} @ {{instance}}"
+                )
+            ]
+        ),
+        panels.timeseries_ops(
+            "Source Split Change Events frequency(events/s)",
+            "Source Split Change Events frequency by source_id and actor_id",
+            [
+                panels.target(
+                    f"rate({metric('stream_source_split_change_event_count')}[$__rate_interval])",
+                    "source={{source_name}} actor={{actor_id}} @ {{instance}}"
+                )
+            ]
+        ),
+        panels.timeseries_count(
+            "Kafka Consumer Lag Size",
+            "Kafka Consumer Lag Size by source_id, partition and actor_id",
+            [
+                panels.target(
+                    f"{metric('high_watermark')}",
+                    "source={{source_id}} partition={{partition}}"
+                ),
+                panels.target(
+                    f"{metric('latest_message_id')}",
+                    "source={{source_id}} partition={{partition}} actor_id={{actor_id}}"
                 )
             ]
         ),
@@ -833,7 +882,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            "rate(actor_memory_usage[$__rate_interval])",
+                            f"{metric('actor_memory_usage')}",
                             "{{actor_id}}",
                         ),
                     ],
@@ -843,7 +892,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            "rate(stream_memory_usage[$__rate_interval])",
+                            f"{metric('stream_memory_usage')}",
                             "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
                         ),
                     ],
@@ -1732,20 +1781,16 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(irate({table_metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "bloom filter true negative  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"sum(irate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (table_id,type)",
+                    "bloom filter false positive count  - {{table_id}} - {{type}}",
                 ),
                 panels.target(
-                    f"sum(irate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "bloom filter false positive count  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"sum(irate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (table_id,type)",
+                    "bloom filter miss count - {{table_id}} - {{type}}",
                 ),
                 panels.target(
-                    f"sum(irate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req bloom filter positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(irate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req check bloom filter - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"sum(irate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (table_id,type)",
+                    "bloom filter check count- {{table_id}} - {{type}}",
                 ),
             ],
         ),
@@ -1778,22 +1823,22 @@ def section_hummock(panels):
             ],
         ),
         panels.timeseries_percentage(
-            "Read Request Bloom-Filter Filtered Rate",
-            "Negative / Total",
+            "Bloom-Filter Miss Rate",
+            "Positive / Total",
             [
                 panels.target(
-                    f"1 - (((sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
-                    "read req bloom filter filter rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"(sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (table_id,type)) / (sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (table_id,type))",
+                    "bloom filter miss rate - {{table_id}} - {{type}}",
                 ),
             ],
         ),
         panels.timeseries_percentage(
             "Read Request Bloom-Filter False-Positive Rate",
-            "False-Positive / Positive",
+            "False-Positive / Total",
             [
                 panels.target(
-                    f"1 - (((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
-                    "read req bloom filter false positive rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"(((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (table_id,type))) / (sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (table_id,type)))",
+                    "read req bloom filter false positive rate - {{table_id}} - {{type}}",
                 ),
             ],
         ),
@@ -1944,12 +1989,12 @@ def section_hummock(panels):
                     "data cache - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
-                    "Memory limiter usage - {{job}} @ {{instance}}",
+                    f"sum({metric('uploading_memory_size')}) by (job,instance)",
+                    "uploading memory - {{job}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum({metric('state_store_uploader_uploading_task_size')}) by (job,instance)",
-                    "uploading memory - {{job}} @ {{instance}}",
+                    "uploading task size - {{job}} @ {{instance}}",
                 ),
             ],
         ),
@@ -2009,6 +2054,39 @@ def section_hummock(panels):
                 panels.target(
                     f"{metric('state_store_iter_slow_fetch_meta_cache_unhits')}",
                     "",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Move State Table Count",
+            "The times of move_state_table occurs",
+            [
+                panels.target(
+                    f"sum({table_metric('storage_move_state_table_count')}[$__rate_interval]) by (group)",
+                    "move table cg{{group}}",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "State Table Count",
+            "The number of state_tables in each CG",
+            [
+                panels.target(
+                    f"sum(irate({table_metric('storage_state_table_count')}[$__rate_interval])) by (group)",
+                    "state table cg{{group}}",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Branched SST Count",
+            "The number of branched_sst in each CG",
+            [
+                panels.target(
+                    f"sum(irate({table_metric('storage_branched_sst_count')}[$__rate_interval])) by (group)",
+                    "branched sst cg{{group}}",
                 ),
             ],
         ),
@@ -2103,6 +2181,7 @@ def section_hummock_manager(outer_panels):
     total_key_size_filter = "metric='total_key_size'"
     total_value_size_filter = "metric='total_value_size'"
     total_key_count_filter = "metric='total_key_count'"
+    mv_total_size_filter = "metric='materialized_view_total_size'"
     return [
         outer_panels.row_collapsed(
             "Hummock Manager",
@@ -2170,7 +2249,7 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_kilobytes(
-                    "Table KV Size",
+                    "Table Size",
                     "",
                     [
                         panels.target(f"{table_metric('storage_version_stats', total_key_size_filter)}/1024",
@@ -2179,6 +2258,17 @@ def section_hummock_manager(outer_panels):
                                       "table{{table_id}} {{metric}}"),
                     ],
                 ),
+
+                panels.timeseries_kilobytes(
+                    "Materialized View Size",
+                    "",
+                    [
+                        panels.target(f"{table_metric('storage_materialized_view_stats', mv_total_size_filter)}/1024",
+                                      "{{metric}}, mv id - {{table_id}} "),
+                    ],
+                ),
+
+        
                 panels.timeseries_count(
                     "Table KV Count",
                     "",
@@ -2238,6 +2328,30 @@ Objects are classified into 3 groups:
                             f"rate({metric('storage_version_checkpoint_latency_sum')}[$__rate_interval]) / rate({metric('storage_version_checkpoint_latency_count')}[$__rate_interval])",
                             "version_checkpoint_latency_avg",
                         ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Write Stop Compaction Groups",
+                    "When certain per compaction group threshold is exceeded (e.g. number of level 0 sub-level in LSMtree), write op to that compaction group is stopped temporarily. Check log for detail reason of write stop.",
+                    [
+                        panels.target(f"{metric('storage_write_stop_compaction_groups')}",
+                                      "compaction_group_{{compaction_group_id}}"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Full GC Trigger Count",
+                    "total number of attempts to trigger full GC",
+                    [
+                        panels.target(f"{metric('storage_full_gc_trigger_count')}",
+                                      "full_gc_trigger_count"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Full GC Last Watermark",
+                    "the object id watermark used in last full GC",
+                    [
+                        panels.target(f"{metric('storage_full_gc_last_object_id_watermark')}",
+                                      "full_gc_last_object_id_watermark"),
                     ],
                 ),
             ],
@@ -2578,6 +2692,16 @@ def section_memory_manager(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_ms(
+                    "LRU manager diff between current watermark and evicted watermark time (ms) for actors",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('lru_evicted_watermark_time_diff_ms')}",
+                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]
@@ -2594,8 +2718,8 @@ def section_connector_node(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('connector_source_rows_received')}[$__interval])",
-                            "{{source_type}} @ {{source_id}}",
+                            f"rate({metric('connector_source_rows_received')}[$__rate_interval])",
+                            "source={{source_type}} @ {{source_id}}",
                         ),
                     ],
                 ),
@@ -2604,8 +2728,8 @@ def section_connector_node(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('connector_sink_rows_received')}[$__interval])",
-                            "{{connector_type}} @ {{sink_id}}",
+                            f"rate({metric('connector_sink_rows_received')}[$__rate_interval])",
+                            "sink={{connector_type}} @ {{sink_id}}",
                         ),
                     ],
                 ),

@@ -9,6 +9,7 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
+  message NowRexNode {}
   // TODO: move this into `FunctionCall`.
   enum Type {
     // `InputRef`, `Constant`, and `UserDefinedFunction` are indicated by the viriant of `rex_node`.
@@ -60,6 +61,8 @@ message ExprNode {
     TO_TIMESTAMP1 = 107;
     // Performs a cast with additional timezone information.
     CAST_WITH_TIME_ZONE = 108;
+    ADD_WITH_TIME_ZONE = 109;
+    SUBTRACT_WITH_TIME_ZONE = 110;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -137,6 +140,7 @@ message ExprNode {
     LN = 272;
     LOG10 = 273;
     CBRT = 274;
+    SIGN = 275;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -156,6 +160,8 @@ message ExprNode {
     SHA256 = 314;
     SHA384 = 315;
     SHA512 = 316;
+    LEFT = 317;
+    RIGHT = 318;
 
     // Unary operators
     NEG = 401;
@@ -179,6 +185,9 @@ message ExprNode {
     ARRAY_POSITIONS = 539;
     TRIM_ARRAY = 540;
     STRING_TO_ARRAY = 541;
+    ARRAY_POSITION = 542;
+    ARRAY_REPLACE = 543;
+    ARRAY_DIMS = 544;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
@@ -206,6 +215,7 @@ message ExprNode {
     data.Datum constant = 5;
     FunctionCall func_call = 6;
     UserDefinedFunction udf = 7;
+    NowRexNode now = 8;
   }
 }
 
@@ -235,6 +245,11 @@ message TableFunction {
 // Reference to an upstream column, containing its index and data type.
 message InputRef {
   uint32 index = 1;
+  data.DataType type = 2;
+}
+
+message Constant {
+  data.Datum datum = 1;
   data.DataType type = 2;
 }
 
@@ -300,6 +315,10 @@ message AggCall {
     BOOL_OR = 19;
     JSONB_AGG = 20;
     JSONB_OBJECT_AGG = 21;
+    PERCENTILE_CONT = 22;
+    PERCENTILE_DISC = 23;
+    MODE = 24;
+    LAST_VALUE = 25;
   }
   Type type = 1;
   repeated InputRef args = 2;
@@ -307,6 +326,7 @@ message AggCall {
   bool distinct = 4;
   repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
+  repeated Constant direct_args = 7;
 }
 
 message WindowFrame {
@@ -356,9 +376,6 @@ message WindowFunction {
     // NTILE = 6;
     LAG = 7;
     LEAD = 8;
-    // FIRST_VALUE = 9;
-    // LAST_VALUE = 10;
-    // NTH_VALUE = 11;
   }
 
   oneof type {

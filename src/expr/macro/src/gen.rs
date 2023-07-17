@@ -520,8 +520,20 @@ impl FunctionAttr {
             vec![quote! { self.return_type.clone() }]
         } else {
             (0..return_types.len())
-                .map(|i| quote! { self.return_type.as_struct().fields[#i].clone() })
+                .map(|i| quote! { self.return_type.as_struct().types().nth(#i).unwrap().clone() })
                 .collect()
+        };
+        let build_value_array = if return_types.len() == 1 {
+            quote! { let [value_array] = value_arrays; }
+        } else {
+            quote! {
+                let bitmap = value_arrays[0].null_bitmap().clone();
+                let value_array = StructArray::new(
+                    self.return_type.as_struct().clone(),
+                    value_arrays.to_vec(),
+                    bitmap,
+                ).into_ref();
+            }
         };
         let const_arg = match &self.prebuild {
             Some(_) => quote! { &self.const_arg },
@@ -594,25 +606,24 @@ impl FunctionAttr {
                         let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
 
-                        let mut index_builder = I64ArrayBuilder::new(self.chunk_size);
+                        let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
 
                         for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
                             if let (#(Some(#inputs),)*) = row && visible {
                                 let iter = #fn_name(#(#inputs,)* #const_arg);
                                 for output in #iter {
-                                    index_builder.append(Some(i as i64));
+                                    index_builder.append(Some(i as i32));
                                     match #output {
                                         Some((#(#outputs),*)) => { #(#builders.append(Some(#outputs.as_scalar_ref()));)* }
                                         None => { #(#builders.append_null();)* }
                                     }
 
                                     if index_builder.len() == self.chunk_size {
-                                        let columns = vec![
-                                            std::mem::replace(&mut index_builder, I64ArrayBuilder::new(self.chunk_size)).finish().into_ref(),
-                                            #(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref(),)*
-                                        ];
-                                        yield DataChunk::new(columns, self.chunk_size);
+                                        let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
+                                        let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
+                                        #build_value_array
+                                        yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
                                     }
                                 }
                             }
@@ -620,11 +631,10 @@ impl FunctionAttr {
 
                         if index_builder.len() > 0 {
                             let len = index_builder.len();
-                            let columns = vec![
-                                index_builder.finish().into_ref(),
-                                #(#builders.finish().into_ref(),)*
-                            ];
-                            yield DataChunk::new(columns, len);
+                            let index_array = index_builder.finish().into_ref();
+                            let value_arrays = [#(#builders.finish().into_ref()),*];
+                            #build_value_array
+                            yield DataChunk::new(vec![index_array, value_array], len);
                         }
                     }
                 }
@@ -651,9 +661,7 @@ fn data_type(ty: &str) -> TokenStream2 {
         return quote! { DataType::List(Box::new(#inner_type)) };
     }
     if ty.starts_with("struct<") {
-        return quote! { DataType::Struct(Arc::new(
-            #ty.parse().expect("invalid struct type")
-        )) };
+        return quote! { DataType::Struct(#ty.parse().expect("invalid struct type")) };
     }
     let variant = format_ident!("{}", types::data_type(ty));
     quote! { DataType::#variant }

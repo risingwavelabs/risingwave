@@ -52,6 +52,31 @@ struct Inner {
     metrics: Arc<MetaMetrics>,
 }
 
+impl Inner {
+    /// Create a new scheduled barrier with the given `checkpoint`, `command` and `notifiers`.
+    fn new_scheduled(
+        &self,
+        checkpoint: bool,
+        command: Command,
+        notifiers: impl IntoIterator<Item = Notifier>,
+    ) -> Scheduled {
+        // Create a span only if we're being traced, instead of for every periodic barrier.
+        let span = if tracing::Span::current().is_none() {
+            tracing::Span::none()
+        } else {
+            tracing::info_span!("barrier", checkpoint, epoch = tracing::field::Empty)
+        };
+
+        Scheduled {
+            command,
+            notifiers: notifiers.into_iter().collect(),
+            send_latency_timer: self.metrics.barrier_send_latency.start_timer(),
+            span,
+            checkpoint,
+        }
+    }
+}
+
 /// The sender side of the barrier scheduling queue.
 /// Can be cloned and held by other managers to schedule and run barriers.
 #[derive(Clone)]
@@ -140,12 +165,11 @@ impl<S: MetaStore> BarrierScheduler<S> {
             }
             None => {
                 // If no command scheduled, create a periodic barrier by default.
-                queue.push_back(Scheduled {
-                    notifiers: new_notifiers,
-                    command: Command::barrier(),
-                    send_latency_timer: self.inner.metrics.barrier_send_latency.start_timer(),
-                    checkpoint: new_checkpoint,
-                });
+                queue.push_back(self.inner.new_scheduled(
+                    new_checkpoint,
+                    Command::barrier(),
+                    new_notifiers,
+                ));
                 self.inner.changed_tx.send(()).ok();
             }
         }
@@ -184,17 +208,15 @@ impl<S: MetaStore> BarrierScheduler<S> {
                 collect_rx,
                 finish_rx,
             });
-            scheduleds.push(Scheduled {
-                checkpoint: command.need_checkpoint(),
+            scheduleds.push(self.inner.new_scheduled(
+                command.need_checkpoint(),
                 command,
-                send_latency_timer: self.inner.metrics.barrier_send_latency.start_timer(),
-                notifiers: once(Notifier {
+                once(Notifier {
                     collected: Some(collect_tx),
                     finished: Some(finish_tx),
                     ..Default::default()
-                })
-                .collect(),
-            });
+                }),
+            ));
         }
 
         self.push(scheduleds).await;
@@ -263,12 +285,8 @@ impl ScheduledBarriers {
             }
             None => {
                 // If no command scheduled, create a periodic barrier by default.
-                Scheduled {
-                    command: Command::barrier(),
-                    send_latency_timer: self.inner.metrics.barrier_send_latency.start_timer(),
-                    notifiers: Default::default(),
-                    checkpoint,
-                }
+                self.inner
+                    .new_scheduled(checkpoint, Command::barrier(), std::iter::empty())
             }
         };
         self.update_num_uncheckpointed_barrier(scheduled.checkpoint);

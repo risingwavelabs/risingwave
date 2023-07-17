@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pretty_xmlish::Pretty;
+use std::borrow::Cow;
+use std::hash::Hash;
+
+use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::Schema;
 
 use super::{stream, EqJoinPredicate};
@@ -57,12 +60,31 @@ mod update;
 pub use update::*;
 mod delete;
 pub use delete::*;
+mod insert;
+pub use insert::*;
+mod limit;
+pub use limit::*;
 
 pub trait DistillUnit {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a>;
+    fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;
 }
 
-pub trait GenericPlanRef {
+macro_rules! impl_distill_unit_from_fields {
+    ($name:ident, $bound:path) => {
+        use std::borrow::Cow;
+
+        use pretty_xmlish::XmlNode;
+        use $crate::optimizer::plan_node::generic::DistillUnit;
+        impl<PlanRef: $bound> DistillUnit for $name<PlanRef> {
+            fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a> {
+                XmlNode::simple_record(name, self.fields_pretty(), vec![])
+            }
+        }
+    };
+}
+pub(super) use impl_distill_unit_from_fields;
+
+pub trait GenericPlanRef: Eq + Hash {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];
     fn functional_dependency(&self) -> &FunctionalDependencySet;

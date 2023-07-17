@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -22,7 +21,8 @@ use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, Pro
 use risingwave_common::error::{Result, RwError};
 use url::Url;
 
-use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
+use crate::aws_auth::AwsAuthProps;
+use crate::aws_utils::{default_conn_config, s3_client};
 use crate::parser::schema_registry::{Client, ConfluentSchema};
 use crate::parser::util::download_from_http;
 
@@ -30,22 +30,18 @@ const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
 /// Read schema from s3 bucket.
 /// S3 file location format: <s3://bucket_name/file_name>
-pub(super) async fn read_schema_from_s3(
-    url: &Url,
-    properties: &HashMap<String, String>,
-) -> Result<String> {
+pub(super) async fn read_schema_from_s3(url: &Url, config: &AwsAuthProps) -> Result<String> {
     let bucket = url
         .domain()
         .ok_or_else(|| RwError::from(InternalError(format!("Illegal Avro schema path {}", url))))?;
-    if properties.get(AVRO_SCHEMA_LOCATION_S3_REGION).is_none() {
+    if config.region.is_none() {
         return Err(RwError::from(InvalidConfigValue {
             config_entry: AVRO_SCHEMA_LOCATION_S3_REGION.to_string(),
             config_value: "NONE".to_string(),
         }));
     }
     let key = url.path().replace('/', "");
-    let config = AwsConfigV2::from(properties.clone());
-    let sdk_config = config.load_config(None).await;
+    let sdk_config = config.build_config().await?;
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
     let response = s3_client
         .get_object()

@@ -22,7 +22,6 @@
 #![feature(impl_trait_in_assoc_type)]
 
 mod key_cmp;
-
 use std::cmp::Ordering;
 
 pub use key_cmp::*;

@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use risingwave_common::catalog::Schema;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::NestedLoopJoinNode;
 
-use super::generic::{self, GenericPlanRef};
+use super::generic::{self};
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -50,44 +49,27 @@ impl BatchNestedLoopJoin {
     }
 }
 
-impl fmt::Display for BatchNestedLoopJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Distill for BatchNestedLoopJoin {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("BatchNestedLoopJoin");
-        builder.field("type", &self.logical.join_type);
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.logical.join_type)));
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
-        builder.field(
+        let concat_schema = self.logical.concat_schema();
+        vec.push((
             "predicate",
-            &ConditionDisplay {
+            Pretty::debug(&ConditionDisplay {
                 condition: &self.logical.on,
                 input_schema: &concat_schema,
-            },
-        );
+            }),
+        ));
 
         if verbose {
-            if self
-                .logical
-                .output_indices
-                .iter()
-                .copied()
-                .eq(0..self.logical.internal_column_num())
-            {
-                builder.field("output", &format_args!("all"));
-            } else {
-                builder.field(
-                    "output",
-                    &IndicesDisplay {
-                        indices: &self.logical.output_indices,
-                        input_schema: &concat_schema,
-                    },
-                );
-            }
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema);
+            vec.push(("output", data));
         }
 
-        builder.finish()
+        childless_record("BatchNestedLoopJoin", vec)
     }
 }
 

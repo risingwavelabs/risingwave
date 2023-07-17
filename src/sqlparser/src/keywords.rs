@@ -198,6 +198,7 @@ define_keywords!(
     ELEMENT,
     ELSE,
     EMIT,
+    ENCODE,
     ENCRYPTED,
     END,
     END_EXEC = "END-EXEC",

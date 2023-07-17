@@ -22,7 +22,7 @@ use bytes::{Buf, BufMut};
 use either::Either;
 use itertools::Itertools;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
-use serde::{Deserializer, Serializer};
+use serde::{Deserialize, Serializer};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
@@ -383,25 +383,7 @@ impl ListValue {
         datatype: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
-        // This is a bit dirty, but idk how to correctly deserialize bytes in memcomparable
-        // format without this...
-        struct Visitor<'a>(&'a DataType);
-        impl<'a> serde::de::Visitor<'a> for Visitor<'a> {
-            type Value = Vec<u8>;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(formatter, "a list of {}", self.0)
-            }
-
-            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(v)
-            }
-        }
-        let visitor = Visitor(datatype);
-        let bytes = deserializer.deserialize_byte_buf(visitor)?;
+        let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
         let mut values = Vec::new();
         while inner_deserializer.has_remaining() {
@@ -434,6 +416,7 @@ impl<'a> ListRef<'a> {
         self.len() == 0
     }
 
+    /// Returns the elements in the flattened list.
     pub fn flatten(self) -> Vec<DatumRef<'a>> {
         // XXX: avoid using vector
         iter_elems_ref!(self, it, {
@@ -446,6 +429,20 @@ impl<'a> ListRef<'a> {
                 .into_iter()
             })
             .collect()
+        })
+    }
+
+    /// Returns the total number of elements in the flattened list.
+    pub fn flatten_len(self) -> usize {
+        iter_elems_ref!(self, it, {
+            it.map(|datum_ref| {
+                if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
+                    list_ref.flatten_len()
+                } else {
+                    1
+                }
+            })
+            .sum()
         })
     }
 

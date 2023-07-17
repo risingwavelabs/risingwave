@@ -27,6 +27,7 @@ use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{
     DefaultOrd, DefaultOrdered, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
 };
+use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_storage::row_serde::row_serde_util::deserialize_pk_with_vnode;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -34,9 +35,6 @@ use risingwave_storage::StateStore;
 use super::{StreamExecutorError, StreamExecutorResult};
 use crate::common::cache::{OrderedStateCache, StateCache, StateCacheFiller};
 use crate::common::table::state_table::StateTable;
-
-// TODO(rc): This should be a struct in `memcmp_encoding` module. See #8606.
-type MemcmpEncoded = Box<[u8]>;
 
 type CacheKey = (
     DefaultOrdered<ScalarImpl>, // sort (watermark) column value
@@ -56,7 +54,7 @@ fn row_to_cache_key<S: StateStore>(
     buffer_table
         .pk_serde()
         .serialize((&row).project(buffer_table.pk_indices()), &mut pk);
-    (timestamp_val.into(), pk.into_boxed_slice())
+    (timestamp_val.into(), pk.into())
 }
 
 /// [`SortBuffer`] is a common component that consume an unordered stream and produce an ordered

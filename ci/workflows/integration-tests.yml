@@ -7,6 +7,7 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+      - ./ci/plugins/docker-compose-logs
     matrix:
       setup:
         testcase:
@@ -86,14 +87,16 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+      - ./ci/plugins/docker-compose-logs
     matrix:
       setup:
         testcase:
           - "twitter"
           - "twitter-pulsar"
-          - "debezium-mongo"
+        # - "debezium-mongo"
           - "debezium-postgres"
           - "tidb-cdc-sink"
+          - "debezium-sqlserver"
         format:
           - "json"
           - "protobuf"
@@ -102,15 +105,19 @@ steps:
             testcase: "twitter-pulsar"
             format: "protobuf"
           skip: true
-        - with:
-            testcase: "debezium-mongo"
-            format: "protobuf"
-          skip: true
+      # - with:
+      #     testcase: "debezium-mongo"
+      #     format: "protobuf"
+      #   skip: true
         - with:
             testcase: "debezium-postgres"
             format: "protobuf"
           skip: true
         - with:
             testcase: "tidb-cdc-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "debezium-sqlserver"
             format: "protobuf"
           skip: true

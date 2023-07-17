@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
@@ -23,9 +21,11 @@ use risingwave_expr::agg::AggKind;
 use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
+use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamSort, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, LogicalProject,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
+    StreamOverWindow, StreamSort, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, WindowFunction};
 use crate::optimizer::plan_node::{
@@ -139,7 +139,7 @@ impl LogicalOverWindow {
                             | AggKind::VarSamp
                     )
                 {
-                    // Refer to LogicalAggBuilder::try_rewrite_agg_call()
+                    // Refer to `LogicalAggBuilder::try_rewrite_agg_call`
                     match agg_kind {
                         AggKind::Avg => {
                             assert_eq!(args.len(), 1);
@@ -393,15 +393,23 @@ impl LogicalOverWindow {
             .collect_vec();
 
         let mut args = window_function.args;
-        let frame = match window_function.kind {
+        let (kind, frame) = match window_function.kind {
             WindowFuncKind::RowNumber | WindowFuncKind::Rank | WindowFuncKind::DenseRank => {
                 // ignore user-defined frame for rank functions
-                Frame::rows(
-                    FrameBound::UnboundedPreceding,
-                    FrameBound::UnboundedFollowing,
+                (
+                    window_function.kind,
+                    Frame::rows(
+                        FrameBound::UnboundedPreceding,
+                        FrameBound::UnboundedFollowing,
+                    ),
                 )
             }
             WindowFuncKind::Lag | WindowFuncKind::Lead => {
+                // `lag(x, const offset N) over ()`
+                //     == `first_value(x) over (rows between N preceding and N preceding)`
+                // `lead(x, const offset N) over ()`
+                //     == `first_value(x) over (rows between N following and N following)`
+
                 let offset = if args.len() > 1 {
                     let offset_expr = args.remove(1);
                     if !offset_expr.return_type().is_int() {
@@ -411,37 +419,46 @@ impl LogicalOverWindow {
                         ))
                         .into());
                     }
-                    offset_expr
-                        .cast_implicit(DataType::Int64)?
-                        .try_fold_const()
-                        .transpose()?
-                        .flatten()
+                    let const_offset = offset_expr.cast_implicit(DataType::Int64)?.try_fold_const();
+                    if const_offset.is_none() {
+                        // should already be checked in `WindowFunction::infer_return_type`,
+                        // but just in case
+                        return Err(ErrorCode::NotImplemented(
+                            "non-const `offset` of `lag`/`lead` is not supported yet".to_string(),
+                            None.into(),
+                        )
+                        .into());
+                    }
+                    const_offset
+                        .unwrap()?
                         .map(|v| *v.as_int64() as usize)
                         .unwrap_or(1usize)
                 } else {
                     1usize
                 };
+                let frame = if window_function.kind == WindowFuncKind::Lag {
+                    Frame::rows(FrameBound::Preceding(offset), FrameBound::Preceding(offset))
+                } else {
+                    Frame::rows(FrameBound::Following(offset), FrameBound::Following(offset))
+                };
 
-                // override the frame
-                // TODO(rc): We can only do the optimization for constant offset.
-                if window_function.kind == WindowFuncKind::Lag {
-                    Frame::rows(FrameBound::Preceding(offset), FrameBound::CurrentRow)
-                } else {
-                    Frame::rows(FrameBound::CurrentRow, FrameBound::Following(offset))
-                }
+                (WindowFuncKind::Aggregate(AggKind::FirstValue), frame)
             }
-            WindowFuncKind::Aggregate(_) => window_function.frame.unwrap_or({
-                // FIXME(rc): The following 2 cases should both be `Frame::Range(Unbounded,
-                // CurrentRow)` but we don't support yet.
-                if order_by.is_empty() {
-                    Frame::rows(
-                        FrameBound::UnboundedPreceding,
-                        FrameBound::UnboundedFollowing,
-                    )
-                } else {
-                    Frame::rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow)
-                }
-            }),
+            WindowFuncKind::Aggregate(_) => {
+                let frame = window_function.frame.unwrap_or({
+                    // FIXME(rc): The following 2 cases should both be `Frame::Range(Unbounded,
+                    // CurrentRow)` but we don't support yet.
+                    if order_by.is_empty() {
+                        Frame::rows(
+                            FrameBound::UnboundedPreceding,
+                            FrameBound::UnboundedFollowing,
+                        )
+                    } else {
+                        Frame::rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow)
+                    }
+                });
+                (window_function.kind, frame)
+            }
         };
 
         let args = args
@@ -450,7 +467,7 @@ impl LogicalOverWindow {
             .collect_vec();
 
         Ok(PlanWindowFunction {
-            kind: window_function.kind,
+            kind,
             return_type: window_function.return_type,
             args,
             partition_by,
@@ -558,12 +575,7 @@ impl PlanTreeNodeUnary for LogicalOverWindow {
 }
 
 impl_plan_tree_node_for_unary! { LogicalOverWindow }
-
-impl fmt::Display for LogicalOverWindow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalOverWindow")
-    }
-}
+impl_distill_by_unit!(LogicalOverWindow, core, "LogicalOverWindow");
 
 impl ColPrunable for LogicalOverWindow {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
@@ -646,19 +658,70 @@ impl PredicatePushdown for LogicalOverWindow {
 
 impl ToBatch for LogicalOverWindow {
     fn to_batch(&self) -> Result<PlanRef> {
-        Err(ErrorCode::NotImplemented(
-            "Batch over window is not implemented yet".to_string(),
-            9124.into(),
-        )
-        .into())
+        if self
+            .window_functions()
+            .iter()
+            .any(|x| matches!(x.kind, WindowFuncKind::Rank | WindowFuncKind::DenseRank))
+        {
+            return Err(ErrorCode::NotImplemented(
+                "`rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet"
+                    .to_string(),
+                8965.into(),
+            )
+            .into());
+        }
+
+        if !self.core.funcs_have_same_partition_and_order() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
+            )
+            .into());
+        }
+
+        // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
+        // empty PARTITION BY by simply removing the following check.
+        let partition_key_indices = self.window_functions()[0]
+            .partition_by
+            .iter()
+            .map(|e| e.index())
+            .collect_vec();
+        if partition_key_indices.is_empty() {
+            return Err(ErrorCode::NotImplemented(
+                "Window function with empty PARTITION BY is not supported yet".to_string(),
+                None.into(),
+            )
+            .into());
+        }
+
+        let input = self.input().to_batch()?;
+        let new_logical = OverWindow {
+            input,
+            ..self.core.clone()
+        };
+        Ok(BatchOverWindow::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        if self
+            .window_functions()
+            .iter()
+            .any(|x| matches!(x.kind, WindowFuncKind::Rank | WindowFuncKind::DenseRank))
+        {
+            return Err(ErrorCode::NotImplemented(
+                "`rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet"
+                    .to_string(),
+                8965.into(),
+            )
+            .into());
+        }
+
         let stream_input = self.core.input.to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {
+            // Emit-On-Window-Close case
+
             if !self.core.funcs_have_same_partition_and_order() {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
@@ -705,14 +768,39 @@ impl ToStream for LogicalOverWindow {
 
             let mut logical = self.core.clone();
             logical.input = sort.into();
-            return Ok(StreamEowcOverWindow::new(logical).into());
-        }
+            Ok(StreamEowcOverWindow::new(logical).into())
+        } else {
+            // General (Emit-On-Update) case
 
-        Err(ErrorCode::NotImplemented(
-            "General version of streaming over window is not implemented yet".to_string(),
-            9124.into(),
-        )
-        .into())
+            if !self.core.funcs_have_same_partition_and_order() {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
+                )
+                .into());
+            }
+
+            // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
+            // empty PARTITION BY by simply removing the following check.
+            let partition_key_indices = self.window_functions()[0]
+                .partition_by
+                .iter()
+                .map(|e| e.index())
+                .collect_vec();
+            if partition_key_indices.is_empty() {
+                return Err(ErrorCode::NotImplemented(
+                    "Window function with empty PARTITION BY is not supported yet".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+
+            let new_input =
+                RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
+                    .enforce_if_not_satisfies(stream_input, &Order::any())?;
+            let mut logical = self.core.clone();
+            logical.input = new_input;
+            Ok(StreamOverWindow::new(logical).into())
+        }
     }
 
     fn logical_rewrite_for_stream(

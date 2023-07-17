@@ -57,6 +57,7 @@ pub struct SourceDescBuilder {
     source_info: PbStreamSourceInfo,
     connector_params: ConnectorParams,
     connector_message_buffer_size: usize,
+    pk_indices: Vec<usize>,
 }
 
 impl SourceDescBuilder {
@@ -69,6 +70,7 @@ impl SourceDescBuilder {
         source_info: PbStreamSourceInfo,
         connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
+        pk_indices: Vec<usize>,
     ) -> Self {
         Self {
             columns,
@@ -78,6 +80,7 @@ impl SourceDescBuilder {
             source_info,
             connector_params,
             connector_message_buffer_size,
+            pk_indices,
         }
     }
 
@@ -89,6 +92,9 @@ impl SourceDescBuilder {
             .collect();
         if let Some(row_id_index) = self.row_id_index {
             columns[row_id_index].is_row_id = true;
+        }
+        for pk_index in &self.pk_indices {
+            columns[*pk_index].is_pk = true;
         }
         columns
     }
@@ -107,6 +113,7 @@ impl SourceDescBuilder {
             PbRowFormatType::UpsertAvro => SourceFormat::UpsertAvro,
             PbRowFormatType::DebeziumMongoJson => SourceFormat::DebeziumMongoJson,
             PbRowFormatType::Csv => SourceFormat::Csv,
+            PbRowFormatType::Bytes => SourceFormat::Bytes,
             _ => unreachable!(),
         };
 
@@ -122,7 +129,11 @@ impl SourceDescBuilder {
         let source = ConnectorSource::new(
             self.properties,
             columns.clone(),
-            self.connector_params.connector_rpc_endpoint,
+            // TODO: may reuse the connector client
+            self.connector_params
+                .connector_client
+                .as_ref()
+                .map(|client| client.endpoint().clone()),
             self.connector_message_buffer_size,
             psrser_config,
         )?;
@@ -154,7 +165,11 @@ impl SourceDescBuilder {
         let source = FsConnectorSource::new(
             self.properties.clone(),
             columns.clone(),
-            self.connector_params.connector_rpc_endpoint.clone(),
+            // TODO: may reuse connector client
+            self.connector_params
+                .connector_client
+                .as_ref()
+                .map(|client| client.endpoint().clone()),
             parser_config,
         )?;
 
@@ -181,6 +196,7 @@ pub mod test_utils {
         row_id_index: Option<usize>,
         source_info: StreamSourceInfo,
         properties: HashMap<String, String>,
+        pk_indices: Vec<usize>,
     ) -> SourceDescBuilder {
         let columns = schema
             .fields
@@ -209,6 +225,7 @@ pub mod test_utils {
             source_info,
             connector_params: Default::default(),
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
+            pk_indices,
         }
     }
 }

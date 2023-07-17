@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use risingwave_common::catalog::Schema;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
 use risingwave_pb::plan_common::JoinType;
 
 use super::generic::{self, GenericPlanRef};
+use super::utils::{childless_record, Distill};
 use super::{
     EqJoinPredicate, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb,
     ToDistributedBatch,
@@ -98,44 +97,25 @@ impl BatchHashJoin {
     }
 }
 
-impl fmt::Display for BatchHashJoin {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Distill for BatchHashJoin {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("BatchHashJoin");
-        builder.field("type", &self.logical.join_type);
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.logical.join_type)));
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
-        builder.field(
+        let concat_schema = self.logical.concat_schema();
+        vec.push((
             "predicate",
-            &EqJoinPredicateDisplay {
+            Pretty::debug(&EqJoinPredicateDisplay {
                 eq_join_predicate: self.eq_join_predicate(),
                 input_schema: &concat_schema,
-            },
-        );
-
+            }),
+        ));
         if verbose {
-            if self
-                .logical
-                .output_indices
-                .iter()
-                .copied()
-                .eq(0..self.logical.internal_column_num())
-            {
-                builder.field("output", &format_args!("all"));
-            } else {
-                builder.field(
-                    "output",
-                    &IndicesDisplay {
-                        indices: &self.logical.output_indices,
-                        input_schema: &concat_schema,
-                    },
-                );
-            }
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema);
+            vec.push(("output", data));
         }
-
-        builder.finish()
+        childless_record("BatchHashJoin", vec)
     }
 }
 

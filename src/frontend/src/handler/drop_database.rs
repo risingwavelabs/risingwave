@@ -46,10 +46,12 @@ pub async fn handle_drop_database(
                 // Unable to find this database. If `if_exists` is true,
                 // we can just return success.
                 return if if_exists {
-                    Ok(PgResponse::empty_result_with_notice(
-                        StatementType::DROP_DATABASE,
-                        format!("database \"{}\" does not exist, skipping", database_name),
-                    ))
+                    Ok(PgResponse::builder(StatementType::DROP_DATABASE)
+                        .notice(format!(
+                            "database \"{}\" does not exist, skipping",
+                            database_name
+                        ))
+                        .into())
                 } else {
                     Err(err.into())
                 };
@@ -61,7 +63,7 @@ pub async fn handle_drop_database(
         return Err(ErrorCode::PermissionDenied("Do not have the privilege".to_string()).into());
     }
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_database(database.id()).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_DATABASE))
 }

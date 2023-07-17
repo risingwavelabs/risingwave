@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use std::cmp::{max, min};
-use std::fmt;
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
@@ -26,6 +26,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 
 use super::stream_watermark_filter::StreamWatermarkFilter;
+use super::utils::{childless_record, Distill};
 use super::{
     generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject,
     PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource, ToBatch,
@@ -34,6 +35,7 @@ use super::{
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -170,14 +172,6 @@ impl LogicalSource {
         })
     }
 
-    pub(super) fn column_names(&self) -> Vec<String> {
-        self.schema()
-            .fields()
-            .iter()
-            .map(|f| f.name.clone())
-            .collect()
-    }
-
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
     }
@@ -236,21 +230,20 @@ impl LogicalSource {
 }
 
 impl_plan_tree_node_for_leaf! {LogicalSource}
-
-impl fmt::Display for LogicalSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // TODO: show generated columns
-        if let Some(catalog) = self.source_catalog() {
-            write!(
-                f,
-                "LogicalSource {{ source: {}, columns: [{}], time_range: [{:?}] }}",
-                catalog.name,
-                self.column_names().join(", "),
-                self.core.kafka_timestamp_range,
-            )
+impl Distill for LogicalSource {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let fields = if let Some(catalog) = self.source_catalog() {
+            let src = Pretty::from(catalog.name.clone());
+            let time = Pretty::debug(&self.core.kafka_timestamp_range);
+            vec![
+                ("source", src),
+                ("columns", column_names_pretty(self.schema())),
+                ("time_range", time),
+            ]
         } else {
-            write!(f, "LogicalSource")
-        }
+            vec![]
+        };
+        childless_record("LogicalSource", fields)
     }
 }
 
@@ -358,7 +351,7 @@ fn expr_to_kafka_timestamp_range(
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            datum.unwrap().into_int64() / 1000,
+                            datum.unwrap().into_timestamptz().timestamp_millis(),
                             false,
                         )))
                     }
@@ -369,7 +362,7 @@ fn expr_to_kafka_timestamp_range(
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            datum.unwrap().into_int64() / 1000,
+                            datum.unwrap().into_timestamptz().timestamp_millis(),
                             true,
                         )))
                     }

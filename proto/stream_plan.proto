@@ -93,7 +93,7 @@ message Barrier {
     ResumeMutation resume = 8;
   }
   // Used for tracing.
-  bytes span = 2;
+  map<string, string> tracing_context = 2;
   // Whether this barrier do checkpoint
   bool checkpoint = 9;
 
@@ -145,19 +145,23 @@ message SourceNode {
 }
 
 message SinkDesc {
+  reserved 4;
+  reserved "columns";
   uint32 id = 1;
   string name = 2;
   string definition = 3;
-  repeated plan_common.ColumnDesc columns = 4;
   repeated common.ColumnOrder plan_pk = 5;
   repeated uint32 downstream_pk = 6;
   repeated uint32 distribution_key = 7;
   map<string, string> properties = 8;
   catalog.SinkType sink_type = 9;
+  repeated plan_common.ColumnCatalog column_catalogs = 10;
 }
 
 message SinkNode {
   SinkDesc sink_desc = 1;
+  // A sink with a kv log store should have a table.
+  catalog.Table table = 2;
 }
 
 message ProjectNode {
@@ -557,6 +561,14 @@ message EowcOverWindowNode {
   catalog.Table state_table = 4;
 }
 
+// Note this is not exactly the same as EowcOverWindowNode in terms of future extension, so better to split as 2 different nodes.
+message OverWindowNode {
+  repeated expr.WindowFunction calls = 1;
+  repeated uint32 partition_by = 2;
+  repeated common.ColumnOrder order_by = 3;
+  catalog.Table state_table = 4;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -596,6 +608,7 @@ message StreamNode {
     DedupNode append_only_dedup = 134;
     NoOpNode no_op = 135;
     EowcOverWindowNode eowc_over_window = 136;
+    OverWindowNode over_window = 137;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -685,6 +698,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_CHAIN_NODE = 16;
   FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
   FRAGMENT_TYPE_FLAG_VALUES = 64;
+  FRAGMENT_TYPE_FLAG_DML = 128;
 }
 
 // The environment associated with a stream plan

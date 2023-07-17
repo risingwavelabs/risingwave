@@ -85,6 +85,88 @@
     select v1 from t group by v1 + v2;
   expected_outputs:
   - planner_error
+- name: group by output column ordinal ok
+  sql: |
+    select 4 + 5 group by 1;
+  expected_outputs:
+  - logical_plan
+- name: group by const int expr
+  sql: |
+    select 4 + 5 group by 3 - 2; -- not folded
+  expected_outputs:
+  - logical_plan
+- name: group by output column ordinal of agg
+  sql: |
+    select sum(2) group by 1;
+  expected_outputs:
+  - planner_error
+- name: group by output column ordinal non-integer const
+  sql: |
+    select 4 + 5 group by null; -- no implicit cast
+  expected_outputs:
+  - binder_error
+- name: group by output column ordinal bigint
+  sql: |
+    select 4 + 5 group by 2147483648;
+  expected_outputs:
+  - binder_error
+- name: group by output column ordinal negative
+  sql: |
+    select 4 + 5 group by -2147483648;
+  expected_outputs:
+  - binder_error
+- name: group by output column ordinal zero
+  sql: |
+    select 4 + 5 group by 0;
+  expected_outputs:
+  - binder_error
+- name: group by output column ordinal out of bound (excl extra order by exprs)
+  sql: |
+    select 4 + 5 group by 2 order by 7 + 8, 3 + 2;
+  expected_outputs:
+  - binder_error
+- name: group by output column name ok
+  sql: |
+    select 4 + 5 as a group by a;
+  expected_outputs:
+  - logical_plan
+- name: group by output column name ambiguous 2
+  sql: |
+    select 4 + 5 as a, 2 + 3 as a group by a;
+  expected_outputs:
+  - binder_error
+- name: group by output column name ambiguous 3
+  sql: |
+    select 4 + 5 as a, 2 + 3 as a, 3 + 4 as a group by a;
+  expected_outputs:
+  - binder_error
+- name: group by output column name not ambiguous when unused
+  sql: |
+    select 4 + 5 as a, 2 + 3 as a, 3 + 4 as b group by b;
+  expected_outputs:
+  - logical_plan
+- name: group by output column name not ambiguous when input preferred
+  sql: |
+    create table t (a int);
+    select 4 + 5 as a, 2 + 3 as a from t group by a;
+  expected_outputs:
+  - logical_plan
+- name: group by output column name expr disallowed
+  sql: |
+    select 4 + 5 as a group by a + 1;
+  expected_outputs:
+  - binder_error
+- name: group by prefers input while order by prefers output
+  sql: |
+    create table t (a int);
+    select 4 + 5 as a from t group by a order by a;
+  expected_outputs:
+  - batch_plan
+- name: group by column not found
+  sql: |
+    select 4 + 5 as a group by b;
+  expected_outputs:
+  - binder_error
 - sql: |
     create table t(v1 int, v2 int);
     select count(v1 + v2) as cnt, sum(v1 + v2) as sum from t;
@@ -352,6 +434,12 @@
   expected_outputs:
   - stream_plan
   - batch_plan
+- name: distinct agg on empty args
+  sql: |
+    create table t(x int, y varchar);
+    select count(distinct *) from t;
+  expected_outputs:
+  - binder_error
 - name: only distinct agg
   sql: |
     create table t(a int, b int, c int);
@@ -374,6 +462,42 @@
   - optimized_logical_plan_for_batch
   - stream_plan
   - batch_plan
+- name: distinct & string_agg
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(y, ','), count(distinct x) from t;
+  expected_outputs:
+  - logical_plan
+  - stream_plan
+  - batch_plan
+- name: distinct & order by on different calls
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(y, ',' order by y), count(distinct x) from t;
+  expected_outputs:
+  - logical_plan
+  - stream_plan
+  - batch_plan
+- name: distinct & order by on same calls
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(distinct y, ',' order by y), count(distinct x) from t;
+  expected_outputs:
+  - logical_plan
+  - stream_plan
+  - batch_plan
+- name: distinct & invalid order by
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(distinct y, ',' order by x) from t;
+  expected_outputs:
+  - binder_error
+- name: distinct with multiple non-const args
+  sql: |
+    create table t(x int, y varchar);
+    select string_agg(distinct y, x::varchar) from t;
+  expected_outputs:
+  - binder_error
 - name: distinct agg with filter
   sql: |
     create table t(a int, b int, c int);
@@ -397,11 +521,6 @@
   - stream_plan
   - optimized_logical_plan_for_batch
 - sql: |
-    create table t(x int, y varchar);
-    select string_agg(y, ',' order by y), count(distinct x) from t;
-  expected_outputs:
-  - planner_error
-- sql: |
     create table t(v1 int, v2 int);
     with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
   expected_outputs:
@@ -420,27 +539,35 @@
     select count(x), sum(distinct y), sum(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x int, y int);
     select count(y), sum(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - sql: |
     create table t(x int, y int);
     select count(distinct x), sum(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
-- sql: |
-    create table t(x varchar, y int);
-    select string_agg(x, ','), count(distinct y) from t;
-  expected_outputs:
-  - planner_error
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - name: remove unnecessary distinct for max and min
   sql: |
     create table t(x int, y int);
     select max(distinct x), min(distinct y) from t;
   expected_outputs:
   - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
+
 - name: agg filter - subquery
   sql: |
     /* This case is valid in PostgreSQL */
@@ -721,5 +848,78 @@
     create index idx_asc on t(a asc);
     create index idx_desc on t(a desc);
     select a, count(*) cnt from t group by a order by a desc;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(x) within group (order by y) from t;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont('abc') within group (order by y) from t;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(1.3) within group (order by y) from t;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0, 0) within group (order by y) from t;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t (x int, y varchar);
+    select percentile_cont(0) within group (order by y) from t;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0) within group (order by y desc) from t;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (x int, y varchar);
+    select percentile_disc(1) within group (order by y desc) from t;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (x int, y varchar);
+    select mode() within group (order by y desc) from t;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (x int, y varchar);
+    select mode(1) within group (order by y desc) from t;
+  expected_outputs:
+  - binder_error
+
+- sql: |
+    create table t (x int, y int);
+    select first_value(x) from t;
+  expected_outputs:
+  - planner_error
+- sql: |
+    create table t (x int, y int);
+    select last_value(x) from t;
+  expected_outputs:
+  - planner_error
+- sql: |
+    create table t (x int, y int);
+    select first_value(x order by y asc) from t;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- sql: |
+    create table t (x int, y int);
+    select last_value(x order by y desc nulls last) from t;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- sql: |
+    CREATE TABLE integers(i INTEGER);
+    SELECT count(DISTINCT i) FROM integers;
   expected_outputs:
   - batch_plan

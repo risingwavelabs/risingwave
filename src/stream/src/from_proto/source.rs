@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
+use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
@@ -43,12 +44,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .context
             .lock_barrier_manager()
             .register_sender(params.actor_context.id, sender);
-        let barrier_interval_ms = params
-            .env
-            .system_params_manager_ref()
-            .get_params()
-            .load()
-            .barrier_interval_ms() as u64;
+        let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
             let source_id = TableId::new(source.source_id);
@@ -62,7 +58,21 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 source.get_info()?.clone(),
                 params.env.connector_params(),
                 params.env.config().developer.connector_message_buffer_size,
+                // `pk_indices` is used to ensure that a message will be skipped instead of parsed
+                // with null pk when the pk column is missing.
+                //
+                // Currently pk_indices for source is always empty since pk information is not
+                // passed via `StreamSource` so null pk may be emitted to downstream.
+                //
+                // TODO: use the correct information to fill in pk_dicies.
+                // We should consdier add back the "pk_column_ids" field removed by #8841 in
+                // StreamSource
+                params.pk_indices.clone(),
             );
+
+            let source_ctrl_opts = SourceCtrlOpts {
+                chunk_size: params.env.config().developer.chunk_size,
+            };
 
             let column_ids: Vec<_> = source
                 .columns
@@ -109,8 +119,9 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     stream_source_core,
                     params.executor_stats,
                     barrier_receiver,
-                    barrier_interval_ms,
+                    system_params,
                     params.executor_id,
+                    source_ctrl_opts,
                 )?))
             } else {
                 Ok(Box::new(SourceExecutor::new(
@@ -120,8 +131,9 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     Some(stream_source_core),
                     params.executor_stats,
                     barrier_receiver,
-                    barrier_interval_ms,
+                    system_params,
                     params.executor_id,
+                    source_ctrl_opts,
                 )))
             }
         } else {
@@ -134,8 +146,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 None,
                 params.executor_stats,
                 barrier_receiver,
-                barrier_interval_ms,
+                system_params,
                 params.executor_id,
+                // we don't expect any data in, so no need to set chunk_sizes
+                SourceCtrlOpts::default(),
             )))
         }
     }

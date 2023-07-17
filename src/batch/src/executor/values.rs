@@ -142,7 +142,7 @@ mod tests {
         Array, ArrayImpl, I16Array, I32Array, I64Array, StructArray, StructValue,
     };
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl, StructType};
     use risingwave_expr::expr::{BoxedExpression, LiteralExpression};
 
     use crate::executor::{Executor, ValuesExecutor};
@@ -200,14 +200,14 @@ mod tests {
 
         let mut stream = values_executor.execute();
         let result = stream.next().await.unwrap();
-        let array: ArrayImpl = StructArray::from_slices(
-            &[true],
+        let array: ArrayImpl = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Int32, DataType::Int32]),
             vec![
-                I32Array::from_iter([1]).into(),
-                I32Array::from_iter([2]).into(),
-                I32Array::from_iter([3]).into(),
+                I32Array::from_iter([1]).into_ref(),
+                I32Array::from_iter([2]).into_ref(),
+                I32Array::from_iter([3]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Int32, DataType::Int32],
+            [true].into_iter().collect(),
         )
         .into();
 

@@ -23,7 +23,8 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_connector::source::{
-    ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
+    ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SplitEnumeratorImpl,
+    SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::Source;
 use risingwave_pb::connector_service::table_schema::Column;
@@ -54,6 +55,7 @@ pub struct SourceManager<S: MetaStore> {
 }
 
 const MAX_FAIL_CNT: u32 = 10;
+const DEFAULT_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct SharedSplitMap {
     splits: Option<BTreeMap<SplitId, SplitImpl>>,
@@ -74,7 +76,16 @@ struct ConnectorSourceWorker {
 
 impl ConnectorSourceWorker {
     async fn refresh(&mut self) -> MetaResult<()> {
-        let enumerator = SplitEnumeratorImpl::create(self.connector_properties.clone()).await?;
+        let enumerator = SplitEnumeratorImpl::create(
+            self.connector_properties.clone(),
+            Arc::new(SourceEnumeratorContext {
+                metrics: self.metrics.source_enumerator_metrics.clone(),
+                info: SourceEnumeratorInfo {
+                    source_id: self.source_id,
+                },
+            }),
+        )
+        .await?;
         self.enumerator = enumerator;
         self.fail_cnt = 0;
         tracing::info!("refreshed source enumerator: {}", self.source_name);
@@ -93,7 +104,16 @@ impl ConnectorSourceWorker {
             let table_schema = Self::extract_source_schema(source);
             properties.init_properties_for_cdc(source.id, endpoint.to_string(), Some(table_schema));
         }
-        let enumerator = SplitEnumeratorImpl::create(properties.clone()).await?;
+        let enumerator = SplitEnumeratorImpl::create(
+            properties.clone(),
+            Arc::new(SourceEnumeratorContext {
+                metrics: metrics.source_enumerator_metrics.clone(),
+                info: SourceEnumeratorInfo {
+                    source_id: source.id,
+                },
+            }),
+        )
+        .await?;
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {
             source_id: source.id,
@@ -180,7 +200,7 @@ impl ConnectorSourceWorker {
                 .flat_map(|col| &col.column_desc)
                 .map(|col| Column {
                     name: col.name.clone(),
-                    data_type: col.column_type.as_ref().unwrap().type_name,
+                    data_type: col.column_type.clone(),
                 })
                 .collect(),
             pk_indices,
@@ -469,7 +489,7 @@ where
 
     for (actor_id, mut splits) in actor_splits {
         if opts.enable_scale_in {
-            splits.drain_filter(|split| dropped_splits.contains(&split.id()));
+            splits.retain(|split| !dropped_splits.contains(&split.id()));
         }
 
         heap.push(ActorSplitsAssignment { actor_id, splits })
@@ -520,7 +540,7 @@ where
 
         let mut actor_splits = HashMap::new();
         let mut source_fragments = HashMap::new();
-        for table_fragments in fragment_manager.list_table_fragments().await? {
+        for table_fragments in fragment_manager.list_table_fragments().await {
             source_fragments.extend(table_fragments.stream_source_fragments());
             actor_splits.extend(table_fragments.actor_splits.clone());
         }
@@ -706,7 +726,18 @@ where
         // failure.
         if force_tick {
             // if fail to fetch meta info, will refuse to create source
-            worker.tick().await?;
+
+            // todo: make the timeout configurable, longer than `properties.sync.call.timeout` in
+            // kafka
+            tokio::time::timeout(DEFAULT_TICK_TIMEOUT, worker.tick())
+                .await
+                .map_err(|_e| {
+                    anyhow!(
+                        "failed to fetch meta info for source {}, error: timeout {}",
+                        source.id,
+                        DEFAULT_TICK_TIMEOUT.as_secs()
+                    )
+                })??;
         }
 
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();

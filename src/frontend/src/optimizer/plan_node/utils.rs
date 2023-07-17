@@ -13,15 +13,18 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::{fmt, vec};
+use std::vec;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
+use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
+use risingwave_common::catalog::{
+    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema,
+};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::{FragmentId, TableCatalog, TableId};
+use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
 use crate::utils::WithOptions;
 
 #[derive(Default)]
@@ -62,11 +65,28 @@ impl TableCatalogBuilder {
         self.avoid_duplicate_col_name(&mut column_desc);
 
         self.columns.push(ColumnCatalog {
-            column_desc: column_desc.clone(),
+            column_desc,
             // All columns in internal table are invisible to batch query.
             is_hidden: false,
         });
         column_idx
+    }
+
+    /// Extend the columns with column ids reset. The input columns should NOT have duplicate names.
+    ///
+    /// Returns the indices of the extended columns.
+    pub fn extend_columns(&mut self, columns: &[ColumnCatalog]) -> Vec<usize> {
+        let base_idx = self.columns.len();
+        columns.iter().enumerate().for_each(|(i, col)| {
+            assert!(!self.column_names.contains_key(col.name()));
+            self.column_names.insert(col.name().to_string(), 0);
+
+            // Reset the column id for the columns.
+            let mut new_col = col.clone();
+            new_col.column_desc.column_id = ColumnId::new((base_idx + i) as _);
+            self.columns.push(new_col);
+        });
+        Vec::from_iter(base_idx..(base_idx + columns.len()))
     }
 
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
@@ -140,6 +160,7 @@ impl TableCatalogBuilder {
             properties: self.properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
+            dml_fragment_id: None,
             vnode_col_index: self.vnode_col_idx,
             row_id_index: None,
             value_indices: self
@@ -159,34 +180,107 @@ impl TableCatalogBuilder {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct IndicesDisplay<'a> {
-    pub indices: &'a [usize],
-    pub input_schema: &'a Schema,
-}
+/// See also [`super::generic::DistillUnit`].
+pub trait Distill {
+    fn distill<'a>(&self) -> XmlNode<'a>;
 
-impl fmt::Display for IndicesDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
+    fn distill_to_string(&self) -> String {
+        let mut config = pretty_config();
+        let mut output = String::with_capacity(2048);
+        config.unicode(&mut output, &Pretty::Record(self.distill()));
+        output
     }
 }
 
-impl fmt::Debug for IndicesDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = f.debug_list();
-        for i in self.indices {
-            let name = &self.input_schema.fields.get(*i).unwrap().name;
-            f.entry(&format_args!("{}", name));
+pub(super) fn childless_record<'a>(
+    name: impl Into<Str<'a>>,
+    fields: StrAssocArr<'a>,
+) -> XmlNode<'a> {
+    XmlNode::simple_record(name, fields, Default::default())
+}
+
+macro_rules! impl_distill_by_unit {
+    ($ty:ty, $core:ident, $name:expr) => {
+        use pretty_xmlish::XmlNode;
+        use $crate::optimizer::plan_node::generic::DistillUnit;
+        use $crate::optimizer::plan_node::utils::Distill;
+        impl Distill for $ty {
+            fn distill<'a>(&self) -> XmlNode<'a> {
+                self.$core.distill_with_name($name)
+            }
         }
-        f.finish()
+    };
+}
+pub(crate) use impl_distill_by_unit;
+
+pub(crate) fn column_names_pretty<'a>(schema: &Schema) -> Pretty<'a> {
+    let columns = (schema.fields.iter())
+        .map(|f| f.name.clone())
+        .map(Pretty::from)
+        .collect();
+    Pretty::Array(columns)
+}
+
+pub(crate) fn watermark_pretty<'a>(
+    watermark_columns: &FixedBitSet,
+    schema: &Schema,
+) -> Option<Pretty<'a>> {
+    if watermark_columns.count_ones(..) > 0 {
+        Some(watermark_fields_pretty(watermark_columns.ones(), schema))
+    } else {
+        None
+    }
+}
+pub(crate) fn watermark_fields_pretty<'a>(
+    watermark_columns: impl Iterator<Item = usize>,
+    schema: &Schema,
+) -> Pretty<'a> {
+    let arr = watermark_columns
+        .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+        .map(|d| Pretty::display(&d))
+        .collect();
+    Pretty::Array(arr)
+}
+
+#[derive(Clone, Copy)]
+pub struct IndicesDisplay<'a> {
+    pub indices: &'a [usize],
+    pub schema: &'a Schema,
+}
+
+impl<'a> IndicesDisplay<'a> {
+    /// Returns `None` means all
+    pub fn from_join<'b, PlanRef: GenericPlanRef>(
+        join: &'a generic::Join<PlanRef>,
+        input_schema: &'a Schema,
+    ) -> Pretty<'b> {
+        let col_num = join.internal_column_num();
+        let id = Self::from(&join.output_indices, col_num, input_schema);
+        id.map_or_else(|| Pretty::from("all"), Self::distill)
+    }
+
+    /// Returns `None` means all
+    fn from(indices: &'a [usize], col_num: usize, schema: &'a Schema) -> Option<Self> {
+        if indices.iter().copied().eq(0..col_num) {
+            return None;
+        }
+        Some(Self { indices, schema })
+    }
+
+    pub fn distill<'b>(self) -> Pretty<'b> {
+        let vec = self.indices.iter().map(|&i| {
+            let name = self.schema.fields.get(i).unwrap().name.clone();
+            Pretty::from(name)
+        });
+        Pretty::Array(vec.collect())
     }
 }
 
 /// Call `debug_struct` on the given formatter to create a debug struct builder.
 /// If a property list is provided, properties in it will be added to the struct name according to
 /// the condition of that property.
-macro_rules! formatter_debug_plan_node {
-    ($formatter:ident, $name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
+macro_rules! plan_node_name {
+    ($name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
         {
             #[allow(unused_mut)]
             let mut properties: Vec<&str> = vec![];
@@ -197,8 +291,11 @@ macro_rules! formatter_debug_plan_node {
                 name += &properties.join(", ");
                 name += "]";
             }
-            $formatter.debug_struct(&name)
+            name
         }
     };
 }
-pub(crate) use formatter_debug_plan_node;
+pub(crate) use plan_node_name;
+
+use super::generic::{self, GenericPlanRef};
+use super::pretty_config;

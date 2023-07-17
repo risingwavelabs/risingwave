@@ -35,6 +35,7 @@ use crate::session::SessionImpl;
 /// store them as `PureStatement`.
 #[derive(Clone)]
 pub enum PrepareStatement {
+    Empty,
     Prepared(PreparedResult),
     PureStatement(Statement),
 }
@@ -47,6 +48,7 @@ pub struct PreparedResult {
 
 #[derive(Clone)]
 pub enum Portal {
+    Empty,
     Portal(PortalResult),
     PureStatement(Statement),
 }
@@ -54,6 +56,7 @@ pub enum Portal {
 impl std::fmt::Display for Portal {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self {
+            Portal::Empty => write!(f, "Empty"),
             Portal::Portal(portal) => write!(
                 f,
                 "{}, params = {:?}",
@@ -129,6 +132,7 @@ pub fn handle_bind(
     result_formats: Vec<Format>,
 ) -> Result<Portal> {
     match prepare_statement {
+        PrepareStatement::Empty => Ok(Portal::Empty),
         PrepareStatement::Prepared(prepared_result) => {
             let PreparedResult {
                 bound_result,
@@ -167,8 +171,12 @@ pub fn handle_bind(
 
 pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result<RwPgResponse> {
     match portal {
+        Portal::Empty => Ok(RwPgResponse::empty_result(
+            pgwire::pg_response::StatementType::EMPTY,
+        )),
         Portal::Portal(portal) => {
             session.clear_cancel_query_flag();
+            let _guard = session.txn_begin_implicit(); // TODO(bugen): is this behavior correct?
             let str_sql = portal.statement.to_string();
             let handler_args = HandlerArgs::new(session, &portal.statement, &str_sql)?;
             match &portal.statement {

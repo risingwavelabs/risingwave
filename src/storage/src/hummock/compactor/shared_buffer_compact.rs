@@ -121,7 +121,7 @@ async fn compact_shared_buffer(
         .acquire(existing_table_ids.clone())
         .await?;
     if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
-        existing_table_ids = multi.get_exsting_table_ids();
+        existing_table_ids = multi.get_existing_table_ids();
     }
     let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
@@ -200,7 +200,7 @@ async fn compact_shared_buffer(
         }
         vnodes.sort();
         vnodes.dedup();
-        const MIN_SSTABLE_SIZE: u64 = 8 * 1024 * 1024;
+        const MIN_SSTABLE_SIZE: u64 = 16 * 1024 * 1024;
         if compact_data_size >= MIN_SSTABLE_SIZE && !vnodes.is_empty() {
             let mut avg_vnode_size = compact_data_size / (vnodes.len() as u64);
             split_weight_by_vnode = VirtualNode::COUNT;
@@ -480,6 +480,8 @@ impl SharedBufferCompactRunner {
                 dummy_compaction_filter,
                 del_agg,
                 filter_key_extractor,
+                None,
+                None,
                 None,
             )
             .await?;

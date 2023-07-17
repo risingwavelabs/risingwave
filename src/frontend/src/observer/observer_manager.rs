@@ -12,20 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentParallelUnitMapping, MetaSnapshot, SubscribeResponse};
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
+use crate::catalog::FragmentId;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
@@ -49,6 +53,7 @@ impl ObserverState for FrontendObserverNode {
             return;
         };
 
+        // TODO: this clone can be avoided
         match info.to_owned() {
             Info::Database(_)
             | Info::Schema(_)
@@ -85,6 +90,12 @@ impl ObserverState for FrontendObserverNode {
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
             }
+            Info::HummockStats(stats) => {
+                self.handle_table_stats_notification(stats);
+            }
+            Info::ServingParallelUnitMappings(m) => {
+                self.handle_fragment_serving_mapping_notification(m.mappings, resp.operation());
+            }
         }
     }
 
@@ -109,6 +120,7 @@ impl ObserverState for FrontendObserverNode {
             connections,
             users,
             parallel_unit_mappings,
+            serving_parallel_unit_mappings,
             nodes,
             hummock_snapshot,
             hummock_version: _,
@@ -149,21 +161,11 @@ impl ObserverState for FrontendObserverNode {
         }
         self.worker_node_manager.refresh(
             nodes,
-            parallel_unit_mappings
-                .iter()
-                .map(
-                    |FragmentParallelUnitMapping {
-                         fragment_id,
-                         mapping,
-                     }| {
-                        let mapping = ParallelUnitMapping::from_protobuf(mapping.as_ref().unwrap());
-                        (*fragment_id, mapping)
-                    },
-                )
-                .collect(),
+            convert_pu_mapping(&parallel_unit_mappings),
+            convert_pu_mapping(&serving_parallel_unit_mappings),
         );
         self.hummock_snapshot_manager
-            .update_epoch(hummock_snapshot.unwrap());
+            .update(hummock_snapshot.unwrap());
 
         let snapshot_version = version.unwrap();
         catalog_guard.set_version(snapshot_version.catalog_version);
@@ -196,6 +198,11 @@ impl FrontendObserverNode {
             hummock_snapshot_manager,
             system_params_manager,
         }
+    }
+
+    fn handle_table_stats_notification(&mut self, table_stats: HummockVersionStats) {
+        let mut catalog_guard = self.catalog.write();
+        catalog_guard.set_table_stats(table_stats);
     }
 
     fn handle_catalog_notification(&mut self, resp: SubscribeResponse) {
@@ -370,6 +377,27 @@ impl FrontendObserverNode {
         }
     }
 
+    fn handle_fragment_serving_mapping_notification(
+        &mut self,
+        mappings: Vec<FragmentParallelUnitMapping>,
+        op: Operation,
+    ) {
+        match op {
+            Operation::Add | Operation::Update => {
+                self.worker_node_manager
+                    .upsert_serving_fragment_mapping(convert_pu_mapping(&mappings));
+            }
+            Operation::Delete => self.worker_node_manager.remove_serving_fragment_mapping(
+                &mappings.into_iter().map(|m| m.fragment_id).collect_vec(),
+            ),
+            Operation::Snapshot => {
+                self.worker_node_manager
+                    .set_serving_fragment_mapping(convert_pu_mapping(&mappings));
+            }
+            _ => panic!("receive an unsupported notify {:?}", op),
+        }
+    }
+
     /// Update max committed epoch in `HummockSnapshotManager`.
     fn handle_hummock_snapshot_notification(&self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
@@ -379,7 +407,7 @@ impl FrontendObserverNode {
             Info::HummockSnapshot(hummock_snapshot) => match resp.operation() {
                 Operation::Update => {
                     self.hummock_snapshot_manager
-                        .update_epoch(hummock_snapshot.clone());
+                        .update(hummock_snapshot.clone());
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
@@ -402,4 +430,21 @@ impl FrontendObserverNode {
             _ => (),
         }
     }
+}
+
+fn convert_pu_mapping(
+    parallel_unit_mappings: &[FragmentParallelUnitMapping],
+) -> HashMap<FragmentId, ParallelUnitMapping> {
+    parallel_unit_mappings
+        .iter()
+        .map(
+            |FragmentParallelUnitMapping {
+                 fragment_id,
+                 mapping,
+             }| {
+                let mapping = ParallelUnitMapping::from_protobuf(mapping.as_ref().unwrap());
+                (*fragment_id, mapping)
+            },
+        )
+        .collect()
 }

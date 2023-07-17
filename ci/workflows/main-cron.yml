@@ -33,7 +33,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
-  
+
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
@@ -84,6 +84,8 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
 
+  # The timeout should be strictly more than timeout in `pull-request.yml`.
+  # This ensures our `main-cron` workflow will be stable.
   - label: "unit test"
     command: "ci/scripts/unit-test.sh"
     plugins:
@@ -96,7 +98,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 16
 
   - label: "unit test (deterministic simulation)"
     command: "MADSIM_TEST_NUM=100 timeout 15m ci/scripts/deterministic-unit-test.sh"
@@ -177,6 +179,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
 
   - label: "S3 source check on AWS (json parser)"
@@ -192,21 +195,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
-    timeout_in_minutes: 25
-
-  - label: "S3 source check on lyvecloud.seagate.com (json parser)"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s run"
-    depends_on: build
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            S3_SOURCE_TEST_CONF: ci_s3_source_test_lyvecloud
-      - docker-compose#v4.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-          environment:
-            - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
 
   - label: "S3 source check on AWS (csv parser)"
@@ -222,6 +211,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
 
   - label: "S3 source on OpenDAL fs engine"
@@ -237,6 +227,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
 
   - label: "pulsar source check"
@@ -260,9 +251,54 @@ steps:
 
   - label: "micro benchmark"
     command: "ci/scripts/run-micro-benchmarks.sh"
+    key: "run-micro-benchmarks"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 35
+    timeout_in_minutes: 60
+
+  - label: "upload micro-benchmark"
+    command:
+      - "BUILDKITE_BUILD_NUMBER=$BUILDKITE_BUILD_NUMBER ci/scripts/upload-micro-bench-results.sh"
+    depends_on: "run-micro-benchmarks"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            BUILDKITE_TOKEN: buildkite_token
+            GITHUB_TOKEN: github-token
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - BUILDKITE_TOKEN
+            - GITHUB_TOKEN
+    timeout_in_minutes: 5
+
+  # Backwards compatibility tests
+  - label: "Backwards compatibility tests"
+    command: "RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: ci-flamegraph-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 30
+
+  # Sqlsmith differential testing
+  - label: "Sqlsmith Differential Testing"
+    command: "ci/scripts/sqlsmith-differential-test.sh -p ci-release"
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: ci-flamegraph-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 40
+    soft_fail: true

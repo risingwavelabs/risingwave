@@ -52,6 +52,7 @@ impl DataType {
             21 => Ok(DataType::Int16),
             23 => Ok(DataType::Int32),
             20 => Ok(DataType::Int64),
+            25 => Ok(DataType::Varchar), // workaround to support text in extended mode.
             700 => Ok(DataType::Float32),
             701 => Ok(DataType::Float64),
             1700 => Ok(DataType::Decimal),
@@ -123,6 +124,30 @@ impl DataType {
                 DataType::Struct(_) => -1,
                 DataType::List { .. } => unreachable!("Never reach here!"),
             },
+        }
+    }
+
+    pub fn pg_name(&self) -> &'static str {
+        match self {
+            DataType::Boolean => "bool",
+            DataType::Int16 => "int2",
+            DataType::Int32 => "int4",
+            DataType::Int64 => "int8",
+            DataType::Float32 => "float4",
+            DataType::Float64 => "float8",
+            DataType::Decimal => "numeric",
+            DataType::Date => "date",
+            DataType::Varchar => "varchar",
+            DataType::Time => "time",
+            DataType::Timestamp => "timestamp",
+            DataType::Timestamptz => "timestamptz",
+            DataType::Interval => "interval",
+            DataType::Struct(_) => "struct",
+            DataType::List(_) => "list",
+            DataType::Bytea => "bytea",
+            DataType::Jsonb => "jsonb",
+            DataType::Serial => "serial",
+            DataType::Int256 => "rw_int256",
         }
     }
 }

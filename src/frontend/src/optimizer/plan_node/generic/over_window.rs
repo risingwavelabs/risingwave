@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -25,6 +23,7 @@ use risingwave_pb::expr::PbWindowFunction;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::expr::{InputRef, InputRefDisplay};
+use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMappingRewriteExt;
 use crate::OptimizerContextRef;
@@ -155,32 +154,34 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
         self.input.schema().len() + self.window_functions.len()
     }
 
+    pub fn window_functions(&self) -> &[PlanWindowFunction] {
+        &self.window_functions
+    }
+
     pub fn funcs_have_same_partition_and_order(&self) -> bool {
         self.window_functions
             .iter()
             .map(|f| (&f.partition_by, &f.order_by))
             .all_equal()
     }
-}
 
-impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
-    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
-        let window_funcs_display = self
-            .window_functions
+    pub fn partition_key_indices(&self) -> Vec<usize> {
+        assert!(self.funcs_have_same_partition_and_order());
+        self.window_functions[0]
+            .partition_by
             .iter()
-            .map(|func| PlanWindowFunctionDisplay {
-                window_function: func,
-                input_schema: self.input.schema(),
-            })
-            .collect::<Vec<_>>();
-        builder.field("window_functions", &window_funcs_display);
-        builder.finish()
+            .map(|i| i.index())
+            .collect()
+    }
+
+    pub fn order_key(&self) -> &[ColumnOrder] {
+        assert!(self.funcs_have_same_partition_and_order());
+        &self.window_functions[0].order_by
     }
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for OverWindow<PlanRef> {
-    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+    fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let f = |func| {
             Pretty::debug(&PlanWindowFunctionDisplay {
                 window_function: func,
@@ -189,7 +190,7 @@ impl<PlanRef: GenericPlanRef> DistillUnit for OverWindow<PlanRef> {
         };
         let wf = Pretty::Array(self.window_functions.iter().map(f).collect());
         let vec = vec![("window_functions", wf)];
-        Pretty::childless_record(name, vec)
+        childless_record(name, vec)
     }
 }
 
@@ -213,7 +214,17 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for OverWindow<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.input.logical_pk().to_vec())
+        let mut output_pk = self.input.logical_pk().to_vec();
+        for part_key_idx in self
+            .window_functions
+            .iter()
+            .flat_map(|f| f.partition_by.iter().map(|i| i.index))
+        {
+            if !output_pk.contains(&part_key_idx) {
+                output_pk.push(part_key_idx);
+            }
+        }
+        Some(output_pk)
     }
 
     fn ctx(&self) -> OptimizerContextRef {

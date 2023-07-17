@@ -39,10 +39,10 @@ def section_actor_info(panels):
             excluded_cols,
         ),
         panels.table_info(
-            "Table Id Info",
-            "Mapping from table id to actor id and table name",
-            [panels.table_target(f"{metric('table_info')}")],
-            excluded_cols,
+            "Materialized View Info",
+            "Mapping from materialized view table id to it's internal table ids",
+            [panels.table_target(f"{metric('materialized_info')}")],
+            excluded_cols
         ),
     ]
 
@@ -120,6 +120,9 @@ def section_overview(panels):
             - Lagging Epoch: the pinned or safe epoch is lagging behind the current max committed epoch. Check 'Hummock Manager' section in dev dashboard.
             - Lagging Compaction: there are too many files in L0. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.
             - Lagging Vacuum: there are too many stale files waiting to be cleaned. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.
+            - Abnormal Meta Cache Memory: the meta cache memory usage is too large, exceeding the expected 10 percent.
+            - Abnormal Block Cache Memory: the block cache memory usage is too large, exceeding the expected 10 percent.
+            - Abnormal Uploading Memory Usage: uploading memory is more than 70 percent of the expected, and is about to spill.
             """,
             [
                 panels.target(
@@ -148,6 +151,18 @@ def section_overview(panels):
                 panels.target(
                     f"{metric('storage_stale_object_count')} >= bool 200",
                     "Lagging Vacuum",
+                ),
+                panels.target(
+                    f"{metric('state_store_meta_cache_usage_ratio')} >= bool 1.1",
+                    "Abnormal Meta Cache Memory",
+                ),
+                panels.target(
+                    f"{metric('state_store_block_cache_usage_ratio')} >= bool 1.1",
+                    "Abnormal Block Cache Memory",
+                ),
+                panels.target(
+                    f"{metric('state_store_uploading_memory_usage_ratio')} >= bool 0.7",
+                    "Abnormal Uploading Memory Usage",
                 ),
             ],
             ["last"],
@@ -256,7 +271,7 @@ def section_memory(outer_panels):
                         panels.target(
                             f"sum({metric('state_store_meta_cache_size')}) by (instance) + "
                             + f"sum({metric('state_store_block_cache_size')}) by (instance) + "
-                            + f"sum({metric('state_store_limit_memory_size')}) by (instance)",
+                            + f"sum({metric('uploading_memory_size')}) by (instance)",
                             "storage @ {{instance}}",
                         ),
                     ],
@@ -278,7 +293,7 @@ def section_memory(outer_panels):
                             "storage block cache - {{job}} @ {{instance}}",
                         ),
                         panels.target(
-                            f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
+                            f"sum({metric('uploading_memory_size')}) by (job,instance)",
                             "storage write buffer - {{job}} @ {{instance}}",
                         ),
                     ],
@@ -477,6 +492,7 @@ def section_network(outer_panels):
 
 def section_storage(outer_panels):
     panels = outer_panels.sub_panel()
+    mv_total_size_filter = "metric='materialized_view_total_size'"
     return [
         outer_panels.row_collapsed(
             "Storage",
@@ -502,6 +518,14 @@ def section_storage(outer_panels):
                             f"{metric('storage_current_version_object_size')}",
                             "referenced by current version",
                         ),
+                    ],
+                ),
+                panels.timeseries_kilobytes(
+                    "Materialized View Size",
+                    "The storage size of each materialized view",
+                    [
+                        panels.target(f"{metric('storage_materialized_view_stats', mv_total_size_filter)}/1024",
+                                      "{{metric}}, mv id - {{table_id}} "),
                     ],
                 ),
                 panels.timeseries_count(
@@ -715,6 +739,36 @@ def section_batch(outer_panels):
         )
     ]
 
+def section_connector_node(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Connector Node",
+            [
+                panels.timeseries_rowsps(
+                    "Connector Source Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('connector_source_rows_received')}[$__rate_interval])",
+                            "source={{source_type}} @ {{source_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Connector Sink Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('connector_sink_rows_received')}[$__rate_interval])",
+                            "sink={{connector_type}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+            ],
+        )
+    ]
+
 templating_list = []
 if dynamic_source_enabled:
     templating_list.append(
@@ -862,5 +916,6 @@ dashboard = Dashboard(
         *section_storage(panels),
         *section_streaming(panels),
         *section_batch(panels),
+        *section_connector_node(panels),
     ],
 ).auto_panel_ids()

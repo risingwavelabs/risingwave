@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::GroupTopNNode;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
@@ -47,11 +46,7 @@ impl BatchGroupTopN {
     }
 }
 
-impl fmt::Display for BatchGroupTopN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchGroupTopN")
-    }
-}
+impl_distill_by_unit!(BatchGroupTopN, logical, "BatchGroupTopN");
 
 impl PlanTreeNodeUnary for BatchGroupTopN {
     fn input(&self) -> PlanRef {

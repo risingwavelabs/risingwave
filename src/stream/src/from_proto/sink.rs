@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::kafka::KAFKA_SINK;
-use risingwave_connector::sink::{SinkConfig, DOWNSTREAM_SINK_KEY};
+use risingwave_connector::sink::{SinkConfig, SinkWriterParam};
 use risingwave_pb::stream_plan::SinkNode;
 
 use super::*;
-use crate::common::log_store::BoundedInMemLogStoreFactory;
+use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
 use crate::executor::{SinkExecutor, StreamExecutorError};
 
 pub struct SinkExecutorBuilder;
@@ -33,41 +33,44 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let [materialize_executor]: [_; 1] = params.input.try_into().unwrap();
+        let [input_executor]: [_; 1] = params.input.try_into().unwrap();
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
         let sink_id = sink_desc.get_id().into();
-        let mut properties = sink_desc.get_properties().clone();
+        let properties = sink_desc.get_properties().clone();
         let pk_indices = sink_desc
             .downstream_pk
             .iter()
             .map(|i| *i as usize)
             .collect_vec();
-        let schema = sink_desc.columns.iter().map(Into::into).collect();
-        // This field can be used to distinguish a specific actor in parallelism to prevent
-        // transaction execution errors
-        if let Some(connector) = properties.get(DOWNSTREAM_SINK_KEY) && connector == KAFKA_SINK {
-            properties.insert(
-                "identifier".to_string(),
-                format!("sink-{:?}", params.executor_id),
-            );
-        }
+        let columns = sink_desc
+            .column_catalogs
+            .clone()
+            .into_iter()
+            .map(ColumnCatalog::from)
+            .collect_vec();
         let config = SinkConfig::from_hashmap(properties).map_err(StreamExecutorError::from)?;
+
+        // TODO: For sink executor with a state table, a kv log store should be created.
+        let factory = BoundedInMemLogStoreFactory::new(1);
 
         Ok(Box::new(
             SinkExecutor::new(
-                materialize_executor,
+                input_executor,
                 stream.streaming_metrics.clone(),
                 config,
-                params.executor_id,
-                params.env.connector_params(),
-                schema,
+                SinkWriterParam {
+                    connector_params: params.env.connector_params(),
+                    executor_id: params.executor_id,
+                    vnode_bitmap: params.vnode_bitmap,
+                },
+                columns,
                 pk_indices,
                 sink_type,
                 sink_id,
                 params.actor_context,
-                BoundedInMemLogStoreFactory::new(1),
+                factory,
             )
             .await?,
         ))

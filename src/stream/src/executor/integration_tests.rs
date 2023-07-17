@@ -21,7 +21,7 @@ use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
-use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
+use risingwave_expr::agg::AggCall;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 
@@ -53,22 +53,8 @@ async fn test_merger_sum_aggr() {
             actor_ctx.clone(),
             input.boxed(),
             vec![
-                AggCall {
-                    kind: AggKind::Count,
-                    args: AggArgs::None,
-                    return_type: DataType::Int64,
-                    column_orders: vec![],
-                    filter: None,
-                    distinct: false,
-                },
-                AggCall {
-                    kind: AggKind::Sum,
-                    args: AggArgs::Unary(DataType::Int64, 0),
-                    return_type: DataType::Int64,
-                    column_orders: vec![],
-                    filter: None,
-                    distinct: false,
-                },
+                AggCall::from_pretty("(count:int8)"),
+                AggCall::from_pretty("(sum:int8 $0:int8)"),
             ],
             vec![],
             1,
@@ -150,30 +136,9 @@ async fn test_merger_sum_aggr() {
         merger.boxed(),
         is_append_only,
         vec![
-            AggCall {
-                kind: AggKind::Sum0,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 1),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Count, // as row count, index: 2
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
+            AggCall::from_pretty("(sum0:int8 $0:int8)"),
+            AggCall::from_pretty("(sum:int8 $1:int8)"),
+            AggCall::from_pretty("(count:int8)"),
         ],
         2, // row_count_index
         vec![],
@@ -265,7 +230,7 @@ impl StreamConsumer for MockConsumer {
             while let Some(item) = input.next().await {
                 match item? {
                     Message::Watermark(_) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                     }
                     Message::Chunk(chunk) => data.lock().unwrap().push(chunk),
                     Message::Barrier(barrier) => yield barrier,

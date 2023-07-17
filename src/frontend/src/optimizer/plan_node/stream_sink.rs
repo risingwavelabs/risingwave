@@ -13,13 +13,17 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::fmt;
 use std::io::{Error, ErrorKind};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::ColumnCatalog;
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{ColumnCatalog, Field};
+use risingwave_common::constants::log_store::{
+    EPOCH_COLUMN_INDEX, KV_LOG_STORE_PREDEFINED_COLUMNS, SEQ_ID_COLUMN_INDEX,
+};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::{
@@ -30,12 +34,12 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
-use super::utils::{formatter_debug_plan_node, IndicesDisplay};
+use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::WithOptions;
+use crate::{TableCatalog, WithOptions};
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -75,7 +79,7 @@ impl StreamSink {
             Distribution::Single => RequiredDist::single(),
             _ => {
                 match properties.get("connector") {
-                    Some(s) if s == "iceberg" => {
+                    Some(s) if s == "iceberg" || s == "deltalake" => {
                         // iceberg with multiple parallelism will fail easily with concurrent commit
                         // on metadata
                         // TODO: reset iceberg sink to have multiple parallelism
@@ -241,6 +245,44 @@ impl StreamSink {
             }
         }
     }
+
+    /// The table schema is: | epoch | seq id | row op | sink columns |
+    /// Pk is: | epoch | seq id |
+    fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
+        let mut table_catalog_builder =
+            TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
+
+        let mut value_indices = Vec::with_capacity(
+            KV_LOG_STORE_PREDEFINED_COLUMNS.len() + self.sink_desc.columns.len(),
+        );
+
+        for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
+            let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
+            value_indices.push(indice);
+        }
+
+        // The table's pk is composed of `epoch` and `seq_id`.
+        table_catalog_builder.add_order_column(EPOCH_COLUMN_INDEX, OrderType::ascending());
+        table_catalog_builder
+            .add_order_column(SEQ_ID_COLUMN_INDEX, OrderType::ascending_nulls_last());
+        let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+
+        let payload_indices = table_catalog_builder.extend_columns(&self.sink_desc().columns);
+
+        value_indices.extend(payload_indices);
+        table_catalog_builder.set_value_indices(value_indices);
+
+        // Modify distribution key indices based on the pre-defined columns.
+        let dist_key = self
+            .input
+            .distribution()
+            .dist_column_indices()
+            .iter()
+            .map(|idx| idx + KV_LOG_STORE_PREDEFINED_COLUMNS.len())
+            .collect_vec();
+
+        table_catalog_builder.build(dist_key, read_prefix_len_hint)
+    }
 }
 
 impl PlanTreeNodeUnary for StreamSink {
@@ -256,10 +298,8 @@ impl PlanTreeNodeUnary for StreamSink {
 
 impl_plan_tree_node_for_unary! { StreamSink }
 
-impl fmt::Display for StreamSink {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = formatter_debug_plan_node!(f, "StreamSink");
-
+impl Distill for StreamSink {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let sink_type = if self.sink_desc.sink_type.is_append_only() {
             "append-only"
         } else {
@@ -269,38 +309,41 @@ impl fmt::Display for StreamSink {
             .sink_desc
             .columns
             .iter()
-            .map(|col| col.column_desc.name.clone())
-            .collect_vec()
-            .join(", ");
-        builder
-            .field("type", &format_args!("{}", sink_type))
-            .field("columns", &format_args!("[{}]", column_names));
-
+            .map(|col| col.name_with_hidden().to_string())
+            .map(Pretty::from)
+            .collect();
+        let column_names = Pretty::Array(column_names);
+        let mut vec = Vec::with_capacity(3);
+        vec.push(("type", Pretty::from(sink_type)));
+        vec.push(("columns", column_names));
         if self.sink_desc.sink_type.is_upsert() {
-            builder.field(
-                "pk",
-                &IndicesDisplay {
-                    indices: &self
-                        .sink_desc
-                        .plan_pk
-                        .iter()
-                        .map(|k| k.column_index)
-                        .collect_vec(),
-                    input_schema: &self.base.schema,
-                },
-            );
+            let pk = IndicesDisplay {
+                indices: &self
+                    .sink_desc
+                    .plan_pk
+                    .iter()
+                    .map(|k| k.column_index)
+                    .collect_vec(),
+                schema: &self.base.schema,
+            };
+            vec.push(("pk", pk.distill()));
         }
-
-        builder.finish()
+        childless_record("StreamSink", vec)
     }
 }
 
 impl StreamNode for StreamSink {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
+
+        // We need to create a table for sink with a kv log store.
+        let table = self
+            .infer_kv_log_store_table_catalog()
+            .with_id(state.gen_table_id_wrapped());
 
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
+            table: Some(table.to_internal_table_prost()),
         })
     }
 }

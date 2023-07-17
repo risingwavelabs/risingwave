@@ -14,11 +14,11 @@
 
 package com.risingwave.java.binding;
 
-import java.io.ByteArrayInputStream;
+import io.questdb.jar.jni.JarJniLoader;
 
 public class Binding {
     static {
-        System.loadLibrary("risingwave_java_binding");
+        JarJniLoader.loadLib(Binding.class, "/risingwave/jni", "risingwave_java_binding");
     }
 
     public static native int vnodeCount();
@@ -67,7 +67,10 @@ public class Binding {
 
     static native String rowGetJsonbValue(long pointer, int index);
 
-    static native ByteArrayInputStream rowGetByteaValue(long pointer, int index);
+    static native byte[] rowGetByteaValue(long pointer, int index);
+
+    // TODO: object or object array?
+    static native Object rowGetArrayValue(long pointer, int index, Class<?> clazz);
 
     // Since the underlying rust does not have garbage collection, we will have to manually call
     // close on the row to release the row instance pointed by the pointer.

@@ -32,6 +32,7 @@ use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_common_service::tracing::TracingExtractLayer;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
@@ -42,7 +43,7 @@ use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
+use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -81,6 +82,7 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
+    registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config.clone()));
@@ -106,6 +108,7 @@ pub async fn compute_node_serve(
             worker_node_parallelism: opts.parallelism as u64,
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
+            is_unschedulable: false,
         },
         &config.meta,
     )
@@ -161,7 +164,7 @@ pub async fn compute_node_serve(
 
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
-    let registry = prometheus::Registry::new();
+
     monitor_process(&registry).unwrap();
     let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
@@ -191,16 +194,6 @@ pub async fn compute_node_serve(
         state_store_metrics.clone(),
         object_store_metrics,
         TieredCacheMetricsBuilder::new(registry.clone()),
-        if config.streaming.enable_jaeger_tracing {
-            Arc::new(
-                risingwave_tracing::RwTracingService::new(risingwave_tracing::TracingConfig::new(
-                    "127.0.0.1:6831".to_string(),
-                ))
-                .unwrap(),
-            )
-        } else {
-            Arc::new(risingwave_tracing::RwTracingService::disabled())
-        },
         storage_metrics.clone(),
         compactor_metrics.clone(),
     )
@@ -233,6 +226,7 @@ pub async fn compute_node_serve(
                 output_memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
+                await_tree_reg: None,
             });
 
             let (handle, shutdown_sender) =
@@ -243,6 +237,7 @@ pub async fn compute_node_serve(
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
             memory_limiter,
+            storage_memory_config,
         ));
         monitor_cache(memory_collector, &registry).unwrap();
         let backup_reader = storage.backup_reader();
@@ -263,7 +258,7 @@ pub async fn compute_node_serve(
     let await_tree_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
         c => await_tree::ConfigBuilder::default()
-            .verbose(matches!(c, AsyncStackTraceOption::Verbose))
+            .verbose(c.is_verbose().unwrap())
             .build()
             .ok(),
     };
@@ -285,13 +280,14 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    let memory_mgr = GlobalMemoryManager::new(
-        system_params.barrier_interval_ms(),
-        streaming_metrics.clone(),
-        memory_control_policy,
-    );
+    let memory_mgr = GlobalMemoryManager::new(streaming_metrics.clone(), memory_control_policy);
     // Run a background memory monitor
-    tokio::spawn(memory_mgr.clone().run(batch_mgr_clone, stream_mgr_clone));
+    tokio::spawn(memory_mgr.clone().run(
+        batch_mgr_clone,
+        stream_mgr_clone,
+        system_params.barrier_interval_ms(),
+        system_params_manager.watch_params(),
+    ));
 
     let watermark_epoch = memory_mgr.get_watermark_epoch();
     // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead
@@ -302,7 +298,10 @@ pub async fn compute_node_serve(
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
-    let dml_mgr = Arc::new(DmlManager::default());
+    let dml_mgr = Arc::new(DmlManager::new(
+        worker_id,
+        config.streaming.developer.dml_channel_initial_permits,
+    ));
 
     // Initialize batch environment.
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
@@ -319,11 +318,18 @@ pub async fn compute_node_serve(
         source_metrics.clone(),
     );
 
+    info!(
+        "connector param: {:?} {:?}",
+        opts.connector_rpc_endpoint, opts.connector_rpc_sink_payload_format
+    );
+
+    let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
+
     let connector_params = risingwave_connector::ConnectorParams {
-        connector_rpc_endpoint: opts.connector_rpc_endpoint,
+        connector_client,
         sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
-            None | Some("json") => SinkPayloadFormat::Json,
-            Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
+            None | Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
+            Some("json") => SinkPayloadFormat::Json,
             _ => {
                 unreachable!(
                     "invalid sink payload format: {:?}. Should be either json or stream_chunk",
@@ -332,8 +338,6 @@ pub async fn compute_node_serve(
             }
         },
     };
-
-    info!("connector param: {:?}", connector_params);
 
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
@@ -391,6 +395,7 @@ pub async fn compute_node_serve(
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
             .layer(AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg))
+            .layer(TracingExtractLayer::new())
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
@@ -492,40 +497,31 @@ fn print_memory_config(
     embedded_compactor_enabled: bool,
     reserved_memory_bytes: usize,
 ) {
-    info!("Memory outline: ");
-    info!("> total_memory: {}", convert(cn_total_memory_bytes as _));
-    info!(
-        ">     storage_memory: {}",
-        convert(storage_memory_bytes as _)
-    );
-    info!(
-        ">         block_cache_capacity: {}",
-        convert((storage_memory_config.block_cache_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         meta_cache_capacity: {}",
-        convert((storage_memory_config.meta_cache_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         shared_buffer_capacity: {}",
-        convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _)
-    );
-    info!(
-        ">         file_cache_total_buffer_capacity: {}",
-        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _)
-    );
-    if embedded_compactor_enabled {
-        info!(
-            ">         compactor_memory_limit: {}",
+    let memory_config = format!(
+        "\n\
+        Memory outline:\n\
+        > total_memory: {}\n\
+        >     storage_memory: {}\n\
+        >         block_cache_capacity: {}\n\
+        >         meta_cache_capacity: {}\n\
+        >         shared_buffer_capacity: {}\n\
+        >         file_cache_total_buffer_capacity: {}\n\
+        >         compactor_memory_limit: {}\n\
+        >     compute_memory: {}\n\
+        >     reserved_memory: {}",
+        convert(cn_total_memory_bytes as _),
+        convert(storage_memory_bytes as _),
+        convert((storage_memory_config.block_cache_capacity_mb << 20) as _),
+        convert((storage_memory_config.meta_cache_capacity_mb << 20) as _),
+        convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _),
+        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _),
+        if embedded_compactor_enabled {
             convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
-        );
-    }
-    info!(
-        ">     compute_memory: {}",
-        convert(compute_memory_bytes as _)
+        } else {
+            "Not enabled".to_string()
+        },
+        convert(compute_memory_bytes as _),
+        convert(reserved_memory_bytes as _),
     );
-    info!(
-        ">     reserved_memory: {}",
-        convert(reserved_memory_bytes as _)
-    );
+    info!("{}", memory_config);
 }

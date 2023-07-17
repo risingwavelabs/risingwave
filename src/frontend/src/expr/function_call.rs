@@ -110,20 +110,22 @@ impl FunctionCall {
     }
 
     /// Create a cast expr over `child` to `target` type in `allows` context.
-    pub fn new_cast(
-        mut child: ExprImpl,
+    /// The input `child` remains unchanged when this returns an error.
+    pub fn cast_mut(
+        child: &mut ExprImpl,
         target: DataType,
         allows: CastContext,
-    ) -> Result<ExprImpl, CastError> {
-        if let ExprImpl::Parameter(expr) = &mut child && !expr.has_infer() {
+    ) -> Result<(), CastError> {
+        if let ExprImpl::Parameter(expr) = child && !expr.has_infer() {
+            // Always Ok below. Safe to mutate `expr` (from `child`).
             expr.cast_infer_type(target);
-            return Ok(child);
+            return Ok(());
         }
-        if is_row_function(&child) {
+        if let ExprImpl::FunctionCall(func) = child && func.func_type == ExprType::Row {
             // Row function will have empty fields in Datatype::Struct at this point. Therefore,
             // we will need to take some special care to generate the cast types. For normal struct
             // types, they will be handled in `cast_ok`.
-            return Self::cast_row_expr(child, target, allows);
+            return Self::cast_row_expr(func, target, allows);
         }
         if child.is_untyped() {
             // `is_unknown` makes sure `as_literal` and `as_utf8` will never panic.
@@ -137,23 +139,27 @@ impl FunctionCall {
                 })
                 .transpose();
             if let Ok(datum) = datum {
-                return Ok(Literal::new(datum, target).into());
+                *child = Literal::new(datum, target).into();
+                return Ok(());
             }
             // else when eager parsing fails, just proceed as normal.
             // Some callers are not ready to handle `'a'::int` error here.
         }
         let source = child.return_type();
         if source == target {
-            Ok(child)
+            Ok(())
         // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
         // in frontend.
         } else if child.is_untyped() || cast_ok(&source, &target, allows) {
-            Ok(Self {
+            // Always Ok below. Safe to mutate `child`.
+            let owned = std::mem::replace(child, ExprImpl::literal_bool(false));
+            *child = Self {
                 func_type: ExprType::Cast,
                 return_type: target,
-                inputs: vec![child],
+                inputs: vec![owned],
             }
-            .into())
+            .into();
+            Ok(())
         } else {
             Err(CastError(format!(
                 "cannot cast type \"{}\" to \"{}\" in {:?} context",
@@ -166,14 +172,11 @@ impl FunctionCall {
     /// expressions, like `ROW(1)::STRUCT<i INTEGER>` to `STRUCT<VARCHAR>`, although an integer
     /// is castible to VARCHAR. It's to simply the casting rules.
     fn cast_row_expr(
-        expr: ExprImpl,
+        func: &mut FunctionCall,
         target_type: DataType,
         allows: CastContext,
-    ) -> Result<ExprImpl, CastError> {
-        let func = *expr.into_function_call().unwrap();
-        let (fields, field_names) = if let DataType::Struct(t) = &target_type {
-            (t.fields.clone(), t.field_names.clone())
-        } else {
+    ) -> Result<(), CastError> {
+        let DataType::Struct(t) = &target_type else {
             return Err(CastError(format!(
                 "cannot cast type \"{}\" to \"{}\" in {:?} context",
                 func.return_type(),
@@ -181,19 +184,16 @@ impl FunctionCall {
                 allows
             )));
         };
-        let (func_type, inputs, _) = func.decompose();
-        match fields.len().cmp(&inputs.len()) {
+        match t.len().cmp(&func.inputs.len()) {
             std::cmp::Ordering::Equal => {
-                let inputs = inputs
-                    .into_iter()
-                    .zip_eq_fast(fields.to_vec())
-                    .map(|(e, t)| Self::new_cast(e, t, allows))
-                    .collect::<Result<Vec<_>, CastError>>()?;
-                let return_type = DataType::new_struct(
-                    inputs.iter().map(|i| i.return_type()).collect_vec(),
-                    field_names,
-                );
-                Ok(FunctionCall::new_unchecked(func_type, inputs, return_type).into())
+                // FIXME: `func` shall not be in a partially mutated state when one of its fields
+                // fails to cast.
+                func.inputs
+                    .iter_mut()
+                    .zip_eq_fast(t.types())
+                    .try_for_each(|(e, t)| Self::cast_mut(e, t.clone(), allows))?;
+                func.return_type = target_type;
+                Ok(())
             }
             std::cmp::Ordering::Less => Err(CastError("Input has too few columns.".to_string())),
             std::cmp::Ordering::Greater => {

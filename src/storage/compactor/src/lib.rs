@@ -18,7 +18,7 @@ mod server;
 mod telemetry;
 
 use clap::Parser;
-use risingwave_common::config::OverrideConfig;
+use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 
 use crate::server::compactor_serve;
 
@@ -83,6 +83,24 @@ struct OverrideConfigOpts {
     #[clap(long, env = "RW_MAX_CONCURRENT_TASK_NUMBER")]
     #[override_opts(path = storage.max_concurrent_compaction_task_number)]
     pub max_concurrent_task_number: Option<u64>,
+
+    /// Enable async stack tracing through `await-tree` for risectl.
+    #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
+    #[override_opts(path = streaming.async_stack_trace)]
+    pub async_stack_trace: Option<AsyncStackTraceOption>,
+
+    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
+    pub object_store_streaming_read_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_UPLOAD_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_streaming_upload_timeout_ms)]
+    pub object_store_streaming_upload_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_UPLOAD_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_upload_timeout_ms)]
+    pub object_store_upload_timeout_ms: Option<u64>,
+    #[clap(long, env = "RW_OBJECT_STORE_READ_TIMEOUT_MS", value_enum)]
+    #[override_opts(path = storage.object_store_read_timeout_ms)]
+    pub object_store_read_timeout_ms: Option<u64>,
 }
 
 use std::future::Future;

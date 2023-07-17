@@ -184,8 +184,6 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::schema_test_utils;
-    use risingwave_common::types::DataType;
-    use risingwave_expr::agg::{AggArgs, AggKind};
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -199,14 +197,7 @@ mod tests {
         tx.push_barrier(2, false);
         tx.push_barrier(3, false);
 
-        let agg_calls = vec![AggCall {
-            kind: AggKind::Count,
-            args: AggArgs::None,
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        }];
+        let agg_calls = vec![AggCall::from_pretty("(count:int8)")];
 
         let simple_agg = Box::new(
             StatelessSimpleAggExecutor::new(
@@ -256,30 +247,9 @@ mod tests {
         tx.push_barrier(3, false);
 
         let agg_calls = vec![
-            AggCall {
-                kind: AggKind::Count,
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 1),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
+            AggCall::from_pretty("(count:int8)"),
+            AggCall::from_pretty("(sum:int8 $0:int8)"),
+            AggCall::from_pretty("(sum:int8 $1:int8)"),
         ];
 
         let simple_agg = Box::new(

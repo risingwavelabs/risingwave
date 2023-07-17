@@ -12,50 +12,230 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
 use crate::source::{SplitId, SplitMetaData};
 
-/// The states of a CDC split, which will be persisted to checkpoint.
+/// The base states of a CDC split, which will be persisted to checkpoint.
 /// CDC source only has single split, so we use the `source_id` to identify the split.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
-pub struct CdcSplit {
+pub struct CdcSplitBase {
     pub split_id: u32,
-    // the hostname and port of a node that holding shard tables
-    pub server_addr: Option<String>,
     pub start_offset: Option<String>,
+    pub snapshot_done: bool,
 }
 
-impl SplitMetaData for CdcSplit {
-    fn id(&self) -> SplitId {
-        format!("{}", self.split_id).into()
+impl CdcSplitBase {
+    pub fn new(split_id: u32, start_offset: Option<String>) -> Self {
+        Self {
+            split_id,
+            start_offset,
+            snapshot_done: false,
+        }
+    }
+}
+
+// Example debezium offset for Postgres:
+// {
+//     "sourcePartition":
+//     {
+//         "server": "RW_CDC_public.te"
+//     },
+//     "sourceOffset":
+//     {
+//         "last_snapshot_record": false,
+//         "lsn": 29973552,
+//         "txId": 1046,
+//         "ts_usec": 1670826189008456,
+//         "snapshot": true
+//     }
+// }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DebeziumOffset {
+    #[serde(rename = "sourcePartition")]
+    source_partition: HashMap<String, String>,
+    #[serde(rename = "sourceOffset")]
+    source_offset: DebeziumSourceOffset,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DebeziumSourceOffset {
+    // postgres snapshot progress
+    last_snapshot_record: Option<bool>,
+    // mysql snapshot progress
+    snapshot: Option<bool>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
+pub struct MySqlCdcSplit {
+    pub inner: CdcSplitBase,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
+pub struct PostgresCdcSplit {
+    pub inner: CdcSplitBase,
+    // the hostname and port of a node that holding shard tables (for Citus)
+    pub server_addr: Option<String>,
+}
+
+impl MySqlCdcSplit {
+    pub fn new(split_id: u32, start_offset: String) -> MySqlCdcSplit {
+        let split = CdcSplitBase {
+            split_id,
+            start_offset: Some(start_offset),
+            snapshot_done: false,
+        };
+        Self { inner: split }
     }
 
-    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
-        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+        // deserialize the start_offset
+        let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
+            .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
+
+        let snapshot_done = match dbz_offset.source_offset.snapshot {
+            Some(val) => !val,
+            None => true,
+        };
+
+        let split = CdcSplitBase {
+            split_id: self.inner.split_id,
+            start_offset: Some(start_offset),
+            snapshot_done,
+        };
+        Self { inner: split }
+    }
+}
+
+impl PostgresCdcSplit {
+    pub fn new(split_id: u32, start_offset: String) -> PostgresCdcSplit {
+        let split = CdcSplitBase {
+            split_id,
+            start_offset: Some(start_offset),
+            snapshot_done: false,
+        };
+        Self {
+            inner: split,
+            server_addr: None,
+        }
+    }
+
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+        // deserialize the start_offset
+        let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
+            .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
+
+        let snapshot_done = dbz_offset
+            .source_offset
+            .last_snapshot_record
+            .unwrap_or(false);
+
+        let split = CdcSplitBase {
+            split_id: self.inner.split_id,
+            start_offset: Some(start_offset),
+            snapshot_done,
+        };
+
+        let server_addr = self.server_addr.clone();
+        Self {
+            inner: split,
+            server_addr,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
+pub struct DebeziumCdcSplit {
+    pub mysql_split: Option<MySqlCdcSplit>,
+    pub pg_split: Option<PostgresCdcSplit>,
+}
+
+impl SplitMetaData for DebeziumCdcSplit {
+    fn id(&self) -> SplitId {
+        assert!(self.mysql_split.is_some() || self.pg_split.is_some());
+        if let Some(split) = &self.mysql_split {
+            return format!("{}", split.inner.split_id).into();
+        }
+        if let Some(split) = &self.pg_split {
+            return format!("{}", split.inner.split_id).into();
+        }
+        unreachable!("invalid split")
     }
 
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
+
+    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
+        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    }
 }
 
-impl CdcSplit {
-    pub fn new(split_id: u32, start_offset: String) -> CdcSplit {
+impl DebeziumCdcSplit {
+    pub fn new(mysql_split: Option<MySqlCdcSplit>, pg_split: Option<PostgresCdcSplit>) -> Self {
         Self {
-            split_id,
-            server_addr: None,
-            start_offset: Some(start_offset),
+            mysql_split,
+            pg_split,
         }
     }
 
-    pub fn copy_with_offset(&self, start_offset: String) -> Self {
-        Self {
-            split_id: self.split_id,
-            server_addr: self.server_addr.clone(),
-            start_offset: Some(start_offset),
+    pub fn split_id(&self) -> u32 {
+        if let Some(split) = &self.mysql_split {
+            return split.inner.split_id;
         }
+        if let Some(split) = &self.pg_split {
+            return split.inner.split_id;
+        }
+        unreachable!("invalid debezium split")
+    }
+
+    pub fn start_offset(&self) -> &Option<String> {
+        if let Some(split) = &self.mysql_split {
+            return &split.inner.start_offset;
+        }
+        if let Some(split) = &self.pg_split {
+            return &split.inner.start_offset;
+        }
+        unreachable!("invalid debezium split")
+    }
+
+    pub fn snapshot_done(&self) -> bool {
+        if let Some(split) = &self.mysql_split {
+            return split.inner.snapshot_done;
+        }
+        if let Some(split) = &self.pg_split {
+            return split.inner.snapshot_done;
+        }
+        unreachable!("invalid debezium split")
+    }
+
+    pub fn server_addr(&self) -> &Option<String> {
+        if let Some(split) = &self.pg_split {
+            return &split.server_addr;
+        }
+        unreachable!("invalid debezium split")
+    }
+
+    pub fn copy_with_offset(&self, start_offset: String) -> Self {
+        assert!(self.mysql_split.is_some() || self.pg_split.is_some());
+        if let Some(split) = &self.mysql_split {
+            let mysql_split = Some(split.copy_with_offset(start_offset));
+            return Self {
+                mysql_split,
+                pg_split: None,
+            };
+        }
+        if let Some(split) = &self.pg_split {
+            let pg_split = Some(split.copy_with_offset(start_offset));
+            return Self {
+                mysql_split: None,
+                pg_split,
+            };
+        }
+        unreachable!("invalid debezium split")
     }
 }

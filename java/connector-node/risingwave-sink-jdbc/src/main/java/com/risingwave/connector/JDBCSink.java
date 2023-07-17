@@ -17,61 +17,87 @@ package com.risingwave.connector;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.jdbc.JdbcDialect;
+import com.risingwave.connector.jdbc.JdbcDialectFactory;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
-import java.io.InputStream;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import org.postgresql.util.PGInterval;
-import org.postgresql.util.PGobject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-enum DatabaseType {
-    MYSQL,
-    POSTGRES,
-}
-
 public class JDBCSink extends SinkBase {
-    public static final String INSERT_TEMPLATE = "INSERT INTO %s (%s) VALUES (%s)";
-    private static final String DELETE_TEMPLATE = "DELETE FROM %s WHERE %s";
-    private static final String UPDATE_TEMPLATE = "UPDATE %s SET %s WHERE %s";
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
+    private final JdbcDialect jdbcDialect;
     private final JDBCSinkConfig config;
     private final Connection conn;
     private final List<String> pkColumnNames;
-    private final DatabaseType targetDbType;
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
 
-    private String updateDeleteConditionBuffer;
-    private Object[] updateDeleteValueBuffer;
+    private PreparedStatement insertPreparedStmt;
+    private PreparedStatement upsertPreparedStmt;
+    private PreparedStatement deletePreparedStmt;
 
+    private boolean updateFlag = false;
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSink.class);
 
     public JDBCSink(JDBCSinkConfig config, TableSchema tableSchema) {
         super(tableSchema);
 
         var jdbcUrl = config.getJdbcUrl().toLowerCase();
-        if (jdbcUrl.startsWith("jdbc:mysql")) {
-            this.targetDbType = DatabaseType.MYSQL;
-        } else if (jdbcUrl.startsWith("jdbc:postgresql")) {
-            this.targetDbType = DatabaseType.POSTGRES;
-        } else {
-            throw Status.INVALID_ARGUMENT
-                    .withDescription("Unsupported jdbc url: " + jdbcUrl)
-                    .asRuntimeException();
-        }
-
+        var factory = JdbcUtils.getDialectFactory(jdbcUrl);
+        this.jdbcDialect =
+                factory.map(JdbcDialectFactory::create)
+                        .orElseThrow(
+                                () ->
+                                        Status.INVALID_ARGUMENT
+                                                .withDescription("Unsupported jdbc url: " + jdbcUrl)
+                                                .asRuntimeException());
         this.config = config;
         try {
             this.conn = DriverManager.getConnection(config.getJdbcUrl());
             this.conn.setAutoCommit(false);
-            this.pkColumnNames = getPkColumnNames(conn, config.getTableName());
+            this.pkColumnNames =
+                    getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
+        } catch (SQLException e) {
+            throw Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
+        }
+
+        try {
+            var schemaTableName =
+                    jdbcDialect.createSchemaTableName(
+                            config.getSchemaName(), config.getTableName());
+            if (config.isUpsertSink()) {
+                var upsertSql =
+                        jdbcDialect.getUpsertStatement(
+                                schemaTableName,
+                                List.of(tableSchema.getColumnNames()),
+                                pkColumnNames);
+                // MySQL and Postgres have upsert SQL
+                if (upsertSql.isEmpty()) {
+                    throw Status.FAILED_PRECONDITION
+                            .withDescription("Failed to get upsert SQL")
+                            .asRuntimeException();
+                }
+                this.upsertPreparedStmt =
+                        conn.prepareStatement(upsertSql.get(), Statement.RETURN_GENERATED_KEYS);
+                // upsert sink will handle DELETE events
+                var deleteSql = jdbcDialect.getDeleteStatement(schemaTableName, pkColumnNames);
+                this.deletePreparedStmt =
+                        conn.prepareStatement(deleteSql, Statement.RETURN_GENERATED_KEYS);
+            } else {
+                var insertSql =
+                        jdbcDialect.getInsertIntoStatement(
+                                schemaTableName, List.of(tableSchema.getColumnNames()));
+                this.insertPreparedStmt =
+                        conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS);
+            }
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -80,10 +106,11 @@ public class JDBCSink extends SinkBase {
         }
     }
 
-    private static List<String> getPkColumnNames(Connection conn, String tableName) {
+    private static List<String> getPkColumnNames(
+            Connection conn, String tableName, String schemaName) {
         List<String> pkColumnNames = new ArrayList<>();
         try {
-            var pks = conn.getMetaData().getPrimaryKeys(null, null, tableName);
+            var pks = conn.getMetaData().getPrimaryKeys(null, schemaName, tableName);
             while (pks.next()) {
                 pkColumnNames.add(pks.getString(JDBC_COLUMN_NAME_KEY));
             }
@@ -93,194 +120,111 @@ public class JDBCSink extends SinkBase {
                             String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
-        LOG.info("detected pk {}", pkColumnNames);
+        LOG.info("detected pk column {}", pkColumnNames);
         return pkColumnNames;
     }
 
-    private PreparedStatement prepareStatement(SinkRow row) {
-        switch (row.getOp()) {
-            case INSERT:
-                String columnsRepr = String.join(",", getTableSchema().getColumnNames());
-                String valuesRepr =
-                        IntStream.range(0, row.size())
-                                .mapToObj(row::get)
-                                .map((Object o) -> "?")
-                                .collect(Collectors.joining(","));
-                String insertStmt =
-                        String.format(
-                                INSERT_TEMPLATE, config.getTableName(), columnsRepr, valuesRepr);
-                try {
-                    return generatePreparedStatement(insertStmt, row, null);
-                } catch (SQLException e) {
-                    throw io.grpc.Status.INTERNAL
-                            .withDescription(
-                                    String.format(
-                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                            .withCause(e)
-                            .asRuntimeException();
-                }
-            case DELETE:
-                if (this.pkColumnNames.isEmpty()) {
-                    throw Status.INTERNAL
-                            .withDescription(
-                                    "downstream jdbc table should have primary key to handle delete event")
-                            .asRuntimeException();
-                }
-                String deleteCondition =
-                        this.pkColumnNames.stream()
-                                .map(key -> key + " = ?")
-                                .collect(Collectors.joining(" AND "));
-
-                String deleteStmt =
-                        String.format(DELETE_TEMPLATE, config.getTableName(), deleteCondition);
-                try {
-                    int placeholderIdx = 1;
-                    PreparedStatement stmt =
-                            conn.prepareStatement(deleteStmt, Statement.RETURN_GENERATED_KEYS);
-                    for (String primaryKey : this.pkColumnNames) {
-                        Object fromRow = getTableSchema().getFromRow(primaryKey, row);
-                        stmt.setObject(placeholderIdx++, fromRow);
-                    }
-                    return stmt;
-                } catch (SQLException e) {
-                    throw Status.INTERNAL
-                            .withDescription(
-                                    String.format(
-                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                            .asRuntimeException();
-                }
-            case UPDATE_DELETE:
-                if (this.pkColumnNames.isEmpty()) {
-                    throw Status.INTERNAL
-                            .withDescription(
-                                    "downstream jdbc table should have primary key to handle update_delete event")
-                            .asRuntimeException();
-                }
-                updateDeleteConditionBuffer =
-                        this.pkColumnNames.stream()
-                                .map(key -> key + " = ?")
-                                .collect(Collectors.joining(" AND "));
-                updateDeleteValueBuffer =
-                        this.pkColumnNames.stream()
-                                .map(key -> getTableSchema().getFromRow(key, row))
-                                .toArray();
-
-                LOG.debug(
-                        "update delete condition: {} on values {}",
-                        updateDeleteConditionBuffer,
-                        updateDeleteValueBuffer);
-                return null;
-            case UPDATE_INSERT:
-                if (updateDeleteConditionBuffer == null) {
-                    throw Status.FAILED_PRECONDITION
-                            .withDescription("an UPDATE_INSERT should precede an UPDATE_DELETE")
-                            .asRuntimeException();
-                }
-                String updateColumns =
-                        IntStream.range(0, getTableSchema().getNumColumns())
-                                .mapToObj(
-                                        index -> getTableSchema().getColumnNames()[index] + " = ?")
-                                .collect(Collectors.joining(","));
-                String updateStmt =
-                        String.format(
-                                UPDATE_TEMPLATE,
-                                config.getTableName(),
-                                updateColumns,
-                                updateDeleteConditionBuffer);
-                try {
-                    PreparedStatement stmt =
-                            generatePreparedStatement(updateStmt, row, updateDeleteValueBuffer);
-                    updateDeleteConditionBuffer = null;
-                    updateDeleteValueBuffer = null;
-                    return stmt;
-                } catch (SQLException e) {
-                    throw Status.INTERNAL
-                            .withDescription(
-                                    String.format(
-                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                            .asRuntimeException();
-                }
-            default:
-                throw Status.INVALID_ARGUMENT
-                        .withDescription("unspecified row operation")
-                        .asRuntimeException();
+    private PreparedStatement prepareInsertStatement(SinkRow row) {
+        if (row.getOp() != Data.Op.INSERT) {
+            throw Status.FAILED_PRECONDITION
+                    .withDescription("unexpected op type: " + row.getOp())
+                    .asRuntimeException();
+        }
+        try {
+            var preparedStmt = insertPreparedStmt;
+            jdbcDialect.bindInsertIntoStatement(preparedStmt, conn, getTableSchema(), row);
+            return preparedStmt;
+        } catch (SQLException e) {
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .withCause(e)
+                    .asRuntimeException();
         }
     }
 
-    /**
-     * Generates sql statement for insert/update
-     *
-     * @param inputStmt insert/update template string
-     * @param row column values to fill into statement
-     * @param updateDeleteValueBuffer pk values for update condition, pass null for insert
-     * @return prepared sql statement for insert/delete
-     * @throws SQLException
-     */
-    private PreparedStatement generatePreparedStatement(
-            String inputStmt, SinkRow row, Object[] updateDeleteValueBuffer) throws SQLException {
-        PreparedStatement stmt = conn.prepareStatement(inputStmt, Statement.RETURN_GENERATED_KEYS);
-        var columnNames = getTableSchema().getColumnNames();
-        int placeholderIdx = 1;
-        for (int i = 0; i < row.size(); i++) {
-            switch (getTableSchema().getColumnType(columnNames[i])) {
-                case INTERVAL:
-                    if (targetDbType == DatabaseType.POSTGRES) {
-                        stmt.setObject(placeholderIdx++, new PGInterval((String) row.get(i)));
-                    } else {
-                        stmt.setObject(placeholderIdx++, row.get(i));
+    private PreparedStatement prepareUpsertStatement(SinkRow row) {
+        try {
+            var preparedStmt = upsertPreparedStmt;
+            switch (row.getOp()) {
+                case INSERT:
+                    jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
+                    return preparedStmt;
+                case UPDATE_INSERT:
+                    if (!updateFlag) {
+                        throw Status.FAILED_PRECONDITION
+                                .withDescription("an UPDATE_DELETE should precede an UPDATE_INSERT")
+                                .asRuntimeException();
                     }
-                    break;
-                case JSONB:
-                    if (targetDbType == DatabaseType.POSTGRES) {
-                        // reference: https://github.com/pgjdbc/pgjdbc/issues/265
-                        var pgObj = new PGobject();
-                        pgObj.setType("jsonb");
-                        pgObj.setValue((String) row.get(i));
-                        stmt.setObject(placeholderIdx++, pgObj);
-                    } else {
-                        stmt.setObject(placeholderIdx++, row.get(i));
-                    }
-                    break;
-                case BYTEA:
-                    stmt.setBinaryStream(placeholderIdx++, (InputStream) row.get(i));
-                    break;
+                    jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
+                    updateFlag = false;
+                    return preparedStmt;
                 default:
-                    stmt.setObject(placeholderIdx++, row.get(i));
-                    break;
+                    throw Status.FAILED_PRECONDITION
+                            .withDescription("unexpected op type: " + row.getOp())
+                            .asRuntimeException();
             }
+        } catch (SQLException e) {
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .withCause(e)
+                    .asRuntimeException();
         }
-        if (updateDeleteValueBuffer != null) {
-            for (Object value : updateDeleteValueBuffer) {
-                stmt.setObject(placeholderIdx++, value);
+    }
+
+    private PreparedStatement prepareDeleteStatement(SinkRow row) {
+        if (!config.isUpsertSink()) {
+            throw Status.FAILED_PRECONDITION
+                    .withDescription("Non-upsert sink cannot handle DELETE event")
+                    .asRuntimeException();
+        }
+        if (pkColumnNames.isEmpty()) {
+            throw Status.INTERNAL
+                    .withDescription(
+                            "downstream jdbc table should have primary key to handle DELETE event")
+                    .asRuntimeException();
+        }
+
+        try {
+            int placeholderIdx = 1;
+            for (String primaryKey : pkColumnNames) {
+                Object fromRow = getTableSchema().getFromRow(primaryKey, row);
+                deletePreparedStmt.setObject(placeholderIdx++, fromRow);
             }
+            return deletePreparedStmt;
+        } catch (SQLException e) {
+            throw Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
         }
-        return stmt;
     }
 
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
             try (SinkRow row = rows.next()) {
-                PreparedStatement stmt = prepareStatement(row);
+                PreparedStatement stmt;
                 if (row.getOp() == Data.Op.UPDATE_DELETE) {
+                    updateFlag = true;
                     continue;
                 }
-                if (stmt != null) {
-                    try {
-                        LOG.debug("Executing statement: {}", stmt);
-                        stmt.executeUpdate();
-                    } catch (SQLException e) {
-                        throw Status.INTERNAL
-                                .withDescription(
-                                        String.format(
-                                                ERROR_REPORT_TEMPLATE,
-                                                e.getSQLState(),
-                                                e.getMessage()))
-                                .asRuntimeException();
-                    }
+
+                if (config.isUpsertSink()) {
+                    stmt = prepareForUpsert(row);
                 } else {
+                    stmt = prepareForAppendOnly(row);
+                }
+
+                try {
+                    LOG.debug("Executing statement: {}", stmt);
+                    stmt.executeUpdate();
+                    stmt.clearParameters();
+                } catch (SQLException e) {
                     throw Status.INTERNAL
-                            .withDescription("empty statement encoded")
+                            .withDescription(
+                                    String.format(ERROR_REPORT_TEMPLATE, stmt, e.getMessage()))
                             .asRuntimeException();
                 }
             } catch (Exception e) {
@@ -289,9 +233,23 @@ public class JDBCSink extends SinkBase {
         }
     }
 
+    private PreparedStatement prepareForUpsert(SinkRow row) {
+        PreparedStatement stmt;
+        if (row.getOp() == Data.Op.DELETE) {
+            stmt = prepareDeleteStatement(row);
+        } else {
+            stmt = prepareUpsertStatement(row);
+        }
+        return stmt;
+    }
+
+    private PreparedStatement prepareForAppendOnly(SinkRow row) {
+        return prepareInsertStatement(row);
+    }
+
     @Override
     public void sync() {
-        if (updateDeleteConditionBuffer != null || updateDeleteValueBuffer != null) {
+        if (updateFlag) {
             throw Status.FAILED_PRECONDITION
                     .withDescription(
                             "expected UPDATE_INSERT to complete an UPDATE operation, got `sync`")
@@ -311,6 +269,8 @@ public class JDBCSink extends SinkBase {
     public void drop() {
         try {
             conn.close();
+            upsertPreparedStmt.close();
+            deletePreparedStmt.close();
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(

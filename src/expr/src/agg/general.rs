@@ -74,8 +74,13 @@ where
 }
 
 #[aggregate("first_value(*) -> auto")]
-fn first<T>(state: T, _: T) -> T {
+fn first_value<T>(state: T, _: T) -> T {
     state
+}
+
+#[aggregate("last_value(*) -> auto")]
+fn last_value<T>(_: T, input: T) -> T {
+    input
 }
 
 /// Note the following corner cases:
@@ -195,26 +200,17 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::types::{DataType, Decimal};
 
-    use crate::agg::{AggArgs, AggCall, AggKind};
+    use crate::agg::AggCall;
     use crate::Result;
 
     async fn eval_agg(
-        input_type: DataType,
+        pretty: &str,
         input: ArrayRef,
-        agg_kind: AggKind,
-        return_type: DataType,
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
         let len = input.len();
         let input_chunk = DataChunk::new(vec![input], len);
-        let mut agg_state = crate::agg::build(AggCall {
-            kind: agg_kind,
-            args: AggArgs::Unary(input_type, 0),
-            return_type,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        })?;
+        let mut agg_state = crate::agg::build(AggCall::from_pretty(pretty))?;
         agg_state
             .update_multi(&input_chunk, 0, input_chunk.cardinality())
             .await?;
@@ -225,14 +221,9 @@ mod tests {
     #[tokio::test]
     async fn vec_sum_int32() -> Result<()> {
         let input = I32Array::from_iter([1, 2, 3]);
-        let agg_kind = AggKind::Sum;
-        let input_type = DataType::Int32;
-        let return_type = DataType::Int64;
         let actual = eval_agg(
-            input_type,
+            "(sum:int8 $0:int4)",
             Arc::new(input.into()),
-            agg_kind,
-            return_type,
             ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
         )
         .await?;
@@ -245,14 +236,9 @@ mod tests {
     #[tokio::test]
     async fn vec_sum_int64() -> Result<()> {
         let input = I64Array::from_iter([1, 2, 3]);
-        let agg_kind = AggKind::Sum;
-        let input_type = DataType::Int64;
-        let return_type = DataType::Decimal;
         let actual = eval_agg(
-            input_type,
+            "(sum:decimal $0:int8)",
             Arc::new(input.into()),
-            agg_kind,
-            return_type,
             DecimalArrayBuilder::new(0).into(),
         )
         .await?;
@@ -265,14 +251,9 @@ mod tests {
     #[tokio::test]
     async fn vec_min_float32() -> Result<()> {
         let input = F32Array::from_iter([1.0, 2.0, 3.0]);
-        let agg_kind = AggKind::Min;
-        let input_type = DataType::Float32;
-        let return_type = DataType::Float32;
         let actual = eval_agg(
-            input_type,
+            "(min:float4 $0:float4)",
             Arc::new(input.into()),
-            agg_kind,
-            return_type,
             ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)),
         )
         .await?;
@@ -285,14 +266,9 @@ mod tests {
     #[tokio::test]
     async fn vec_min_char() -> Result<()> {
         let input = Utf8Array::from_iter(["b", "aa"]);
-        let agg_kind = AggKind::Min;
-        let input_type = DataType::Varchar;
-        let return_type = DataType::Varchar;
         let actual = eval_agg(
-            input_type,
+            "(min:varchar $0:varchar)",
             Arc::new(input.into()),
-            agg_kind,
-            return_type,
             ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
         )
         .await?;
@@ -312,14 +288,9 @@ mod tests {
             ],
             DataType::Int32,
         );
-        let agg_type = AggKind::Min;
-        let input_type = DataType::List(Box::new(DataType::Int32));
-        let return_type = DataType::List(Box::new(DataType::Int32));
         let actual = eval_agg(
-            input_type,
+            "(min:int4[] $0:int4[])",
             Arc::new(input.into()),
-            agg_type,
-            return_type,
             ArrayBuilderImpl::List(ListArrayBuilder::with_type(
                 0,
                 DataType::List(Box::new(DataType::Int32)),
@@ -340,14 +311,9 @@ mod tests {
     #[tokio::test]
     async fn vec_max_char() -> Result<()> {
         let input = Utf8Array::from_iter(["b", "aa"]);
-        let agg_kind = AggKind::Max;
-        let input_type = DataType::Varchar;
-        let return_type = DataType::Varchar;
         let actual = eval_agg(
-            input_type,
+            "(max:varchar $0:varchar)",
             Arc::new(input.into()),
-            agg_kind,
-            return_type,
             ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
         )
         .await?;
@@ -360,14 +326,9 @@ mod tests {
     #[tokio::test]
     async fn vec_count_int32() -> Result<()> {
         async fn test_case(input: ArrayImpl, expected: &[Option<i64>]) -> Result<()> {
-            let agg_kind = AggKind::Count;
-            let input_type = DataType::Int32;
-            let return_type = DataType::Int64;
             let actual = eval_agg(
-                input_type,
+                "(count:int8 $0:int4)",
                 Arc::new(input),
-                agg_kind,
-                return_type,
                 ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
             )
             .await?;
@@ -388,41 +349,12 @@ mod tests {
         test_case(input.into(), expected).await
     }
 
-    async fn eval_agg_distinct(
-        input_type: DataType,
-        input: ArrayRef,
-        agg_kind: AggKind,
-        return_type: DataType,
-        mut builder: ArrayBuilderImpl,
-    ) -> Result<ArrayImpl> {
-        let len = input.len();
-        let input_chunk = DataChunk::new(vec![input], len);
-        let mut agg_state = crate::agg::build(AggCall {
-            kind: agg_kind,
-            args: AggArgs::Unary(input_type, 0),
-            return_type,
-            column_orders: vec![],
-            filter: None,
-            distinct: true,
-        })?;
-        agg_state
-            .update_multi(&input_chunk, 0, input_chunk.cardinality())
-            .await?;
-        agg_state.output(&mut builder)?;
-        Ok(builder.finish())
-    }
-
     #[tokio::test]
     async fn vec_distinct_sum_int32() -> Result<()> {
         let input = I32Array::from_iter([1, 1, 3]);
-        let agg_kind = AggKind::Sum;
-        let input_type = DataType::Int32;
-        let return_type = DataType::Int64;
-        let actual = eval_agg_distinct(
-            input_type,
+        let actual = eval_agg(
+            "(sum:int8 $0:int4 distinct)",
             Arc::new(input.into()),
-            agg_kind,
-            return_type,
             ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
         )
         .await?;
@@ -435,14 +367,9 @@ mod tests {
     #[tokio::test]
     async fn vec_distinct_sum_int64() -> Result<()> {
         let input = I64Array::from_iter([1, 1, 3]);
-        let agg_kind = AggKind::Sum;
-        let input_type = DataType::Int64;
-        let return_type = DataType::Decimal;
-        let actual = eval_agg_distinct(
-            input_type,
+        let actual = eval_agg(
+            "(sum:decimal $0:int8 distinct)",
             Arc::new(input.into()),
-            agg_kind,
-            return_type,
             DecimalArrayBuilder::new(0).into(),
         )
         .await?;
@@ -455,14 +382,9 @@ mod tests {
     #[tokio::test]
     async fn vec_distinct_min_float32() -> Result<()> {
         let input = F32Array::from_iter([1.0, 2.0, 3.0]);
-        let agg_kind = AggKind::Min;
-        let input_type = DataType::Float32;
-        let return_type = DataType::Float32;
-        let actual = eval_agg_distinct(
-            input_type,
+        let actual = eval_agg(
+            "(min:float4 $0:float4 distinct)",
             Arc::new(input.into()),
-            agg_kind,
-            return_type,
             ArrayBuilderImpl::Float32(F32ArrayBuilder::new(0)),
         )
         .await?;
@@ -475,14 +397,9 @@ mod tests {
     #[tokio::test]
     async fn vec_distinct_min_char() -> Result<()> {
         let input = Utf8Array::from_iter(["b", "aa"]);
-        let agg_kind = AggKind::Min;
-        let input_type = DataType::Varchar;
-        let return_type = DataType::Varchar;
-        let actual = eval_agg_distinct(
-            input_type,
+        let actual = eval_agg(
+            "(min:varchar $0:varchar distinct)",
             Arc::new(input.into()),
-            agg_kind,
-            return_type,
             ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
         )
         .await?;
@@ -495,14 +412,9 @@ mod tests {
     #[tokio::test]
     async fn vec_distinct_max_char() -> Result<()> {
         let input = Utf8Array::from_iter(["b", "aa"]);
-        let agg_kind = AggKind::Max;
-        let input_type = DataType::Varchar;
-        let return_type = DataType::Varchar;
-        let actual = eval_agg_distinct(
-            input_type,
+        let actual = eval_agg(
+            "(max:varchar $0:varchar distinct)",
             Arc::new(input.into()),
-            agg_kind,
-            return_type,
             ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0)),
         )
         .await?;
@@ -515,14 +427,9 @@ mod tests {
     #[tokio::test]
     async fn vec_distinct_count_int32() -> Result<()> {
         async fn test_case(input: ArrayImpl, expected: &[Option<i64>]) -> Result<()> {
-            let agg_kind = AggKind::Count;
-            let input_type = DataType::Int32;
-            let return_type = DataType::Int64;
-            let actual = eval_agg_distinct(
-                input_type,
+            let actual = eval_agg(
+                "(count:int8 $0:int4 distinct)",
                 Arc::new(input),
-                agg_kind,
-                return_type,
                 ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)),
             )
             .await?;

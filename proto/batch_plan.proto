@@ -219,6 +219,7 @@ message TaskOutputId {
 message LocalExecutePlan {
   batch_plan.PlanFragment plan = 1;
   common.BatchQueryEpoch epoch = 2;
+  map<string, string> tracing_context = 3;
 }
 
 // ExchangeSource describes where to read results from children operators
@@ -274,6 +275,11 @@ message DistributedLookupJoinNode {
 
 message UnionNode {}
 
+message SortOverWindowNode {
+  repeated expr.WindowFunction calls = 1;
+  repeated uint32 partition_by = 2;
+}
+
 message PlanNode {
   repeated PlanNode children = 1;
   reserved 22;
@@ -305,6 +311,7 @@ message PlanNode {
     GroupTopNNode group_top_n = 32;
     DistributedLookupJoinNode distributed_lookup_join = 33;
     SourceNode source = 34;
+    SortOverWindowNode sort_over_window = 37;
     // The following nodes are used for testing.
     bool block_executor = 35;
     bool busy_loop_executor = 36;

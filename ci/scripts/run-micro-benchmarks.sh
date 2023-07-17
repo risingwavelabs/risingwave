@@ -8,13 +8,14 @@ set -euo pipefail
 # Space delimited micro-benchmarks to run.
 # Each micro-benchmark added here should return a singular result indicative of performance.
 # Make sure the added benchmark has a unique name.
-BENCHMARKS="stream_hash_agg json_parser"
+BENCHMARKS="stream_hash_agg json_parser bench_block_iter bench_compactor bench_lru_cache bench_merge_iter"
 
 # cargo criterion --bench stream_hash_agg --message-format=json
 bench() {
   BENCHMARK_NAME=$1
   for LINE in $(cargo criterion --bench "$BENCHMARK_NAME" --message-format=json)
   do
+    echo "$LINE"
     REASON="$(jq ".reason" <<< "$LINE")"
     if [[ $REASON == \"benchmark-complete\" ]]; then
       ID="$(jq ".id" <<< "$LINE")"
@@ -47,8 +48,17 @@ main() {
   for BENCHMARK in $BENCHMARKS
   do
     echo "--- Running $BENCHMARK"
+
+    OLD_IFS=$IFS
+    IFS=$'\n'
+
     bench $BENCHMARK
+
+    IFS=$OLD_IFS
+
   done
+
+
   # FIXME: the `-i` (inplace) flag doesn't work with this sed expr for some reason...
   NO_TRAILING_COMMA=$(sed -E '$ s/(.*),$/\1/' ./results.json)
   echo "$NO_TRAILING_COMMA" > ./results.json
@@ -56,4 +66,25 @@ main() {
   buildkite-agent artifact upload "./results.json"
 }
 
-main
+local_test() {
+  echo '[' > results.json
+  for BENCHMARK in $BENCHMARKS
+  do
+    echo "--- Running $BENCHMARK"
+    bench $BENCHMARK
+  done
+  NO_TRAILING_COMMA=$(sed -E '$ s/(.*),$/\1/' ./results.json)
+  echo "$NO_TRAILING_COMMA" > ./results.json
+  echo ']' >> results.json
+}
+
+set +u
+if [[ "$1" == 'local' ]]; then
+  set -u
+  echo "Running Local microbench"
+  local_test
+else
+  set -u
+  echo "Running CI microbench"
+  main
+fi

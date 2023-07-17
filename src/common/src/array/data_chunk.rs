@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::hash::BuildHasher;
-use std::sync::Arc;
 use std::{fmt, usize};
 
 use bytes::Bytes;
@@ -183,6 +182,11 @@ impl DataChunk {
 
     pub fn columns(&self) -> &[ArrayRef] {
         &self.columns
+    }
+
+    /// Returns the data types of all columns.
+    pub fn data_types(&self) -> Vec<DataType> {
+        self.columns.iter().map(|col| col.data_type()).collect()
     }
 
     /// Divides one chunk into two at an column index.
@@ -749,16 +753,16 @@ impl DataChunkTestExt for DataChunk {
                 "F" => DataType::Float64,
                 "f" => DataType::Float32,
                 "TS" => DataType::Timestamp,
+                "TZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
                 "SRL" => DataType::Serial,
                 array if array.starts_with('{') && array.ends_with('}') => {
-                    DataType::Struct(Arc::new(StructType {
-                        fields: array[1..array.len() - 1]
+                    DataType::Struct(StructType::unnamed(
+                        array[1..array.len() - 1]
                             .split(',')
                             .map(parse_type)
-                            .collect_vec(),
-                        field_names: vec![],
-                    }))
+                            .collect(),
+                    ))
                 }
                 _ => todo!("unsupported type: {s:?}"),
             }

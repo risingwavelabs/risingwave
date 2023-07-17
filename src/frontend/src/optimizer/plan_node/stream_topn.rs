@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
+use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::Limit;
+use super::generic::{DistillUnit, TopNLimit};
+use super::utils::{plan_node_name, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -45,7 +45,7 @@ impl StreamTopN {
         StreamTopN { base, logical }
     }
 
-    pub fn limit_attr(&self) -> Limit {
+    pub fn limit_attr(&self) -> TopNLimit {
         self.logical.limit_attr
     }
 
@@ -58,13 +58,12 @@ impl StreamTopN {
     }
 }
 
-impl fmt::Display for StreamTopN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.input().append_only() {
-            self.logical.fmt_with_name(f, "StreamAppendOnlyTopN")
-        } else {
-            self.logical.fmt_with_name(f, "StreamTopN")
-        }
+impl Distill for StreamTopN {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let name = plan_node_name!("StreamTopN",
+            { "append_only", self.input().append_only() },
+        );
+        self.logical.distill_with_name(name)
     }
 }
 

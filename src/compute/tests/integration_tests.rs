@@ -33,11 +33,13 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::OwnedRow;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
@@ -101,7 +103,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_common::types::DataType;
 
     let memory_state_store = MemoryStateStore::new();
-    let dml_manager = Arc::new(DmlManager::default());
+    let dml_manager = Arc::new(DmlManager::for_test());
     let table_id = TableId::default();
     let schema = Schema {
         fields: vec![
@@ -120,8 +122,13 @@ async fn test_table_materialize() -> StreamResult<()> {
         "fields.v1.seed" => "12345",
     ));
     let row_id_index: usize = 0;
-    let source_builder =
-        create_source_desc_builder(&schema, Some(row_id_index), source_info, properties);
+    let source_builder = create_source_desc_builder(
+        &schema,
+        Some(row_id_index),
+        source_info,
+        properties,
+        vec![row_id_index],
+    );
 
     // Ensure the source exists.
     let source_desc = source_builder.build().await.unwrap();
@@ -157,6 +164,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
     let actor_ctx = ActorContext::create(0x3f3f3f);
+    let system_params_manager = LocalSystemParamsManager::for_test();
 
     // Create a `SourceExecutor` to read the changes.
     let source_executor = SourceExecutor::<PanicStateStore>::new(
@@ -166,8 +174,9 @@ async fn test_table_materialize() -> StreamResult<()> {
         None, // There is no external stream source.
         Arc::new(StreamingMetrics::unused()),
         barrier_rx,
-        u64::MAX,
+        system_params_manager.get_params(),
         1,
+        SourceCtrlOpts::default(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
@@ -284,7 +293,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let mut col_row_ids = vec![];
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].as_serial();
@@ -363,7 +372,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let message = materialize.next().await.unwrap()?;
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
             let col_row_id = c.columns()[0].as_serial();

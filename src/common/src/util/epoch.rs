@@ -18,7 +18,7 @@ use std::time::{Duration, SystemTime};
 
 use parse_display::Display;
 
-use crate::types::ScalarImpl;
+use crate::types::{ScalarImpl, Timestamptz};
 
 static UNIX_RISINGWAVE_DATE_SEC: u64 = 1_617_235_200;
 
@@ -44,7 +44,8 @@ impl Epoch {
     pub fn next(self) -> Self {
         let physical_now = Epoch::physical_now();
         let prev_physical_time = self.physical_time();
-        match physical_now.cmp(&prev_physical_time) {
+
+        let next_epoch = match physical_now.cmp(&prev_physical_time) {
             Ordering::Greater => Self::from_physical_time(physical_now),
             Ordering::Equal => {
                 tracing::warn!("New generate epoch is too close to the previous one.");
@@ -58,7 +59,10 @@ impl Epoch {
                 );
                 Epoch(self.0 + 1)
             }
-        }
+        };
+
+        assert!(next_epoch.0 > self.0);
+        next_epoch
     }
 
     pub fn physical_time(&self) -> u64 {
@@ -80,10 +84,11 @@ impl Epoch {
         UNIX_RISINGWAVE_DATE_SEC * 1000 + self.physical_time()
     }
 
-    /// Returns the epoch in a Int64(Timestamptz) scalar.
+    /// Returns the epoch in a Timestamptz scalar.
     pub fn as_scalar(&self) -> ScalarImpl {
-        // Timestamptz is in microseconds.
-        ScalarImpl::Int64(self.as_unix_millis() as i64 * 1000)
+        Timestamptz::from_millis(self.as_unix_millis() as i64)
+            .expect("epoch is out of range")
+            .into()
     }
 
     /// Returns the epoch in real system time.
