@@ -39,7 +39,7 @@ use crate::pg_extended::ResultCache;
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
-    FePasswordMessage, FeStartupMessage,
+    FePasswordMessage, FeStartupMessage, TransactionStatus,
 };
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
@@ -203,9 +203,7 @@ where
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
                             .unwrap();
-                        self.stream
-                            .write_no_flush(&BeMessage::ReadyForQuery)
-                            .unwrap();
+                        self.ready_for_query().unwrap();
                     }
 
                     PsqlError::Panic(_) => {
@@ -246,7 +244,7 @@ where
             FeMessage::Bind(m) => self.process_bind_msg(m)?,
             FeMessage::Execute(m) => self.process_execute_msg(m).await?,
             FeMessage::Describe(m) => self.process_describe_msg(m)?,
-            FeMessage::Sync => self.stream.write_no_flush(&BeMessage::ReadyForQuery)?,
+            FeMessage::Sync => self.ready_for_query()?,
             FeMessage::Close(m) => self.process_close_msg(m)?,
             FeMessage::Flush => self.stream.flush().await?,
         }
@@ -259,6 +257,16 @@ where
             PgProtocolState::Startup => self.stream.read_startup().await,
             PgProtocolState::Regular => self.stream.read().await,
         }
+    }
+
+    /// Writes a `ReadyForQuery` message to the client without flushing.
+    fn ready_for_query(&mut self) -> io::Result<()> {
+        self.stream.write_no_flush(&BeMessage::ReadyForQuery(
+            self.session
+                .as_ref()
+                .map(|s| s.transaction_status())
+                .unwrap_or(TransactionStatus::Idle),
+        ))
     }
 
     async fn process_ssl_msg(&mut self) -> PsqlResult<()> {
@@ -313,7 +321,7 @@ where
                     .write_parameter_status_msg_no_flush(&ParameterStatus {
                         application_name: application_name.cloned(),
                     })?;
-                self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+                self.ready_for_query()?;
             }
             UserAuthenticator::ClearText(_) => {
                 self.stream
@@ -341,7 +349,7 @@ where
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
-        self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+        self.ready_for_query()?;
         self.state = PgProtocolState::Regular;
         Ok(())
     }
@@ -363,14 +371,14 @@ where
         let result = self.inner_process_query_msg(sql, session).await;
 
         let mills = start.elapsed().as_millis();
-        let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
+
         tracing::info!(
             target: PGWIRE_QUERY_LOG,
             mode = %"(simple query)",
             session = %session_id,
             status = %if result.is_ok() { "ok" } else { "err" },
-            time = %format!("{}ms", mills),
-            sql = %truncated_sql,
+            time = %format_args!("{}ms", mills),
+            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
         );
 
         result
@@ -388,7 +396,11 @@ where
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
-            let span = tracing::info_span!("run_stmt", %stmt, session_id = session.id().0);
+            let span = tracing::info_span!(
+                "process_query_msg_one_stmt",
+                session_id = session.id().0,
+                stmt = format_args!("{}", truncated_fmt::TruncatedFmt(&stmt, 1024)),
+            );
 
             self.inner_process_query_msg_one_stmt(stmt, session.clone())
                 .instrument(span)
@@ -396,7 +408,7 @@ where
         }
         // Put this line inside the for loop above will lead to unfinished/stuck regress test...Not
         // sure the reason.
-        self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
+        self.ready_for_query()?;
         Ok(())
     }
 
@@ -479,14 +491,13 @@ where
         let result = self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids);
 
         let mills = start.elapsed().as_millis();
-        let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
         tracing::info!(
             target: PGWIRE_QUERY_LOG,
             mode = %"(extended query parse)",
             session = %session_id,
             status = %if result.is_ok() { "ok" } else { "err" },
-            time = %format!("{}ms", mills),
-            sql = %truncated_sql,
+            time = %format_args!("{}ms", mills),
+            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
         );
 
         result
@@ -518,14 +529,7 @@ where
                 ));
             }
 
-            // TODO: This behavior is not compatible with Postgres.
-            if stmts.is_empty() {
-                return Err(PsqlError::ParseError(
-                    "Empty statement is parsed in extended query mode".into(),
-                ));
-            }
-
-            stmts.into_iter().next().unwrap()
+            stmts.into_iter().next()
         };
 
         let param_types = type_ids
@@ -618,7 +622,6 @@ where
             let start = Instant::now();
             let portal = self.get_portal(&portal_name)?;
             let sql = format!("{}", portal);
-            let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
 
             let result = session.execute(portal).await;
 
@@ -629,8 +632,8 @@ where
                 mode = %"(extended query execute)",
                 session = %session_id,
                 status = %if result.is_ok() { "ok" } else { "err" },
-                time = %format!("{}ms", mills),
-                sql = %truncated_sql,
+                time = %format_args!("{}ms", mills),
+                sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
             );
 
             let pg_response = result.map_err(PsqlError::ExecuteError)?;
@@ -959,4 +962,62 @@ fn build_ssl_ctx_from_config(tls_config: &TlsConfig) -> PsqlResult<SslContext> {
     let acceptor = acceptor.build();
 
     Ok(acceptor.into_context())
+}
+
+mod truncated_fmt {
+    use std::fmt::*;
+
+    struct TruncatedFormatter<'a, 'b> {
+        remaining: usize,
+        finished: bool,
+        f: &'a mut Formatter<'b>,
+    }
+    impl<'a, 'b> Write for TruncatedFormatter<'a, 'b> {
+        fn write_str(&mut self, s: &str) -> Result {
+            if self.finished {
+                return Ok(());
+            }
+
+            if self.remaining < s.len() {
+                self.f.write_str(&s[0..self.remaining])?;
+                self.remaining = 0;
+                self.f.write_str("...(truncated)")?;
+                self.finished = true; // so that ...(truncated) is printed exactly once
+            } else {
+                self.f.write_str(s)?;
+                self.remaining -= s.len();
+            }
+            Ok(())
+        }
+    }
+
+    pub struct TruncatedFmt<'a, T>(pub &'a T, pub usize);
+
+    impl<'a, T> Debug for TruncatedFmt<'a, T>
+    where
+        T: Debug,
+    {
+        fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+            TruncatedFormatter {
+                remaining: self.1,
+                finished: false,
+                f,
+            }
+            .write_fmt(format_args!("{:?}", self.0))
+        }
+    }
+
+    impl<'a, T> Display for TruncatedFmt<'a, T>
+    where
+        T: Display,
+    {
+        fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+            TruncatedFormatter {
+                remaining: self.1,
+                finished: false,
+                f,
+            }
+            .write_fmt(format_args!("{}", self.0))
+        }
+    }
 }
