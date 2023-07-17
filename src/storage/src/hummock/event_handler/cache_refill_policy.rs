@@ -147,10 +147,16 @@ impl CacheRefillPolicy {
                     let sstable_store = self.sstable_store.clone();
                     let metrics = self.metrics.clone();
                     let future = async move {
-                        let _timer = metrics.refill_data_file_cache_duration.start_timer();
-                        sstable_store
+                        let now = Instant::now();
+                        let res = sstable_store
                             .may_fill_data_file_cache(&meta, block_index, &mut stat)
-                            .await
+                            .await;
+                        if let Ok(true) = res {
+                            metrics
+                                .refill_data_file_cache_duration
+                                .observe(now.elapsed().as_secs_f64());
+                        }
+                        res
                     };
                     futures.push(future);
                 }
