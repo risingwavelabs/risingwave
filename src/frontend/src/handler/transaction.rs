@@ -14,7 +14,7 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{TransactionAccessMode, TransactionMode};
+use risingwave_sqlparser::ast::{TransactionAccessMode, TransactionMode, Value};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::session::transaction::AccessMode;
@@ -46,17 +46,22 @@ pub async fn handle_begin(
 
         match access_mode {
             Some(TransactionAccessMode::ReadOnly) => AccessMode::ReadOnly,
-            Some(TransactionAccessMode::ReadWrite) => not_impl!("READ WRITE")?,
-            None => {
-                session.notice_to_user("access mode is not specified, using default READ ONLY");
-                AccessMode::ReadOnly
+            Some(TransactionAccessMode::ReadWrite) | None => {
+                // Note: This is for compatibility with some external drivers (like psycopg2) that
+                // issue `BEGIN` implicitly for users. Not actually starting a transaction is okay
+                // since `COMMIT` and `ROLLBACK` are no-ops (except for warnings) when there is no
+                // active transaction.
+                const MESSAGE: &str = "\
+                    Read-write transaction is not supported yet. Please specify `READ ONLY` to start a read-only transaction.\n\
+                    For compatibility, this statement will still succeed but no transaction is actually started.";
+
+                return Ok(RwPgResponse::builder(stmt_type).notice(MESSAGE).into());
             }
         }
     };
 
     session.txn_begin_explicit(access_mode);
 
-    // TODO: pgwire integration of the transaction state
     Ok(RwPgResponse::empty_result(stmt_type))
 }
 
@@ -74,7 +79,6 @@ pub async fn handle_commit(
 
     session.txn_commit_explicit();
 
-    // TODO: pgwire integration of the transaction state
     Ok(RwPgResponse::empty_result(stmt_type))
 }
 
@@ -92,6 +96,21 @@ pub async fn handle_rollback(
 
     session.txn_rollback_explicit();
 
-    // TODO: pgwire integration of the transaction state
     Ok(RwPgResponse::empty_result(stmt_type))
+}
+
+#[expect(clippy::unused_async)]
+pub async fn handle_set(
+    _handler_args: HandlerArgs,
+    _modes: Vec<TransactionMode>,
+    _snapshot: Option<Value>,
+    _session: bool,
+) -> Result<RwPgResponse> {
+    const MESSAGE: &str = "\
+        `SET TRANSACTION` is not supported yet.\n\
+        For compatibility, this statement will still succeed but no changes are actually made.";
+
+    Ok(RwPgResponse::builder(StatementType::SET_TRANSACTION)
+        .notice(MESSAGE)
+        .into())
 }

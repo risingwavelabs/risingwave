@@ -15,8 +15,3 @@ jobs:
         version-prefix: 'release-'
         version-separator: '.'
         overwrite: false
-    - name: Add issue to project
-      uses: actions/add-to-project@v0.3.0
-      with:
-        project-url: https://github.com/orgs/risingwavelabs/projects/13
-        github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}

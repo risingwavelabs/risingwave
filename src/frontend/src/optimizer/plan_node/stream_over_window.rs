@@ -47,22 +47,6 @@ impl StreamOverWindow {
         StreamOverWindow { base, logical }
     }
 
-    fn window_functions(&self) -> &[PlanWindowFunction] {
-        &self.logical.window_functions
-    }
-
-    fn partition_key_indices(&self) -> Vec<usize> {
-        self.window_functions()[0]
-            .partition_by
-            .iter()
-            .map(|i| i.index())
-            .collect()
-    }
-
-    fn order_key(&self) -> &[ColumnOrder] {
-        &self.window_functions()[0].order_by
-    }
-
     fn infer_state_table(&self) -> TableCatalog {
         let mut tbl_builder =
             TableCatalogBuilder::new(self.ctx().with_options().internal_table_subset());
@@ -73,14 +57,14 @@ impl StreamOverWindow {
         }
 
         let mut order_cols = HashSet::new();
-        for idx in self.partition_key_indices() {
+        for idx in self.logical.partition_key_indices() {
             if !order_cols.contains(&idx) {
                 tbl_builder.add_order_column(idx, OrderType::ascending());
                 order_cols.insert(idx);
             }
         }
         let read_prefix_len_hint = tbl_builder.get_current_pk_len();
-        for o in self.order_key() {
+        for o in self.logical.order_key() {
             if !order_cols.contains(&o.column_index) {
                 tbl_builder.add_order_column(o.column_index, o.order_type);
                 order_cols.insert(o.column_index);
@@ -118,19 +102,22 @@ impl StreamNode for StreamOverWindow {
         use risingwave_pb::stream_plan::*;
 
         let calls = self
+            .logical
             .window_functions()
             .iter()
             .map(PlanWindowFunction::to_protobuf)
             .collect();
-        let partition_by = self.window_functions()[0]
-            .partition_by
-            .iter()
-            .map(|i| i.index() as _)
+        let partition_by = self
+            .logical
+            .partition_key_indices()
+            .into_iter()
+            .map(|idx| idx as _)
             .collect();
-        let order_by = self.window_functions()[0]
-            .order_by
+        let order_by = self
+            .logical
+            .order_key()
             .iter()
-            .map(|o| o.to_protobuf())
+            .map(ColumnOrder::to_protobuf)
             .collect();
         let state_table = self
             .infer_state_table()
