@@ -65,6 +65,9 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
+    #[clap(long, env = "RW_CONFIG_PATH", default_value = "2.0")]
+    pub max_compactor_task_multiplier: f32,
+
     #[clap(flatten)]
     override_config: OverrideConfigOpts,
 }

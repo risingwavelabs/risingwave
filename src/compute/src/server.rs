@@ -232,7 +232,7 @@ pub async fn compute_node_serve(
             });
 
             let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client);
+                Compactor::start_compactor(compactor_context, hummock_meta_client, 2.0);
             sub_tasks.push((handle, shutdown_sender));
         }
         let memory_limiter = storage.get_memory_limiter();

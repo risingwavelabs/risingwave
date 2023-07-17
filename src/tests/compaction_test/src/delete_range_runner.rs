@@ -569,6 +569,7 @@ fn run_compactor_thread(
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,
         meta_client,
+        2.0, // max_compactor_task_multiplier
     )
 }
 

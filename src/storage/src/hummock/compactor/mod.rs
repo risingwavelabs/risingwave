@@ -465,6 +465,7 @@ impl Compactor {
     pub fn start_compactor(
         compactor_context: Arc<CompactorContext>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        max_compactor_task_multiplier: f32,
     ) -> (JoinHandle<()>, Sender<()>) {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -550,7 +551,7 @@ impl Compactor {
                             if pull_task_ack.load(Ordering::SeqCst) {
                                 // reset pending_pull_task_count when all pending task had been refill
                                 let pending_pull_task_count = {
-                                   (cpu_core_num as f32 * 1.5) as u32 - running_task_count.load(Ordering::Relaxed)
+                                   (cpu_core_num as f32 * max_compactor_task_multiplier) as u32 - running_task_count.load(Ordering::Relaxed)
                                 };
 
                                 if pending_pull_task_count > 0 {
