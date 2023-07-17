@@ -1,4 +1,4 @@
-Test each query
+# Test each query
 include ./q0.slt.part
 include ./q1.slt.part
 include ./q2.slt.part
