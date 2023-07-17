@@ -27,8 +27,9 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, ErrorSuppressor, Result as RwResult, RwError};
 use risingwave_common::types::{JsonbVal, Scalar};
-use risingwave_pb::connector_service::TableSchema;
+use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::ConnectorSplit;
+use risingwave_rpc_client::ConnectorClient;
 use serde::{Deserialize, Serialize};
 
 use super::datagen::DatagenMeta;
@@ -66,10 +67,7 @@ use crate::source::pulsar::source::reader::PulsarSplitReader;
 use crate::source::pulsar::{
     PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
 };
-use crate::{
-    impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader,
-    ConnectorParams,
-};
+use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
@@ -111,7 +109,7 @@ impl Default for SourceCtrlOpts {
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,
     pub metrics: Arc<EnumeratorMetrics>,
-    pub connector_params: ConnectorParams,
+    pub connector_client: Option<ConnectorClient>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -121,7 +119,7 @@ pub struct SourceEnumeratorInfo {
 
 #[derive(Debug, Default)]
 pub struct SourceContext {
-    pub connector_params: ConnectorParams,
+    pub connector_client: Option<ConnectorClient>,
     pub source_info: SourceInfo,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
@@ -134,11 +132,10 @@ impl SourceContext {
         fragment_id: u32,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
-        connector_params: ConnectorParams,
-        error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
+        connector_client: Option<ConnectorClient>,
     ) -> Self {
         Self {
-            connector_params,
+            connector_client,
             source_info: SourceInfo {
                 actor_id,
                 source_id: table_id,
@@ -146,12 +143,29 @@ impl SourceContext {
             },
             metrics,
             source_ctrl_opts,
-            error_suppressor,
+            error_suppressor: None,
         }
     }
 
-    pub fn add_suppressor(&mut self, error_suppressor: Arc<Mutex<ErrorSuppressor>>) {
-        self.error_suppressor = Some(error_suppressor)
+    pub fn new_with_suppressor(
+        actor_id: u32,
+        table_id: TableId,
+        fragment_id: u32,
+        metrics: Arc<SourceMetrics>,
+        source_ctrl_opts: SourceCtrlOpts,
+        connector_client: Option<ConnectorClient>,
+        error_suppressor: Arc<Mutex<ErrorSuppressor>>,
+    ) -> Self {
+        let mut ctx = Self::new(
+            actor_id,
+            table_id,
+            fragment_id,
+            metrics,
+            source_ctrl_opts,
+            connector_client,
+        );
+        ctx.error_suppressor = Some(error_suppressor);
+        ctx
     }
 
     pub(crate) fn report_user_source_error(&self, e: RwError) -> RwResult<()> {
@@ -294,21 +308,23 @@ impl ConnectorProperties {
         }
     }
 
-    pub fn init_properties_for_cdc(
-        &mut self,
-        source_id: u32,
-        rpc_addr: String,
-        table_schema: Option<TableSchema>,
-    ) {
+    pub fn init_cdc_properties(&mut self, table_schema: Option<PbTableSchema>) {
         match self {
             ConnectorProperties::MySqlCdc(c)
             | ConnectorProperties::PostgresCdc(c)
             | ConnectorProperties::CitusCdc(c) => {
-                c.source_id = source_id;
-                c.connector_node_addr = rpc_addr;
                 c.table_schema = table_schema;
             }
             _ => {}
+        }
+    }
+
+    pub fn is_cdc_connector(&self) -> bool {
+        match self {
+            ConnectorProperties::MySqlCdc(_)
+            | ConnectorProperties::PostgresCdc(_)
+            | ConnectorProperties::CitusCdc(_) => true,
+            _ => false,
         }
     }
 }

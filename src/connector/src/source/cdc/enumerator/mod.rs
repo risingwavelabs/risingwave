@@ -43,11 +43,13 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
 
     async fn new(
         props: CdcProperties,
-        _context: SourceEnumeratorContextRef,
+        context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<DebeziumSplitEnumerator> {
         tracing::debug!("start validate cdc properties");
         // TODO: use a shared client
-        let connector_client = ConnectorClient::new(&props.connector_node_addr).await?;
+        let connector_client = context.connector_client.clone().ok_or(anyhow!(
+            "connector node endpoint not specified or unable to connect to connector node"
+        ))?;
 
         let server_addrs = props
             .props
@@ -64,7 +66,7 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
         // validate connector properties
         connector_client
             .validate_source_properties(
-                props.source_id as u64,
+                context.info.source_id as u64,
                 props.get_source_type_pb()?,
                 props.props,
                 props.table_schema,
@@ -73,7 +75,7 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
 
         tracing::debug!("validate properties success");
         Ok(Self {
-            source_id: props.source_id,
+            source_id: context.info.source_id,
             source_type,
             worker_node_addrs: server_addrs,
         })

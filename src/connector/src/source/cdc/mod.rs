@@ -32,9 +32,9 @@ pub const CITUS_CDC_CONNECTOR: &str = "citus-cdc";
 #[derive(Clone, Debug, Deserialize, Default)]
 pub struct CdcProperties {
     /// Set by `ConnectorSource`
-    pub connector_node_addr: String,
+    // pub connector_node_addr: String,
     /// Set by `SourceManager` when creating the source, used by `DebeziumSplitEnumerator`
-    pub source_id: u32,
+    // pub source_id: u32,
     /// Type of the cdc source, e.g. mysql, postgres
     pub source_type: String,
     /// Properties specified in the WITH clause by user

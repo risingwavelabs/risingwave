@@ -61,7 +61,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 source.row_id_index.map(|x| x as _),
                 source.properties.clone(),
                 source.get_info()?.clone(),
-                // params.env.connector_params(),
+                params.env.connector_params(),
                 params.env.config().developer.connector_message_buffer_size,
                 // `pk_indices` is used to ensure that a message will be skipped instead of parsed
                 // with null pk when the pk column is missing.

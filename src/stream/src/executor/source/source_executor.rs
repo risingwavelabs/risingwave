@@ -19,8 +19,8 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceContext, SourceContextRef, SourceCtrlOpts,
-    SplitMetaData, StreamChunkWithState,
+    BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
+    StreamChunkWithState,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
@@ -97,16 +97,24 @@ impl<S: StateStore> SourceExecutor<S> {
         &self,
         source_desc: &SourceDesc,
         state: ConnectorState,
-        source_ctx: SourceContextRef,
     ) -> StreamExecutorResult<BoxSourceWithStateStream> {
         let column_ids = source_desc
             .columns
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
+        let source_ctx = SourceContext::new_with_suppressor(
+            self.actor_ctx.id,
+            self.stream_source_core.as_ref().unwrap().source_id,
+            self.actor_ctx.fragment_id,
+            source_desc.metrics.clone(),
+            self.source_ctrl_opts.clone(),
+            self.connector_params.connector_client.clone(),
+            self.actor_ctx.error_suppressor.clone(),
+        );
         source_desc
             .source
-            .stream_reader(state, column_ids, source_ctx)
+            .stream_reader(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }
@@ -386,19 +394,8 @@ impl<S: StateStore> SourceExecutor<S> {
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::info!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
-
-        let mut source_ctx = SourceContext::new(
-            self.ctx.id,
-            self.stream_source_core.as_ref().unwrap().source_id,
-            self.ctx.fragment_id,
-            source_desc.metrics.clone(),
-            self.source_ctrl_opts.clone(),
-            self.connector_params,
-            Some(self.actor_ctx.error_suppressor.clone()),
-        );
-
         let source_chunk_reader = self
-            .build_stream_source_reader(&source_desc, recover_state, Arc::new(source_ctx))
+            .build_stream_source_reader(&source_desc, recover_state)
             .instrument_await("source_build_reader")
             .await?;
 
@@ -569,7 +566,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .ok_or_else(|| {
                 StreamExecutorError::from(anyhow!(
                     "failed to receive the first barrier, actor_id: {:?} with no stream source",
-                    self.ctx.id
+                    self.actor_ctx.id
                 ))
             })?;
         yield Message::Barrier(barrier);

@@ -43,12 +43,8 @@ impl ConnectorSource {
         connector_message_buffer_size: usize,
         parser_config: SpecificParserConfig,
     ) -> Result<Self> {
-        let mut config =
+        let config =
             ConnectorProperties::extract(properties).map_err(|e| ConnectorError(e.into()))?;
-        if let Some(addr) = connector_node_addr {
-            // fixme: require source_id
-            config.init_properties_for_cdc(0, addr, None)
-        }
 
         Ok(Self {
             config,
