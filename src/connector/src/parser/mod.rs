@@ -521,13 +521,11 @@ impl ByteStreamSourceParserImpl {
                 unreachable!("Native parser should not be created")
             }
             SpecificParserConfig::Debezium(config) => {
-                let parser = DebeziumParser::new(config, rw_columns, source_ctx)
-                    .await?;
+                let parser = DebeziumParser::new(config, rw_columns, source_ctx).await?;
                 Ok(Self::Debezium(parser))
             }
             SpecificParserConfig::Maxwell(config) => {
-                let parser = MaxwellParser::new(config, rw_columns, source_ctx)
-                    .await?;
+                let parser = MaxwellParser::new(config, rw_columns, source_ctx).await?;
                 Ok(Self::Maxwell(parser))
             }
         }
@@ -654,11 +652,14 @@ impl ParserProperties {
         props: &HashMap<String, String>,
         info: &StreamSourceInfo,
     ) -> Result<Self> {
-        let encoding_config = match format {
-            SourceFormat::Csv => EncodingProperties::Csv(CsvProperties {
-                delimiter: info.csv_delimiter as u8,
-                has_header: info.csv_has_header,
-            }),
+        let (encoding_config, protocol_config) = match format {
+            SourceFormat::Csv => (
+                EncodingProperties::Csv(CsvProperties {
+                    delimiter: info.csv_delimiter as u8,
+                    has_header: info.csv_has_header,
+                }),
+                ProtocolProperties::Plain,
+            ),
             SourceFormat::Avro | SourceFormat::UpsertAvro => {
                 let mut config = AvroProperties {
                     use_schema_registry: info.use_schema_registry,
@@ -677,7 +678,7 @@ impl ParserProperties {
                         props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
                     ));
                 }
-                EncodingProperties::Avro(config)
+                (EncodingProperties::Avro(config), ProtocolProperties::Plain)
             }
             SourceFormat::Protobuf => {
                 let mut config = ProtobufProperties {
@@ -694,18 +695,34 @@ impl ParserProperties {
                         props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
                     ));
                 }
-                EncodingProperties::Protobuf(config)
+                (
+                    EncodingProperties::Protobuf(config),
+                    ProtocolProperties::Plain,
+                )
             }
-            SourceFormat::DebeziumAvro => EncodingProperties::Avro(AvroProperties {
-                row_schema_location: info.row_schema_location.clone(),
-                topic: get_kafka_topic(props).unwrap().clone(),
-                client_config: SchemaRegistryAuth::from(props),
-                ..Default::default()
-            }),
-            SourceFormat::DebeziumJson | SourceFormat::Maxwell => EncodingProperties::Json(JsonProperties { format }),
-            _ => EncodingProperties::None,
+            SourceFormat::DebeziumAvro => (
+                EncodingProperties::Avro(AvroProperties {
+                    row_schema_location: info.row_schema_location.clone(),
+                    topic: get_kafka_topic(props).unwrap().clone(),
+                    client_config: SchemaRegistryAuth::from(props),
+                    ..Default::default()
+                }),
+                ProtocolProperties::Debezium,
+            ),
+            SourceFormat::DebeziumJson => (
+                EncodingProperties::Json(JsonProperties { format }),
+                ProtocolProperties::Debezium,
+            ),
+            SourceFormat::DebeziumMongoJson => {
+                (EncodingProperties::None, ProtocolProperties::Debezium)
+            }
+            SourceFormat::Maxwell => (
+                EncodingProperties::Json(JsonProperties { format }),
+                ProtocolProperties::Maxwell,
+            ),
+            SourceFormat::CanalJson => (EncodingProperties::None, ProtocolProperties::Canal),
+            _ => (EncodingProperties::None, ProtocolProperties::Plain),
         };
-        let protocol_config = ProtocolProperties::Plain;
         // TODO: need to build correct key encoding config
         Ok(ParserProperties {
             key_encoding_config: None,
