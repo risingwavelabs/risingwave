@@ -21,6 +21,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_message::TransactionStatus;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Format;
@@ -962,10 +963,14 @@ impl Session for SessionImpl {
 
     fn parse(
         self: Arc<Self>,
-        statement: Statement,
+        statement: Option<Statement>,
         params_types: Vec<DataType>,
     ) -> std::result::Result<PrepareStatement, BoxedError> {
-        Ok(handle_parse(self, statement, params_types)?)
+        Ok(if let Some(statement) = statement {
+            handle_parse(self, statement, params_types)?
+        } else {
+            PrepareStatement::Empty
+        })
     }
 
     fn bind(
@@ -1013,6 +1018,7 @@ impl Session for SessionImpl {
         prepare_statement: PrepareStatement,
     ) -> std::result::Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError> {
         Ok(match prepare_statement {
+            PrepareStatement::Empty => (vec![], vec![]),
             PrepareStatement::Prepared(prepare_statement) => (
                 prepare_statement.bound_result.param_types,
                 infer(
@@ -1029,6 +1035,7 @@ impl Session for SessionImpl {
         portal: Portal,
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
         match portal {
+            Portal::Empty => Ok(vec![]),
             Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
@@ -1041,6 +1048,16 @@ impl Session for SessionImpl {
     fn take_notices(self: Arc<Self>) -> Vec<String> {
         let inner = &mut (*self.notices.write());
         std::mem::take(inner)
+    }
+
+    fn transaction_status(&self) -> TransactionStatus {
+        match &*self.txn.lock() {
+            transaction::State::Initial | transaction::State::Implicit(_) => {
+                TransactionStatus::Idle
+            }
+            transaction::State::Explicit(_) => TransactionStatus::InTransaction,
+            // TODO: failed transaction
+        }
     }
 }
 

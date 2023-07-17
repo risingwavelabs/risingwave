@@ -46,11 +46,7 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
         _context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<DebeziumSplitEnumerator> {
         tracing::debug!("start validate cdc properties");
-        let connector_client = ConnectorClient::new(
-            HostAddr::from_str(&props.connector_node_addr)
-                .map_err(|e| anyhow!("parse connector node endpoint fail. {}", e))?,
-        )
-        .await?;
+        let connector_client = ConnectorClient::new(&props.connector_node_addr).await?;
 
         let server_addrs = props
             .props

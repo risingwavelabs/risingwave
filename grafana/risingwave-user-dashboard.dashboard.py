@@ -39,10 +39,10 @@ def section_actor_info(panels):
             excluded_cols,
         ),
         panels.table_info(
-            "Table Id Info",
-            "Mapping from table id to actor id and table name",
-            [panels.table_target(f"{metric('table_info')}")],
-            excluded_cols,
+            "Materialized View Info",
+            "Mapping from materialized view table id to it's internal table ids",
+            [panels.table_target(f"{metric('materialized_info')}")],
+            excluded_cols
         ),
     ]
 
@@ -492,6 +492,7 @@ def section_network(outer_panels):
 
 def section_storage(outer_panels):
     panels = outer_panels.sub_panel()
+    mv_total_size_filter = "metric='materialized_view_total_size'"
     return [
         outer_panels.row_collapsed(
             "Storage",
@@ -517,6 +518,14 @@ def section_storage(outer_panels):
                             f"{metric('storage_current_version_object_size')}",
                             "referenced by current version",
                         ),
+                    ],
+                ),
+                panels.timeseries_kilobytes(
+                    "Materialized View Size",
+                    "The storage size of each materialized view",
+                    [
+                        panels.target(f"{metric('storage_materialized_view_stats', mv_total_size_filter)}/1024",
+                                      "{{metric}}, mv id - {{table_id}} "),
                     ],
                 ),
                 panels.timeseries_count(

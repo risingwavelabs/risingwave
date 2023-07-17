@@ -305,7 +305,7 @@ where
                 }
                 StreamingJob::Sink(sink) => {
                     // Validate the sink on the connector node.
-                    validate_sink(sink, self.env.opts.connector_rpc_endpoint.clone()).await?;
+                    validate_sink(sink, self.env.connector_client()).await?;
                 }
                 _ => {}
             }

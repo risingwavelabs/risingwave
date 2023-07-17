@@ -154,6 +154,10 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
         self.input.schema().len() + self.window_functions.len()
     }
 
+    pub fn window_functions(&self) -> &[PlanWindowFunction] {
+        &self.window_functions
+    }
+
     pub fn funcs_have_same_partition_and_order(&self) -> bool {
         self.window_functions
             .iter()
@@ -161,8 +165,18 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
             .all_equal()
     }
 
-    pub fn has_rank_function(&self) -> bool {
-        self.window_functions.iter().any(|f| f.kind.is_rank())
+    pub fn partition_key_indices(&self) -> Vec<usize> {
+        assert!(self.funcs_have_same_partition_and_order());
+        self.window_functions[0]
+            .partition_by
+            .iter()
+            .map(|i| i.index())
+            .collect()
+    }
+
+    pub fn order_key(&self) -> &[ColumnOrder] {
+        assert!(self.funcs_have_same_partition_and_order());
+        &self.window_functions[0].order_by
     }
 }
 

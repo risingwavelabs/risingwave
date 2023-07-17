@@ -62,12 +62,16 @@ Navigate to the `python-client` directory and run the following command:
 ```
 bash build-venv.sh
 bash gen-stub.sh
-python3 integration_tests.py
+PYTHONPATH=proto python3 integration_tests.py
 ```
 
 Or you can use conda and install the necessary package `grpcio grpcio-tools psycopg2 psycopg2-binary`. 
 
 The connector service is the server and Python integration test is a client, which will send gRPC request and get response from the connector server. So when running integration_tests, remember to launch the connector service in advance. You can get the gRPC response and check messages or errors in client part. And check the detailed exception information on server side.
+
+### Python file format
+
+We use `black` as the python file formatter. We can run `format-python.sh` to format the python files. 
 
 ### JDBC test
 

@@ -24,6 +24,7 @@ use futures_async_stream::for_await;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -70,7 +71,7 @@ impl Sink for KinesisSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = KinesisSinkWriter;
 
-    async fn validate(&self, _connector_rpc_endpoint: Option<String>) -> Result<()> {
+    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(

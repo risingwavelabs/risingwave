@@ -72,7 +72,7 @@
   expected_outputs:
     - logical_plan
     - stream_plan
-    - batch_error
+    - batch_plan
 - id: lag with over clause, ignoring frame definition
   sql: |
     create table t(x int, y int);
@@ -80,7 +80,7 @@
   expected_outputs:
     - logical_plan
     - stream_plan
-    - batch_error
+    - batch_plan
 
 # Aggregate
 - id: aggregate with empty over clause
@@ -108,7 +108,7 @@
   expected_outputs:
     - logical_plan
     - stream_plan
-    - batch_error
+    - batch_plan
 - id: aggregate with over clause, rows frame definition with between, without ORDER BY
   sql: |
     create table t(x int, y int);
@@ -116,7 +116,7 @@
   expected_outputs:
     - logical_plan
     - stream_plan
-    - batch_error
+    - batch_plan
 - id: aggregate with over clause, invalid frame definition case 1
   sql: |
     create table t(x int, y int);
@@ -148,7 +148,7 @@
   expected_outputs:
     - logical_plan
     - stream_plan
-    - batch_error
+    - batch_plan
 - id: more aggregate functions
   sql: |
     create table t(x int, y int, z int, w int);
@@ -159,7 +159,7 @@
   expected_outputs:
     - logical_plan
     - stream_plan
-    - batch_error
+    - batch_plan
 - id: aggregate with expression in func arguments and over clause
   sql: |
     create table t(x int, y int, z int, w int);
@@ -171,7 +171,7 @@
     - logical_plan
     - stream_plan
     - optimized_logical_plan_for_batch
-    - batch_error
+    - batch_plan
 
 # RowNumber/Rank/...
 - id: row_number with empty over clause
@@ -188,6 +188,14 @@
     - logical_plan
     - stream_error
     - batch_error
+- id: row_number with valid over clause
+  sql: |
+    create table t(x int, y int);
+    select row_number() over (PARTITION BY x ORDER BY y) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
 
 # TopN pattern
 - id: TopN by row_number with rank output
@@ -198,8 +206,8 @@
     where rank < 3;
   expected_outputs:
     - logical_plan
-    - stream_error
-    - batch_error
+    - stream_plan
+    - batch_plan
 - id: TopN by row_number without rank output, 1
   sql: |
     create table t(x int, y int);
@@ -316,8 +324,8 @@
   # TODO(rc): seems this can be optimized
   expected_outputs:
     - logical_plan
-    - stream_error
-    - batch_error
+    - stream_plan
+    - batch_plan
 # <<< TopN by row_number, with offset
 - id: Deduplication (Top1) by row_number
   sql: |

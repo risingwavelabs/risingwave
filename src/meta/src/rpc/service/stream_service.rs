@@ -180,6 +180,7 @@ where
                                 distribution_type: fragment.distribution_type,
                                 state_table_ids: fragment.state_table_ids,
                                 upstream_fragment_ids: fragment.upstream_fragment_ids,
+                                fragment_type_mask: fragment.fragment_type_mask,
                             }
                         })
                 })

@@ -35,3 +35,28 @@ pub mod hummock {
     pub const TABLE_OPTION_DUMMY_RETENTION_SECOND: u32 = 0;
     pub const PROPERTIES_RETENTION_SECOND_KEY: &str = "retention_seconds";
 }
+
+pub mod log_store {
+    use crate::types::DataType;
+
+    pub const EPOCH_COLUMN_NAME: &str = "kv_log_store_epoch";
+    pub const SEQ_ID_COLUMN_NAME: &str = "kv_log_store_seq_id";
+    pub const ROW_OP_COLUMN_NAME: &str = "kv_log_store_row_op";
+
+    /// `epoch`, `seq_id`, `row_op`
+    pub const KV_LOG_STORE_PREDEFINED_COLUMNS: [(&str, DataType); 3] = [
+        (EPOCH_COLUMN_NAME, EPOCH_COLUMN_TYPE),
+        (SEQ_ID_COLUMN_NAME, SEQ_ID_COLUMN_TYPE),
+        (ROW_OP_COLUMN_NAME, ROW_OP_COLUMN_TYPE),
+    ];
+    /// `epoch`, `seq_id`
+    pub const PK_TYPES: [DataType; 2] = [EPOCH_COLUMN_TYPE, SEQ_ID_COLUMN_TYPE];
+
+    pub const EPOCH_COLUMN_TYPE: DataType = DataType::Int64;
+    pub const SEQ_ID_COLUMN_TYPE: DataType = DataType::Int32;
+    pub const ROW_OP_COLUMN_TYPE: DataType = DataType::Int16;
+
+    pub const EPOCH_COLUMN_INDEX: usize = 0;
+    pub const SEQ_ID_COLUMN_INDEX: usize = 1;
+    pub const ROW_OP_COLUMN_INDEX: usize = 2;
+}
