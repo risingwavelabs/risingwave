@@ -39,6 +39,7 @@ use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{ScalarImpl, Timestamp};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_pb::user::grant_privilege::Object;
 pub use rw_actors::*;
 pub use rw_connections::*;
@@ -644,6 +645,13 @@ impl SysCatalogReaderImpl {
                             .map(|id| Some(ScalarImpl::Int32(id as i32)))
                             .collect_vec(),
                     ))),
+                    Some(ScalarImpl::List(ListValue::new(
+                        Self::extract_fragment_type_flag(distribution.fragment_type_mask)
+                            .into_iter()
+                            .flat_map(|t| t.as_str_name().strip_prefix("FRAGMENT_TYPE_FLAG_"))
+                            .map(|t| Some(ScalarImpl::Utf8(t.into())))
+                            .collect_vec(),
+                    ))),
                 ])
             })
             .collect_vec())
@@ -678,5 +686,35 @@ impl SysCatalogReaderImpl {
             ]));
         }
         Ok(rows)
+    }
+
+    fn extract_fragment_type_flag(mask: u32) -> Vec<FragmentTypeFlag> {
+        let mut result = vec![];
+        for i in 0..32 {
+            let bit = 1 << i;
+            if mask & bit != 0 {
+                match FragmentTypeFlag::from_i32(bit as i32) {
+                    None => continue,
+                    Some(flag) => result.push(flag),
+                };
+            }
+        }
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::stream_plan::FragmentTypeFlag;
+
+    use crate::catalog::system_catalog::SysCatalogReaderImpl;
+
+    #[test]
+    fn test_extract_mask() {
+        let mask = (FragmentTypeFlag::Source as u32) | (FragmentTypeFlag::ChainNode as u32);
+        let result = SysCatalogReaderImpl::extract_fragment_type_flag(mask);
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&FragmentTypeFlag::Source));
+        assert!(result.contains(&FragmentTypeFlag::ChainNode))
     }
 }

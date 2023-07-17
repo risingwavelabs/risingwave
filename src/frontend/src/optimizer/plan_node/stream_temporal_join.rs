@@ -21,7 +21,6 @@ use risingwave_pb::stream_plan::TemporalJoinNode;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::plan_tree_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -42,7 +41,6 @@ impl StreamTemporalJoin {
     pub fn new(logical: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
         assert!(logical.join_type == JoinType::Inner || logical.join_type == JoinType::LeftOuter);
         assert!(logical.left.append_only());
-        assert!(logical.right.logical_pk() == eq_join_predicate.right_eq_indexes());
         let right = logical.right.clone();
         let exchange: &StreamExchange = right
             .as_stream_exchange()
