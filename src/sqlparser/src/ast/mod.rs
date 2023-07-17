@@ -1057,8 +1057,9 @@ pub enum Statement {
         or_replace: bool,
         name: ObjectName,
         args: Vec<OperateFunctionArg>,
-        returns: Option<DataType>,
         /// Optional parameters.
+        returns: Option<DataType>,
+        append_only: bool,
         params: CreateFunctionBody,
     },
     /// ALTER TABLE
@@ -1379,6 +1380,7 @@ impl fmt::Display for Statement {
                 name,
                 args,
                 returns,
+                append_only,
                 params,
             } => {
                 write!(
@@ -1389,6 +1391,9 @@ impl fmt::Display for Statement {
                 write!(f, "({})", display_comma_separated(args))?;
                 if let Some(return_type) = returns {
                     write!(f, " RETURNS {}", return_type)?;
+                }
+                if *append_only {
+                    write!(f, " APPEND ONLY")?;
                 }
                 write!(f, "{params}")?;
                 Ok(())

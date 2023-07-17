@@ -827,7 +827,7 @@ fn parse_create_function() {
 #[test]
 fn parse_create_aggregate() {
     let sql =
-        "CREATE OR REPLACE AGGREGATE sum(INT) RETURNS BIGINT LANGUAGE python USING LINK 'xxx'";
+        "CREATE OR REPLACE AGGREGATE sum(INT) RETURNS BIGINT APPEND ONLY LANGUAGE python AS 'sum' USING LINK 'xxx'";
     assert_eq!(
         verified_stmt(sql),
         Statement::CreateAggregate {
@@ -835,8 +835,10 @@ fn parse_create_aggregate() {
             name: ObjectName(vec![Ident::new_unchecked("sum")]),
             args: vec![OperateFunctionArg::unnamed(DataType::Int)],
             returns: Some(DataType::BigInt),
+            append_only: true,
             params: CreateFunctionBody {
                 language: Some("python".into()),
+                as_: Some(FunctionDefinition::SingleQuotedDef("sum".into())),
                 using: Some(CreateFunctionUsing::Link("xxx".into())),
                 ..Default::default()
             },

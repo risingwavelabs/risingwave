@@ -2045,6 +2045,7 @@ impl Parser {
             None
         };
 
+        let append_only = self.parse_keywords(&[Keyword::APPEND, Keyword::ONLY]);
         let params = self.parse_create_function_body()?;
 
         Ok(Statement::CreateAggregate {
@@ -2052,6 +2053,7 @@ impl Parser {
             name,
             args,
             returns: return_type,
+            append_only,
             params,
         })
     }
