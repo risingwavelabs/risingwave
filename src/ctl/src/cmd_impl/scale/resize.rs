@@ -264,13 +264,14 @@ pub async fn resize(context: &CtlContext, resize: ScaleResizeCommands) -> anyhow
             }
         }
 
-        let (success, next_revision) = match meta_client.reschedule(reschedules, revision).await {
-            Ok(response) => response,
-            Err(e) => {
-                println!("Failed to execute plan: {:?}", e);
-                exit(1);
-            }
-        };
+        let (success, next_revision) =
+            match meta_client.reschedule(reschedules, revision, false).await {
+                Ok(response) => response,
+                Err(e) => {
+                    println!("Failed to execute plan: {:?}", e);
+                    exit(1);
+                }
+            };
 
         if !success {
             println!("Failed to execute plan, current revision is {}", revision);

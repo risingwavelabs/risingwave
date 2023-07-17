@@ -833,7 +833,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Function { schema } => write!(f, "FUNCTIONS{}", fmt_schema(schema)),
             ShowObject::Indexes { table } => write!(f, "INDEXES FROM {}", table),
             ShowObject::Cluster => {
-                write!(f, "CLUSTERS")
+                write!(f, "CLUSTER")
             }
         }
     }
@@ -1048,6 +1048,18 @@ pub enum Statement {
         args: Option<Vec<OperateFunctionArg>>,
         returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
+        params: CreateFunctionBody,
+    },
+    /// CREATE AGGREGATE
+    ///
+    /// Postgres: <https://www.postgresql.org/docs/15/sql-createaggregate.html>
+    CreateAggregate {
+        or_replace: bool,
+        name: ObjectName,
+        args: Vec<OperateFunctionArg>,
+        /// Optional parameters.
+        returns: Option<DataType>,
+        append_only: bool,
         params: CreateFunctionBody,
     },
     /// ALTER TABLE
@@ -1359,6 +1371,29 @@ impl fmt::Display for Statement {
                 }
                 if let Some(return_type) = returns {
                     write!(f, " {}", return_type)?;
+                }
+                write!(f, "{params}")?;
+                Ok(())
+            }
+            Statement::CreateAggregate {
+                or_replace,
+                name,
+                args,
+                returns,
+                append_only,
+                params,
+            } => {
+                write!(
+                    f,
+                    "CREATE {or_replace}AGGREGATE {name}",
+                    or_replace = if *or_replace { "OR REPLACE " } else { "" },
+                )?;
+                write!(f, "({})", display_comma_separated(args))?;
+                if let Some(return_type) = returns {
+                    write!(f, " RETURNS {}", return_type)?;
+                }
+                if *append_only {
+                    write!(f, " APPEND ONLY")?;
                 }
                 write!(f, "{params}")?;
                 Ok(())

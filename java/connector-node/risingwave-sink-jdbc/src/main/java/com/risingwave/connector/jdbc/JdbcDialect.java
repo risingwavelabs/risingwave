@@ -61,10 +61,6 @@ public interface JdbcDialect {
     Optional<String> getUpsertStatement(
             SchemaTableName schemaTableName, List<String> fieldNames, List<String> uniqueKeyFields);
 
-    void bindUpsertStatement(
-            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
-            throws SQLException;
-
     /**
      * Generates a string that will be used as a {@link java.sql.PreparedStatement} to insert a row
      * into a database table. Fields in the statement must be in the same order as the {@code
@@ -106,4 +102,12 @@ public interface JdbcDialect {
                 + " WHERE "
                 + conditionClause;
     }
+
+    void bindUpsertStatement(
+            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
+            throws SQLException;
+
+    void bindInsertIntoStatement(
+            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
+            throws SQLException;
 }

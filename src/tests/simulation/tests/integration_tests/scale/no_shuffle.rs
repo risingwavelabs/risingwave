@@ -139,3 +139,31 @@ async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
 
     Ok(())
 }
+
+#[madsim::test]
+async fn test_resolve_no_shuffle_upstream() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut session = cluster.start_session();
+
+    session.run("create table t (v int);").await?;
+    session
+        .run("create materialized view m1 as select * from t;")
+        .await?;
+
+    let fragment = cluster
+        .locate_one_fragment([identity_contains("chain")])
+        .await?;
+
+    let result = cluster.reschedule(fragment.reschedule([0], [])).await;
+
+    assert!(result.is_err());
+
+    cluster
+        .reschedule_resolve_no_shuffle(fragment.reschedule([0], []))
+        .await?;
+    cluster
+        .reschedule_resolve_no_shuffle(fragment.reschedule([], [0]))
+        .await?;
+
+    Ok(())
+}
