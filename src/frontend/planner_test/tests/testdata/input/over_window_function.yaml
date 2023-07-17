@@ -1,10 +1,10 @@
 # Window function call position restriction
 - id: window function call in expression
   sql: |
-    create table t(x int);
-    select 1+row_number() over(ORDER BY x) from t;
+    create table t(x int, y int);
+    select x + y, y, 2, 1+row_number() over(PARTITION BY y + y ORDER BY x-1), sum(x) over(partition by x * x ORDER BY x-1) from t;
   expected_outputs:
-    - planner_error
+    - logical_plan
 - id: window function call in ORDER BY
   sql: |
     create table t(x int);
