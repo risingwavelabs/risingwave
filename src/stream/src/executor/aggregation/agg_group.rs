@@ -20,7 +20,6 @@ use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -304,26 +303,6 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             tracing::trace!(group = ?self.group_key_row(), "last time see this group");
         }
 
-        Ok(())
-    }
-
-    /// Flush in-memory state into state table if needed.
-    /// The calling order of this method and `get_outputs` doesn't matter, but this method
-    /// must be called before committing state tables.
-    pub async fn flush_state_if_needed(
-        &self,
-        storages: &mut [AggStateStorage<S>],
-    ) -> StreamExecutorResult<()> {
-        futures::future::try_join_all(self.states.iter().zip_eq_fast(storages).filter_map(
-            |(state, storage)| match state {
-                AggState::Table(state) => Some(state.flush_state_if_needed(
-                    must_match!(storage, AggStateStorage::Table { table } => table),
-                    self.group_key(),
-                )),
-                _ => None,
-            },
-        ))
-        .await?;
         Ok(())
     }
 

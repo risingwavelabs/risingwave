@@ -428,7 +428,7 @@ pub mod agg_kinds {
     #[macro_export]
     macro_rules! single_value_state_iff_in_append_only {
         () => {
-            AggKind::Max | AggKind::Min
+            AggKind::Max | AggKind::Min | AggKind::ApproxCountDistinct
         };
     }
     pub use single_value_state_iff_in_append_only;
