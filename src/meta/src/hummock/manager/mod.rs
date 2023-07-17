@@ -60,13 +60,14 @@ use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCo
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_delta_log_stats, trigger_lsm_stat, trigger_pin_unpin_snapshot_state,
+    trigger_delta_log_stats, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
     trigger_pin_unpin_version_state, trigger_split_stat, trigger_sst_stat, trigger_version_stat,
     trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, LocalNotification,
+    MetaSrvEnv, META_NODE_ID,
 };
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
@@ -101,6 +102,8 @@ pub struct HummockManager<S: MetaStore> {
     pub env: MetaSrvEnv<S>,
     pub cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
+
+    fragment_manager: FragmentManagerRef<S>,
     // `CompactionGroupManager` manages `CompactionGroup`'s members.
     // Note that all hummock state store user should register to `CompactionGroupManager`. It
     // includes all state tables of streaming jobs except sink.
@@ -240,6 +243,7 @@ where
     pub(crate) async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         catalog_manager: CatalogManagerRef<S>,
@@ -248,6 +252,7 @@ where
         Self::new_impl(
             env,
             cluster_manager,
+            fragment_manager,
             metrics,
             compactor_manager,
             compaction_group_manager,
@@ -260,6 +265,7 @@ where
     pub(super) async fn with_config(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         config: CompactionConfig,
@@ -273,6 +279,7 @@ where
         Self::new_impl(
             env,
             cluster_manager,
+            fragment_manager,
             metrics,
             compactor_manager,
             compaction_group_manager,
@@ -285,6 +292,7 @@ where
     async fn new_impl(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
@@ -336,6 +344,7 @@ where
             metrics,
             cluster_manager,
             catalog_manager,
+            fragment_manager,
             compaction_group_manager,
             compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
@@ -1275,8 +1284,8 @@ where
                     deterministic_mode,
                 );
                 let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
-                if let Some(table_stats_change) = table_stats_change {
-                    add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
+                if let Some(table_stats_change) = &table_stats_change {
+                    add_prost_table_stats_map(&mut version_stats.table_stats, table_stats_change);
                 }
 
                 commit_multi_var!(
@@ -2069,7 +2078,7 @@ where
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
-            const STAT_REPORT_PERIOD_SEC: u64 = 10;
+            const STAT_REPORT_PERIOD_SEC: u64 = 20;
             const COMPACTION_HEARTBEAT_PERIOD_SEC: u64 = 1;
 
             pub enum HummockTimerEvent {
@@ -2078,7 +2087,6 @@ where
                 Report,
                 CompactionHeartBeat,
             }
-
             let mut check_compact_trigger_interval =
                 tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
             check_compact_trigger_interval
@@ -2164,18 +2172,36 @@ where
                                 }
 
                                 HummockTimerEvent::Report => {
-                                    let (current_version, id_to_config, branched_sst) = {
-                                        let mut versioning_guard =
-                                            write_lock!(hummock_manager.as_ref(), versioning).await;
+                                    let (
+                                        current_version,
+                                        id_to_config,
+                                        branched_sst,
+                                        version_stats,
+                                    ) = {
+                                        let versioning_guard =
+                                            read_lock!(hummock_manager.as_ref(), versioning).await;
+
                                         let configs =
                                             hummock_manager.get_compaction_group_map().await;
-                                        let versioning_deref = versioning_guard.deref_mut();
+                                        let versioning_deref = versioning_guard;
                                         (
                                             versioning_deref.current_version.clone(),
                                             configs,
                                             versioning_deref.branched_ssts.clone(),
+                                            versioning_deref.version_stats.clone(),
                                         )
                                     };
+
+                                    if let Some(mv_id_to_all_table_ids) = hummock_manager
+                                        .fragment_manager
+                                        .get_mv_id_to_internal_table_ids_mapping()
+                                    {
+                                        trigger_mv_stat(
+                                            &hummock_manager.metrics,
+                                            &version_stats,
+                                            mv_id_to_all_table_ids,
+                                        );
+                                    }
 
                                     for compaction_group_id in
                                         get_compaction_group_ids(&current_version)

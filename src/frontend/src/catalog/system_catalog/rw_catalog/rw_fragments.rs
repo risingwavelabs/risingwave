@@ -30,5 +30,6 @@ pub static RW_FRAGMENTS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = La
             DataType::List(Box::new(DataType::Int32)),
             "upstream_fragment_ids",
         ),
+        (DataType::List(Box::new(DataType::Varchar)), "flags"),
     ]
 });

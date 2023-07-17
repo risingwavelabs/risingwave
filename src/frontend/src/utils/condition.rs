@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug, Display};
 use std::ops::Bound;
 use std::rc::Rc;
@@ -170,7 +170,7 @@ impl Condition {
         self,
         input_col_nums: &[usize],
         only_eq: bool,
-    ) -> (HashMap<(usize, usize), Self>, Self) {
+    ) -> (BTreeMap<(usize, usize), Self>, Self) {
         let mut bitmaps = Vec::with_capacity(input_col_nums.len());
         let mut cols_seen = 0;
         for cols in input_col_nums {
@@ -178,7 +178,7 @@ impl Condition {
             cols_seen += cols;
         }
 
-        let mut pairwise_conditions = HashMap::with_capacity(self.conjunctions.len());
+        let mut pairwise_conditions = BTreeMap::new();
         let mut non_eq_join = vec![];
 
         for expr in self.conjunctions {
