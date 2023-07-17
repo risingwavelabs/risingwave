@@ -1,6 +1,7 @@
 -- noinspection SqlNoDataSourceInspectionForFile
 -- noinspection SqlResolveForFile
-CREATE SINK nexmark_q6_group_top1 AS
+CREATE SINK nexmark_q6_group_top1
+AS
 SELECT
     Q.seller,
     AVG(Q.final) OVER
