@@ -51,7 +51,7 @@ function drop_mvs() {
 
 function backup() {
   local job_id
-  job_id=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta backup-meta | grep "backup job succeeded" | awk '{print $(NF)}')
+  job_id=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta backup-meta 2>&1 | grep "backup job succeeded" | awk '{print $(NF)}')
   [ -n "${job_id}" ]
   echo "${job_id}"
 }
@@ -99,12 +99,12 @@ function execute_sql_and_expect() {
 }
 
 function get_max_committed_epoch() {
-  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
+  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose 2>&1 | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
   echo "${mce}"
 }
 
 function get_safe_epoch() {
-  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
+  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose 2>&1 | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
   echo "${safe_epoch}"
 }
 
@@ -130,6 +130,6 @@ function get_safe_epoch_in_backup() {
 }
 
 function get_min_pinned_snapshot() {
-  s=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-pinned-snapshots | grep "min_pinned_snapshot" | sed -n 's/.*min_pinned_snapshot \(.*\)/\1/p' | sort -n | head -1)
+  s=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-pinned-snapshots 2>&1 | grep "min_pinned_snapshot" | sed -n 's/.*min_pinned_snapshot \(.*\)/\1/p' | sort -n | head -1)
   echo "${s}"
 }

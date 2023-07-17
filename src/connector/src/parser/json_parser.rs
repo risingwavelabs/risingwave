@@ -19,7 +19,10 @@ use super::ByteStreamSourceParser;
 use crate::common::UpsertMessage;
 use crate::parser::unified::json::JsonAccess;
 use crate::parser::unified::upsert::UpsertChangeEvent;
-use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
+use crate::parser::unified::util::{
+    apply_row_operation_on_stream_chunk_writer_with_op, apply_upsert_on_stream_chunk_writer,
+};
+use crate::parser::unified::ChangeEventOperation;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -71,6 +74,12 @@ impl JsonParser {
 
             let mut primary_key = msg.primary_key.to_vec();
             let mut record = msg.record.to_vec();
+            let change_event_op = if record.is_empty() {
+                ChangeEventOperation::Delete
+            } else {
+                ChangeEventOperation::Upsert
+            };
+
             let key_decoded = simd_json::to_borrowed_value(&mut primary_key)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
@@ -87,7 +96,11 @@ impl JsonParser {
             if let Some(value) = value_decoded {
                 accessor = accessor.with_value(JsonAccess::new(value));
             }
-            apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
+            apply_row_operation_on_stream_chunk_writer_with_op(
+                accessor,
+                &mut writer,
+                change_event_op,
+            )
         } else {
             let value = simd_json::to_borrowed_value(&mut payload)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
@@ -102,7 +115,7 @@ impl JsonParser {
                 let accessor: UpsertChangeEvent<JsonAccess<'_, '_>, JsonAccess<'_, '_>> =
                     UpsertChangeEvent::default().with_value(JsonAccess::new(value));
 
-                match apply_row_operation_on_stream_chunk_writer(accessor, &mut writer) {
+                match apply_upsert_on_stream_chunk_writer(accessor, &mut writer) {
                     Ok(this_guard) => guard = Some(this_guard),
                     Err(err) => errors.push(err),
                 }
