@@ -775,6 +775,7 @@ mod tests {
             u64::MAX,
             1,
             SourceCtrlOpts::default(),
+            ConnectorParams::default(),
         );
         let mut handler = Box::new(executor).execute();
 
