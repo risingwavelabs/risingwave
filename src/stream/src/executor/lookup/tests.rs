@@ -119,7 +119,6 @@ async fn create_arrangement(
             table_id,
             arrangement_col_arrange_rules(),
             column_ids,
-            1,
             Arc::new(AtomicU64::new(0)),
             ConflictBehavior::NoCheck,
         )

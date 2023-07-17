@@ -159,6 +159,7 @@ pub struct MetaMetrics {
     /// A dummpy gauge metrics with its label to be the mapping from materialized view id to table
     /// id.
     pub mv_info: IntGaugeVec,
+    pub mv_info_with_actor_id: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
@@ -512,6 +513,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let mv_info_with_actor_id = register_int_gauge_vec_with_registry!(
+            "materialized_info_with_actor_id",
+            "Mapping from materialized view id to (actor id, mv name)",
+            &["id", "actor_id", "mv_name"],
+            registry
+        )
+        .unwrap();
+
         let l0_compact_level_count = register_histogram_vec_with_registry!(
             "storage_l0_compact_level_count",
             "level_count of l0 compact task",
@@ -621,6 +630,7 @@ impl MetaMetrics {
             actor_info,
             table_info,
             mv_info,
+            mv_info_with_actor_id,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
@@ -769,6 +779,16 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                                     .mv_info
                                     .with_label_values(&[&mv_id_str, &table_id_str, &table.name])
                                     .set(1);
+                                if mv_id_str == table_id_str {
+                                    meta_metrics
+                                        .mv_info_with_actor_id
+                                        .with_label_values(&[
+                                            &mv_id_str,
+                                            &actor_id_str,
+                                            &table.name,
+                                        ])
+                                        .set(1);
+                                }
                             });
                         }
                     }

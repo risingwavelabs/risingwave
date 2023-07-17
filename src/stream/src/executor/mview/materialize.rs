@@ -76,7 +76,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         input: BoxedExecutor,
         store: S,
         key: Vec<ColumnOrder>,
-        executor_id: u64,
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
@@ -110,7 +109,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,
-                identity: format!("MaterializeExecutor {:X}", executor_id),
+                identity: "MaterializeExecutor".to_string(),
             },
             materialize_cache: MaterializeCache::new(watermark_epoch, metrics_info),
             conflict_behavior,
@@ -206,7 +205,6 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         table_id: TableId,
         keys: Vec<ColumnOrder>,
         column_ids: Vec<ColumnId>,
-        executor_id: u64,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
@@ -236,7 +234,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,
-                identity: format!("MaterializeExecutor {:X}", executor_id),
+                identity: "MaterializeExecutor".to_string(),
             },
             materialize_cache: MaterializeCache::new(watermark_epoch, MetricsInfo::for_test()),
             conflict_behavior,
@@ -719,7 +717,6 @@ mod tests {
                 table_id,
                 vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
-                1,
                 Arc::new(AtomicU64::new(0)),
                 ConflictBehavior::NoCheck,
             )
@@ -836,7 +833,6 @@ mod tests {
                 table_id,
                 vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
-                1,
                 Arc::new(AtomicU64::new(0)),
                 ConflictBehavior::Overwrite,
             )
@@ -969,7 +965,6 @@ mod tests {
                 table_id,
                 vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
-                1,
                 Arc::new(AtomicU64::new(0)),
                 ConflictBehavior::Overwrite,
             )
@@ -1152,7 +1147,6 @@ mod tests {
                 table_id,
                 vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
-                1,
                 Arc::new(AtomicU64::new(0)),
                 ConflictBehavior::IgnoreConflict,
             )
@@ -1285,7 +1279,6 @@ mod tests {
                 table_id,
                 vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
-                1,
                 Arc::new(AtomicU64::new(0)),
                 ConflictBehavior::IgnoreConflict,
             )
