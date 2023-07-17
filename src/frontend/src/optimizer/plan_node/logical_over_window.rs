@@ -50,6 +50,7 @@ impl LogicalOverWindow {
         Self { base, core }
     }
 
+    /// Creates a `OverWindow` (contains only window functions) on top of a `Project`.
     pub fn create(
         input: PlanRef,
         mut select_exprs: Vec<ExprImpl>,
