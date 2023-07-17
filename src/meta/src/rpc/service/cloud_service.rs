@@ -101,39 +101,30 @@ where
                     e.to_string(),
                 ));
             }
-            if let Some(info) = connection.unwrap().info {
-                match info {
-                    PrivateLinkService(service) => {
-                        let privatelink_status = cli
-                            .is_vpc_endpoint_ready(service.endpoint_id.as_str())
-                            .await;
-                        match privatelink_status {
-                            Err(e) => {
-                                return Ok(new_rwc_validate_fail_response(
-                                    ErrorType::PrivatelinkUnavailable,
-                                    e.to_string(),
-                                ));
-                            }
-                            Ok(false) => {
-                                return Ok(new_rwc_validate_fail_response(
-                                    ErrorType::PrivatelinkUnavailable,
-                                    format!(
-                                        "Private link endpoint {} is not ready",
-                                        service.endpoint_id,
-                                    ),
-                                ));
-                            }
-                            _ => (),
-                        };
-                        if let Err(e) =
-                            insert_privatelink_broker_rewrite_map(&service, &mut source_cfg)
-                        {
-                            return Ok(new_rwc_validate_fail_response(
-                                ErrorType::PrivatelinkResolveErr,
-                                e.to_string(),
-                            ));
-                        }
+            if let Some(PrivateLinkService(service)) = connection.unwrap().info {
+                let privatelink_status = cli
+                    .is_vpc_endpoint_ready(service.endpoint_id.as_str())
+                    .await;
+                match privatelink_status {
+                    Err(e) => {
+                        return Ok(new_rwc_validate_fail_response(
+                            ErrorType::PrivatelinkUnavailable,
+                            e.to_string(),
+                        ));
                     }
+                    Ok(false) => {
+                        return Ok(new_rwc_validate_fail_response(
+                            ErrorType::PrivatelinkUnavailable,
+                            format!("Private link endpoint {} is not ready", service.endpoint_id,),
+                        ));
+                    }
+                    _ => (),
+                };
+                if let Err(e) = insert_privatelink_broker_rewrite_map(&service, &mut source_cfg) {
+                    return Ok(new_rwc_validate_fail_response(
+                        ErrorType::PrivatelinkResolveErr,
+                        e.to_string(),
+                    ));
                 }
             } else {
                 return Ok(new_rwc_validate_fail_response(
