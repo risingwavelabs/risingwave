@@ -167,6 +167,13 @@ impl CacheRefillPolicy {
                     };
                     futures.push(future);
                 }
+            } else {
+                for _ in 0..meta.value().block_count() {
+                    self.metrics
+                        .refill_data_file_cache_duration
+                        .with_label_values(&["filtered"])
+                        .observe(0.0);
+                }
             }
         }
         let _ = try_join_all(futures).await;
