@@ -18,6 +18,7 @@ import com.google.common.collect.Lists;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
+import com.risingwave.proto.PlanCommon;
 import java.util.List;
 
 public class TestUtils {
@@ -38,17 +39,17 @@ public class TestUtils {
     public static ConnectorServiceProto.TableSchema getMockTableProto() {
         return ConnectorServiceProto.TableSchema.newBuilder()
                 .addColumns(
-                        ConnectorServiceProto.TableSchema.Column.newBuilder()
+                        PlanCommon.ColumnDesc.newBuilder()
                                 .setName("id")
-                                .setDataType(
+                                .setColumnType(
                                         Data.DataType.newBuilder()
                                                 .setTypeName(Data.DataType.TypeName.INT32)
                                                 .build())
                                 .build())
                 .addColumns(
-                        ConnectorServiceProto.TableSchema.Column.newBuilder()
+                        PlanCommon.ColumnDesc.newBuilder()
                                 .setName("name")
-                                .setDataType(
+                                .setColumnType(
                                         Data.DataType.newBuilder()
                                                 .setTypeName(Data.DataType.TypeName.VARCHAR)
                                                 .build())

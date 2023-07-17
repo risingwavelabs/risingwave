@@ -532,6 +532,7 @@
     StreamMaterialize { columns: [seller, avg, auction.id(hidden)], stream_key: [auction.id, seller], pk_columns: [auction.id, seller], pk_conflict: NoCheck } { materialized table: 4294967294 }
     └── StreamProject { exprs: [auction.seller, (sum / count::Decimal) as $expr1, auction.id] }
         └── StreamOverWindow { window_functions: [sum(bid.price) OVER(PARTITION BY auction.seller ORDER BY bid.date_time ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count(bid.price) OVER(PARTITION BY auction.seller ORDER BY bid.date_time ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
+            ├── state table: 0
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
@@ -555,6 +556,8 @@
     Chain { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 7 }
     ├── Upstream
     └── BatchPlanNode
+
+    Table 0 { columns: [ auction_seller, bid_price, bid_date_time, auction_id, sum, count ], primary key: [ $0 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1 { columns: [ auction_id, auction_seller, bid_price, bid_date_time, bid__row_id ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
