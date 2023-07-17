@@ -11,4 +11,5 @@ FROM (
     FROM auction AS A, bid AS B
     WHERE A.id = B.auction and B.date_time between A.date_time and A.expires
 ) AS Q
-WHERE Q.rank <= 1;
+WHERE Q.rank <= 1
+WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');
