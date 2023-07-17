@@ -229,7 +229,8 @@ enum MetaCommands {
 
     /// Validate source interface for the cloud team
     ValidateSource {
-        /// CREATE SOURCE statement
+        /// With properties in json format
+        /// If privatelink is used, specify `connection.id` instead of `connection.name`
         #[clap(long)]
         props: String,
     },

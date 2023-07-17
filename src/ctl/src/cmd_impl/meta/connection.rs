@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use risingwave_pb::catalog::connection::Info;
 use risingwave_pb::cloud_service::SourceType;
 use serde_json::Value;
@@ -56,9 +57,11 @@ pub async fn validate_source(context: &CtlContext, props: String) -> anyhow::Res
         .expect("missing 'connector' in with clause")
         .as_str()
     {
-        "kafka" => SourceType::Kafka,
-        _ => SourceType::Unspecified,
-    };
+        "kafka" => Ok(SourceType::Kafka),
+        _ => Err(anyhow!(
+            "unsupported source type, only kafka sources are supported"
+        )),
+    }?;
     let meta_client = context.meta_client().await?;
     let resp = meta_client
         .rw_cloud_validate_source(source_type, with_props)

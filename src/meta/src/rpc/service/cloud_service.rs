@@ -83,12 +83,15 @@ where
         let cli = self.aws_client.as_ref().unwrap();
         let mut source_cfg: BTreeMap<String, String> =
             req.source_config.into_iter().map(|(k, v)| (k, v)).collect();
-        // if connection_name provided, check whether endpoint service is available and resolve
+        // if connection_id provided, check whether endpoint service is available and resolve
         // broker rewrite map currently only support aws privatelink connection
-        if let Some(connection_name) = source_cfg.get("connection.name") {
+        if let Some(connection_id_str) = source_cfg.get("connection.id") {
+            let connection_id = connection_id_str.parse().map_err(|e| {
+                Status::invalid_argument(format!("connection.id is not an integer: {}", e))
+            })?;
             let connection = self
                 .catalog_manager
-                .get_connection_by_name(connection_name)
+                .get_connection_by_id(connection_id)
                 .await;
             if let Err(e) = connection {
                 return Ok(new_rwc_validate_fail_response(
@@ -133,7 +136,7 @@ where
             } else {
                 return Ok(new_rwc_validate_fail_response(
                     ErrorType::PrivatelinkResolveErr,
-                    format!("connection {} has no info available", connection_name),
+                    format!("connection {} has no info available", connection_id),
                 ));
             }
         }
