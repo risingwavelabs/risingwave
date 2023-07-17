@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,12 +26,13 @@ use foyer::storage::admission::AdmissionPolicy;
 use foyer::storage::event::EventListener;
 use foyer::storage::store::PrometheusConfig;
 use foyer::storage::LfuFsStoreConfig;
+use futures::Future;
 use prometheus::Registry;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{Block, Sstable};
+use super::{Block, HummockResult, Sstable};
 use crate::hummock::SstableMeta;
 
 #[derive(thiserror::Error, Debug)]
@@ -52,6 +55,8 @@ pub type EvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
 pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
 pub type FoyerStore<K, V> = foyer::storage::LfuFsStore<K, V>;
+
+pub trait FetchValueFuture<V> = Future<Output = HummockResult<Option<V>>> + Send + 'static;
 
 pub struct FoyerStoreConfig<K, V>
 where
@@ -86,7 +91,6 @@ where
     pub runtime_worker_threads: Option<usize>,
 }
 
-#[derive(Debug)]
 pub enum FoyerRuntimeTask<K, V>
 where
     K: Key + Copy,
@@ -95,6 +99,12 @@ where
     Insert {
         key: K,
         value: V,
+        tx: Option<oneshot::Sender<Result<bool>>>,
+    },
+    InsertWith {
+        key: K,
+        fetch_value: Pin<Box<dyn FetchValueFuture<V>>>,
+        value_serialized_len: usize,
         tx: Option<oneshot::Sender<Result<bool>>>,
     },
     Remove {
@@ -108,6 +118,54 @@ where
         key: K,
         tx: oneshot::Sender<Result<Option<V>>>,
     },
+    Exists {
+        key: K,
+        tx: oneshot::Sender<Result<bool>>,
+    },
+}
+
+impl<K, V> Debug for FoyerRuntimeTask<K, V>
+where
+    K: Key + Copy,
+    V: Value,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Insert { key, value, tx } => f
+                .debug_struct("Insert")
+                .field("key", key)
+                .field("value", value)
+                .field("tx", tx)
+                .finish(),
+            Self::InsertWith {
+                key,
+                fetch_value: _,
+                value_serialized_len,
+                tx,
+            } => f
+                .debug_struct("InsertWith")
+                .field("key", key)
+                .field("value_serialized_len", value_serialized_len)
+                .field("tx", tx)
+                .finish(),
+            Self::Remove { key, tx } => f
+                .debug_struct("Remove")
+                .field("key", key)
+                .field("tx", tx)
+                .finish(),
+            Self::Clear { tx } => f.debug_struct("Clear").field("tx", tx).finish(),
+            Self::Lookup { key, tx } => f
+                .debug_struct("Lookup")
+                .field("key", key)
+                .field("tx", tx)
+                .finish(),
+            Self::Exists { key, tx } => f
+                .debug_struct("Exists")
+                .field("key", key)
+                .field("tx", tx)
+                .finish(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
@@ -307,6 +365,33 @@ where
                                     tx.send(res).unwrap();
                                 }
                             }
+                            FoyerRuntimeTask::InsertWith {
+                                key,
+                                fetch_value,
+                                value_serialized_len,
+                                tx,
+                            } => {
+                                let mut writer =
+                                    store.writer(key, key.serialized_len() + value_serialized_len);
+                                let res = if !writer.judge().await {
+                                    Ok(false)
+                                } else {
+                                    match fetch_value
+                                        .await
+                                        .map_err(|e| FileCacheError::Other(e.into()))
+                                    {
+                                        Ok(Some(value)) => writer
+                                            .finish(value)
+                                            .await
+                                            .map_err(FileCacheError::foyer),
+                                        Ok(None) => Ok(false),
+                                        Err(e) => Err(e),
+                                    }
+                                };
+                                if let Some(tx) = tx {
+                                    tx.send(res).unwrap();
+                                }
+                            }
                             FoyerRuntimeTask::Remove { key, tx } => {
                                 let res = store.remove(&key).await.map_err(FileCacheError::foyer);
                                 if let Some(tx) = tx {
@@ -321,6 +406,10 @@ where
                             }
                             FoyerRuntimeTask::Lookup { key, tx } => {
                                 let res = store.lookup(&key).await.map_err(FileCacheError::foyer);
+                                tx.send(res).unwrap();
+                            }
+                            FoyerRuntimeTask::Exists { key, tx } => {
+                                let res = store.exists(&key).map_err(FileCacheError::foyer);
                                 tx.send(res).unwrap();
                             }
                         }
@@ -372,6 +461,44 @@ where
                         tx: None,
                     })
                     .unwrap();
+            }
+        }
+    }
+
+    /// only fetch value if judge pass
+    #[tracing::instrument(skip(self, fetch_value))]
+    pub async fn insert_with(
+        &self,
+        key: K,
+        fetch_value: impl FetchValueFuture<V>,
+        value_serialized_len: usize,
+    ) -> Result<bool> {
+        match self {
+            FileCache::None => Ok(false),
+            FileCache::Foyer(store) => {
+                let mut writer = store.writer(key, key.serialized_len() + value_serialized_len);
+                if !writer.judge().await {
+                    return Ok(false);
+                }
+                match fetch_value
+                    .await
+                    .map_err(|e| FileCacheError::Other(e.into()))?
+                {
+                    Some(value) => writer.finish(value).await.map_err(FileCacheError::foyer),
+                    None => Ok(false),
+                }
+            }
+            FileCache::FoyerRuntime { task_tx, .. } => {
+                let (tx, rx) = oneshot::channel();
+                task_tx
+                    .send(FoyerRuntimeTask::InsertWith {
+                        key,
+                        fetch_value: Box::pin(fetch_value),
+                        value_serialized_len,
+                        tx: Some(tx),
+                    })
+                    .unwrap();
+                rx.await.unwrap()
             }
         }
     }
@@ -445,6 +572,21 @@ where
                 let (tx, rx) = oneshot::channel();
                 task_tx
                     .send(FoyerRuntimeTask::Lookup { key: *key, tx })
+                    .unwrap();
+                rx.await.unwrap()
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn exists(&self, key: &K) -> Result<bool> {
+        match self {
+            FileCache::None => Ok(false),
+            FileCache::Foyer(store) => store.exists(key).map_err(FileCacheError::foyer),
+            FileCache::FoyerRuntime { task_tx, .. } => {
+                let (tx, rx) = oneshot::channel();
+                task_tx
+                    .send(FoyerRuntimeTask::Exists { key: *key, tx })
                     .unwrap();
                 rx.await.unwrap()
             }

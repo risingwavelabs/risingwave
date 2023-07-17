@@ -2100,8 +2100,12 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('foyer_storage_latency_count')}[$__rate_interval])) by (op, extra, instance)",
-                            "file cache {{op}} {{extra}} @ {{instance}}",
+                            f"sum(rate({metric('data_foyer_storage_latency_count')}[$__rate_interval])) by (op, extra, instance)",
+                            "data file cache {{op}} {{extra}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('meta_foyer_storage_latency_count')}[$__rate_interval])) by (op, extra, instance)",
+                            "meta cache {{op}} {{extra}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -2111,8 +2115,16 @@ def section_hummock_tiered_cache(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_latency_bucket')}[$__rate_interval])) by (le, op, extra, instance))",
-                                f"p{legend} - file cache" +
+                                f"histogram_quantile({quantile}, sum(rate({metric('data_foyer_storage_latency_bucket')}[$__rate_interval])) by (le, op, extra, instance))",
+                                f"p{legend} - data file cache" +
+                                " - {{op}} {{extra}} @ {{instance}}",
+                            ),
+                            [50, 90, 99, "max"],
+                        ),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('meta_foyer_storage_latency_bucket')}[$__rate_interval])) by (le, op, extra, instance))",
+                                f"p{legend} - meta file cache" +
                                 " - {{op}} {{extra}} @ {{instance}}",
                             ),
                             [50, 90, 99, "max"],
@@ -2124,8 +2136,12 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('foyer_storage_bytes')}[$__rate_interval])) by (op, extra, instance)",
-                            "disk {{op}} {{extra}} @ {{instance}}",
+                            f"sum(rate({metric('data_foyer_storage_bytes')}[$__rate_interval])) by (op, extra, instance)",
+                            "data file cache - {{op}} {{extra}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('meta_foyer_storage_bytes')}[$__rate_interval])) by (op, extra, instance)",
+                            "meta file cache - {{op}} {{extra}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -2134,7 +2150,11 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"{metric('foyer_storage_size')}", "size @ {{instance}}"),
+                            f"{metric('data_foyer_storage_size')}", "size @ {{instance}}"
+                        ),
+                            panels.target(
+                            f"{metric('meta_foyer_storage_size')}", "size @ {{instance}}"
+                        ),
                     ],
                 ),
             ],

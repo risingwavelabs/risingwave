@@ -546,6 +546,59 @@ impl SstableStore {
     pub fn data_file_cache(&self) -> &FileCache<SstableBlockIndex, Box<Block>> {
         &self.data_file_cache
     }
+
+    pub async fn may_fill_data_file_cache(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<bool> {
+        let object_id = sst.id;
+        let (block_loc, uncompressed_capacity) = sst.calculate_block_info(block_index);
+
+        stats.cache_data_block_total += 1;
+        let mut fetch_block = || {
+            let file_cache = self.data_file_cache.clone();
+            stats.cache_data_block_miss += 1;
+            let data_path = self.get_sst_data_path(object_id);
+            let store = self.store.clone();
+
+            async move {
+                let key = SstableBlockIndex {
+                    sst_id: object_id,
+                    block_idx: block_index as u64,
+                };
+                if file_cache
+                    .exists(&key)
+                    .await
+                    .map_err(HummockError::file_cache)?
+                {
+                    return Ok(None);
+                }
+
+                let block_data = store.read(&data_path, Some(block_loc)).await?;
+                let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
+
+                Ok(Some(block))
+            }
+        };
+
+        if let Some(filter) = self.cache_refill_filter.as_ref() {
+            filter.insert(object_id);
+        }
+
+        self.data_file_cache
+            .insert_with(
+                SstableBlockIndex {
+                    sst_id: object_id,
+                    block_idx: block_index as u64,
+                },
+                fetch_block(),
+                uncompressed_capacity,
+            )
+            .await
+            .map_err(HummockError::file_cache)
+    }
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;

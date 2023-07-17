@@ -23,7 +23,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::hummock::{group_delta, HummockVersionDelta};
 
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{CachePolicy, HummockResult, TableHolder};
+use crate::hummock::{HummockResult, TableHolder};
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
 pub struct CacheRefillPolicy {
@@ -145,14 +145,11 @@ impl CacheRefillPolicy {
                     let meta = meta.value().clone();
                     let mut stat = StoreLocalStatistic::default();
                     let sstable_store = self.sstable_store.clone();
+                    let metrics = self.metrics.clone();
                     let future = async move {
+                        let _timer = metrics.refill_data_file_cache_duration.start_timer();
                         sstable_store
-                            .get_block_response(
-                                &meta,
-                                block_index,
-                                CachePolicy::FillFileCache,
-                                &mut stat,
-                            )
+                            .may_fill_data_file_cache(&meta, block_index, &mut stat)
                             .await
                     };
                     futures.push(future);

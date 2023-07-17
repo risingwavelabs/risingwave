@@ -25,7 +25,7 @@ dyn-clone = "1.0.4"
 either = "1"
 enum-as-inner = "0.5"
 fail = "0.5"
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "754a038" }
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "6c42c7f" }
 # foyer = { path = "/home/mrcroxx/github/mrcroxx/foyer/foyer" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
