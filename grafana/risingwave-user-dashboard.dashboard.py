@@ -605,6 +605,11 @@ def section_storage(outer_panels):
 
 def section_streaming(outer_panels):
     panels = outer_panels.sub_panel()
+    executor_identity = '.*MaterializeExecutor.*'
+    job = '$job'
+    instance = '$node'
+    mv_throughput_query = f'sum(rate(stream_executor_row_count{{executor_identity=~"{executor_identity}", job=~"{job}", instance=~"{instance}"}}[$__rate_interval]) * on(actor_id) group_left(id, mv_name) materialized_info_with_actor_id) by (id, mv_name)'
+
     return [
         outer_panels.row_collapsed(
             "Streaming",
@@ -626,6 +631,16 @@ def section_streaming(outer_panels):
                         panels.target(
                             f"(sum by (source_id)(rate({metric('partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
                             "source={{source_id}}",
+                        )
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Materialized View Throughput(rows/s)",
+                    "The figure shows the number of rows written into each materialized executor actor per second.",
+                    [
+                        panels.target(
+                            mv_throughput_query,
+                            "materialized view {{mv_name}} table_id {{id}}",
                         )
                     ],
                 ),
