@@ -1,4 +1,4 @@
-# Test each query
+Test each query
 include ./q0.slt.part
 include ./q1.slt.part
 include ./q2.slt.part
@@ -15,6 +15,7 @@ include ./q15.slt.part
 include ./q16.slt.part
 include ./q17.slt.part
 include ./q18.slt.part
+include ./q19_rewrite.slt.part
 include ./q20.slt.part
 include ./q21.slt.part
 include ./q22.slt.part
