@@ -151,10 +151,17 @@ impl CacheRefillPolicy {
                         let res = sstable_store
                             .may_fill_data_file_cache(&meta, block_index, &mut stat)
                             .await;
-                        if let Ok(true) = res {
-                            metrics
+                        match res {
+                            Ok(true) => metrics
                                 .refill_data_file_cache_duration
-                                .observe(now.elapsed().as_secs_f64());
+                                .with_label_values(&["admitted"])
+                                .observe(now.elapsed().as_secs_f64()),
+                            Ok(false) => metrics
+                                .refill_data_file_cache_duration
+                                .with_label_values(&["rejected"])
+                                .observe(now.elapsed().as_secs_f64()),
+
+                            _ => {}
                         }
                         res
                     };

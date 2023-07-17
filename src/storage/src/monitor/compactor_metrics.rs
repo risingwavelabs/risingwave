@@ -45,7 +45,7 @@ pub struct CompactorMetrics {
     pub sstable_distinct_epoch_count: Histogram,
     pub preload_io_count: GenericCounter<AtomicU64>,
     pub refill_cache_duration: Histogram,
-    pub refill_data_file_cache_duration: Histogram,
+    pub refill_data_file_cache_duration: HistogramVec,
 }
 
 impl CompactorMetrics {
@@ -98,7 +98,7 @@ impl CompactorMetrics {
             exponential_buckets(0.001, 1.6, 20).unwrap()
         );
         let refill_data_file_cache_duration =
-            register_histogram_with_registry!(opts, registry).unwrap();
+            register_histogram_vec_with_registry!(opts, &["extra"], registry).unwrap();
         let opts = histogram_opts!(
             "compactor_remote_read_time",
             "Total time of operations which read from remote storage when enable prefetch",
