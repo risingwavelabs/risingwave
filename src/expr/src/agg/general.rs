@@ -37,7 +37,7 @@ where
     let Some(input) = input else {
         return Ok(state);
     };
-    let state = state.unwrap_or_else(S::default);
+    let state = state.unwrap_or_default();
     let result = if retract {
         state
             .checked_sub(&S::from(input))
