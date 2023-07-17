@@ -2452,11 +2452,11 @@ where
                     },
 
                     result = pending_on_none(compactor_request_streams.next()) => {
+                        let mut compactor_alive = true;
                         let (context_id, compactor_stream_req) = result;
-                        let event = match compactor_stream_req {
+                        let (event, stream) = match compactor_stream_req {
                             (Some(Ok(req)), stream) => {
-                                push_stream(context_id, stream, &mut compactor_request_streams);
-                                req.event.unwrap()
+                                (req.event.unwrap(), stream)
                             }
                             _ => {continue;}
                         };
@@ -2466,85 +2466,88 @@ where
                                 pull_task_count,
                             }) => {
                                 assert_ne!(0, pull_task_count);
-                                use rand::prelude::SliceRandom;
-                                use rand::thread_rng;
-                                let compactor = hummock_manager.compactor_manager.get_compactor(context_id).unwrap();
+                                if let Some(compactor) = hummock_manager.compactor_manager.get_compactor(context_id) {
+                                    use rand::prelude::SliceRandom;
+                                    use rand::thread_rng;
+                                    let mut compaction_group_ids = hummock_manager.compaction_group_ids().await;
+                                    compaction_group_ids.shuffle(&mut thread_rng());
 
-                                let mut compaction_group_ids = hummock_manager.compaction_group_ids().await;
-                                compaction_group_ids.shuffle(&mut thread_rng());
+                                    let (group, task_type) = {
+                                        let (mut group,mut task_type) = (None, None);
+                                        for cg_id in compaction_group_ids {
+                                            if let Some(pick_type) = hummock_manager.compaction_state.auto_pick_type(cg_id) {
+                                                group = Some(cg_id);
+                                                task_type = Some(pick_type);
 
-                                let (group, task_type) = {
-                                    let (mut group,mut task_type) = (None, None);
-                                    for cg_id in compaction_group_ids {
-                                        if let Some(pick_type) = hummock_manager.compaction_state.auto_pick_type(cg_id) {
-                                            group = Some(cg_id);
-                                            task_type = Some(pick_type);
-
-                                            break;
+                                                break;
+                                            }
                                         }
-                                    }
 
-                                    (group, task_type)
-                                };
+                                        (group, task_type)
+                                    };
 
-                                let mut compactor_alive = true;
-                                if let (Some(group), Some(task_type)) = (group, task_type) {
-                                    let selector: &mut Box<dyn LevelSelector> = compaction_selectors.get_mut(&task_type).unwrap();
-                                    for _ in 0..pull_task_count {
-                                        let compact_task =
-                                            hummock_manager
-                                            .get_compact_task(group, selector)
-                                            .await;
+                                    if let (Some(group), Some(task_type)) = (group, task_type) {
+                                        let selector: &mut Box<dyn LevelSelector> = compaction_selectors.get_mut(&task_type).unwrap();
+                                        for _ in 0..pull_task_count {
+                                            let compact_task =
+                                                hummock_manager
+                                                .get_compact_task(group, selector)
+                                                .await;
 
-                                        match compact_task {
-                                            Ok(Some(compact_task)) => {
-                                                let task_id = compact_task.task_id;
-                                                if let Err(e) = compactor.send_event(
-                                                    ResponseEvent::CompactTask(compact_task)
-                                                ) {
-                                                    tracing::warn!(
-                                                        "Failed to send task {} to {}. {:#?}",
-                                                        task_id,
-                                                        compactor.context_id(),
-                                                        e
-                                                    );
+                                            match compact_task {
+                                                Ok(Some(compact_task)) => {
+                                                    let task_id = compact_task.task_id;
+                                                    if let Err(e) = compactor.send_event(
+                                                        ResponseEvent::CompactTask(compact_task)
+                                                    ) {
+                                                        tracing::warn!(
+                                                            "Failed to send task {} to {}. {:#?}",
+                                                            task_id,
+                                                            compactor.context_id(),
+                                                            e
+                                                        );
 
-                                                    // try cancel on compactor
-                                                    let _ = compactor.cancel_task(task_id);
-                                                    hummock_manager.compactor_manager
-                                                        .remove_compactor(compactor.context_id());
+                                                        // try cancel on compactor
+                                                        let _ = compactor.cancel_task(task_id);
+                                                        hummock_manager.compactor_manager
+                                                            .remove_compactor(compactor.context_id());
 
-                                                    compactor_alive = false;
+                                                        compactor_alive = false;
+                                                        break;
+                                                    }
+                                                },
+                                                Ok(None) => {
+                                                    // no compact_task to be picked
+                                                    hummock_manager.compaction_state.unschedule(group, task_type);
                                                     break;
                                                 }
-                                            },
-                                            Ok(None) => {
-                                                // no compact_task to be picked
-                                                hummock_manager.compaction_state.unschedule(group, task_type);
-                                                break;
-                                            }
-                                            Err(err) => {
-                                                tracing::warn!("Failed to get compaction task: {:#?}.", err);
-                                                break;
-                                            }
-                                        };
+                                                Err(err) => {
+                                                    tracing::warn!("Failed to get compaction task: {:#?}.", err);
+                                                    break;
+                                                }
+                                            };
+                                        }
+                                    } else {
+                                        tracing::debug!("Fail auto_pick_type group {:?} task_type {:?}", group, task_type);
+                                    }
+
+                                    // ack to compactor
+                                    if compactor_alive {
+                                        if let Err(e) = compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {})){
+                                            tracing::warn!(
+                                                "Failed to send ask to {}. {:#?}",
+                                                context_id,
+                                                e
+                                            );
+
+                                            compactor_alive = false;
+                                            hummock_manager.compactor_manager
+                                                .remove_compactor(context_id);
+                                        }
                                     }
                                 } else {
-                                    tracing::debug!("Fail auto_pick_type group {:?} task_type {:?}", group, task_type);
-                                }
+                                    compactor_alive = false;
 
-                                // ack to compactor
-                                if compactor_alive {
-                                    if let Err(e) = compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {})){
-                                        tracing::warn!(
-                                            "Failed to send ask to {}. {:#?}",
-                                            context_id,
-                                            e
-                                        );
-
-                                        hummock_manager.compactor_manager
-                                            .remove_compactor(context_id);
-                                    }
                                 }
                             },
 
@@ -2593,6 +2596,8 @@ where
                                             context_id,
                                             task.task_id
                                         );
+                                    } else {
+                                        compactor_alive = false;
                                     }
                                 }
                             },
@@ -2600,6 +2605,10 @@ where
                             RequestEvent::Register(_) => {
                                 unreachable!()
                             }
+                        }
+
+                        if compactor_alive {
+                            push_stream(context_id, stream, &mut compactor_request_streams);
                         }
                     }
                 }
