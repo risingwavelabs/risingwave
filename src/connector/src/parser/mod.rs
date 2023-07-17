@@ -427,11 +427,13 @@ pub enum AccessBuilderImpl {
 impl AccessBuilderImpl {
     pub async fn new_default(config: EncodingProperties, kv: EncodingType) -> Result<Self> {
         let accessor = match config {
-            EncodingProperties::Avro(config) => {
-                AccessBuilderImpl::Avro(AvroAccessBuilder::new(config, kv).await?)
+            EncodingProperties::Avro(_) => {
+                let config = AvroParserConfig::new(config).await?;
+                AccessBuilderImpl::Avro(AvroAccessBuilder::new(config, kv)?)
             }
-            EncodingProperties::Protobuf(config) => {
-                AccessBuilderImpl::Protobuf(ProtobufAccessBuilder::new(config).await?)
+            EncodingProperties::Protobuf(_) => {
+                let config = ProtobufParserConfig::new(config).await?;
+                AccessBuilderImpl::Protobuf(ProtobufAccessBuilder::new(config)?)
             }
             EncodingProperties::Bytes => AccessBuilderImpl::Bytes(BytesAccessBuilder::new()?),
             EncodingProperties::Json(config) => {
@@ -742,17 +744,17 @@ impl SpecificParserConfig {
         let parser_properties = ParserProperties::new(format, props, info)?;
         let conf = match format {
             SourceFormat::Csv => {
-                SpecificParserConfig::Csv(CsvParserConfig::new(parser_properties)?)
+                SpecificParserConfig::Csv(CsvParserConfig::new(parser_properties.encoding_config)?)
             }
-            SourceFormat::Avro => {
-                SpecificParserConfig::Avro(AvroParserConfig::new(parser_properties).await?)
-            }
-            SourceFormat::UpsertAvro => {
-                SpecificParserConfig::UpsertAvro(AvroParserConfig::new(parser_properties).await?)
-            }
-            SourceFormat::Protobuf => {
-                SpecificParserConfig::Protobuf(ProtobufParserConfig::new(parser_properties).await?)
-            }
+            SourceFormat::Avro => SpecificParserConfig::Avro(
+                AvroParserConfig::new(parser_properties.encoding_config).await?,
+            ),
+            SourceFormat::UpsertAvro => SpecificParserConfig::UpsertAvro(
+                AvroParserConfig::new(parser_properties.encoding_config).await?,
+            ),
+            SourceFormat::Protobuf => SpecificParserConfig::Protobuf(
+                ProtobufParserConfig::new(parser_properties.encoding_config).await?,
+            ),
             SourceFormat::Json => SpecificParserConfig::Json,
             SourceFormat::UpsertJson => SpecificParserConfig::UpsertJson,
             SourceFormat::DebeziumMongoJson => SpecificParserConfig::DebeziumMongoJson,

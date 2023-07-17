@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::{Result, RwError};
 
-use super::DebeziumAvroAccessBuilder;
+use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
@@ -31,49 +32,44 @@ pub struct DebeziumParser {
     source_ctx: SourceContextRef,
 }
 
+async fn build_accessor_builder(
+    config: EncodingProperties,
+    encoding_type: EncodingType,
+) -> Result<AccessBuilderImpl> {
+    match config {
+        EncodingProperties::Avro(_) => {
+            let config = DebeziumAvroParserConfig::new(config).await?;
+            Ok(AccessBuilderImpl::DebeziumAvro(
+                DebeziumAvroAccessBuilder::new(config, encoding_type)?,
+            ))
+        }
+        EncodingProperties::Json(_) | EncodingProperties::Protobuf(_) => {
+            Ok(AccessBuilderImpl::new_default(config, encoding_type).await?)
+        }
+        _ => Err(RwError::from(ProtocolError(
+            "unsupported encoding for Debezium".to_string(),
+        ))),
+    }
+}
+
 impl DebeziumParser {
     pub async fn new(
         props: ParserProperties,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
-        match props.encoding_config {
-            EncodingProperties::Avro(config) => {
-                let payload_builder =
-                    DebeziumAvroAccessBuilder::new(config.clone(), EncodingType::Value).await?;
-                let key_builder = DebeziumAvroAccessBuilder::new(config, EncodingType::Key).await?;
-                Ok(Self {
-                    key_builder: AccessBuilderImpl::DebeziumAvro(key_builder),
-                    payload_builder: AccessBuilderImpl::DebeziumAvro(payload_builder),
-                    rw_columns,
-                    source_ctx,
-                })
-            }
-            EncodingProperties::Json(_) | EncodingProperties::Protobuf(_) => {
-                let key_builder = match props.key_encoding_config {
-                    None => {
-                        AccessBuilderImpl::new_default(
-                            props.encoding_config.clone(),
-                            EncodingType::Key,
-                        )
-                        .await?
-                    }
-                    Some(config) => {
-                        AccessBuilderImpl::new_default(config, EncodingType::Key).await?
-                    }
-                };
-                let payload_builder =
-                    AccessBuilderImpl::new_default(props.encoding_config, EncodingType::Value)
-                        .await?;
-                Ok(Self {
-                    key_builder,
-                    payload_builder,
-                    rw_columns,
-                    source_ctx,
-                })
-            }
-            _ => unreachable!(),
-        }
+        let key_config = props
+            .key_encoding_config
+            .unwrap_or(props.encoding_config.clone());
+        let key_builder = build_accessor_builder(key_config, EncodingType::Key).await?;
+        let payload_builder =
+            build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
+        Ok(Self {
+            key_builder,
+            payload_builder,
+            rw_columns,
+            source_ctx,
+        })
     }
 
     pub async fn parse_inner(

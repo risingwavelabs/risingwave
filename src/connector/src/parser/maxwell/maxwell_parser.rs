@@ -46,7 +46,9 @@ impl MaxwellParser {
                     source_ctx,
                 })
             }
-            _ => unreachable!(),
+            _ => Err(RwError::from(ErrorCode::ProtocolError(
+                "unsupported encoding for Maxwell".to_string(),
+            ))),
         }
     }
 

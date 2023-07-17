@@ -25,6 +25,7 @@ use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 pub struct BytesAccessBuilder {}
 
 impl AccessBuilder for BytesAccessBuilder {
+    #[allow(clippy::unused_async)]
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
         Ok(AccessImpl::Bytes(BytesAccess::new(payload)))
     }

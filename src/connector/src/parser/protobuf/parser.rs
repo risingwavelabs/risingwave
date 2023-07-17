@@ -34,8 +34,8 @@ use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{
-    AccessBuilder, ByteStreamSourceParser, EncodingProperties, ParserProperties,
-    ProtobufProperties, SourceStreamChunkRowWriter, WriteGuard,
+    AccessBuilder, ByteStreamSourceParser, EncodingProperties, SourceStreamChunkRowWriter,
+    WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -46,6 +46,7 @@ pub struct ProtobufAccessBuilder {
 }
 
 impl AccessBuilder for ProtobufAccessBuilder {
+    #[allow(clippy::unused_async)]
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
         let payload = if self.confluent_wire_type {
             resolve_pb_header(&payload)?
@@ -61,75 +62,14 @@ impl AccessBuilder for ProtobufAccessBuilder {
 }
 
 impl ProtobufAccessBuilder {
-    pub async fn new(protobuf_config: ProtobufProperties) -> Result<Self> {
-        let location = &protobuf_config.row_schema_location;
-        let message_name = &protobuf_config.message_name;
-        let url = Url::parse(location)
-            .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
-
-        let schema_bytes = if protobuf_config.use_schema_registry {
-            let client = Client::new(url, &protobuf_config.client_config)?;
-            compile_file_descriptor_from_schema_registry(
-                format!("{}-value", &protobuf_config.topic).as_str(),
-                &client,
-            )
-            .await?
-        } else {
-            match url.scheme() {
-                // TODO(Tao): support local file only when it's compiled in debug mode.
-                "file" => {
-                    let path = url.to_file_path().map_err(|_| {
-                        RwError::from(InternalError(format!("illegal path: {}", location)))
-                    })?;
-
-                    if path.is_dir() {
-                        return Err(RwError::from(ProtocolError(
-                            "schema file location must not be a directory".to_string(),
-                        )));
-                    }
-                    Self::local_read_to_bytes(&path)
-                }
-                "s3" => {
-                    load_file_descriptor_from_s3(
-                        &url,
-                        protobuf_config.aws_auth_props.as_ref().unwrap(),
-                    )
-                    .await
-                }
-                "https" | "http" => load_file_descriptor_from_http(&url).await,
-                scheme => Err(RwError::from(ProtocolError(format!(
-                    "path scheme {} is not supported",
-                    scheme
-                )))),
-            }?
-        };
-
-        let pool = DescriptorPool::decode(schema_bytes.as_slice()).map_err(|e| {
-            ProtocolError(format!(
-                "cannot build descriptor pool from schema: {}, error: {}",
-                location, e
-            ))
-        })?;
-        let message_descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
-            ProtocolError(format!(
-                "cannot find message {} in schema: {}.\n poll is {:?}",
-                message_name, location, pool
-            ))
-        })?;
-        Ok(Self {
+    pub fn new(config: ProtobufParserConfig) -> Result<Self> {
+        let ProtobufParserConfig {
+            confluent_wire_type,
             message_descriptor,
-            confluent_wire_type: protobuf_config.use_schema_registry,
-        })
-    }
-
-    /// read binary schema from a local file
-    fn local_read_to_bytes(path: &Path) -> Result<Vec<u8>> {
-        std::fs::read(path).map_err(|e| {
-            RwError::from(InternalError(format!(
-                "failed to read file {}: {}",
-                path.display(),
-                e
-            )))
+        } = config;
+        Ok(Self {
+            confluent_wire_type,
+            message_descriptor,
         })
     }
 }
@@ -149,11 +89,8 @@ pub struct ProtobufParserConfig {
 }
 
 impl ProtobufParserConfig {
-    pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let protobuf_config = try_match_expand!(
-            parser_properties.encoding_config,
-            EncodingProperties::Protobuf
-        )?;
+    pub async fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+        let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;
         let url = Url::parse(location)
@@ -495,6 +432,7 @@ mod test {
     use risingwave_pb::data::data_type::PbTypeName;
 
     use super::*;
+    use crate::parser::ParserProperties;
     use crate::source::SourceFormat;
 
     fn schema_dir() -> String {
@@ -525,7 +463,7 @@ mod test {
             ..Default::default()
         };
         let parser_config = ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info)?;
-        let conf = ProtobufParserConfig::new(parser_config).await?;
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let parser = ProtobufParser::new(Vec::default(), conf, Default::default())?;
         let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
@@ -569,7 +507,7 @@ mod test {
             ..Default::default()
         };
         let parser_config = ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info)?;
-        let conf = ProtobufParserConfig::new(parser_config).await?;
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let columns = conf.map_to_columns().unwrap();
 
         assert_eq!(columns[0].name, "id".to_string());
@@ -617,7 +555,9 @@ mod test {
         };
         let parser_config =
             ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info).unwrap();
-        let conf = ProtobufParserConfig::new(parser_config).await.unwrap();
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config)
+            .await
+            .unwrap();
         let columns = conf.map_to_columns();
         // expect error message:
         // "Err(Protocol error: circular reference detected:

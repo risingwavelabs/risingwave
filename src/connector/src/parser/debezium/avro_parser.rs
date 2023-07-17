@@ -33,8 +33,8 @@ use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{
-    AccessBuilder, AvroProperties, ByteStreamSourceParser, EncodingProperties, EncodingType,
-    ParserProperties, SourceStreamChunkRowWriter, WriteGuard,
+    AccessBuilder, ByteStreamSourceParser, EncodingProperties, EncodingType,
+    SourceStreamChunkRowWriter, WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -45,68 +45,54 @@ const PAYLOAD: &str = "payload";
 
 #[derive(Debug)]
 pub struct DebeziumAvroAccessBuilder {
-    schema: Arc<Schema>,
+    schema: Schema,
     schema_resolver: Arc<ConfluentSchemaResolver>,
-    resolved_schema: Option<Arc<Schema>>,
+    key_schema: Option<Arc<Schema>>,
     value: Option<Value>,
     encoding_type: EncodingType,
 }
 
+// TODO: reduce encodingtype match
 impl AccessBuilder for DebeziumAvroAccessBuilder {
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
-        let writer_schema = self.schema_resolver.get(schema_id).await?;
+        let schema = self.schema_resolver.get(schema_id).await?;
         self.value = Some(
-            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
+            from_avro_datum(schema.as_ref(), &mut raw_payload, None)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
         );
-        self.resolved_schema = match self.encoding_type {
-            EncodingType::Key => Some(writer_schema),
-            EncodingType::Value => {
-                let resolver = apache_avro::schema::ResolvedSchema::try_from(&*self.schema)
-                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-                // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-                Some(Arc::new(
-                    resolver
-                        .to_resolved(&self.schema)
-                        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
-                ))
-            }
+        self.key_schema = match self.encoding_type {
+            EncodingType::Key => Some(schema),
+            EncodingType::Value => None,
         };
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_mut().unwrap(),
-            AvroParseOptions::default().with_schema(self.resolved_schema.as_mut().unwrap()),
+            AvroParseOptions::default().with_schema(match self.encoding_type {
+                EncodingType::Key => self.key_schema.as_mut().unwrap(),
+                EncodingType::Value => &self.schema,
+            }),
         )))
     }
 }
 
 impl DebeziumAvroAccessBuilder {
-    pub async fn new(avro_config: AvroProperties, encoding_type: EncodingType) -> Result<Self> {
-        let schema_location = &avro_config.row_schema_location;
-        let client_config = &avro_config.client_config;
-        let kafka_topic = &avro_config.topic;
-        let url = Url::parse(schema_location).map_err(|e| {
-            InternalError(format!("failed to parse url ({}): {}", schema_location, e))
-        })?;
-        let client = Client::new(url, client_config)?;
-        let raw_schema = client
-            .get_schema_by_subject(format!("{}-key", &kafka_topic).as_str())
-            .await?;
-        let resolver = ConfluentSchemaResolver::new(client);
-        let schema = match encoding_type {
-            EncodingType::Value => {
-                resolver
-                    .get_by_subject_name(&format!("{}-value", kafka_topic))
-                    .await?
-            }
-            EncodingType::Key => Arc::new(Schema::parse_str(&raw_schema.content).map_err(|e| {
-                RwError::from(ProtocolError(format!("Avro schema parse error {}", e)))
-            })?),
-        };
+    pub fn new(config: DebeziumAvroParserConfig, encoding_type: EncodingType) -> Result<Self> {
+        let DebeziumAvroParserConfig {
+            outer_schema,
+            schema_resolver,
+            ..
+        } = config;
+
+        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        // todo: to_resolved may cause stackoverflow if there's a loop in the schema
+        let schema = resolver
+            .to_resolved(&outer_schema)
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         Ok(Self {
             schema,
-            schema_resolver: Arc::new(resolver),
-            resolved_schema: None,
+            schema_resolver,
+            key_schema: None,
             value: None,
             encoding_type,
         })
@@ -130,9 +116,8 @@ pub struct DebeziumAvroParserConfig {
 }
 
 impl DebeziumAvroParserConfig {
-    pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let avro_config =
-            try_match_expand!(parser_properties.encoding_config, EncodingProperties::Avro)?;
+    pub async fn new(encoding_config: EncodingProperties) -> Result<Self> {
+        let avro_config = try_match_expand!(encoding_config, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let client_config = &avro_config.client_config;
         let kafka_topic = &avro_config.topic;
@@ -273,7 +258,7 @@ mod tests {
     use risingwave_pb::catalog::StreamSourceInfo;
 
     use super::*;
-    use crate::parser::{DebeziumAvroParserConfig, SourceStreamChunkBuilder};
+    use crate::parser::{DebeziumAvroParserConfig, ParserProperties, SourceStreamChunkBuilder};
     use crate::source::SourceFormat;
 
     const DEBEZIUM_AVRO_DATA: &[u8] = b"\x00\x00\x00\x00\x06\x00\x02\xd2\x0f\x0a\x53\x61\x6c\x6c\x79\x0c\x54\x68\x6f\x6d\x61\x73\x2a\x73\x61\x6c\x6c\x79\x2e\x74\x68\x6f\x6d\x61\x73\x40\x61\x63\x6d\x65\x2e\x63\x6f\x6d\x16\x32\x2e\x31\x2e\x32\x2e\x46\x69\x6e\x61\x6c\x0a\x6d\x79\x73\x71\x6c\x12\x64\x62\x73\x65\x72\x76\x65\x72\x31\xc0\xb4\xe8\xb7\xc9\x61\x00\x30\x66\x69\x72\x73\x74\x5f\x69\x6e\x5f\x64\x61\x74\x61\x5f\x63\x6f\x6c\x6c\x65\x63\x74\x69\x6f\x6e\x12\x69\x6e\x76\x65\x6e\x74\x6f\x72\x79\x00\x02\x12\x63\x75\x73\x74\x6f\x6d\x65\x72\x73\x00\x00\x20\x6d\x79\x73\x71\x6c\x2d\x62\x69\x6e\x2e\x30\x30\x30\x30\x30\x33\x8c\x06\x00\x00\x00\x02\x72\x02\x92\xc3\xe8\xb7\xc9\x61\x00";
@@ -416,7 +401,7 @@ mod tests {
             ..Default::default()
         };
         let parser_config = ParserProperties::new(SourceFormat::DebeziumAvro, &props, &info)?;
-        let config = DebeziumAvroParserConfig::new(parser_config).await?;
+        let config = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
         let columns = config
             .map_to_columns()?
             .into_iter()

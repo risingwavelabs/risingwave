@@ -31,6 +31,7 @@ pub struct JsonAccessBuilder {
 }
 
 impl AccessBuilder for JsonAccessBuilder {
+    #[allow(clippy::unused_async)]
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
         self.value = Some(payload);
         let value = simd_json::to_borrowed_value(self.value.as_mut().unwrap())
@@ -341,13 +342,10 @@ mod tests {
             let writer = builder.row_writer();
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#.to_vec();
-            assert_eq!(
-                true,
-                parser
-                    .parse_inner(None, Some(payload), writer)
-                    .await
-                    .is_err()
-            );
+            assert!(parser
+                .parse_inner(None, Some(payload), writer)
+                .await
+                .is_err());
         }
 
         // Parse a correct record.

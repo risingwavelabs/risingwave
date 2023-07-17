@@ -31,8 +31,8 @@ use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{
-    AccessBuilder, AvroProperties, ByteStreamSourceParser, EncodingProperties, EncodingType,
-    ParserProperties, SourceStreamChunkRowWriter, WriteGuard,
+    AccessBuilder, ByteStreamSourceParser, EncodingProperties, EncodingType,
+    SourceStreamChunkRowWriter, WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -55,53 +55,17 @@ impl AccessBuilder for AvroAccessBuilder {
 }
 
 impl AvroAccessBuilder {
-    pub async fn new(avro_config: AvroProperties, kv: EncodingType) -> Result<Self> {
-        let schema_location = &avro_config.row_schema_location;
-        let url = Url::parse(schema_location).map_err(|e| {
-            InternalError(format!("failed to parse url ({}): {}", schema_location, e))
-        })?;
-        if avro_config.use_schema_registry {
-            let kafka_topic = &avro_config.topic;
-            let client = Client::new(url, &avro_config.client_config)?;
-            let resolver = ConfluentSchemaResolver::new(client);
-
-            Ok(Self {
-                schema: match kv {
-                    EncodingType::Key => {
-                        resolver
-                            .get_by_subject_name(&format!("{}-key", kafka_topic))
-                            .await?
-                    }
-                    EncodingType::Value => {
-                        resolver
-                            .get_by_subject_name(&format!("{}-value", kafka_topic))
-                            .await?
-                    }
-                },
-                schema_resolver: Some(Arc::new(resolver)),
-                value: None,
-            })
-        } else {
-            let schema_content = match url.scheme() {
-                "file" => read_schema_from_local(url.path()),
-                "s3" => {
-                    read_schema_from_s3(&url, avro_config.aws_auth_props.as_ref().unwrap()).await
-                }
-                "https" | "http" => read_schema_from_http(&url).await,
-                scheme => Err(RwError::from(ProtocolError(format!(
-                    "path scheme {} is not supported",
-                    scheme
-                )))),
-            }?;
-            let schema = Schema::parse_str(&schema_content).map_err(|e| {
-                RwError::from(InternalError(format!("Avro schema parse error {}", e)))
-            })?;
-            Ok(Self {
-                schema: Arc::new(schema),
-                schema_resolver: None,
-                value: None,
-            })
-        }
+    pub fn new(config: AvroParserConfig, _encoding_type: EncodingType) -> Result<Self> {
+        let AvroParserConfig {
+            schema,
+            schema_resolver,
+            ..
+        } = config;
+        Ok(Self {
+            schema,
+            schema_resolver,
+            value: None,
+        })
     }
 
     async fn parse_avro_value(
@@ -153,9 +117,8 @@ pub struct AvroParserConfig {
 }
 
 impl AvroParserConfig {
-    pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let avro_config =
-            try_match_expand!(parser_properties.encoding_config, EncodingProperties::Avro)?;
+    pub async fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+        let avro_config = try_match_expand!(encoding_properties, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let enable_upsert = avro_config.enable_upsert;
         let url = Url::parse(schema_location).map_err(|e| {
@@ -454,7 +417,7 @@ mod test {
             ..Default::default()
         };
         let parser_config = ParserProperties::new(SourceFormat::Avro, &HashMap::new(), &info)?;
-        AvroParserConfig::new(parser_config).await
+        AvroParserConfig::new(parser_config.encoding_config).await
     }
 
     async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {
