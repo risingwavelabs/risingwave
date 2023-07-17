@@ -115,11 +115,7 @@ impl Compactor {
 /// Furthermore, the compactor for a compaction task must be picked with `CompactorManagerInner`,
 /// or its internal states might not be correctly maintained.
 pub struct CompactorManagerInner {
-    // policy: RwLock<Box<dyn CompactionSchedulePolicy>>,
     pub task_expiry_seconds: u64,
-    // A map: { context_id -> { task_id -> heartbeat } }
-    // task_heartbeats:
-    //     RwLock<HashMap<HummockContextId, HashMap<HummockCompactionTaskId, TaskHeartbeat>>>,
     task_heartbeats: HashMap<HummockCompactionTaskId, TaskHeartbeat>,
 
     /// The context ids of compactors.
@@ -509,7 +505,6 @@ mod tests {
         // Restart. Set task_expiry_seconds to 0 only to speed up test.
         let compactor_manager = CompactorManager::with_meta(env).await.unwrap();
         // Because task assignment exists.
-        // assert_eq!(compactor_manager.task_heartbeats.len(), 1);
         // Because compactor gRPC is not established yet.
         assert_eq!(compactor_manager.compactor_num(), 0);
         assert!(compactor_manager.get_compactor(context_id).is_none());

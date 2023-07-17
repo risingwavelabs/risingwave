@@ -557,12 +557,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         )
     }
 
-    // let compaction_scheduler = CompactionScheduler::new(
-    //     env.clone(),
-    //     hummock_manager.clone(),
-    //     compactor_manager.clone(),
-    // );
-
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     let mut sub_tasks = hummock::start_hummock_workers(
         hummock_manager.clone(),

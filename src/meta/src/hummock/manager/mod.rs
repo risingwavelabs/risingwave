@@ -14,7 +14,6 @@
 
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::future::pending;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
@@ -26,12 +25,12 @@ use fail::fail_point;
 use function_name::named;
 use futures::future::Either;
 use futures::stream::{BoxStream, FuturesUnordered};
-use futures::{Future, FutureExt};
+use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_common::util::select_all;
+use risingwave_common::util::{pending_on_none, select_all};
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
@@ -928,7 +927,7 @@ where
                 compact_task.task_id,
                 CompactTaskAssignment {
                     compact_task: Some(compact_task.clone()),
-                    context_id: 0, // deprecated
+                    context_id: META_NODE_ID, // deprecated
                 },
             );
 
@@ -1888,8 +1887,7 @@ where
             .send_event(ResponseEvent::CompactTask(compact_task))
             .await
         {
-            // todo cancel meta ?
-
+            // TODO: shall we need to cancel on meta ?
             return Err(anyhow::anyhow!(
                 "Failed to trigger compaction task: {:#?} compaction_group {}",
                 e,
@@ -2417,14 +2415,6 @@ where
         }
     }
 
-    fn pending_on_none<I>(future: impl Future<Output = Option<I>>) -> impl Future<Output = I> {
-        use futures::TryFutureExt;
-        future
-            .map(|opt| opt.ok_or(()))
-            .or_else(|()| pending::<std::result::Result<I, ()>>())
-            .map(|result| result.expect("only err on pending, which is unlikely to reach here"))
-    }
-
     pub async fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
@@ -2464,7 +2454,7 @@ where
                         }
                     },
 
-                    result = Self::pending_on_none(compactor_request_streams.next()) => {
+                    result = pending_on_none(compactor_request_streams.next()) => {
                         let (context_id, compactor_stream_req) = result;
                         let event = match compactor_stream_req {
                             (Some(Ok(req)), stream) => {
@@ -2580,7 +2570,6 @@ where
                                 let compactor_manager = hummock_manager.compactor_manager.clone();
                                 let cancel_tasks = compactor_manager.update_task_heartbeats(&progress);
 
-                                // compactor_manager.update_compactor_pending_task(req.context_id, req.pull_task_count, false);
                                 for mut task in cancel_tasks {
                                     tracing::info!(
                                         "Task with task_id {} with context_id {} has expired due to lack of visible progress",
