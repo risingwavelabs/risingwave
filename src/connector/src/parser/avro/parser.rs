@@ -598,7 +598,7 @@ mod test {
                 let inner_schema = union_schema
                     .variants()
                     .iter()
-                    .find_or_first(|s| s != &&Schema::Null)
+                    .find_or_first(|s| !matches!(s, &&Schema::Null))
                     .unwrap();
 
                 match build_field(inner_schema) {

@@ -231,7 +231,7 @@ impl RemoteSinkWriter {
                     &config.connector_type, e
                 )
             })?;
-        tracing::info!(
+        tracing::trace!(
             "{:?} sink stream started with properties: {:?}",
             &config.connector_type,
             &config.properties
