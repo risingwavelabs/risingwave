@@ -22,7 +22,7 @@ use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::estimate_size::KvSize;
+use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
@@ -35,7 +35,7 @@ use crate::row_serde::value_serde::ValueRowSerde;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, EstimateSize)]
 pub enum KeyOp {
     Insert(Bytes),
     Delete(Bytes),
@@ -88,7 +88,7 @@ impl MemTable {
             let key_len = pk.len();
             self.kv_size.add(&pk, &value);
             let origin_value = self.buffer.insert(pk, KeyOp::Insert(value));
-            self.calculate_origin_size(origin_value, key_len);
+            self.sub_origin_size(origin_value, key_len);
 
             return Ok(());
         }
@@ -122,7 +122,7 @@ impl MemTable {
             let key_len = pk.len();
             self.kv_size.add(&pk, &old_value);
             let origin_value = self.buffer.insert(pk, KeyOp::Delete(old_value));
-            self.calculate_origin_size(origin_value, key_len);
+            self.sub_origin_size(origin_value, key_len);
             return Ok(());
         }
         let entry = self.buffer.entry(pk);
@@ -178,7 +178,7 @@ impl MemTable {
             let origin_value = self
                 .buffer
                 .insert(pk, KeyOp::Update((old_value, new_value)));
-            self.calculate_origin_size(origin_value, key_len);
+            self.sub_origin_size(origin_value, key_len);
             return Ok(());
         }
         let entry = self.buffer.entry(pk);
@@ -223,7 +223,7 @@ impl MemTable {
         self.buffer.range(key_range)
     }
 
-    fn calculate_origin_size(&mut self, origin_value: Option<KeyOp>, key_len: usize) {
+    fn sub_origin_size(&mut self, origin_value: Option<KeyOp>, key_len: usize) {
         if let Some(origin_value) = origin_value {
             match origin_value {
                 KeyOp::Insert(old_value) => {

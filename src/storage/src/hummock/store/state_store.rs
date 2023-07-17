@@ -19,7 +19,7 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
-use prometheus::core::{AtomicI64, GenericGauge};
+use prometheus::IntGauge;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -86,9 +86,9 @@ pub struct LocalHummockStorage {
 
     write_limiter: WriteLimiterRef,
 
-    mem_table_size: GenericGauge<AtomicI64>,
+    mem_table_size: IntGauge,
 
-    mem_table_item_count: GenericGauge<AtomicI64>,
+    mem_table_item_count: IntGauge,
 }
 
 impl LocalHummockStorage {
