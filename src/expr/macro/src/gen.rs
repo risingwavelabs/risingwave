@@ -339,7 +339,7 @@ impl FunctionAttr {
             _ => quote! { state },
         };
         let init_state = match &self.init_state {
-            Some(s) => s.parse().unwrap(),
+            Some(s) => format!("Some({s})").parse().unwrap(),
             _ => quote! { None },
         };
         let get_state = match &self.state {

@@ -38,7 +38,7 @@ const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
 #[aggregate(
     "approx_count_distinct(*) -> int64",
     state = "Registers",
-    init_state = "Some(Registers::new())"
+    init_state = "Registers::new()"
 )]
 fn approx_count_distinct<'a>(
     mut reg: Registers,

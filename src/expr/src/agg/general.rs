@@ -29,20 +29,25 @@ use crate::{ExprError, Result};
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256")]
-#[aggregate("sum0(int64) -> int64", init_state = "Some(0)")]
-fn sum<S, T>(state: S, input: T, retract: bool) -> Result<S>
+#[aggregate("sum0(int64) -> int64", init_state = "0")]
+fn sum<S, T>(state: Option<S>, input: Option<T>, retract: bool) -> Result<Option<S>>
 where
-    S: From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
+    S: Default + From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
 {
-    if retract {
+    let Some(input) = input else {
+        return Ok(state);
+    };
+    let state = state.unwrap_or_else(S::default);
+    let result = if retract {
         state
             .checked_sub(&S::from(input))
-            .ok_or(ExprError::NumericOutOfRange)
+            .ok_or(ExprError::NumericOutOfRange)?
     } else {
         state
             .checked_add(&S::from(input))
-            .ok_or(ExprError::NumericOutOfRange)
-    }
+            .ok_or(ExprError::NumericOutOfRange)?
+    };
+    Ok(Some(result))
 }
 
 #[aggregate("min(*) -> auto", state = "ref")]
@@ -116,7 +121,7 @@ fn last_value<T>(_: T, input: T) -> T {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("count(*) -> int64", init_state = "Some(0)")]
+#[aggregate("count(*) -> int64", init_state = "0")]
 fn count<T>(state: i64, _: T, retract: bool) -> i64 {
     if retract {
         state - 1
@@ -125,7 +130,7 @@ fn count<T>(state: i64, _: T, retract: bool) -> i64 {
     }
 }
 
-#[aggregate("count() -> int64", init_state = "Some(0)")]
+#[aggregate("count() -> int64", init_state = "0")]
 fn count_star(state: i64, retract: bool) -> i64 {
     if retract {
         state - 1

@@ -81,7 +81,7 @@ impl UserFunctionAttr {
             name: item.sig.ident.to_string(),
             write: last_arg_is_write(item),
             retract: last_arg_is_retract(item),
-            arg_option: args_are_all_option(item),
+            arg_option: args_contain_option(item),
             return_type,
             iterator_item_type,
             generic: item.sig.generics.params.len(),
@@ -112,8 +112,8 @@ fn last_arg_is_retract(item: &syn::ItemFn) -> bool {
     pat.ident.to_string().contains("retract")
 }
 
-/// Check if all arguments are `Option`s.
-fn args_are_all_option(item: &syn::ItemFn) -> bool {
+/// Check if any argument is `Option`.
+fn args_contain_option(item: &syn::ItemFn) -> bool {
     if item.sig.inputs.is_empty() {
         return false;
     }
@@ -121,11 +121,11 @@ fn args_are_all_option(item: &syn::ItemFn) -> bool {
         let syn::FnArg::Typed(arg) = arg else { return false };
         let syn::Type::Path(path) = arg.ty.as_ref() else { return false };
         let Some(seg) = path.path.segments.last() else { return false };
-        if seg.ident != "Option" {
-            return false;
+        if seg.ident == "Option" {
+            return true;
         }
     }
-    true
+    false
 }
 
 /// Check the return type.
