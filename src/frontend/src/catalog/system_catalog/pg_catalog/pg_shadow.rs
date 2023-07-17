@@ -55,7 +55,6 @@ pub static PG_SHADOW: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
                  NULL::text[] AS useconfig \
             FROM rw_catalog.rw_users u \
             JOIN rw_catalog.rw_user_secrets s \
-              ON u.id = s.id\
-              "
-    .to_string(),
+              ON u.id = s.id"
+        .to_string(),
 });

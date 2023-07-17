@@ -272,12 +272,12 @@ fn get_acl_items(
 }
 
 pub struct SystemCatalog {
-    table_by_schema_name: HashMap<&'static str, Vec<SystemTableCatalog>>,
+    table_by_schema_name: HashMap<&'static str, Vec<Arc<SystemTableCatalog>>>,
     table_name_by_id: HashMap<TableId, &'static str>,
     view_by_schema_name: HashMap<&'static str, Vec<Arc<ViewCatalog>>>,
 }
 
-pub fn get_sys_catalogs_in_schema(schema_name: &str) -> Option<Vec<SystemTableCatalog>> {
+pub fn get_sys_catalogs_in_schema(schema_name: &str) -> Option<Vec<Arc<SystemTableCatalog>>> {
     SYS_CATALOGS
         .table_by_schema_name
         .get(schema_name)
@@ -291,7 +291,7 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Option<Vec<Arc<ViewCatalog>
         .map(Clone::clone)
 }
 
-macro_rules! prepare_sys_catalog_v2 {
+macro_rules! prepare_sys_catalog {
     ($( { $builtin_catalog:expr $(, $func:ident $($await:ident)?)? } ),* $(,)?) => {
         pub(crate) static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
             let mut table_by_schema_name = HashMap::new();
@@ -302,7 +302,7 @@ macro_rules! prepare_sys_catalog_v2 {
                 match $builtin_catalog {
                     BuiltinCatalog::Table(table) => {
                         let sys_table: SystemTableCatalog = table.into();
-                        table_by_schema_name.entry(table.schema).or_insert(vec![]).push(sys_table.with_id(id.into()));
+                        table_by_schema_name.entry(table.schema).or_insert(vec![]).push(Arc::new(sys_table.with_id(id.into())));
                         table_name_by_id.insert(id.into(), table.name);
                     },
                     BuiltinCatalog::View(view) => {
@@ -339,7 +339,8 @@ macro_rules! prepare_sys_catalog_v2 {
     }
 }
 
-prepare_sys_catalog_v2! {
+// `prepare_sys_catalog!` macro is used to generate all builtin system catalogs.
+prepare_sys_catalog! {
     { BuiltinCatalog::View(&PG_TYPE) },
     { BuiltinCatalog::View(&PG_NAMESPACE) },
     { BuiltinCatalog::View(&PG_CAST) },

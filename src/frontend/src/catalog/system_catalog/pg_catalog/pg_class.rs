@@ -37,16 +37,16 @@ pub static PG_CLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
         (DataType::Int32, "reltablespace"),
     ],
     sql: "SELECT id AS oid, name AS relname, schema_id AS relnamespace, owner AS relowner, \
-    CASE \
-        WHEN relation_type = 'table' THEN 'r' \
-        WHEN relation_type = 'system table' THEN 'r' \
-        WHEN relation_type = 'index' THEN 'i' \
-        WHEN relation_type = 'view' THEN 'v' \
-        WHEN relation_type = 'materialized view' THEN 'm' \
-    END relkind, \
-    0 AS relam, \
-    0 AS reltablespace \
-    FROM rw_catalog.rw_relations\
+        CASE \
+            WHEN relation_type = 'table' THEN 'r' \
+            WHEN relation_type = 'system table' THEN 'r' \
+            WHEN relation_type = 'index' THEN 'i' \
+            WHEN relation_type = 'view' THEN 'v' \
+            WHEN relation_type = 'materialized view' THEN 'm' \
+        END relkind, \
+        0 AS relam, \
+        0 AS reltablespace \
+        FROM rw_catalog.rw_relations\
     "
     .to_string(),
 });

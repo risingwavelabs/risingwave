@@ -40,12 +40,12 @@ pub static PG_INDEX: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
     name: PG_INDEX_TABLE_NAME,
     schema: PG_CATALOG_SCHEMA_NAME,
     columns: &PG_INDEX_COLUMNS,
-    sql: "SELECT id AS indexrelid,
-                primary_table_id AS indrelid,
-                ARRAY_LENGTH(original_column_ids)::smallint AS indnatts,
-                original_column_ids AS indkey,
-                NULL AS indexprs,
-                NULL AS indpred
+    sql: "SELECT id AS indexrelid, \
+                primary_table_id AS indrelid, \
+                ARRAY_LENGTH(original_column_ids)::smallint AS indnatts, \
+                original_column_ids AS indkey, \
+                NULL AS indexprs, \
+                NULL AS indpred \
             FROM rw_catalog.rw_indexes"
         .into(),
 });

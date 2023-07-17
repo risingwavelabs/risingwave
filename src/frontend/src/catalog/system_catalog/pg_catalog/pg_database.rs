@@ -54,15 +54,15 @@ pub static PG_DATABASE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
         (DataType::Varchar, "datacl"),
     ],
     sql: "SELECT id AS oid, \
-                 name AS dataname,
-                 owner AS databa,\
-                 6 AS encoding,\
-                 'C' AS datcollate,\
-                 'C' AS datctype,\
-                 false AS datistemplate,\
-                 true AS datallowconn,\
-                 -1 AS datconnlimit,\
-                 1663 AS dattablespace,\
+                 name AS dataname, \
+                 owner AS databa, \
+                 6 AS encoding, \
+                 'C' AS datcollate, \
+                 'C' AS datctype, \
+                 false AS datistemplate, \
+                 true AS datallowconn, \
+                 -1 AS datconnlimit, \
+                 1663 AS dattablespace, \
                  acl AS datacl FROM rw_catalog.rw_databases"
         .into(),
 });

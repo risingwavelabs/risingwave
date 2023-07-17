@@ -500,7 +500,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         table_name: &str,
-    ) -> CatalogResult<&SystemTableCatalog> {
+    ) -> CatalogResult<&Arc<SystemTableCatalog>> {
         self.get_schema_by_name(db_name, schema_name)
             .unwrap()
             .get_system_table_by_name(table_name)

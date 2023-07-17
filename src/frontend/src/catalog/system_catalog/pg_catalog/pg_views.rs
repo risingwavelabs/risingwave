@@ -30,14 +30,14 @@ pub static PG_VIEWS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
         (DataType::Varchar, "viewowner"),
         (DataType::Varchar, "definition"),
     ],
-    sql: "SELECT s.name AS schemaname,
-                 v.name AS viewname,
-                 u.name AS viewowner,
-                 v.definition AS definition
-             FROM rw_catalog.rw_views v
-             JOIN rw_catalog.rw_schemas s
-             ON v.schema_id = s.id
-             JOIN rw_catalog.rw_users u
+    sql: "SELECT s.name AS schemaname, \
+                 v.name AS viewname, \
+                 u.name AS viewowner, \
+                 v.definition AS definition \
+             FROM rw_catalog.rw_views v \
+             JOIN rw_catalog.rw_schemas s \
+             ON v.schema_id = s.id \
+             JOIN rw_catalog.rw_users u \
              ON v.owner = u.id"
         .into(),
 });

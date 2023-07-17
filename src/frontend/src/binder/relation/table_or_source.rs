@@ -44,7 +44,7 @@ pub struct BoundBaseTable {
 #[derive(Debug, Clone)]
 pub struct BoundSystemTable {
     pub table_id: TableId,
-    pub sys_table_catalog: SystemTableCatalog,
+    pub sys_table_catalog: Arc<SystemTableCatalog>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,7 +68,7 @@ impl Binder {
         for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
         // define some helper functions converting catalog to bound relation
-        let resolve_sys_table_relation = |sys_table_catalog: &SystemTableCatalog| {
+        let resolve_sys_table_relation = |sys_table_catalog: &Arc<SystemTableCatalog>| {
             let table = BoundSystemTable {
                 table_id: sys_table_catalog.id(),
                 sys_table_catalog: sys_table_catalog.clone(),

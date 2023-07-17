@@ -52,23 +52,22 @@ pub static PG_TYPE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
         // None
         (DataType::Int32, "typreceive"),
     ],
-    sql: "SELECT t.id AS oid,
-                t.name AS typname,
-                0 AS typelem,
-                false AS typnotnull,
-                0 AS typbasetype,
-                -1 AS typtypmod,
-                0 AS typcollation,
-                0 AS typlen,
-                s.id AS typnamespace,
-                'b' AS typtype,
-                0 AS typrelid,
-                NULL AS typdefault,
-                NULL AS typcategory,
-                NULL::integer AS typreceive
-            FROM rw_catalog.rw_types t
-            JOIN rw_catalog.rw_schemas s
-            ON s.name = 'pg_catalog'
-    "
-    .to_string(),
+    sql: "SELECT t.id AS oid, \
+                t.name AS typname, \
+                0 AS typelem, \
+                false AS typnotnull, \
+                0 AS typbasetype, \
+                -1 AS typtypmod, \
+                0 AS typcollation, \
+                0 AS typlen, \
+                s.id AS typnamespace, \
+                'b' AS typtype, \
+                0 AS typrelid, \
+                NULL AS typdefault, \
+                NULL AS typcategory, \
+                NULL::integer AS typreceive \
+            FROM rw_catalog.rw_types t \
+            JOIN rw_catalog.rw_schemas s \
+            ON s.name = 'pg_catalog'"
+        .to_string(),
 });
