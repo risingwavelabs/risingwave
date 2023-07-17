@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::{pending, Future};
 use std::iter::once;
 use std::pin::pin;
+use std::time::Instant;
 
 use futures::future::{select, try_join_all, BoxFuture, Either};
 use futures::stream::{BoxStream, FuturesUnordered};
@@ -547,6 +548,7 @@ impl SinkCoordinatorWorker {
                         warn!("unaligned epoch {} {}", other_epoch, epoch);
                     }
                 }
+                let start_time = Instant::now();
                 coordinator.commit(epoch, metadatas).await.map_err(|e| {
                     error!(
                         "failed to commit on coordinator with param {:?}: {:?}",
@@ -554,6 +556,7 @@ impl SinkCoordinatorWorker {
                     );
                     Status::internal(format!("failed to commit on epoch {}: {:?}", epoch, param))
                 })?;
+                info!("commit take {:?}", start_time.elapsed());
                 for sender in &response_response_senders {
                     send_with_err_check!(
                         sender,

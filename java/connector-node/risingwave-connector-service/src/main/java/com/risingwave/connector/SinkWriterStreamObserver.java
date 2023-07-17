@@ -24,6 +24,7 @@ import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.metrics.MonitoredRowIterator;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.StreamObserver;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -148,17 +149,20 @@ public class SinkWriterStreamObserver
                             .asRuntimeException();
                 }
                 boolean isCheckpoint = sinkTask.getBarrier().getIsCheckpoint();
-                sink.barrier(isCheckpoint);
+                Optional<ConnectorServiceProto.SinkMetadata> metadata = sink.barrier(isCheckpoint);
                 currentEpoch = sinkTask.getBarrier().getEpoch();
                 LOG.debug("Epoch {} barrier {}", currentEpoch, isCheckpoint);
                 if (isCheckpoint) {
+                    ConnectorServiceProto.SinkWriterStreamResponse.CommitResponse.Builder builder =
+                            ConnectorServiceProto.SinkWriterStreamResponse.CommitResponse
+                                    .newBuilder()
+                                    .setEpoch(currentEpoch);
+                    if (metadata.isPresent()) {
+                        builder.setMetadata(metadata.get());
+                    }
                     responseObserver.onNext(
                             ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
-                                    .setCommit(
-                                            ConnectorServiceProto.SinkWriterStreamResponse
-                                                    .CommitResponse.newBuilder()
-                                                    .setEpoch(currentEpoch)
-                                                    .build())
+                                    .setCommit(builder)
                                     .build());
                 }
             } else {

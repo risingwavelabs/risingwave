@@ -19,9 +19,9 @@ import static io.grpc.Status.UNIMPLEMENTED;
 
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
-import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.grpc.Status;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -35,7 +35,6 @@ import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.PartitionKey;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
-import org.apache.iceberg.Transaction;
 import org.apache.iceberg.data.GenericRecord;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.data.parquet.GenericParquetWriter;
@@ -46,7 +45,7 @@ import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.parquet.Parquet;
 import org.apache.iceberg.types.Types;
 
-public class UpsertIcebergSink extends SinkWriterBase {
+public class UpsertIcebergSinkWriter extends IcebergSinkWriterBase {
     private final HadoopCatalog hadoopCatalog;
     private final Table icebergTable;
     private final FileFormat fileFormat;
@@ -57,7 +56,7 @@ public class UpsertIcebergSink extends SinkWriterBase {
     private boolean updateBufferExists = false;
     private Map<PartitionKey, SinkRowMap> sinkRowMapByPartition = new HashMap<>();
 
-    public UpsertIcebergSink(
+    public UpsertIcebergSinkWriter(
             TableSchema tableSchema,
             HadoopCatalog hadoopCatalog,
             Table icebergTable,
@@ -66,12 +65,11 @@ public class UpsertIcebergSink extends SinkWriterBase {
         this.hadoopCatalog = hadoopCatalog;
         this.icebergTable = icebergTable;
         this.fileFormat = fileFormat;
-        this.rowSchema =
-                icebergTable.schema().select(Arrays.asList(getTableSchema().getColumnNames()));
+        this.rowSchema = icebergTable.schema().select(Arrays.asList(tableSchema.getColumnNames()));
         this.deleteRowSchema = icebergTable.schema().select(tableSchema.getPrimaryKeys());
         this.pkIndices =
-                getTableSchema().getPrimaryKeys().stream()
-                        .map(columnName -> getTableSchema().getColumnIndex(columnName))
+                tableSchema.getPrimaryKeys().stream()
+                        .map(columnName -> tableSchema.getColumnIndex(columnName))
                         .collect(Collectors.toList());
     }
 
@@ -148,7 +146,7 @@ public class UpsertIcebergSink extends SinkWriterBase {
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
             try (SinkRow row = rows.next()) {
-                if (row.size() != getTableSchema().getColumnNames().length) {
+                if (row.size() != tableSchema.getColumnNames().length) {
                     throw Status.FAILED_PRECONDITION
                             .withDescription("row values do not match table schema")
                             .asRuntimeException();
@@ -203,8 +201,9 @@ public class UpsertIcebergSink extends SinkWriterBase {
     }
 
     @Override
-    public void sync() {
-        Transaction transaction = icebergTable.newTransaction();
+    protected IcebergMetadata collectSinkMetadata() {
+        List<DataFile> dataFileList = new ArrayList<>();
+        List<DeleteFile> deleteFileList = new ArrayList<>();
         for (Map.Entry<PartitionKey, SinkRowMap> entry : sinkRowMapByPartition.entrySet()) {
             EqualityDeleteWriter<Record> equalityDeleteWriter =
                     newEqualityDeleteWriter(entry.getKey());
@@ -227,17 +226,19 @@ public class UpsertIcebergSink extends SinkWriterBase {
                                 "failed to close dataWriter and equalityDeleteWriter")
                         .asRuntimeException();
             }
+
             if (equalityDeleteWriter.length() > 0) {
                 DeleteFile eqDeletes = equalityDeleteWriter.toDeleteFile();
-                transaction.newRowDelta().addDeletes(eqDeletes).commit();
+                deleteFileList.add(eqDeletes);
             }
             if (dataWriter.length() > 0) {
                 DataFile dataFile = dataWriter.toDataFile();
-                transaction.newAppend().appendFile(dataFile).commit();
+                dataFileList.add(dataFile);
             }
         }
-        transaction.commitTransaction();
         sinkRowMapByPartition.clear();
+        return new IcebergMetadata(
+                dataFileList.toArray(new DataFile[0]), deleteFileList.toArray(new DeleteFile[0]));
     }
 
     @Override

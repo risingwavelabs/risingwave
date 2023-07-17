@@ -82,6 +82,7 @@ message SinkWriterStreamResponse {
 
   message CommitResponse {
     uint64 epoch = 1;
+    SinkMetadata metadata = 2;
   }
 
   oneof response {
