@@ -190,8 +190,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         // Materialize input chunk if needed and possible.
         for (storage, visibility) in this.storages.iter_mut().zip_eq_fast(visibilities.iter()) {
             if let AggStateStorage::MaterializedInput { table, mapping } = storage {
-                let mut chunk = chunk.project(mapping.upstream_columns());
-                chunk.set_vis(visibility.clone());
+                let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
                 table.write_chunk(chunk);
             }
         }

@@ -241,6 +241,14 @@ impl StreamChunk {
             data: self.data.project(indices),
         }
     }
+
+    /// Reorder columns and set visibility.
+    pub fn project_with_vis(&self, indices: &[usize], vis: Vis) -> Self {
+        Self {
+            ops: self.ops.clone(),
+            data: self.data.project_with_vis(indices, vis),
+        }
+    }
 }
 
 impl Deref for StreamChunk {

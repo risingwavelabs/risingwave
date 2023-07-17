@@ -435,6 +435,15 @@ impl DataChunk {
         }
     }
 
+    /// Reorder columns and set visibility.
+    pub fn project_with_vis(&self, indices: &[usize], vis: Vis) -> Self {
+        assert_eq!(vis.len(), self.capacity());
+        Self {
+            columns: indices.iter().map(|i| self.columns[*i].clone()).collect(),
+            vis2: vis,
+        }
+    }
+
     /// Reorder rows by indexes.
     pub fn reorder_rows(&self, indexes: &[usize]) -> Self {
         let mut array_builders: Vec<ArrayBuilderImpl> = self

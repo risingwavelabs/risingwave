@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
@@ -99,21 +99,26 @@ impl AggState {
     /// Apply input chunk to the state.
     pub async fn apply_chunk(
         &mut self,
-        chunk: StreamChunk,
+        chunk: &StreamChunk,
         call: &AggCall,
+        visibility: Vis,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => {
-                let chunk = chunk.project(call.args.val_indices());
+                let chunk = chunk.project_with_vis(call.args.val_indices(), visibility);
                 state.update(&chunk).await?;
                 Ok(())
             }
             Self::Table(state) => {
-                let chunk = chunk.project(call.args.val_indices());
+                let chunk = chunk.project_with_vis(call.args.val_indices(), visibility);
                 state.apply_chunk(&chunk).await
             }
-            // the input chunk for minput is unprojected
-            Self::MaterializedInput(state) => state.apply_chunk(&chunk),
+            Self::MaterializedInput(state) => {
+                // the input chunk for minput is unprojected
+                let mut chunk = chunk.clone();
+                chunk.set_vis(visibility);
+                state.apply_chunk(&chunk)
+            }
         }
     }
 
