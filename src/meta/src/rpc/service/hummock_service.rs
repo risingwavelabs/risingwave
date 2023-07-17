@@ -302,11 +302,9 @@ where
         &self,
         request: Request<TriggerFullGcRequest>,
     ) -> Result<Response<TriggerFullGcResponse>, Status> {
-        self.vacuum_manager
-            .start_full_gc(Duration::from_secs(
-                request.into_inner().sst_retention_time_sec,
-            ))
-            .await?;
+        self.vacuum_manager.start_full_gc(Duration::from_secs(
+            request.into_inner().sst_retention_time_sec,
+        ))?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 
@@ -499,7 +497,7 @@ where
         }
         let compactor_manager = self.hummock_manager.compactor_manager.clone();
 
-        let rx: tokio::sync::mpsc::Receiver<
+        let rx: tokio::sync::mpsc::UnboundedReceiver<
             Result<SubscribeCompactionEventResponse, crate::MetaError>,
         > = compactor_manager.add_compactor(context_id);
 

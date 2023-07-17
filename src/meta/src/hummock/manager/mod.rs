@@ -1883,10 +1883,7 @@ where
 
         // 3. send task to compactor
         let compact_task_string = compact_task_to_string(&compact_task);
-        if let Err(e) = compactor
-            .send_event(ResponseEvent::CompactTask(compact_task))
-            .await
-        {
+        if let Err(e) = compactor.send_event(ResponseEvent::CompactTask(compact_task)) {
             // TODO: shall we need to cancel on meta ?
             return Err(anyhow::anyhow!(
                 "Failed to trigger compaction task: {:#?} compaction_group {}",
@@ -2504,7 +2501,7 @@ where
                                                 let task_id = compact_task.task_id;
                                                 if let Err(e) = compactor.send_event(
                                                     ResponseEvent::CompactTask(compact_task)
-                                                ).await {
+                                                ) {
                                                     tracing::warn!(
                                                         "Failed to send task {} to {}. {:#?}",
                                                         task_id,
@@ -2513,7 +2510,7 @@ where
                                                     );
 
                                                     // try cancel on compactor
-                                                    let _ = compactor.cancel_task(task_id).await;
+                                                    let _ = compactor.cancel_task(task_id);
                                                     hummock_manager.compactor_manager
                                                         .remove_compactor(compactor.context_id());
 
@@ -2538,7 +2535,7 @@ where
 
                                 // ack to compactor
                                 if compactor_alive {
-                                    if let Err(e) = compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {})).await {
+                                    if let Err(e) = compactor.send_event(ResponseEvent::PullTaskAck(PullTaskAck {})){
                                         tracing::warn!(
                                             "Failed to send ask to {}. {:#?}",
                                             context_id,
@@ -2590,7 +2587,7 @@ where
                                         // Forcefully cancel the task so that it terminates
                                         // early on the compactor
                                         // node.
-                                        let _ = compactor.cancel_task(task.task_id).await;
+                                        let _ = compactor.cancel_task(task.task_id);
                                         tracing::info!(
                                             "CancelTask operation for task_id {} has been sent to node with context_id {}",
                                             context_id,

@@ -169,7 +169,6 @@ where
                     sst_id_to_worker_id: sst_to_context.clone(),
                     epoch,
                 }))
-                .await
                 .is_err()
             {
                 tracing::warn!("Skip committed SST sanity check due to send failure");

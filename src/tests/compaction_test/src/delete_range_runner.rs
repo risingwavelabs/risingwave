@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
 use std::pin::{pin, Pin};
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -563,6 +564,7 @@ fn run_compactor_thread(
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
         await_tree_reg: None,
+        running_task_count: Arc::new(AtomicU32::new(0)),
     });
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,

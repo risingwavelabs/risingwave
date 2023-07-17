@@ -24,7 +24,7 @@ pub(super) mod task_progress;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::Div;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -475,7 +475,7 @@ impl Compactor {
         let mut system =
             System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
         let pid = sysinfo::get_current_pid().unwrap();
-        let running_task_count = Arc::new(AtomicU32::new(0));
+        let running_task_count = compactor_context.running_task_count.clone();
         let pull_task_ack = Arc::new(AtomicBool::new(true));
 
         let join_handle = tokio::spawn(async move {

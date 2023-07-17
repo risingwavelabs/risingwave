@@ -25,7 +25,7 @@ use risingwave_pb::hummock::{
     CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress,
     SubscribeCompactionEventResponse,
 };
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
@@ -43,7 +43,7 @@ pub const TASK_NORMAL: &str = "task is normal, please wait some time";
 #[derive(Debug)]
 pub struct Compactor {
     context_id: HummockContextId,
-    sender: Sender<MetaResult<SubscribeCompactionEventResponse>>,
+    sender: UnboundedSender<MetaResult<SubscribeCompactionEventResponse>>,
 }
 
 struct TaskHeartbeat {
@@ -60,12 +60,12 @@ struct TaskHeartbeat {
 impl Compactor {
     pub fn new(
         context_id: HummockContextId,
-        sender: Sender<MetaResult<SubscribeCompactionEventResponse>>,
+        sender: UnboundedSender<MetaResult<SubscribeCompactionEventResponse>>,
     ) -> Self {
         Self { context_id, sender }
     }
 
-    pub async fn send_event(&self, event: ResponseEvent) -> MetaResult<()> {
+    pub fn send_event(&self, event: ResponseEvent) -> MetaResult<()> {
         fail_point!("compaction_send_task_fail", |_| Err(anyhow::anyhow!(
             "compaction_send_task_fail"
         )
@@ -73,13 +73,12 @@ impl Compactor {
 
         self.sender
             .send(Ok(SubscribeCompactionEventResponse { event: Some(event) }))
-            .await
             .map_err(|e| anyhow::anyhow!(e))?;
 
         Ok(())
     }
 
-    pub async fn cancel_task(&self, task_id: u64) -> MetaResult<()> {
+    pub fn cancel_task(&self, task_id: u64) -> MetaResult<()> {
         self.sender
             .send(Ok(SubscribeCompactionEventResponse {
                 event: Some(ResponseEvent::CancelCompactTask(CancelCompactTask {
@@ -87,7 +86,6 @@ impl Compactor {
                     task_id,
                 })),
             }))
-            .await
             .map_err(|e| anyhow::anyhow!(e))?;
         Ok(())
     }
@@ -110,10 +108,6 @@ impl Compactor {
 ///   It's the final state.
 /// - 4. Cancelled: a task is reported as cancelled via `CompactStatus::report_compact_task`. It's
 ///   the final state.
-/// We omit Assigned state because there's nothing to be done about this state currently.
-///
-/// Furthermore, the compactor for a compaction task must be picked with `CompactorManagerInner`,
-/// or its internal states might not be correctly maintained.
 pub struct CompactorManagerInner {
     pub task_expiry_seconds: u64,
     task_heartbeats: HashMap<HummockCompactionTaskId, TaskHeartbeat>,
@@ -121,7 +115,6 @@ pub struct CompactorManagerInner {
     /// The context ids of compactors.
     pub compactors: Vec<HummockContextId>,
 
-    /// TODO: Let each compactor have its own Mutex, we should not need to lock whole thing.
     /// The outer lock is a RwLock, so we should still be able to modify each compactor
     pub compactor_map: HashMap<HummockContextId, Arc<Compactor>>,
 }
@@ -177,9 +170,8 @@ impl CompactorManagerInner {
     pub fn add_compactor(
         &mut self,
         context_id: HummockContextId,
-    ) -> Receiver<MetaResult<SubscribeCompactionEventResponse>> {
-        const STREAM_BUFFER_SIZE: usize = 4;
-        let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
+    ) -> UnboundedReceiver<MetaResult<SubscribeCompactionEventResponse>> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.compactors.retain(|c| *c != context_id);
         self.compactors.push(context_id);
         self.compactor_map
@@ -409,7 +401,7 @@ impl CompactorManager {
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
-    ) -> Receiver<MetaResult<SubscribeCompactionEventResponse>> {
+    ) -> UnboundedReceiver<MetaResult<SubscribeCompactionEventResponse>> {
         self.inner.write().add_compactor(context_id)
     }
 

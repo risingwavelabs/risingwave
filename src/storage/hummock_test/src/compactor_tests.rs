@@ -17,6 +17,7 @@ pub(crate) mod tests {
 
     use std::collections::{BTreeSet, HashMap};
     use std::ops::Bound;
+    use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
@@ -196,6 +197,7 @@ pub(crate) mod tests {
             )),
             task_progress_manager: Default::default(),
             await_tree_reg: None,
+            running_task_count: Arc::new(AtomicU32::new(0)),
         }
     }
 

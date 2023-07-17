@@ -133,14 +133,11 @@ where
             };
 
             // 2. Send task.
-            match compactor
-                .send_event(ResponseEvent::VacuumTask(VacuumTask {
-                    // The SST id doesn't necessarily have a counterpart SST file in S3, but
-                    // it's OK trying to delete it.
-                    sstable_object_ids: delete_batch.clone(),
-                }))
-                .await
-            {
+            match compactor.send_event(ResponseEvent::VacuumTask(VacuumTask {
+                // The SST id doesn't necessarily have a counterpart SST file in S3, but
+                // it's OK trying to delete it.
+                sstable_object_ids: delete_batch.clone(),
+            })) {
                 Ok(_) => {
                     tracing::debug!(
                         "Try to vacuum SSTs {:?} in worker {}.",
@@ -213,7 +210,7 @@ where
     /// 3. Meta node decides which SSTs to delete. See `VacuumManager::complete_full_gc`.
     ///
     /// Returns Ok(false) if there is no worker available.
-    pub async fn start_full_gc(&self, sst_retention_time: Duration) -> Result<bool> {
+    pub fn start_full_gc(&self, sst_retention_time: Duration) -> Result<bool> {
         self.hummock_manager.metrics.full_gc_trigger_count.inc();
         // Set a minimum sst_retention_time to avoid deleting SSTs of on-going write op.
         let sst_retention_time = cmp::max(
@@ -235,7 +232,6 @@ where
             .send_event(ResponseEvent::FullScanTask(FullScanTask {
                 sst_retention_time_sec: sst_retention_time.as_secs(),
             }))
-            .await
             .map_err(|_| Error::CompactorUnreachable(compactor.context_id()))?;
         Ok(true)
     }
@@ -458,7 +454,6 @@ mod tests {
             .start_full_gc(Duration::from_secs(
                 vacuum.env.opts.min_sst_retention_time_sec - 1
             ))
-            .await
             .unwrap());
 
         let mut receiver = compactor_manager.add_compactor(context_id);
@@ -467,7 +462,6 @@ mod tests {
             .start_full_gc(Duration::from_secs(
                 vacuum.env.opts.min_sst_retention_time_sec - 1
             ))
-            .await
             .unwrap());
         let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,
@@ -485,7 +479,6 @@ mod tests {
             .start_full_gc(Duration::from_secs(
                 vacuum.env.opts.min_sst_retention_time_sec + 1
             ))
-            .await
             .unwrap());
         let full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
             ResponseEvent::FullScanTask(task) => task,

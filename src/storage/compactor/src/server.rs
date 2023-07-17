@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -206,6 +207,7 @@ pub async fn compactor_serve(
         sstable_object_id_manager: sstable_object_id_manager.clone(),
         task_progress_manager: Default::default(),
         await_tree_reg: await_tree_reg.clone(),
+        running_task_count: Arc::new(AtomicU32::new(0)),
     });
     let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
