@@ -200,6 +200,8 @@ impl MemTable {
                             new: KeyOp::Update((old_value, new_value)),
                         }));
                     }
+                    self.kv_size.sub_val(original_new_value);
+                    self.kv_size.add_val(&new_value);
                     *original_new_value = new_value;
                     Ok(())
                 }
