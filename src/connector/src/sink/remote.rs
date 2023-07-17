@@ -121,7 +121,7 @@ impl Sink for RemoteSink {
         ))
     }
 
-    async fn validate(&mut self, client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()> {
         // FIXME: support struct and array in stream sink
         let columns = self.schema.fields
             .iter()

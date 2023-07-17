@@ -93,7 +93,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             pk_indices.clone(),
             sink_type,
             sink_id,
-        ).await?;
+        )?;
         let schema: Schema = columns
             .iter()
             .map(|column| column.column_desc.clone().into())

@@ -71,7 +71,7 @@ impl Sink for KinesisSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = KinesisSinkWriter;
 
-    async fn validate(&mut self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(

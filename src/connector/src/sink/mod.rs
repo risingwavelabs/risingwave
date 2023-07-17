@@ -13,12 +13,12 @@
 // limitations under the License.
 
 pub mod catalog;
+pub mod clickhouse;
 pub mod kafka;
 pub mod kinesis;
 pub mod redis;
 pub mod remote;
 pub mod utils;
-pub mod clickhouse;
 
 use std::collections::HashMap;
 
@@ -63,7 +63,7 @@ pub trait Sink {
     type Writer: SinkWriter;
     type Coordinator: SinkCommitCoordinator;
 
-    async fn validate(&mut self, client: Option<ConnectorClient>) -> Result<()>;
+    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
@@ -207,7 +207,7 @@ impl Sink for BlackHoleSink {
         Ok(Self)
     }
 
-    async fn validate(&mut self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         Ok(())
     }
 }
@@ -275,7 +275,7 @@ impl SinkConfig {
     }
 }
 
-pub async fn build_sink(
+pub fn build_sink(
     config: SinkConfig,
     columns: &[ColumnCatalog],
     pk_indices: Vec<usize>,
@@ -287,17 +287,17 @@ pub async fn build_sink(
         .iter()
         .filter_map(|column| (!column.is_hidden).then(|| column.column_desc.clone().into()))
         .collect();
-    SinkImpl::new(config, schema, pk_indices, sink_type, sink_id).await
+    SinkImpl::new(config, schema, pk_indices, sink_type, sink_id)
 }
 
-// #[derive(Debug)]
+#[derive(Debug)]
 pub enum SinkImpl {
     Redis(RedisSink),
     Kafka(KafkaSink),
     Remote(RemoteSink),
     BlackHole(BlackHoleSink),
     Kinesis(KinesisSink),
-    ClickHouse(ClickHouseSink)
+    ClickHouse(ClickHouseSink),
 }
 
 #[macro_export]
@@ -306,18 +306,18 @@ macro_rules! dispatch_sink {
         use $crate::sink::SinkImpl;
 
         match $impl {
-            SinkImpl::Redis(mut $sink) => $body,
-            SinkImpl::Kafka(mut $sink) => $body,
-            SinkImpl::Remote(mut $sink) => $body,
-            SinkImpl::BlackHole(mut $sink) => $body,
-            SinkImpl::Kinesis(mut $sink) => $body,
-            SinkImpl::ClickHouse(mut $sink) => $body,
+            SinkImpl::Redis($sink) => $body,
+            SinkImpl::Kafka($sink) => $body,
+            SinkImpl::Remote($sink) => $body,
+            SinkImpl::BlackHole($sink) => $body,
+            SinkImpl::Kinesis($sink) => $body,
+            SinkImpl::ClickHouse($sink) => $body,
         }
     }};
 }
 
 impl SinkImpl {
-    pub async fn new(
+    pub fn new(
         cfg: SinkConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
@@ -346,7 +346,7 @@ impl SinkImpl {
                 *cfg,
                 schema,
                 pk_indices,
-                sink_type.is_append_only()
+                sink_type.is_append_only(),
             )?),
         })
     }
@@ -369,7 +369,7 @@ pub enum SinkError {
     #[error("coordinator error: {0}")]
     Coordinator(anyhow::Error),
     #[error("ClickHouse error: {0}")]
-    ClickHouse(String)
+    ClickHouse(String),
 }
 
 impl From<RpcError> for SinkError {

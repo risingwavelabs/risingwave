@@ -17,11 +17,11 @@ use std::collections::HashMap;
 
 use anyhow::Ok;
 use aws_sdk_kinesis::Client as KinesisClient;
+use clickhouse::Client;
 use rdkafka::ClientConfig;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
 use serde_with::serde_as;
-use clickhouse::Client;
 
 use crate::aws_auth::AwsAuthProps;
 
@@ -232,22 +232,18 @@ pub struct ClickHouseCommon {
     pub user: String,
     #[serde(rename = "password", alias = "clickehouse.password")]
     pub password: String,
-    #[serde(
-        rename = "database",
-        alias = "clickhouse.database"
-    )]
+    #[serde(rename = "database", alias = "clickhouse.database")]
     pub database: String,
-    #[serde(
-        rename = "table",
-        alias = "clickhouse.table"
-    )]
+    #[serde(rename = "table", alias = "clickhouse.table")]
     pub table: String,
 }
 
 impl ClickHouseCommon {
-    pub(crate) async fn build_client(&self) -> anyhow::Result<Client>{
-        let client = Client::default().with_url(&self.url).with_user(&self.user).with_password(&self.password);
-        // .with_database().with_compression().with_subscriber();
+    pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
+        let client = Client::default()
+            .with_url(&self.url)
+            .with_user(&self.user)
+            .with_password(&self.password);
         Ok(client)
     }
 }
@@ -259,5 +255,3 @@ pub struct UpsertMessage<'a> {
     #[serde(borrow)]
     pub record: Cow<'a, [u8]>,
 }
-
-
