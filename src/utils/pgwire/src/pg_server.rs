@@ -65,7 +65,7 @@ pub trait Session: Send + Sync {
 
     fn parse(
         self: Arc<Self>,
-        sql: Statement,
+        sql: Option<Statement>,
         params_types: Vec<DataType>,
     ) -> Result<Self::PreparedStatement, BoxedError>;
 
@@ -254,7 +254,7 @@ mod tests {
 
         fn parse(
             self: Arc<Self>,
-            _sql: Statement,
+            _sql: Option<Statement>,
             _params_types: Vec<DataType>,
         ) -> Result<String, BoxedError> {
             Ok(String::new())

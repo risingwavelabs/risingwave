@@ -407,6 +407,8 @@ impl Sub for Decimal {
 }
 
 impl Decimal {
+    pub const MAX_PRECISION: u8 = 28;
+
     /// TODO: handle nan and inf
     pub fn mantissa(&self) -> i128 {
         match self {
@@ -454,6 +456,38 @@ impl Decimal {
                 Self::Normalized(new_d)
             }
             d => *d,
+        }
+    }
+
+    /// Round to the left of the decimal point, for example `31.5` -> `30`.
+    #[must_use]
+    pub fn round_left_ties_away(&self, left: u32) -> Option<Self> {
+        let Self::Normalized(mut d) = self else { return Some(*self) };
+
+        // First, move the decimal point to the left so that we can reuse `round`. This is more
+        // efficient than division.
+        let old_scale = d.scale();
+        let new_scale = old_scale.saturating_add(left);
+        const MANTISSA_UP: i128 = 5 * 10i128.pow(Decimal::MAX_PRECISION as _);
+        let d = match new_scale.cmp(&Self::MAX_PRECISION.add(1).into()) {
+            // trivial within 28 digits
+            std::cmp::Ordering::Less => {
+                d.set_scale(new_scale).unwrap();
+                d.round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
+            }
+            // Special case: scale cannot be 29, but it may or may not be >= 0.5e+29
+            std::cmp::Ordering::Equal => (d.mantissa() / MANTISSA_UP).signum().into(),
+            // always 0 for >= 30 digits
+            std::cmp::Ordering::Greater => 0.into(),
+        };
+
+        // Then multiply back. Note that we cannot move decimal point to the right in order to get
+        // more zeros.
+        match left > Decimal::MAX_PRECISION.into() {
+            true => d.is_zero().then(|| 0.into()),
+            false => d
+                .checked_mul(RustDecimal::from_i128_with_scale(10i128.pow(left), 0))
+                .map(Self::Normalized),
         }
     }
 

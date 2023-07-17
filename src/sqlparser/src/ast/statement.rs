@@ -109,16 +109,16 @@ impl fmt::Display for SourceSchema {
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
-            SourceSchema::UpsertJson => write!(f, "UPSERT JSON"),
+            SourceSchema::UpsertJson => write!(f, "UPSERT_JSON"),
             SourceSchema::Maxwell => write!(f, "MAXWELL"),
-            SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
-            SourceSchema::DebeziumMongoJson => write!(f, "DEBEZIUM MONGO JSON"),
+            SourceSchema::DebeziumJson => write!(f, "DEBEZIUM_JSON"),
+            SourceSchema::DebeziumMongoJson => write!(f, "DEBEZIUM_MONGO_JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
-            SourceSchema::UpsertAvro(avro_schema) => write!(f, "UPSERT AVRO {}", avro_schema),
-            SourceSchema::CanalJson => write!(f, "CANAL JSON"),
+            SourceSchema::UpsertAvro(avro_schema) => write!(f, "UPSERT_AVRO {}", avro_schema),
+            SourceSchema::CanalJson => write!(f, "CANAL_JSON"),
             SourceSchema::Csv(csv_info) => write!(f, "CSV {}", csv_info),
             SourceSchema::Native => write!(f, "NATIVE"),
-            SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM AVRO {}", avro_schema),
+            SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM_AVRO {}", avro_schema),
             SourceSchema::Bytes => write!(f, "BYTES"),
         }
     }

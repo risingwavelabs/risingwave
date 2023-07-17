@@ -529,14 +529,7 @@ where
                 ));
             }
 
-            // TODO: This behavior is not compatible with Postgres.
-            if stmts.is_empty() {
-                return Err(PsqlError::ParseError(
-                    "Empty statement is parsed in extended query mode".into(),
-                ));
-            }
-
-            stmts.into_iter().next().unwrap()
+            stmts.into_iter().next()
         };
 
         let param_types = type_ids
