@@ -521,14 +521,14 @@ impl ByteStreamSourceParserImpl {
                 unreachable!("Native parser should not be created")
             }
             SpecificParserConfig::Debezium(config) => {
-                DebeziumParser::new(config, rw_columns, source_ctx)
-                    .await
-                    .map(Self::Debezium)
+                let parser = DebeziumParser::new(config, rw_columns, source_ctx)
+                    .await?;
+                Ok(Self::Debezium(parser))
             }
             SpecificParserConfig::Maxwell(config) => {
-                MaxwellParser::new(config, rw_columns, source_ctx)
-                    .await
-                    .map(Self::Maxwell)
+                let parser = MaxwellParser::new(config, rw_columns, source_ctx)
+                    .await?;
+                Ok(Self::Maxwell(parser))
             }
         }
     }
@@ -702,6 +702,7 @@ impl ParserProperties {
                 client_config: SchemaRegistryAuth::from(props),
                 ..Default::default()
             }),
+            SourceFormat::DebeziumJson | SourceFormat::Maxwell => EncodingProperties::Json(JsonProperties { format }),
             _ => EncodingProperties::None,
         };
         let protocol_config = ProtocolProperties::Plain;
