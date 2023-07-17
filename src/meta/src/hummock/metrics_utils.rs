@@ -67,6 +67,26 @@ pub fn trigger_version_stat(
     }
 }
 
+pub fn trigger_mv_stat(
+    metrics: &MetaMetrics,
+    version_stats: &HummockVersionStats,
+    mv_id_to_all_table_ids: Vec<(u32, Vec<u32>)>,
+) {
+    metrics.materialized_view_stats.reset();
+    for (mv_id, all_table_ids) in mv_id_to_all_table_ids {
+        let total_size = all_table_ids
+            .iter()
+            .filter_map(|&table_id| version_stats.table_stats.get(&table_id))
+            .map(|stats| stats.total_key_size + stats.total_value_size)
+            .sum();
+
+        metrics
+            .materialized_view_stats
+            .with_label_values(&[&mv_id.to_string(), "materialized_view_total_size"])
+            .set(total_size);
+    }
+}
+
 pub fn trigger_sst_stat(
     metrics: &MetaMetrics,
     compact_status: Option<&CompactStatus>,

@@ -109,6 +109,27 @@ CREATE SINK s2_mysql FROM rw_types WITH (
 );
 
 statement ok
+CREATE TABLE tt1 (
+    v1 BIGINT,
+    v2 VARCHAR,
+);
+
+statement ok
+CREATE SINK s_pg_0 FROM tt1 WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name='t_append_only',
+    type='append-only',
+    force_append_only=true
+);
+
+statement ok
+INSERT INTO tt1 VALUES
+    (1, 'aaa'),
+    (1, 'bbb'),
+    (2, 'ccc');
+
+statement ok
 INSERT INTO t_remote_0 VALUES
     (1, 'Alice', 28208, 281620391, 4986480304337356659, 28162.0391, 2.03, 28162.0391, '2023-03-20 10:18:30'),
     (2, 'Bob', 10580, 2131030003, 3074255027698877876, 21310.30003, 10.3, 21310.30003, '2023-03-20 10:18:31'),

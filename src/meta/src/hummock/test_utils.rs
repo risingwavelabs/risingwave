@@ -33,7 +33,9 @@ use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 #[cfg(test)]
 use crate::hummock::compaction::default_level_selector;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
-use crate::manager::{ClusterManager, ClusterManagerRef, MetaSrvEnv, META_NODE_ID};
+use crate::manager::{
+    ClusterManager, ClusterManagerRef, FragmentManager, MetaSrvEnv, META_NODE_ID,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
@@ -313,6 +315,7 @@ pub async fn setup_compute_env_with_config(
             .await
             .unwrap(),
     );
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
 
     let compactor_manager = Arc::new(CompactorManager::for_test());
 
@@ -322,6 +325,7 @@ pub async fn setup_compute_env_with_config(
     let hummock_manager = HummockManager::with_config(
         env.clone(),
         cluster_manager.clone(),
+        fragment_manager,
         Arc::new(MetaMetrics::new()),
         compactor_manager,
         config,

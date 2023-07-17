@@ -165,7 +165,7 @@ impl ObserverState for FrontendObserverNode {
             convert_pu_mapping(&serving_parallel_unit_mappings),
         );
         self.hummock_snapshot_manager
-            .update_epoch(hummock_snapshot.unwrap());
+            .update(hummock_snapshot.unwrap());
 
         let snapshot_version = version.unwrap();
         catalog_guard.set_version(snapshot_version.catalog_version);
@@ -407,7 +407,7 @@ impl FrontendObserverNode {
             Info::HummockSnapshot(hummock_snapshot) => match resp.operation() {
                 Operation::Update => {
                     self.hummock_snapshot_manager
-                        .update_epoch(hummock_snapshot.clone());
+                        .update(hummock_snapshot.clone());
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },

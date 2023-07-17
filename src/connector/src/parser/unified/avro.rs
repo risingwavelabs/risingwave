@@ -320,7 +320,6 @@ where
     }
 }
 
-const RW_DECIMAL_MAX_PRECISION: usize = 28;
 pub(crate) fn avro_decimal_to_rust_decimal(
     avro_decimal: AvroDecimal,
     _precision: usize,
@@ -372,7 +371,7 @@ pub fn avro_schema_skip_union(schema: &Schema) -> anyhow::Result<&Schema> {
             let inner_schema = union_schema
                 .variants()
                 .iter()
-                .find(|s| **s != Schema::Null)
+                .find(|s| !matches!(s, &&Schema::Null))
                 .ok_or_else(|| {
                     anyhow::format_err!("illegal avro record schema {:?}", union_schema)
                 })?;
