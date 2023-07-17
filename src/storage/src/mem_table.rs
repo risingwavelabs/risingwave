@@ -118,8 +118,8 @@ impl MemTable {
     }
 
     pub fn delete(&mut self, pk: Bytes, old_value: Bytes) -> Result<()> {
+        let key_len = pk.len();
         if !self.is_consistent_op {
-            let key_len = pk.len();
             self.kv_size.add(&pk, &old_value);
             let origin_value = self.buffer.insert(pk, KeyOp::Delete(old_value));
             self.sub_origin_size(origin_value, key_len);
@@ -141,7 +141,8 @@ impl MemTable {
                             new: KeyOp::Delete(old_value),
                         }));
                     }
-                    self.kv_size.add(e.key(), &old_value);
+                    self.kv_size.sub_size(key_len);
+                    self.kv_size.sub_val(original_value);
                     e.remove();
 
                     Ok(())
@@ -161,7 +162,7 @@ impl MemTable {
                             new: KeyOp::Delete(old_value),
                         }));
                     }
-                    self.kv_size.add_val(&original_new_value);
+                    self.kv_size.sub_val(&original_new_value);
                     e.insert(KeyOp::Delete(original_old_value));
                     Ok(())
                 }
@@ -226,14 +227,11 @@ impl MemTable {
     fn sub_origin_size(&mut self, origin_value: Option<KeyOp>, key_len: usize) {
         if let Some(origin_value) = origin_value {
             match origin_value {
-                KeyOp::Insert(old_value) => {
+                KeyOp::Insert(old_value) | KeyOp::Delete(old_value) => {
                     self.kv_size.sub_val(&old_value);
                     self.kv_size.sub_size(key_len);
                 }
-                KeyOp::Delete(old_value) => {
-                    self.kv_size.sub_val(&old_value);
-                    self.kv_size.sub_size(key_len);
-                }
+
                 KeyOp::Update((old_value1, old_value2)) => {
                     self.kv_size.sub_val(&old_value1);
                     self.kv_size.sub_val(&old_value2);
