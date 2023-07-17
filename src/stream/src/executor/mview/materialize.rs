@@ -309,12 +309,11 @@ impl MaterializeBuffer {
     ) -> Self {
         let (data_chunk, ops) = stream_chunk.into_parts();
 
-        let value_chunk = if let Some(ref value_indices) = value_indices {
-            data_chunk.project(value_indices)
+        let values = if let Some(ref value_indices) = value_indices {
+            data_chunk.project(value_indices).serialize()
         } else {
-            data_chunk.clone()
+            data_chunk.serialize()
         };
-        let values = value_chunk.serialize();
 
         let mut pks = vec![vec![]; data_chunk.capacity()];
         let key_chunk = data_chunk.project(pk_indices);

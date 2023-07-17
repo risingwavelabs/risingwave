@@ -85,7 +85,7 @@ impl WindowState for AggregateState {
     }
 
     fn curr_output(&self) -> Result<Datum> {
-        let wrapper = BatchAggregatorWrapper {
+        let wrapper = AggregatorWrapper {
             agg_call: &self.agg_call,
             arg_data_types: &self.arg_data_types,
         };
@@ -125,12 +125,12 @@ impl EstimateSize for AggregateState {
     }
 }
 
-struct BatchAggregatorWrapper<'a> {
+struct AggregatorWrapper<'a> {
     agg_call: &'a AggCall,
     arg_data_types: &'a [DataType],
 }
 
-impl BatchAggregatorWrapper<'_> {
+impl AggregatorWrapper<'_> {
     fn aggregate<'a>(&'a self, values: impl Iterator<Item = &'a [Datum]>) -> Result<Datum> {
         // TODO(rc): switch to a better general version of aggregator implementation
 
@@ -158,7 +158,7 @@ impl BatchAggregatorWrapper<'_> {
             .update(&chunk)
             .now_or_never()
             .expect("we don't support UDAF currently, so the function should return immediately")?;
-        Ok(aggregator.output()?)
+        aggregator.output()
     }
 }
 

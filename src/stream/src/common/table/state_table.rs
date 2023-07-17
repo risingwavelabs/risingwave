@@ -706,12 +706,11 @@ where
             &self.vnodes,
         );
 
-        let value_chunk = if let Some(ref value_indices) = self.value_indices {
-            chunk.project(value_indices)
+        let values = if let Some(ref value_indices) = self.value_indices {
+            chunk.project(value_indices).serialize_with(&self.row_serde)
         } else {
-            chunk.clone()
+            chunk.serialize_with(&self.row_serde)
         };
-        let values = value_chunk.serialize_with(&self.row_serde);
 
         let key_chunk = chunk.project(self.pk_indices());
         let vnode_and_pks = key_chunk
