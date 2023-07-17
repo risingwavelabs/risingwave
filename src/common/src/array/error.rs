@@ -31,8 +31,11 @@ pub enum ArrayError {
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 
-    #[error("Arrow error: {0}")]
+    #[error("Convert from arrow error: {0}")]
     FromArrow(String),
+
+    #[error("Convert to arrow error: {0}")]
+    ToArrow(String),
 }
 
 impl From<ArrayError> for RwError {
