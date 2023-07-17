@@ -825,6 +825,26 @@ fn parse_create_function() {
 }
 
 #[test]
+fn parse_create_aggregate() {
+    let sql =
+        "CREATE OR REPLACE AGGREGATE sum(INT) RETURNS BIGINT LANGUAGE python USING LINK 'xxx'";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateAggregate {
+            or_replace: true,
+            name: ObjectName(vec![Ident::new_unchecked("sum")]),
+            args: vec![OperateFunctionArg::unnamed(DataType::Int)],
+            returns: Some(DataType::BigInt),
+            params: CreateFunctionBody {
+                language: Some("python".into()),
+                using: Some(CreateFunctionUsing::Link("xxx".into())),
+                ..Default::default()
+            },
+        }
+    );
+}
+
+#[test]
 fn parse_drop_function() {
     let sql = "DROP FUNCTION IF EXISTS test_func";
     assert_eq!(
