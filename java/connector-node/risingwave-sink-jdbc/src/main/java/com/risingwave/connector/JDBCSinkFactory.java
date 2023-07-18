@@ -106,12 +106,9 @@ public class JDBCSinkFactory implements SinkFactory {
                                 "JDBC table has no primary key, consider making the sink append-only or defining primary key on the JDBC table")
                         .asRuntimeException();
             }
-            // The user is not allowed to define the primary key for upsert JDBC sink.
-            if (!tableSchema.getPrimaryKeys().isEmpty()) {
+            if (tableSchema.getPrimaryKeys().isEmpty()) {
                 throw Status.INVALID_ARGUMENT
-                        .withDescription(
-                                "should not define primary key on upsert JDBC sink, find downstream primary key: "
-                                        + jdbcPk.toString())
+                        .withDescription("Must specify downstream primary key for upsert JDBC sink")
                         .asRuntimeException();
             }
         }

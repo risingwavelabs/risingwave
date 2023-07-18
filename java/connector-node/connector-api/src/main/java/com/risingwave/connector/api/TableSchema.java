@@ -45,6 +45,7 @@ public class TableSchema {
             columnIndices.put(columnNames.get(i), i);
             columnDescs.add(new ColumnDesc(columnNames.get(i), dataTypes.get(i)));
         }
+        System.out.println("[debug] primary keys: " + primaryKeys.toString());
     }
 
     public int getNumColumns() {

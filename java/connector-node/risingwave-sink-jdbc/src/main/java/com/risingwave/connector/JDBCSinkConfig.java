@@ -35,6 +35,9 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "schema.name")
     private String schemaName;
 
+    @JsonProperty(value = "primary_key")
+    private String primaryKey;
+
     @JsonCreator
     public JDBCSinkConfig(
             @JsonProperty(value = "jdbc.url") String jdbcUrl,
