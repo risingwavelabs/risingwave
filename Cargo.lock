@@ -5806,6 +5806,7 @@ dependencies = [
  "enum-as-inner",
  "ethnum",
  "fixedbitset",
+ "fs-err",
  "futures",
  "hex",
  "http",
