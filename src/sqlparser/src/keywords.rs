@@ -71,6 +71,7 @@ define_keywords!(
     ABS,
     ACTION,
     ADD,
+    AGGREGATE,
     ALL,
     ALLOCATE,
     ALTER,

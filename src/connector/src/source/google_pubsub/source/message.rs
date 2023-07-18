@@ -42,6 +42,7 @@ impl From<TaggedReceivedMessage> for SourceMessage {
             .unwrap_or_default();
 
         Self {
+            key: None,
             payload: {
                 let payload = message.message.data;
                 match payload.len() {

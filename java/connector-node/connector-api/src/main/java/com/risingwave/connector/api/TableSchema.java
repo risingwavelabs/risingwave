@@ -18,6 +18,7 @@ import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
+import com.risingwave.proto.PlanCommon;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -81,10 +82,10 @@ public class TableSchema {
     public static TableSchema fromProto(ConnectorServiceProto.TableSchema tableSchema) {
         return new TableSchema(
                 tableSchema.getColumnsList().stream()
-                        .map(ConnectorServiceProto.TableSchema.Column::getName)
+                        .map(PlanCommon.ColumnDesc::getName)
                         .collect(Collectors.toList()),
                 tableSchema.getColumnsList().stream()
-                        .map(ConnectorServiceProto.TableSchema.Column::getDataType)
+                        .map(PlanCommon.ColumnDesc::getColumnType)
                         .collect(Collectors.toList()),
                 tableSchema.getPkIndicesList().stream()
                         .map(i -> tableSchema.getColumns(i).getName())
