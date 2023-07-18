@@ -24,13 +24,12 @@ use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
 use rand::seq::SliceRandom;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
-use risingwave_batch::task::{ShutdownMsg, TaskId};
+use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::stream_cancel::{cancellable_stream, Tripwire};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
@@ -52,7 +51,7 @@ use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
-use crate::scheduler::{PinnedHummockSnapshotRef, SchedulerError, SchedulerResult};
+use crate::scheduler::{ReadSnapshot, SchedulerError, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
@@ -63,9 +62,9 @@ pub struct LocalQueryExecution {
     front_env: FrontendEnv,
     // The snapshot will be released when LocalQueryExecution is dropped.
     // TODO
-    snapshot: PinnedHummockSnapshotRef,
+    snapshot: ReadSnapshot,
     auth_context: Arc<AuthContext>,
-    cancel_flag: Option<Tripwire<Result<DataChunk, BoxedError>>>,
+    shutdown_rx: ShutdownToken,
     worker_node_manager: WorkerNodeSelector,
 }
 
@@ -74,9 +73,9 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: PinnedHummockSnapshotRef,
+        snapshot: ReadSnapshot,
         auth_context: Arc<AuthContext>,
-        cancel_flag: Tripwire<Result<DataChunk, BoxedError>>,
+        shutdown_rx: ShutdownToken,
     ) -> Self {
         let sql = sql.into();
         let worker_node_manager = WorkerNodeSelector::new(
@@ -90,7 +89,7 @@ impl LocalQueryExecution {
             front_env,
             snapshot,
             auth_context,
-            cancel_flag: Some(cancel_flag),
+            shutdown_rx,
             worker_node_manager,
         }
     }
@@ -111,15 +110,12 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
 
-        // TODO(ZENOTME): For now this rx is only used as placeholder, it didn't take effect.
-        // Refactor later to make use it.
-        let (_tx, rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
             context,
-            self.snapshot.get_batch_query_epoch(),
-            rx,
+            self.snapshot.batch_query_epoch(),
+            self.shutdown_rx.clone(),
         );
         let executor = executor.build().await?;
 
@@ -133,30 +129,29 @@ impl LocalQueryExecution {
         let span = tracing::info_span!(
             "local_execute",
             query_id = self.query.query_id.id,
-            epoch = ?self.snapshot.get_batch_query_epoch(),
+            epoch = ?self.snapshot.batch_query_epoch(),
         );
         Box::pin(self.run_inner().instrument(span))
     }
 
-    pub fn stream_rows(mut self) -> LocalQueryStream {
+    pub fn stream_rows(self) -> LocalQueryStream {
         let compute_runtime = self.front_env.compute_runtime();
         let (sender, receiver) = mpsc::channel(10);
-        let tripwire = self.cancel_flag.take().unwrap();
+        let shutdown_rx = self.shutdown_rx.clone();
 
-        let mut data_stream = {
-            let s = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
-            Box::pin(cancellable_stream(s, tripwire))
-        };
-
-        let future = async move {
-            while let Some(r) = data_stream.next().await {
-                if (sender.send(r).await).is_err() {
+        compute_runtime.spawn(async move {
+            let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
+            while let Some(mut r) = data_stream.next().await {
+                // append a query cancelled error if the query is cancelled.
+                if r.is_err() && shutdown_rx.is_cancelled() {
+                    r = Err(Box::new(SchedulerError::QueryCancelled) as BoxedError);
+                }
+                if sender.send(r).await.is_err() {
                     tracing::info!("Receiver closed.");
+                    return;
                 }
             }
-        };
-
-        compute_runtime.spawn(future);
+        });
 
         ReceiverStream::new(receiver)
     }
@@ -286,7 +281,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.snapshot.get_batch_query_epoch()),
+                            epoch: Some(self.snapshot.batch_query_epoch()),
                             tracing_context: tracing_context.clone(),
                         };
                         let exchange_source = ExchangeSource {
@@ -320,7 +315,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.snapshot.get_batch_query_epoch()),
+                            epoch: Some(self.snapshot.batch_query_epoch()),
                             tracing_context: tracing_context.clone(),
                         };
                         // NOTE: select a random work node here.
@@ -352,7 +347,7 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
-                        epoch: Some(self.snapshot.get_batch_query_epoch()),
+                        epoch: Some(self.snapshot.batch_query_epoch()),
                         tracing_context,
                     };
 

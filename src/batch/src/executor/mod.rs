@@ -29,6 +29,7 @@ mod project;
 mod project_set;
 mod row_seq_scan;
 mod sort_agg;
+mod sort_over_window;
 mod source;
 mod sys_row_seq_scan;
 mod table_function;
@@ -64,9 +65,9 @@ use risingwave_pb::batch_plan::PlanNode;
 use risingwave_pb::common::BatchQueryEpoch;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
+pub use sort_over_window::SortOverWindowExecutor;
 pub use source::*;
 pub use table_function::*;
-use tokio::sync::watch::Receiver;
 pub use top_n::TopNExecutor;
 pub use union::*;
 pub use update::*;
@@ -75,7 +76,7 @@ pub use values::*;
 
 use self::test_utils::{BlockExecutorBuidler, BusyLoopExecutorBuidler};
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
-use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
+use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedDataChunkStream = BoxStream<'static, Result<DataChunk>>;
@@ -122,7 +123,7 @@ pub struct ExecutorBuilder<'a, C> {
     pub task_id: &'a TaskId,
     context: C,
     epoch: BatchQueryEpoch,
-    shutdown_rx: Receiver<ShutdownMsg>,
+    shutdown_rx: ShutdownToken,
 }
 
 macro_rules! build_executor {
@@ -143,7 +144,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
         task_id: &'a TaskId,
         context: C,
         epoch: BatchQueryEpoch,
-        shutdown_rx: Receiver<ShutdownMsg>,
+        shutdown_rx: ShutdownToken,
     ) -> Self {
         Self {
             plan_node,
@@ -224,6 +225,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::ProjectSet => ProjectSetExecutor,
             NodeBody::Union => UnionExecutor,
             NodeBody::Source => SourceExecutor,
+            NodeBody::SortOverWindow => SortOverWindowExecutor,
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuidler,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,
@@ -241,10 +243,9 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
 mod tests {
     use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::PlanNode;
-    use tokio::sync::watch;
 
     use crate::executor::ExecutorBuilder;
-    use crate::task::{ComputeNodeContext, ShutdownMsg, TaskId};
+    use crate::task::{ComputeNodeContext, ShutdownToken, TaskId};
 
     #[test]
     fn test_clone_for_plan() {
@@ -254,13 +255,12 @@ mod tests {
             stage_id: 1,
             query_id: "test_query_id".to_string(),
         };
-        let (_tx, rx) = watch::channel(ShutdownMsg::Init);
         let builder = ExecutorBuilder::new(
             &plan_node,
             task_id,
             ComputeNodeContext::for_test(),
             to_committed_batch_query_epoch(u64::MAX),
-            rx,
+            ShutdownToken::empty(),
         );
         let child_plan = &PlanNode::default();
         let cloned_builder = builder.clone_for_plan(child_plan);

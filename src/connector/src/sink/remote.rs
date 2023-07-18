@@ -19,31 +19,26 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
-#[cfg(test)]
-use risingwave_common::catalog::Field;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
-use risingwave_pb::connector_service::sink_stream_request::write_batch::{
+use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::json_payload::RowOp;
+use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::{
     JsonPayload, Payload, StreamChunkPayload,
 };
-use risingwave_pb::connector_service::sink_stream_request::{
-    Request as SinkRequest, StartEpoch, SyncBatch, WriteBatch,
-};
-use risingwave_pb::connector_service::table_schema::Column;
-use risingwave_pb::connector_service::{
-    SinkPayloadFormat, SinkResponse, SinkStreamRequest, TableSchema,
-};
-use risingwave_rpc_client::ConnectorClient;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio_stream::StreamExt;
-use tonic::{Status, Streaming};
+use risingwave_pb::connector_service::SinkPayloadFormat;
+#[cfg(test)]
+use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
+use risingwave_rpc_client::{ConnectorClient, SinkWriterStreamHandle};
+#[cfg(test)]
+use tokio::sync::mpsc::{Sender, UnboundedReceiver};
+#[cfg(test)]
+use tonic::Status;
+use tracing::error;
 
-use crate::sink::catalog::{SinkId, SinkType};
+use crate::sink::utils::{record_to_json, TimestampHandlingMode};
 use crate::sink::{
-    record_to_json, DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriterParam,
-    SinkWriterV1, SinkWriterV1Adapter, TimestampHandlingMode,
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam,
 };
 use crate::ConnectorParams;
 
@@ -82,55 +77,34 @@ impl RemoteConfig {
 #[derive(Debug)]
 pub struct RemoteSink {
     config: RemoteConfig,
-    schema: Schema,
-    pk_indices: Vec<usize>,
-    sink_id: SinkId,
-    sink_type: SinkType,
+    param: SinkParam,
 }
 
 impl RemoteSink {
-    pub fn new(
-        config: RemoteConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        sink_id: SinkId,
-        sink_type: SinkType,
-    ) -> Self {
-        Self {
-            config,
-            schema,
-            pk_indices,
-            sink_id,
-            sink_type,
-        }
+    pub fn new(config: RemoteConfig, param: SinkParam) -> Self {
+        Self { config, param }
     }
 }
 
 #[async_trait]
 impl Sink for RemoteSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = SinkWriterV1Adapter<RemoteSinkWriter>;
+    type Writer = RemoteSinkWriter;
 
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(SinkWriterV1Adapter::new(
-            RemoteSinkWriter::new(
-                self.config.clone(),
-                self.schema.clone(),
-                self.pk_indices.clone(),
-                writer_param.connector_params,
-                self.sink_id,
-            )
-            .await?,
-        ))
+        Ok(RemoteSinkWriter::new(
+            self.config.clone(),
+            self.param.clone(),
+            writer_param.connector_params,
+        )
+        .await?)
     }
 
-    async fn validate(&self, connector_rpc_endpoint: Option<String>) -> Result<()> {
+    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()> {
         // FIXME: support struct and array in stream sink
-        let columns = self.schema.fields
-            .iter()
-            .map(|field| {
-                if matches!(
-                field.data_type,
+        self.param.columns.iter().map(|col| {
+            if matches!(
+                col.data_type,
                 DataType::Int16
                     | DataType::Int32
                     | DataType::Int64
@@ -148,68 +122,26 @@ impl Sink for RemoteSink {
                     | DataType::Bytea
                     | DataType::List(_)
             ) {
-                    Ok( Column {
-                        name: field.name.clone(),
-                        data_type: Some(field.data_type.to_protobuf()),
-                    })
-                } else {
-                    Err(SinkError::Remote(format!(
-                        "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, List, Bytea and Varchar, got {:?}: {:?}",
-                        field.name,
-                        field.data_type
-                    )))
-                }
-            })
-            .collect::<Result<Vec<_>>>()?;
+                Ok(())
+            } else {
+                Err(SinkError::Remote(format!(
+                    "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, List, Bytea and Varchar, got {:?}: {:?}",
+                    col.name,
+                    col.data_type,
+                )))
+            }
+        }).try_collect()?;
 
-        let address = connector_rpc_endpoint.clone().ok_or_else(|| {
-            SinkError::Remote("connector sink endpoint not specified".parse().unwrap())
-        })?;
-        let host_addr = HostAddr::try_from(&address).map_err(SinkError::from)?;
-        let client = ConnectorClient::new(host_addr).await.map_err(|err| {
-            SinkError::Remote(format!(
-                "failed to connect to connector endpoint `{}`: {:?}",
-                &address, err
-            ))
-        })?;
-        let table_schema = TableSchema {
-            columns,
-            pk_indices: self.pk_indices.iter().map(|i| *i as u32).collect_vec(),
-        };
+        let client = client.ok_or(SinkError::Remote(
+            "connector node endpoint not specified or unable to connect to connector node"
+                .to_string(),
+        ))?;
 
         // We validate a remote sink's accessibility as well as the pk.
         client
-            .validate_sink_properties(
-                self.config.connector_type.clone(),
-                self.config.properties.clone(),
-                Some(table_schema),
-                self.sink_type.to_proto(),
-            )
+            .validate_sink_properties(self.param.to_proto())
             .await
             .map_err(SinkError::from)
-    }
-}
-
-#[derive(Debug)]
-enum ResponseStreamImpl {
-    Grpc(Streaming<SinkResponse>),
-    Receiver(UnboundedReceiver<SinkResponse>),
-}
-
-impl ResponseStreamImpl {
-    pub async fn next(&mut self) -> Result<SinkResponse> {
-        match self {
-            ResponseStreamImpl::Grpc(ref mut response) => response
-                .next()
-                .await
-                .unwrap_or_else(|| Err(Status::cancelled("response stream closed unexpectedly")))
-                .map_err(|e| SinkError::Remote(e.message().to_string())),
-            ResponseStreamImpl::Receiver(ref mut receiver) => {
-                receiver.recv().await.ok_or_else(|| {
-                    SinkError::Remote("response stream closed unexpectedly".to_string())
-                })
-            }
-        }
     }
 }
 
@@ -220,65 +152,30 @@ pub struct RemoteSinkWriter {
     epoch: Option<u64>,
     batch_id: u64,
     schema: Schema,
-    _client: Option<ConnectorClient>,
-    request_sender: Option<UnboundedSender<SinkStreamRequest>>,
-    response_stream: ResponseStreamImpl,
     payload_format: SinkPayloadFormat,
+    stream_handle: SinkWriterStreamHandle,
 }
 
 impl RemoteSinkWriter {
     pub async fn new(
         config: RemoteConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
+        param: SinkParam,
         connector_params: ConnectorParams,
-        sink_id: SinkId,
     ) -> Result<Self> {
-        let address = connector_params.connector_rpc_endpoint.ok_or_else(|| {
-            SinkError::Remote("connector sink endpoint not specified".parse().unwrap())
-        })?;
-        let host_addr = HostAddr::try_from(&address).map_err(SinkError::from)?;
-        let client = ConnectorClient::new(host_addr).await.map_err(|err| {
-            let msg = format!(
-                "failed to connect to connector endpoint `{}`: {:?}",
-                &address, err
-            );
-            tracing::warn!(msg);
-            SinkError::Remote(msg)
-        })?;
-
-        let table_schema = Some(TableSchema {
-            columns: schema
-                .fields()
-                .iter()
-                .map(|c| Column {
-                    name: c.name.clone(),
-                    data_type: Some(c.data_type().to_protobuf()),
-                })
-                .collect(),
-            pk_indices: pk_indices.iter().map(|i| *i as u32).collect(),
-        });
-        let (request_sender, mut response) = client
-            .start_sink_stream(
-                config.connector_type.clone(),
-                sink_id.sink_id as u64,
-                config.properties.clone(),
-                table_schema,
-                connector_params.sink_payload_format,
-            )
+        let client = connector_params.connector_client.ok_or(SinkError::Remote(
+            "connector node endpoint not specified or unable to connect to connector node"
+                .to_string(),
+        ))?;
+        let stream_handle = client
+            .start_sink_writer_stream(param.to_proto(), connector_params.sink_payload_format)
             .await
-            .map_err(SinkError::from)?;
-        response.next().await.unwrap().map_err(|e| {
-            let msg = format!(
-                "failed to start sink stream for connector `{}` with error code: {}, message: {:?}",
-                &config.connector_type,
-                e.code(),
-                e.message()
-            );
-            tracing::warn!(msg);
-            SinkError::Remote(msg)
-        })?;
-        tracing::info!(
+            .inspect_err(|e| {
+                error!(
+                    "failed to start sink stream for connector `{}`: {:?}",
+                    &config.connector_type, e
+                )
+            })?;
+        tracing::trace!(
             "{:?} sink stream started with properties: {:?}",
             &config.connector_type,
             &config.properties
@@ -289,25 +186,18 @@ impl RemoteSinkWriter {
             properties: config.properties,
             epoch: None,
             batch_id: 0,
-            schema,
-            _client: Some(client),
-            request_sender: Some(request_sender),
-            response_stream: ResponseStreamImpl::Grpc(response),
+            schema: param.schema(),
+            stream_handle,
             payload_format: connector_params.sink_payload_format,
         })
     }
 
-    fn on_sender_alive(&mut self) -> Result<&UnboundedSender<SinkStreamRequest>> {
-        self.request_sender
-            .as_ref()
-            .ok_or_else(|| SinkError::Remote("sink has been dropped".to_string()))
-    }
-
     #[cfg(test)]
     fn for_test(
-        response_receiver: UnboundedReceiver<SinkResponse>,
-        request_sender: UnboundedSender<SinkStreamRequest>,
+        response_receiver: UnboundedReceiver<std::result::Result<SinkWriterStreamResponse, Status>>,
+        request_sender: Sender<SinkWriterStreamRequest>,
     ) -> Self {
+        use risingwave_common::catalog::Field;
         let properties = HashMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
 
         let schema = Schema::new(vec![
@@ -325,22 +215,28 @@ impl RemoteSinkWriter {
             },
         ]);
 
+        use futures::StreamExt;
+        use tokio_stream::wrappers::UnboundedReceiverStream;
+
+        let stream_handle = SinkWriterStreamHandle::new(
+            request_sender,
+            UnboundedReceiverStream::new(response_receiver).boxed(),
+        );
+
         Self {
             connector_type: "file".to_string(),
             properties,
             epoch: None,
             batch_id: 0,
             schema,
-            _client: None,
-            request_sender: Some(request_sender),
-            response_stream: ResponseStreamImpl::Receiver(response_receiver),
+            stream_handle,
             payload_format: SinkPayloadFormat::Json,
         }
     }
 }
 
 #[async_trait]
-impl SinkWriterV1 for RemoteSinkWriter {
+impl SinkWriter for RemoteSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let payload = match self.payload_format {
             SinkPayloadFormat::Json => {
@@ -375,47 +271,37 @@ impl SinkWriterV1 for RemoteSinkWriter {
             SinkError::Remote("epoch has not been initialize, call `begin_epoch`".to_string())
         })?;
         let batch_id = self.batch_id;
-        self.on_sender_alive()?
-            .send(SinkStreamRequest {
-                request: Some(SinkRequest::Write(WriteBatch {
-                    epoch,
-                    batch_id,
-                    payload: Some(payload),
-                })),
-            })
-            .map_err(|e| SinkError::Remote(e.to_string()))?;
-        self.response_stream
-            .next()
-            .await
-            .map(|_| self.batch_id += 1)
+        self.stream_handle
+            .write_batch(epoch, batch_id, payload)
+            .await?;
+        self.batch_id += 1;
+        Ok(())
     }
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.on_sender_alive()?
-            .send(SinkStreamRequest {
-                request: Some(SinkRequest::StartEpoch(StartEpoch { epoch })),
-            })
-            .map_err(|e| SinkError::Remote(e.to_string()))?;
-        self.response_stream
-            .next()
-            .await
-            .map(|_| self.epoch = Some(epoch))
+        self.stream_handle.start_epoch(epoch).await?;
+        self.epoch = Some(epoch);
+        Ok(())
     }
 
-    async fn commit(&mut self) -> Result<()> {
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
         let epoch = self.epoch.ok_or_else(|| {
             SinkError::Remote("epoch has not been initialize, call `begin_epoch`".to_string())
         })?;
-        self.on_sender_alive()?
-            .send(SinkStreamRequest {
-                request: Some(SinkRequest::Sync(SyncBatch { epoch })),
-            })
-            .map_err(|e| SinkError::Remote(e.to_string()))?;
-        self.response_stream.next().await.map(|_| ())
+        if is_checkpoint {
+            let _rsp = self.stream_handle.commit(epoch).await?;
+            Ok(())
+        } else {
+            self.stream_handle.barrier(epoch).await?;
+            Ok(())
+        }
     }
 
     async fn abort(&mut self) -> Result<()> {
-        self.request_sender = None;
+        Ok(())
+    }
+
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }
@@ -426,21 +312,19 @@ mod test {
 
     use risingwave_common::array::StreamChunk;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_pb::connector_service::sink_response::{
-        Response, StartEpochResponse, SyncResponse, WriteResponse,
-    };
-    use risingwave_pb::connector_service::sink_stream_request::write_batch::Payload;
-    use risingwave_pb::connector_service::sink_stream_request::Request;
-    use risingwave_pb::connector_service::{SinkResponse, SinkStreamRequest};
+    use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::Payload;
+    use risingwave_pb::connector_service::sink_writer_stream_request::{Barrier, Request};
+    use risingwave_pb::connector_service::sink_writer_stream_response::{CommitResponse, Response};
+    use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
     use risingwave_pb::data;
     use tokio::sync::mpsc;
 
     use crate::sink::remote::RemoteSinkWriter;
-    use crate::sink::SinkWriterV1;
+    use crate::sink::SinkWriter;
 
     #[tokio::test]
     async fn test_epoch_check() {
-        let (request_sender, mut request_recv) = mpsc::unbounded_channel();
+        let (request_sender, mut request_recv) = mpsc::channel(16);
         let (_, resp_recv) = mpsc::unbounded_channel();
 
         let mut sink = RemoteSinkWriter::for_test(resp_recv, request_sender);
@@ -452,7 +336,7 @@ mod test {
 
         // test epoch check
         assert!(
-            tokio::time::timeout(Duration::from_secs(10), sink.commit())
+            tokio::time::timeout(Duration::from_secs(10), sink.barrier(true))
                 .await
                 .expect("test failed: should not commit without epoch")
                 .is_err(),
@@ -478,7 +362,7 @@ mod test {
 
     #[tokio::test]
     async fn test_remote_sink() {
-        let (request_sender, mut request_receiver) = mpsc::unbounded_channel();
+        let (request_sender, mut request_receiver) = mpsc::channel(16);
         let (response_sender, response_receiver) = mpsc::unbounded_channel();
         let mut sink = RemoteSinkWriter::for_test(response_receiver, request_sender);
 
@@ -498,11 +382,6 @@ mod test {
         );
 
         // test write batch
-        response_sender
-            .send(SinkResponse {
-                response: Some(Response::StartEpoch(StartEpochResponse { epoch: 2022 })),
-            })
-            .expect("test failed: failed to start epoch");
         sink.begin_epoch(2022).await.unwrap();
         assert_eq!(sink.epoch, Some(2022));
 
@@ -511,20 +390,12 @@ mod test {
             .await
             .expect("test failed: failed to construct start_epoch request");
 
-        response_sender
-            .send(SinkResponse {
-                response: Some(Response::Write(WriteResponse {
-                    epoch: 2022,
-                    batch_id: 0,
-                })),
-            })
-            .expect("test failed: failed to start epoch");
         sink.write_batch(chunk_a.clone()).await.unwrap();
         assert_eq!(sink.epoch, Some(2022));
         assert_eq!(sink.batch_id, 1);
         match request_receiver.recv().await {
-            Some(SinkStreamRequest {
-                request: Some(Request::Write(write)),
+            Some(SinkWriterStreamRequest {
+                request: Some(Request::WriteBatch(write)),
             }) => {
                 assert_eq!(write.epoch, 2022);
                 assert_eq!(write.batch_id, 0);
@@ -548,45 +419,35 @@ mod test {
 
         // test commit
         response_sender
-            .send(SinkResponse {
-                response: Some(Response::Sync(SyncResponse { epoch: 2022 })),
-            })
+            .send(Ok(SinkWriterStreamResponse {
+                response: Some(Response::Commit(CommitResponse { epoch: 2022 })),
+            }))
             .expect("test failed: failed to sync epoch");
-        sink.commit().await.unwrap();
+        sink.barrier(true).await.unwrap();
         let commit_request = request_receiver.recv().await.unwrap();
         match commit_request.request {
-            Some(Request::Sync(sync_batch)) => {
-                assert_eq!(sync_batch.epoch, 2022);
+            Some(Request::Barrier(Barrier {
+                epoch,
+                is_checkpoint: true,
+            })) => {
+                assert_eq!(epoch, 2022);
             }
             _ => panic!("test failed: failed to construct sync request "),
         }
 
         // begin another epoch
-        response_sender
-            .send(SinkResponse {
-                response: Some(Response::StartEpoch(StartEpochResponse { epoch: 2023 })),
-            })
-            .expect("test failed: failed to start epoch");
         sink.begin_epoch(2023).await.unwrap();
         // simply keep the channel empty since we've tested begin_epoch
         let _ = request_receiver.recv().await.unwrap();
         assert_eq!(sink.epoch, Some(2023));
 
         // test another write
-        response_sender
-            .send(SinkResponse {
-                response: Some(Response::Write(WriteResponse {
-                    epoch: 2022,
-                    batch_id: 1,
-                })),
-            })
-            .expect("test failed: failed to start epoch");
         sink.write_batch(chunk_b.clone()).await.unwrap();
         assert_eq!(sink.epoch, Some(2023));
         assert_eq!(sink.batch_id, 2);
         match request_receiver.recv().await {
-            Some(SinkStreamRequest {
-                request: Some(Request::Write(write)),
+            Some(SinkWriterStreamRequest {
+                request: Some(Request::WriteBatch(write)),
             }) => {
                 assert_eq!(write.epoch, 2023);
                 assert_eq!(write.batch_id, 1);

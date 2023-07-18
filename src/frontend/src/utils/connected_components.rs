@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 // TODO: could try to optimize using union-find algorithm
 #[derive(Debug)]
 pub(crate) struct ConnectedComponentLabeller {
-    vertex_to_label: HashMap<usize, usize>,
-    labels_to_vertices: HashMap<usize, HashSet<usize>>,
-    labels_to_edges: HashMap<usize, HashSet<(usize, usize)>>,
+    vertex_to_label: BTreeMap<usize, usize>,
+    labels_to_vertices: BTreeMap<usize, BTreeSet<usize>>,
+    labels_to_edges: BTreeMap<usize, BTreeSet<(usize, usize)>>,
 }
 
 impl ConnectedComponentLabeller {
     pub(crate) fn new(vertices: usize) -> Self {
-        let mut vertex_to_label = HashMap::with_capacity(vertices);
-        let mut labels_to_vertices = HashMap::with_capacity(vertices);
-        let labels_to_edges = HashMap::new();
+        let mut vertex_to_label = BTreeMap::new();
+        let mut labels_to_vertices = BTreeMap::new();
+        let labels_to_edges = BTreeMap::new();
         for i in 0..vertices {
             vertex_to_label.insert(i, i);
             labels_to_vertices.insert(i, vec![i].into_iter().collect());
@@ -53,7 +53,7 @@ impl ConnectedComponentLabeller {
             let edges = self
                 .labels_to_edges
                 .entry(new_label)
-                .or_insert_with(HashSet::new);
+                .or_insert_with(BTreeSet::new);
 
             let new_edge = if v1 < v2 { (v1, v2) } else { (v2, v1) };
             edges.insert(new_edge);
@@ -76,12 +76,12 @@ impl ConnectedComponentLabeller {
             let edges = self
                 .labels_to_edges
                 .entry(new_label)
-                .or_insert_with(HashSet::new);
+                .or_insert_with(BTreeSet::new);
             edges.extend(old_edges);
         }
     }
 
-    pub(crate) fn into_edge_sets(self) -> Vec<HashSet<(usize, usize)>> {
+    pub(crate) fn into_edge_sets(self) -> Vec<BTreeSet<(usize, usize)>> {
         self.labels_to_edges.into_values().collect()
     }
 }
@@ -114,13 +114,13 @@ mod tests {
         assert_eq!(labeller.labels_to_vertices.len(), 1);
         assert_eq!(
             *labeller.labels_to_vertices.iter().next().unwrap().1,
-            (0..7).collect::<HashSet<_>>()
+            (0..7).collect::<BTreeSet<_>>()
         );
         assert_eq!(
             *labeller.labels_to_edges.iter().next().unwrap().1,
             vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]
                 .into_iter()
-                .collect::<HashSet<_>>()
+                .collect::<BTreeSet<_>>()
         );
     }
 }

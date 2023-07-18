@@ -20,7 +20,7 @@ use prost_reflect::{
     ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
+use risingwave_common::error::ErrorCode::{self, InternalError, NotImplemented, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, F32, F64};
@@ -29,12 +29,50 @@ use url::Url;
 
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
+use crate::only_parse_payload;
 use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::unified::protobuf::ProtobufAccess;
+use crate::parser::unified::AccessImpl;
 use crate::parser::{
-    ByteStreamSourceParser, EncodingProperties, ParserProperties, SourceStreamChunkRowWriter,
+    AccessBuilder, ByteStreamSourceParser, EncodingProperties, SourceStreamChunkRowWriter,
     WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+
+#[derive(Debug)]
+pub struct ProtobufAccessBuilder {
+    confluent_wire_type: bool,
+    message_descriptor: MessageDescriptor,
+}
+
+impl AccessBuilder for ProtobufAccessBuilder {
+    #[allow(clippy::unused_async)]
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        let payload = if self.confluent_wire_type {
+            resolve_pb_header(&payload)?
+        } else {
+            &payload
+        };
+
+        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
+            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
+
+        Ok(AccessImpl::Protobuf(ProtobufAccess::new(message)))
+    }
+}
+
+impl ProtobufAccessBuilder {
+    pub fn new(config: ProtobufParserConfig) -> Result<Self> {
+        let ProtobufParserConfig {
+            confluent_wire_type,
+            message_descriptor,
+        } = config;
+        Ok(Self {
+            confluent_wire_type,
+            message_descriptor,
+        })
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ProtobufParser {
@@ -51,11 +89,8 @@ pub struct ProtobufParserConfig {
 }
 
 impl ProtobufParserConfig {
-    pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let protobuf_config = try_match_expand!(
-            parser_properties.encoding_config,
-            EncodingProperties::Protobuf
-        )?;
+    pub async fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+        let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;
         let url = Url::parse(location)
@@ -258,14 +293,15 @@ impl ByteStreamSourceParser for ProtobufParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        _key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        only_parse_payload!(self, payload, writer)
     }
 }
 
-fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
+pub fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
     let v = match value {
         Value::Bool(v) => ScalarImpl::Bool(*v),
         Value::I32(i) => ScalarImpl::Int32(*i),
@@ -396,6 +432,7 @@ mod test {
     use risingwave_pb::data::data_type::PbTypeName;
 
     use super::*;
+    use crate::parser::ParserProperties;
     use crate::source::SourceFormat;
 
     fn schema_dir() -> String {
@@ -426,7 +463,7 @@ mod test {
             ..Default::default()
         };
         let parser_config = ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info)?;
-        let conf = ProtobufParserConfig::new(parser_config).await?;
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let parser = ProtobufParser::new(Vec::default(), conf, Default::default())?;
         let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
@@ -470,7 +507,7 @@ mod test {
             ..Default::default()
         };
         let parser_config = ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info)?;
-        let conf = ProtobufParserConfig::new(parser_config).await?;
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let columns = conf.map_to_columns().unwrap();
 
         assert_eq!(columns[0].name, "id".to_string());
@@ -518,7 +555,9 @@ mod test {
         };
         let parser_config =
             ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info).unwrap();
-        let conf = ProtobufParserConfig::new(parser_config).await.unwrap();
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config)
+            .await
+            .unwrap();
         let columns = conf.map_to_columns();
         // expect error message:
         // "Err(Protocol error: circular reference detected:

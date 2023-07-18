@@ -86,8 +86,9 @@ tar xf java-binding-integration-test.tar.zst bin
 
 echo "--- prepare integration tests"
 cd ${RISINGWAVE_ROOT}/java/connector-node
-pip3 install grpcio grpcio-tools psycopg2 psycopg2-binary pyspark==3.3
-cd python-client && bash gen-stub.sh
+pip3 install grpcio grpcio-tools psycopg2 psycopg2-binary pyspark==3.3 black
+cd python-client && bash gen-stub.sh && bash format-python.sh --check
+export PYTHONPATH=proto
 
 echo "--- running streamchunk data format integration tests"
 cd ${RISINGWAVE_ROOT}/java/connector-node/python-client

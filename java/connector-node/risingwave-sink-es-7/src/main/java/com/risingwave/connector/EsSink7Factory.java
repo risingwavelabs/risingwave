@@ -17,8 +17,9 @@ package com.risingwave.connector;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.connector.api.sink.SinkWriter;
+import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog;
 import io.grpc.Status;
 import java.io.IOException;
@@ -38,10 +39,10 @@ import org.slf4j.LoggerFactory;
 public class EsSink7Factory implements SinkFactory {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink7Factory.class);
 
-    public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
         EsSink7Config config = mapper.convertValue(tableProperties, EsSink7Config.class);
-        return new EsSink7(config, tableSchema);
+        return new SinkWriterV1.Adapter(new EsSink7(config, tableSchema));
     }
 
     @Override

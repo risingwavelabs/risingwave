@@ -18,8 +18,8 @@ import static io.grpc.Status.*;
 
 import com.google.gson.Gson;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.api.sink.SinkWriterBase;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -29,7 +29,7 @@ import java.util.Iterator;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
-public class FileSink extends SinkBase {
+public class FileSink extends SinkWriterBase {
     private final FileWriter sinkWriter;
 
     private FileSinkConfig config;

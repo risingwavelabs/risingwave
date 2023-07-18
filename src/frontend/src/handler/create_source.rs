@@ -38,8 +38,8 @@ use risingwave_connector::source::{
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
-    self, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema,
-    ProtobufSchema, SourceSchema, SourceWatermark,
+    self, AvroSchema, ColumnDef, ColumnOption, CompatibleSourceSchema, CreateSourceStatement,
+    DebeziumAvroSchema, Encode, ProtobufSchema, SourceSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -71,7 +71,7 @@ async fn extract_avro_table_schema(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::Avro, with_properties, &info)?;
-    let conf = AvroParserConfig::new(parser_config).await?;
+    let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     Ok(vec_column_desc
         .into_iter()
@@ -93,7 +93,7 @@ async fn extract_upsert_avro_table_schema(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::UpsertAvro, with_properties, &info)?;
-    let conf = AvroParserConfig::new(parser_config).await?;
+    let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
 
     let vec_pk_desc = conf.extract_pks().map_err(|e| RwError::from(ErrorCode::InternalError(
@@ -135,7 +135,7 @@ async fn extract_debezium_avro_table_pk_columns(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::DebeziumAvro, with_properties, &info)?;
-    let conf = DebeziumAvroParserConfig::new(parser_config).await?;
+    let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     Ok(conf.extract_pks()?.drain(..).map(|c| c.name).collect())
 }
 
@@ -149,7 +149,7 @@ async fn extract_debezium_avro_table_schema(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::DebeziumAvro, with_properties, &info)?;
-    let conf = DebeziumAvroParserConfig::new(parser_config).await?;
+    let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     let column_catalog = vec_column_desc
         .into_iter()
@@ -173,7 +173,7 @@ async fn extract_protobuf_table_schema(
         ..Default::default()
     };
     let parser_config = ParserProperties::new(SourceFormat::Protobuf, &with_properties, &info)?;
-    let conf = ProtobufParserConfig::new(parser_config).await?;
+    let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
 
     let column_descs = conf.map_to_columns()?;
 
@@ -764,11 +764,21 @@ pub async fn handle_create_source(
         )));
     }
 
-    let (source_schema, _) = stmt
+    if let CompatibleSourceSchema::V2(s) = &stmt.source_schema {
+        if s.row_encode == Encode::Json && stmt.columns.is_empty() {
+            return Err(RwError::from(InvalidInputSyntax(
+                "schema definition is required for ENCODE JSON".to_owned(),
+            )));
+        }
+    }
+
+    let (source_schema, _, notice) = stmt
         .source_schema
         .into_source_schema()
         .map_err(|e| ErrorCode::InvalidInputSyntax(e.inner_msg()))?;
-
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    }
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
     validate_compatibility(&source_schema, &mut with_properties)?;
 

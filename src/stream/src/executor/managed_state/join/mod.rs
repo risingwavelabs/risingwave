@@ -611,4 +611,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     pub fn null_matched(&self) -> &K::Bitmap {
         &self.null_matched
     }
+
+    pub fn table_id(&self) -> u32 {
+        self.state.table.table_id()
+    }
 }

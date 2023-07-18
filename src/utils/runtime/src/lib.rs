@@ -13,6 +13,9 @@
 // limitations under the License.
 
 //! Configures the RisingWave binary, including logging, locks, panic handler, etc.
+//!
+//! See [`init_risingwave_logger`] and [`main_okk`] for more details, including supported
+//! environment variables.
 
 #![feature(panic_update_hook)]
 #![feature(let_chains)]
@@ -21,6 +24,7 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use either::Either;
 use futures::Future;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
@@ -31,20 +35,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, EnvFilter};
 
-// ============================================================================
-// BEGIN SECTION: frequently used log configurations for debugging
-// ============================================================================
-
-/// Dump logs of all SQLs, i.e., tracing target `pgwire_query_log` to `.risingwave/log/query.log`.
-///
-/// Other ways to enable query log:
-/// - Sets `RW_QUERY_LOG_PATH` to a directory.
-/// - Changing the level of `pgwire` to `TRACE` in `configure_risingwave_targets_fmt` can also turn
-///   on the logs, but without a dedicated file.
-const ENABLE_QUERY_LOG_FILE: bool = false;
-
 const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
-
 const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
 
 /// Configure log targets for some `RisingWave` crates.
@@ -66,10 +57,6 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("events", Level::ERROR)
 }
 
-// ===========================================================================
-// END SECTION
-// ===========================================================================
-
 pub struct LoggerSettings {
     /// The name of the service.
     name: String,
@@ -77,6 +64,8 @@ pub struct LoggerSettings {
     enable_tokio_console: bool,
     /// Enable colorful output in console.
     colorful: bool,
+    /// Output to `stderr` instead of `stdout`.
+    stderr: bool,
     /// Override default target settings.
     targets: Vec<(String, tracing::metadata::LevelFilter)>,
 }
@@ -93,12 +82,20 @@ impl LoggerSettings {
             name: name.into(),
             enable_tokio_console: false,
             colorful: console::colors_enabled_stderr() && console::colors_enabled(),
+            stderr: false,
             targets: vec![],
         }
     }
 
-    pub fn enable_tokio_console(mut self, enable: bool) -> Self {
-        self.enable_tokio_console = enable;
+    /// Enable tokio console output.
+    pub fn tokio_console(mut self, enabled: bool) -> Self {
+        self.enable_tokio_console = enabled;
+        self
+    }
+
+    /// Output to `stderr` instead of `stdout`.
+    pub fn stderr(mut self, enabled: bool) -> Self {
+        self.stderr = enabled;
         self
     }
 
@@ -132,12 +129,33 @@ pub fn set_panic_hook() {
 
 /// Init logger for RisingWave binaries.
 ///
-/// Currently, the following env variables will be read:
+/// ## Environment variables to configure logger dynamically
 ///
-/// * `RUST_LOG`: overrides default level and tracing targets. e.g.,
-///   `RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info"`
-/// * `RW_QUERY_LOG_PATH`: the path to generate query log. If set, [`ENABLE_QUERY_LOG_FILE`] is
-///   turned on.
+/// ### `RUST_LOG`
+///
+/// Overrides default level and tracing targets of the fmt layer (formatting and
+/// logging to `stdout` or `stderr`).
+///
+/// e.g.,
+/// ```bash
+/// RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info"
+/// ```
+///
+/// ### `RW_QUERY_LOG_PATH`
+///
+/// Configures the path to generate query log.
+///
+/// If it is set,
+/// - Dump logs of all SQLs, i.e., tracing target [`PGWIRE_QUERY_LOG`] to
+///   `RW_QUERY_LOG_PATH/query.log`.
+/// - Dump slow queries, i.e., tracing target [`SLOW_QUERY_LOG`] to
+///   `RW_QUERY_LOG_PATH/slow_query.log`.
+///
+/// Note:
+/// To enable query log in the fmt layer (slow query is included by default), set
+/// ```bash
+/// RUST_LOG="pgwire_query_log=info"
+/// ```
 pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Registry) {
     let deployment = Deployment::current();
 
@@ -199,11 +217,18 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
     let mut layers = vec![];
 
-    // fmt layer (formatting and logging to stdout)
+    // fmt layer (formatting and logging to `stdout` or `stderr`)
     {
         let fmt_layer = tracing_subscriber::fmt::layer()
             .with_timer(default_timer.clone())
-            .with_ansi(settings.colorful);
+            .with_ansi(settings.colorful)
+            .with_writer(move || {
+                if settings.stderr {
+                    Either::Left(std::io::stderr())
+                } else {
+                    Either::Right(std::io::stdout())
+                }
+            });
 
         let fmt_layer = match deployment {
             Deployment::Ci => fmt_layer
@@ -221,11 +246,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
         );
     };
 
-    let default_query_log_path = "./".to_string();
-
+    // If `RW_QUERY_LOG_PATH` env var is set to a directory, turn on query log files.
     let query_log_path = std::env::var("RW_QUERY_LOG_PATH");
-    if query_log_path.is_ok() || ENABLE_QUERY_LOG_FILE {
-        let query_log_path = query_log_path.unwrap_or(default_query_log_path.clone());
+    if let Ok(query_log_path) = query_log_path {
         let query_log_path = PathBuf::from(query_log_path);
         std::fs::create_dir_all(query_log_path.clone()).unwrap_or_else(|e| {
             panic!(
@@ -255,29 +278,16 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
             .with_writer(std::sync::Mutex::new(file))
             .with_filter(filter::Targets::new().with_target(PGWIRE_QUERY_LOG, Level::TRACE));
         layers.push(layer.boxed());
-    }
 
-    // slow query log is always enabled
-    {
-        let slow_query_log_path = std::env::var("RW_QUERY_LOG_PATH");
-        let slow_query_log_path = slow_query_log_path.unwrap_or(default_query_log_path);
-        let slow_query_log_path = PathBuf::from(slow_query_log_path);
-
-        std::fs::create_dir_all(slow_query_log_path.clone()).unwrap_or_else(|e| {
-            panic!(
-                "failed to create directory '{}' for slow query log: {e}",
-                slow_query_log_path.display()
-            )
-        });
         let file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
-            .open(slow_query_log_path.join("slow_query.log"))
+            .open(query_log_path.join("slow_query.log"))
             .unwrap_or_else(|e| {
                 panic!(
                     "failed to create '{}/slow_query.log': {e}",
-                    slow_query_log_path.display()
+                    query_log_path.display()
                 )
             });
         let layer = tracing_subscriber::fmt::layer()
