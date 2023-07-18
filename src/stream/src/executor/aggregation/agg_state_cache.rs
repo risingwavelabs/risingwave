@@ -28,6 +28,7 @@ use crate::common::cache::{StateCache, StateCacheFiller};
 /// Cache key type.
 type CacheKey = MemcmpEncoded;
 
+#[derive(Debug)]
 pub struct CacheValue(SmallVec<[Datum; 2]>);
 
 /// Trait that defines the interface of state table cache for stateful streaming agg.
@@ -49,6 +50,9 @@ pub trait AggStateCache: EstimateSize {
 
     /// Output batches from the cache.
     fn output_batches(&self) -> Box<dyn Iterator<Item = StreamChunk> + '_>;
+
+    /// Output the first value.
+    fn output_first(&self) -> Datum;
 }
 
 /// Trait that defines agg state cache syncing interface.
@@ -143,6 +147,11 @@ where
             }
             builder.consume_all().map(|chunk| chunk.into())
         }))
+    }
+
+    fn output_first(&self) -> Datum {
+        let value = self.state_cache.values().next()?;
+        value.0[0].clone()
     }
 }
 

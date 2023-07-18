@@ -40,8 +40,11 @@ use crate::executor::{PkIndices, StreamExecutorResult};
 /// when need to get output.
 #[derive(EstimateSize)]
 pub struct MaterializedInputState {
-    /// The aggregate function. Its state is always initial.
-    aggregator: BoxedAggState,
+    /// The aggregation state. It is always initial.
+    ///
+    /// This is `None` if the aggregate function is either `min`, `max`, `first_value` or
+    /// `last_value`.
+    aggregator: Option<BoxedAggState>,
 
     /// Argument column indices in input chunks.
     arg_col_indices: Vec<usize>,
@@ -130,7 +133,10 @@ impl MaterializedInputState {
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
-        let aggregator = build(agg_call)?;
+        let aggregator = match agg_call.kind {
+            AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue => None,
+            _ => Some(build(agg_call)?),
+        };
         let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
             AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue => {
                 Box::new(GenericAggStateCache::new(
@@ -213,11 +219,17 @@ impl MaterializedInputState {
         }
         assert!(self.cache.is_synced());
 
-        let chunks = self.cache.output_batches().collect_vec();
-        for chunk in chunks {
-            self.aggregator.update(&chunk).await?;
+        if let Some(aggregator) = &mut self.aggregator {
+            let chunks = self.cache.output_batches().collect_vec();
+            for chunk in chunks {
+                aggregator.update(&chunk).await?;
+            }
+            Ok(aggregator.output()?)
+        } else {
+            // special case for `min`, `max`, `first_value` and `last_value`
+            // take the first value from the cache
+            Ok(self.cache.output_first())
         }
-        Ok(self.aggregator.output()?)
     }
 }
 
