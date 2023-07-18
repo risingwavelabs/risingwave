@@ -181,7 +181,7 @@ impl Sink for ClickHouseSink {
 
         // check reachability
         let client = self.config.common.build_client()?;
-        let query_column = format!("select distinct ?fields from system.columns where database = ? and table = ? order by ?");
+        let query_column = "select distinct ?fields from system.columns where database = ? and table = ? order by ?".to_string();
         let clickhouse_column = client
             .query(&query_column)
             .bind(self.config.common.database.clone())
@@ -236,7 +236,7 @@ impl ClickHouseSinkWriter {
             .common
             .build_client()
             .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
-        let query_column = format!("select distinct ?fields from system.columns where database = ? and table = ? order by position");
+        let query_column = "select distinct ?fields from system.columns where database = ? and table = ? order by position".to_string();
         let clickhouse_column = client
             .query(&query_column)
             .bind(config.common.database.clone())
@@ -498,12 +498,12 @@ impl ClickHouseSinkWriter {
                             .await
                             .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
                     }
-                    None => return Err(SinkError::ClickHouse(format!("pk can not be null"))),
+                    None => return Err(SinkError::ClickHouse("pk can not be null".to_string())),
                 },
                 Op::UpdateDelete => continue,
                 Op::UpdateInsert => {
                     let pk = Self::build_ck_fields(row.datum_at(pk_index), accuracy_time)?
-                        .ok_or(SinkError::ClickHouse(format!("pk can not none")))?;
+                        .ok_or(SinkError::ClickHouse("pk can not be none".to_string()))?;
                     let fields_vec = self.build_update_fields(row, accuracy_time)?;
                     self.client
                         .update(
