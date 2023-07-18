@@ -22,11 +22,14 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::hummock::{group_delta, HummockVersionDelta};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockResult, TableHolder};
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
+
+const REFILL_DATA_FILE_CACHE_CONCURRENCY: usize = 100;
+const REFILL_DATA_FILE_CACHE_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct CacheRefillPolicyConfig {
     pub sstable_store: SstableStoreRef,
@@ -44,6 +47,8 @@ pub struct CacheRefillPolicy {
     max_preload_wait_time_mill: u64,
 
     refill_data_file_cache_levels: HashSet<u32>,
+
+    concurrency: Arc<Concurrency>,
 }
 
 impl CacheRefillPolicy {
@@ -55,6 +60,8 @@ impl CacheRefillPolicy {
             max_preload_wait_time_mill: config.max_preload_wait_time_mill,
 
             refill_data_file_cache_levels: config.refill_data_file_cache_levels,
+
+            concurrency: Arc::new(Concurrency::new(REFILL_DATA_FILE_CACHE_CONCURRENCY)),
         }
     }
 
@@ -148,17 +155,21 @@ impl CacheRefillPolicy {
         let mut handles = vec![];
         let cache_refill_filter = self.sstable_store.cache_refill_filter().as_ref().unwrap();
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let start = Instant::now();
 
         for (level, metas, removed_ssts) in &levels {
-            if !self.refill_data_file_cache_levels.contains(level) {
-                continue;
-            }
-
             let blocks = metas
                 .iter()
                 .map(|meta| meta.value().block_count())
                 .sum::<usize>();
+
+            if !self.refill_data_file_cache_levels.contains(level) {
+                self.metrics
+                    .refill_data_file_cache_count
+                    .with_label_values(&["ignored"])
+                    .inc_by(blocks as f64);
+                continue;
+            }
 
             if removed_ssts.is_empty() {
                 self.metrics
@@ -179,13 +190,21 @@ impl CacheRefillPolicy {
             if refill {
                 for meta in metas {
                     for block_index in 0..meta.value().block_count() {
-                        rx.recv().await.unwrap();
-
-                        let tx = tx.clone();
+                        let concurrency = self.concurrency.clone();
                         let meta = meta.value().clone();
                         let mut stat = StoreLocalStatistic::default();
                         let sstable_store = self.sstable_store.clone();
                         let metrics = self.metrics.clone();
+
+                        concurrency.acquire().await;
+                        if start.elapsed() > REFILL_DATA_FILE_CACHE_TIMEOUT {
+                            self.metrics
+                                .refill_data_file_cache_count
+                                .with_label_values(&["timeout"])
+                                .inc_by(blocks as f64);
+                            continue;
+                        }
+
                         let future = async move {
                             let res = sstable_store
                                 .may_fill_data_file_cache(&meta, block_index, &mut stat)
@@ -205,7 +224,7 @@ impl CacheRefillPolicy {
                                 }
                                 _ => {}
                             }
-                            tx.send(()).unwrap();
+                            concurrency.release();
                             res
                         };
                         let handle = tokio::spawn(future);
@@ -221,8 +240,6 @@ impl CacheRefillPolicy {
         }
 
         let _ = try_join_all(handles).await;
-        drop(rx);
-        // TODO(MrCroxx): set timeout
 
         Ok(())
     }
@@ -286,5 +303,31 @@ where
             }
         }
         false
+    }
+}
+
+pub struct Concurrency {
+    tx: mpsc::UnboundedSender<()>,
+    rx: Mutex<mpsc::UnboundedReceiver<()>>,
+}
+
+impl Concurrency {
+    pub fn new(concurrency: usize) -> Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+        for _ in 0..concurrency {
+            tx.send(()).unwrap();
+        }
+        Self {
+            tx,
+            rx: Mutex::new(rx),
+        }
+    }
+
+    pub async fn acquire(&self) {
+        self.rx.lock().await.recv().await.unwrap();
+    }
+
+    pub fn release(&self) {
+        self.tx.send(()).unwrap();
     }
 }
