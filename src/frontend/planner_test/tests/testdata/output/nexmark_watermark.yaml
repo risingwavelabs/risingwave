@@ -1641,18 +1641,18 @@
                   └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: (Unbounded, Unbounded) }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (row_number <= 10:Int32) }
-      └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-        └─BatchExchange { order: [$expr2 ASC, $expr4 DESC], dist: HashShard($expr2) }
-          └─BatchSort { order: [$expr2 ASC, $expr4 DESC] }
+    └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─BatchSort { order: [$expr2 ASC, $expr4 DESC] }
+        └─BatchGroupTopN { order: [$expr4 DESC], limit: 10, offset: 0, group_key: [0] }
+          └─BatchExchange { order: [], dist: HashShard($expr2) }
             └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
               └─BatchFilter { predicate: (event_type = 2:Int32) }
                 └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
                   └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden), rank_number], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
-    └─StreamFilter { predicate: (row_number <= 10:Int32) }
-      └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─StreamGroupTopN [append_only] { order: [$expr4 DESC], limit: 10, offset: 0, group_key: [0], output_watermarks: [$expr1] }
         └─StreamExchange { dist: HashShard($expr2) }
           └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7, _row_id], output_watermarks: [$expr1] }
             └─StreamFilter { predicate: (event_type = 2:Int32) }
@@ -1664,23 +1664,25 @@
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden), rank_number], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamFilter { predicate: (row_number <= 10:Int32) }
-        └── StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] } { state table: 0 }
+    └── StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] } { state table: 0 }
+        └── StreamGroupTopN [append_only] { order: [$expr4 DESC], limit: 10, offset: 0, group_key: [0], output_watermarks: [$expr1] } { state table: 1 }
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
     StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: (event_type = 2:Int32) }
         └── StreamRowIdGen { row_id_index: 5 }
-            └── StreamWatermarkFilter { watermark_descs: [Desc { idx: 4, expr: ($expr1 - '00:00:04':Interval) }] } { state tables: [ 1 ] }
+            └── StreamWatermarkFilter { watermark_descs: [Desc { idx: 4, expr: ($expr1 - '00:00:04':Interval) }] } { state tables: [ 2 ] }
                 └── StreamProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id], output_watermarks: [_row_id] }
-                    └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 2 }
+                    └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 3 }
 
     Table 0 { columns: [ $expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7, _row_id, row_number ], primary key: [ $0 ASC, $2 DESC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 1 { columns: [ vnode, offset ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ $expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7, _row_id ], primary key: [ $0 ASC, $2 DESC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 2 { columns: [ vnode, offset ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 3 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id, rank_number ], primary key: [ $7 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
