@@ -97,6 +97,10 @@ impl Aggregator for ProjectionOrderBy {
         Ok(())
     }
 
+    fn get_output(&self) -> Result<Datum> {
+        unimplemented!("get_output is not supported for orderby");
+    }
+
     fn output(&mut self) -> Result<Datum> {
         // sort
         self.unordered_values_estimated_heap_size = 0;

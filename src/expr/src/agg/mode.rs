@@ -115,8 +115,14 @@ impl Aggregator for Mode {
         Ok(())
     }
 
-    fn output(&mut self) -> Result<Datum> {
+    fn get_output(&self) -> Result<Datum> {
         Ok(self.cur_mode.clone())
+    }
+
+    fn output(&mut self) -> Result<Datum> {
+        let result = self.get_output()?;
+        self.reset();
+        Ok(result)
     }
 
     fn reset(&mut self) {

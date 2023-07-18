@@ -126,7 +126,7 @@ impl Aggregator for PercentileDisc {
         Ok(())
     }
 
-    fn output(&mut self) -> Result<Datum> {
+    fn get_output(&self) -> Result<Datum> {
         Ok(if let Some(fractions) = self.fractions && !self.data.is_empty() {
             let rn = fractions * self.data.len() as f64;
             if fractions == 0.0 {
@@ -137,6 +137,12 @@ impl Aggregator for PercentileDisc {
         } else {
             None
         })
+    }
+
+    fn output(&mut self) -> Result<Datum> {
+        let result = self.get_output()?;
+        self.reset();
+        Ok(result)
     }
 
     fn reset(&mut self) {

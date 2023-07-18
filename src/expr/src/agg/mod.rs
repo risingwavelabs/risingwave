@@ -58,6 +58,9 @@ pub trait Aggregator: Send + Sync + DynClone + 'static {
         self.update_multi(input, row_id, row_id + 1).await
     }
 
+    /// Get the output value.
+    fn get_output(&self) -> Result<Datum>;
+
     /// Output the aggregate state and reset to initial state.
     fn output(&mut self) -> Result<Datum>;
 

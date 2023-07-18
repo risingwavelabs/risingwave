@@ -122,7 +122,7 @@ impl AggState {
         }
     }
 
-    /// Get the output of the state.
+    /// Get the output of aggregations.
     pub async fn get_output(
         &mut self,
         storage: &AggStateStorage<impl StateStore>,
@@ -131,7 +131,7 @@ impl AggState {
         match self {
             Self::Value(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::ResultValue));
-                Ok(state.get_state())
+                Ok(state.get_output()?)
             }
             Self::Table(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::Table { .. }));

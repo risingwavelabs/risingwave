@@ -92,6 +92,10 @@ impl Aggregator for Filter {
         }
     }
 
+    fn get_output(&self) -> Result<Datum> {
+        self.inner.get_output()
+    }
+
     fn output(&mut self) -> Result<Datum> {
         self.inner.output()
     }
@@ -143,6 +147,10 @@ mod tests {
             self.count
                 .fetch_add(end_row_id - start_row_id, Ordering::Relaxed);
             Ok(())
+        }
+
+        fn get_output(&self) -> Result<Datum> {
+            unimplemented!()
         }
 
         fn output(&mut self) -> Result<Datum> {

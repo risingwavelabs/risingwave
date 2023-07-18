@@ -121,6 +121,6 @@ impl TableState {
 
     /// Get the output of the state.
     pub fn get_output(&mut self) -> StreamExecutorResult<Datum> {
-        Ok(self.inner.clone().output()?)
+        Ok(self.inner.get_output()?)
     }
 }

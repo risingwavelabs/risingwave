@@ -440,6 +440,10 @@ impl FunctionAttr {
                     fn set_state(&mut self, state: Datum) {
                         self.state = state.map(|s| s.try_into().unwrap());
                     }
+                    fn get_output(&self) -> Result<Datum> {
+                        // FIXME: avoid copy state
+                        Ok(self.state.clone().map(|s| <#ret_owned>::from(s).into()))
+                    }
                     fn output(&mut self) -> Result<Datum> {
                         #[allow(clippy::mem_replace_option_with_none)]
                         let state = std::mem::replace(&mut self.state, #init_state);

@@ -46,6 +46,10 @@ impl Aggregator for Projection {
             .await
     }
 
+    fn get_output(&self) -> Result<Datum> {
+        self.inner.get_output()
+    }
+
     fn output(&mut self) -> Result<Datum> {
         self.inner.output()
     }
