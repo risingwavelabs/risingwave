@@ -59,7 +59,6 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
     }
 }
 
-// DebeziumJsonParser is deprecated now
 #[derive(Debug)]
 pub struct DebeziumJsonParser {
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
@@ -130,7 +129,10 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
-    use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder, DebeziumParser, EncodingProperties, ParserProperties, JsonProperties, ProtobufProperties, ProtocolProperties};
+    use crate::parser::{
+        DebeziumParser, EncodingProperties, JsonProperties, ParserProperties, ProtocolProperties,
+        SourceColumnDesc, SourceStreamChunkBuilder,
+    };
     use crate::source::SourceFormat;
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
         if let Some(ScalarImpl::Jsonb(json_val)) = parse_result {
@@ -151,10 +153,14 @@ mod tests {
     ) -> DebeziumParser {
         let props = ParserProperties {
             key_encoding_config: None,
-            encoding_config: EncodingProperties::Json(JsonProperties{format: SourceFormat::DebeziumJson}),
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                format: SourceFormat::DebeziumJson,
+            }),
             protocol_config: ProtocolProperties::Debezium,
         };
-        DebeziumParser::new(props, rw_columns, source_ctx).await.unwrap()
+        DebeziumParser::new(props, rw_columns, source_ctx)
+            .await
+            .unwrap()
     }
 
     async fn parse_one(
@@ -165,7 +171,10 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         {
             let writer = builder.row_writer();
-            parser.parse_inner(None, Some(payload), writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(payload), writer)
+                .await
+                .unwrap();
         }
         let chunk = builder.finish();
         chunk
@@ -364,7 +373,7 @@ mod tests {
             let columns = get_test2_columns();
 
             let parser = build_parser(columns.clone(), Default::default()).await;
-            let parser = build_parser(columns.clone(), Default::default()).await;
+
             let [(_op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()

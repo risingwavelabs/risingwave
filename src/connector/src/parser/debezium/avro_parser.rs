@@ -100,14 +100,6 @@ impl DebeziumAvroAccessBuilder {
 }
 
 // TODO: avoid duplicated codes with `AvroParser`
-#[derive(Debug)]
-pub struct DebeziumAvroParser {
-    schema: Schema,
-    schema_resolver: Arc<ConfluentSchemaResolver>,
-    rw_columns: Vec<SourceColumnDesc>,
-    source_ctx: SourceContextRef,
-}
-
 #[derive(Debug, Clone)]
 pub struct DebeziumAvroParserConfig {
     pub key_schema: Arc<Schema>,
@@ -152,6 +144,15 @@ impl DebeziumAvroParserConfig {
             Some("before"),
         )?)?)
     }
+}
+
+// DebeziumAvroParser is deprecated now
+#[derive(Debug)]
+pub struct DebeziumAvroParser {
+    schema: Schema,
+    schema_resolver: Arc<ConfluentSchemaResolver>,
+    rw_columns: Vec<SourceColumnDesc>,
+    source_ctx: SourceContextRef,
 }
 
 impl DebeziumAvroParser {
@@ -258,7 +259,9 @@ mod tests {
     use risingwave_pb::catalog::StreamSourceInfo;
 
     use super::*;
-    use crate::parser::{DebeziumAvroParserConfig, ParserProperties, SourceStreamChunkBuilder};
+    use crate::parser::{
+        DebeziumAvroParserConfig, DebeziumParser, ParserProperties, SourceStreamChunkBuilder,
+    };
     use crate::source::SourceFormat;
 
     const DEBEZIUM_AVRO_DATA: &[u8] = b"\x00\x00\x00\x00\x06\x00\x02\xd2\x0f\x0a\x53\x61\x6c\x6c\x79\x0c\x54\x68\x6f\x6d\x61\x73\x2a\x73\x61\x6c\x6c\x79\x2e\x74\x68\x6f\x6d\x61\x73\x40\x61\x63\x6d\x65\x2e\x63\x6f\x6d\x16\x32\x2e\x31\x2e\x32\x2e\x46\x69\x6e\x61\x6c\x0a\x6d\x79\x73\x71\x6c\x12\x64\x62\x73\x65\x72\x76\x65\x72\x31\xc0\xb4\xe8\xb7\xc9\x61\x00\x30\x66\x69\x72\x73\x74\x5f\x69\x6e\x5f\x64\x61\x74\x61\x5f\x63\x6f\x6c\x6c\x65\x63\x74\x69\x6f\x6e\x12\x69\x6e\x76\x65\x6e\x74\x6f\x72\x79\x00\x02\x12\x63\x75\x73\x74\x6f\x6d\x65\x72\x73\x00\x00\x20\x6d\x79\x73\x71\x6c\x2d\x62\x69\x6e\x2e\x30\x30\x30\x30\x30\x33\x8c\x06\x00\x00\x00\x02\x72\x02\x92\xc3\xe8\xb7\xc9\x61\x00";
@@ -272,14 +275,17 @@ mod tests {
     }
 
     async fn parse_one(
-        parser: DebeziumAvroParser,
+        mut parser: DebeziumParser,
         columns: Vec<SourceColumnDesc>,
         payload: Vec<u8>,
     ) -> Vec<(Op, OwnedRow)> {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         {
             let writer = builder.row_writer();
-            parser.parse_inner(vec![], payload, writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(payload), writer)
+                .await
+                .unwrap();
         }
         let chunk = builder.finish();
         chunk
@@ -401,16 +407,16 @@ mod tests {
             ..Default::default()
         };
         let parser_config = ParserProperties::new(SourceFormat::DebeziumAvro, &props, &info)?;
-        let config = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
+        let config = DebeziumAvroParserConfig::new(parser_config.clone().encoding_config).await?;
         let columns = config
             .map_to_columns()?
             .into_iter()
             .map(CatColumnDesc::from)
             .map(|c| SourceColumnDesc::from(&c))
             .collect_vec();
-
         let parser =
-            DebeziumAvroParser::new(columns.clone(), config, Arc::new(Default::default()))?;
+            DebeziumParser::new(parser_config, columns.clone(), Arc::new(Default::default()))
+                .await?;
         let [(op, row)]: [_; 1] = parse_one(parser, columns, DEBEZIUM_AVRO_DATA.to_vec())
             .await
             .try_into()
