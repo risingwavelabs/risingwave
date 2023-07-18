@@ -158,11 +158,11 @@ message SinkDesc {
   repeated plan_common.ColumnCatalog column_catalogs = 10;
 }
 
-
 enum SinkLogStoreType {
   /// Default value is the normal in memory log store to be backward compatible with the previously unset value
-  InMemoryLogStore = 0;
-  KvLogStore = 1;
+  SINK_LOG_STORE_TYPE_UNSPECIFIED = 0;
+  KV_LOG_STORE = 1;
+  IN_MEMORY_LOG_STORE = 2;
 }
 
 message SinkNode {

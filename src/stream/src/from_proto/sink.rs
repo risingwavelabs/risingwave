@@ -56,7 +56,9 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .collect_vec();
 
         match node.log_store_type() {
-            SinkLogStoreType::InMemoryLogStore => {
+            // Default value is the normal in memory log store to be backward compatible with the
+            // previously unset value
+            SinkLogStoreType::InMemoryLogStore | SinkLogStoreType::Unspecified => {
                 let factory = BoundedInMemLogStoreFactory::new(1);
                 Ok(Box::new(
                     SinkExecutor::new(
