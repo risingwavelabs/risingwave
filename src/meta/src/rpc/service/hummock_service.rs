@@ -340,7 +340,7 @@ where
         &self,
         _request: Request<GetEpochRequest>,
     ) -> Result<Response<GetEpochResponse>, Status> {
-        let hummock_snapshot = self.hummock_manager.get_last_epoch()?;
+        let hummock_snapshot = self.hummock_manager.latest_snapshot();
         Ok(Response::new(GetEpochResponse {
             status: None,
             snapshot: Some(hummock_snapshot),
