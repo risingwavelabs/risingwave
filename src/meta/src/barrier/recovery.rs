@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
     BarrierCompleteResponse, BroadcastActorInfoTableRequest, BuildActorsRequest,
@@ -107,6 +107,8 @@ where
     }
 
     /// Recovery the whole cluster from the latest epoch.
+    ///
+    /// Returns the new epoch after recovery.
     pub(crate) async fn recovery(&self, prev_epoch: TracedEpoch) -> TracedEpoch {
         // pause discovery of all connector split changes and trigger config change.
         let _source_pause_guard = self.source_manager.paused.lock().await;
@@ -126,8 +128,9 @@ where
         let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<(TracedEpoch, Vec<BarrierCompleteResponse>)> = try {
+                    // Resolve actor info for recovery. If there's no actor to recover, most of the
+                    // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = self.resolve_actor_info_for_recovery().await;
-                    let mut new_epoch = prev_epoch.next();
 
                     // Migrate actors in expired CN to newly joined one.
                     let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
@@ -159,18 +162,18 @@ where
                         actor_splits: build_actor_connector_splits(&source_split_assignments),
                     })));
 
-                    let prev_epoch = new_epoch;
-                    new_epoch = prev_epoch.next();
+                    // Use a different `curr_epoch` for each recovery attempt.
+                    let new_epoch = prev_epoch.next();
 
-                    // checkpoint, used as init barrier to initialize all executors.
+                    // Inject the `Initial` barrier to initialize all executors.
                     let command_ctx = Arc::new(CommandContext::new(
                         self.fragment_manager.clone(),
                         self.env.stream_client_pool_ref(),
                         info,
-                        prev_epoch,
+                        prev_epoch.clone(),
                         new_epoch.clone(),
                         command,
-                        true,
+                        BarrierKind::Initial,
                         self.source_manager.clone(),
                         tracing::Span::current(), // recovery span
                     ));
@@ -365,6 +368,11 @@ where
 
     /// Update all actors in compute nodes.
     async fn update_actors(&self, info: &BarrierActorInfo) -> MetaResult<()> {
+        if info.actor_map.is_empty() {
+            tracing::debug!("no actor to update, skipping.");
+            return Ok(());
+        }
+
         let mut actor_infos = vec![];
         for (node_id, actors) in &info.actor_map {
             let host = info
@@ -405,6 +413,11 @@ where
 
     /// Build all actors in compute nodes.
     async fn build_actors(&self, info: &BarrierActorInfo) -> MetaResult<()> {
+        if info.actor_map.is_empty() {
+            tracing::debug!("no actor to build, skipping.");
+            return Ok(());
+        }
+
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
