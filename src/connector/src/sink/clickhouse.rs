@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use core::fmt::Debug;
-use core::mem;
 use std::collections::HashMap;
 
 use anyhow::anyhow;
@@ -39,6 +38,7 @@ use crate::sink::{
 use crate::source::DataType;
 
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
+const BUFFER_SIZE: usize = 1024;
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
@@ -217,8 +217,6 @@ pub struct ClickHouseSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     client: Client,
-    // Save the data to be inserted
-    buffer: BytesMut,
     is_append_only: bool,
     // Save some features of the clickhouse column type
     column_correct_vec: Vec<(bool, u8)>,
@@ -231,11 +229,13 @@ impl ClickHouseSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
+        if !is_append_only {
+            tracing::warn!("Update and delete are not recommended because of their impact on clickhouse performance.");
+        }
         let client = config
             .common
             .build_client()
             .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
-        let buffer_size = client.get_buffer_size();
         let query_column = format!("select distinct ?fields from system.columns where database = ? and table = ? order by position");
         let clickhouse_column = client
             .query(&query_column)
@@ -253,7 +253,6 @@ impl ClickHouseSinkWriter {
             schema,
             pk_indices,
             client,
-            buffer: BytesMut::with_capacity(buffer_size),
             is_append_only,
             column_correct_vec: column_correct_vec?,
         })
@@ -295,11 +294,8 @@ impl ClickHouseSinkWriter {
             if op != Op::Insert {
                 continue;
             }
-            self.build_row_binary(row)?;
-            let buffer = mem::replace(
-                &mut self.buffer,
-                BytesMut::with_capacity(self.client.get_buffer_size()),
-            );
+            let mut buffer = BytesMut::with_capacity(BUFFER_SIZE);
+            self.build_row_binary(row, &mut buffer)?;
             inter
                 .write_row_binary(buffer)
                 .await
@@ -313,33 +309,38 @@ impl ClickHouseSinkWriter {
     }
 
     /// Write row data in 'buffer'
-    fn build_row_binary(&mut self, row: RowRef<'_>) -> Result<()> {
+    fn build_row_binary(&mut self, row: RowRef<'_>, buffer: &mut BytesMut) -> Result<()> {
         for (index, row) in row.iter().enumerate() {
-            self.build_data_binary(index, row)?
+            self.build_data_binary(index, row, buffer)?
         }
         Ok(())
     }
 
-    fn build_data_binary(&mut self, index: usize, data: Option<ScalarRefImpl<'_>>) -> Result<()> {
+    fn build_data_binary(
+        &mut self,
+        index: usize,
+        data: Option<ScalarRefImpl<'_>>,
+        buffer: &mut BytesMut,
+    ) -> Result<()> {
         let &(can_null, accuracy_time) = self.column_correct_vec.get(index).unwrap();
         match data {
             Some(ScalarRefImpl::Int16(v)) => {
                 if can_null {
-                    self.buffer.put_u8(0);
+                    buffer.put_u8(0);
                 }
-                self.buffer.put_i16_le(v)
+                buffer.put_i16_le(v)
             }
             Some(ScalarRefImpl::Int32(v)) => {
                 if can_null {
-                    self.buffer.put_u8(0);
+                    buffer.put_u8(0);
                 }
-                self.buffer.put_i32_le(v)
+                buffer.put_i32_le(v)
             }
             Some(ScalarRefImpl::Int64(v)) => {
                 if can_null {
-                    self.buffer.put_u8(0);
+                    buffer.put_u8(0);
                 }
-                self.buffer.put_i64_le(v)
+                buffer.put_i64_le(v)
             }
             Some(ScalarRefImpl::Int256(_v)) => {
                 return Err(SinkError::ClickHouse(
@@ -348,34 +349,34 @@ impl ClickHouseSinkWriter {
             }
             Some(ScalarRefImpl::Serial(v)) => {
                 if can_null {
-                    self.buffer.put_u8(0);
+                    buffer.put_u8(0);
                 }
-                self.buffer.put_i64_le(v.into_inner())
+                buffer.put_i64_le(v.into_inner())
             }
             Some(ScalarRefImpl::Float32(v)) => {
                 if can_null {
-                    self.buffer.put_u8(0);
+                    buffer.put_u8(0);
                 }
-                self.buffer.put_f32_le(v.into_inner())
+                buffer.put_f32_le(v.into_inner())
             }
             Some(ScalarRefImpl::Float64(v)) => {
                 if can_null {
-                    self.buffer.put_u8(0);
+                    buffer.put_u8(0);
                 }
-                self.buffer.put_f64_le(v.into_inner())
+                buffer.put_f64_le(v.into_inner())
             }
             Some(ScalarRefImpl::Utf8(v)) => {
                 if can_null {
-                    self.buffer.put_u8(0);
+                    buffer.put_u8(0);
                 }
-                Self::put_unsigned_leb128(&mut self.buffer, v.len() as u64);
-                self.buffer.put_slice(v.as_bytes());
+                Self::put_unsigned_leb128(buffer, v.len() as u64);
+                buffer.put_slice(v.as_bytes());
             }
             Some(ScalarRefImpl::Bool(v)) => {
                 if can_null {
-                    self.buffer.put_u8(0);
+                    buffer.put_u8(0);
                 }
-                self.buffer.put_u8(v as _)
+                buffer.put_u8(v as _)
             }
             Some(ScalarRefImpl::Decimal(_v)) => todo!(),
             Some(ScalarRefImpl::Interval(_v)) => {
@@ -385,12 +386,11 @@ impl ClickHouseSinkWriter {
             }
             Some(ScalarRefImpl::Date(v)) => {
                 if can_null {
-                    self.buffer.put_u8(0);
+                    buffer.put_u8(0);
                 }
 
                 let days = v.get_nums_days_unix_epoch();
-                println!("{:?}", days);
-                self.buffer.put_i32_le(days);
+                buffer.put_i32_le(days);
             }
             Some(ScalarRefImpl::Time(_v)) => {
                 return Err(SinkError::ClickHouse(
@@ -399,10 +399,10 @@ impl ClickHouseSinkWriter {
             }
             Some(ScalarRefImpl::Timestamp(v)) => {
                 if can_null {
-                    self.buffer.put_u8(0);
+                    buffer.put_u8(0);
                 }
                 let time = v.get_timestamp_nsecs() / 10_i32.pow((9 - accuracy_time).into()) as i64;
-                self.buffer.put_i64_le(time);
+                buffer.put_i64_le(time);
             }
             Some(ScalarRefImpl::Timestamptz(_v)) => {
                 return Err(SinkError::ClickHouse(
@@ -412,9 +412,9 @@ impl ClickHouseSinkWriter {
             Some(ScalarRefImpl::Jsonb(_v)) => todo!(),
             Some(ScalarRefImpl::Struct(_v)) => todo!(),
             Some(ScalarRefImpl::List(v)) => {
-                Self::put_unsigned_leb128(&mut self.buffer, v.len() as u64);
+                Self::put_unsigned_leb128(buffer, v.len() as u64);
                 for data in v.iter() {
-                    self.build_data_binary(index, data)?;
+                    self.build_data_binary(index, data, buffer)?;
                 }
             }
             Some(ScalarRefImpl::Bytea(_v)) => {
@@ -424,7 +424,7 @@ impl ClickHouseSinkWriter {
             }
             None => {
                 if can_null {
-                    self.buffer.put_u8(1);
+                    buffer.put_u8(1);
                 } else {
                     return Err(SinkError::ClickHouse(
                         "clickhouse column can not insert null".to_string(),
@@ -435,7 +435,7 @@ impl ClickHouseSinkWriter {
         Ok(())
     }
 
-    fn put_unsigned_leb128(mut buffer: impl BufMut, mut value: u64) {
+    fn put_unsigned_leb128(buffer: &mut BytesMut, mut value: u64) {
         while {
             let mut byte = value as u8 & 0x7f;
             value >>= 7;
@@ -468,9 +468,6 @@ impl ClickHouseSinkWriter {
             .filter(|(index, _)| !self.pk_indices.contains(index))
             .map(|(_, value)| value.clone())
             .collect_vec();
-        let update: clickhouse::update::Update =
-            self.client
-                .update(&self.config.common.table, pk_name_0, field_names_update);
         for (index, (op, row)) in chunk.rows().enumerate() {
             let &(_, accuracy_time) = self.column_correct_vec.get(index).unwrap();
             match op {
@@ -482,11 +479,8 @@ impl ClickHouseSinkWriter {
                             Some(field_names.clone()),
                         )
                         .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
-                    self.build_row_binary(row)?;
-                    let buffer = mem::replace(
-                        &mut self.buffer,
-                        BytesMut::with_capacity(self.client.get_buffer_size()),
-                    );
+                    let mut buffer = BytesMut::with_capacity(BUFFER_SIZE);
+                    self.build_row_binary(row, &mut buffer)?;
                     inter
                         .write_row_binary(buffer)
                         .await
@@ -511,8 +505,12 @@ impl ClickHouseSinkWriter {
                     let pk = Self::build_ck_fields(row.datum_at(pk_index), accuracy_time)?
                         .ok_or(SinkError::ClickHouse(format!("pk can not none")))?;
                     let fields_vec = self.build_update_fields(row, accuracy_time)?;
-                    update
-                        .clone()
+                    self.client
+                        .update(
+                            &self.config.common.table,
+                            pk_name_0,
+                            field_names_update.clone(),
+                        )
                         .update_fields(fields_vec, pk)
                         .await
                         .map_err(|e| SinkError::ClickHouse(e.to_string()))?;
@@ -603,7 +601,6 @@ impl SinkWriterV1 for ClickHouseSinkWriter {
         } else if self.config.r#type == SINK_TYPE_DEBEZIUM {
             unreachable!()
         } else if self.config.r#type == SINK_TYPE_UPSERT {
-            tracing::warn!("Update and delete are not recommended because of their impact on clickhouse performance.");
             self.upsert(chunk).await
         } else {
             unreachable!()

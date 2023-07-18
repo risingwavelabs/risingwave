@@ -20,10 +20,10 @@ use risingwave_common::types::Datum;
 use super::state::{StateEvictHint, StateKey, WindowState};
 use crate::Result;
 
-pub struct WindowStates(Vec<Box<dyn WindowState + Send>>);
+pub struct WindowStates(Vec<Box<dyn WindowState + Send + Sync>>);
 
 impl WindowStates {
-    pub fn new(states: Vec<Box<dyn WindowState + Send>>) -> Self {
+    pub fn new(states: Vec<Box<dyn WindowState + Send + Sync>>) -> Self {
         assert!(!states.is_empty());
         Self(states)
     }
@@ -74,7 +74,7 @@ impl WindowStates {
 }
 
 impl Deref for WindowStates {
-    type Target = Vec<Box<dyn WindowState + Send>>;
+    type Target = Vec<Box<dyn WindowState + Send + Sync>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

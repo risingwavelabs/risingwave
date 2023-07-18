@@ -28,8 +28,10 @@ use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnCatalog, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_pb::catalog::PbSinkType;
+use risingwave_pb::connector_service::{PbSinkParam, TableSchema};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::ConnectorClient;
 use thiserror::Error;
@@ -37,7 +39,7 @@ pub use tracing;
 
 use self::catalog::SinkType;
 use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
-use crate::sink::catalog::SinkId;
+use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::clickhouse::CLICKHOUSE_SINK;
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
@@ -52,6 +54,69 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
+#[derive(Debug, Clone)]
+pub struct SinkParam {
+    pub sink_id: SinkId,
+    pub properties: HashMap<String, String>,
+    pub columns: Vec<ColumnDesc>,
+    pub pk_indices: Vec<usize>,
+    pub sink_type: SinkType,
+}
+
+impl SinkParam {
+    pub fn from_proto(pb_param: PbSinkParam) -> Self {
+        let table_schema = pb_param.table_schema.expect("should contain table schema");
+        Self {
+            sink_id: SinkId::from(pb_param.sink_id),
+            properties: pb_param.properties,
+            columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
+            pk_indices: table_schema
+                .pk_indices
+                .iter()
+                .map(|i| *i as usize)
+                .collect(),
+            sink_type: SinkType::from_proto(
+                PbSinkType::from_i32(pb_param.sink_type).expect("should be able to convert"),
+            ),
+        }
+    }
+
+    pub fn to_proto(&self) -> PbSinkParam {
+        PbSinkParam {
+            sink_id: self.sink_id.sink_id,
+            properties: self.properties.clone(),
+            table_schema: Some(TableSchema {
+                columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
+                pk_indices: self.pk_indices.iter().map(|i| *i as u32).collect(),
+            }),
+            sink_type: self.sink_type.to_proto().into(),
+        }
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema {
+            fields: self.columns.iter().map(Field::from).collect(),
+        }
+    }
+}
+
+impl From<SinkCatalog> for SinkParam {
+    fn from(sink_catalog: SinkCatalog) -> Self {
+        let columns = sink_catalog
+            .visible_columns()
+            .map(|col| col.column_desc.clone())
+            .collect();
+        Self {
+            sink_id: sink_catalog.id,
+            properties: sink_catalog.properties,
+            columns,
+            pk_indices: sink_catalog.downstream_pk,
+            sink_type: sink_catalog.sink_type,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
@@ -262,32 +327,11 @@ impl SinkConfig {
             _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
     }
-
-    pub fn get_connector(&self) -> &'static str {
-        match self {
-            SinkConfig::Kafka(_) => "kafka",
-            SinkConfig::Redis(_) => "redis",
-            SinkConfig::Remote(_) => "remote",
-            SinkConfig::BlackHole => "blackhole",
-            SinkConfig::Kinesis(_) => "kinesis",
-            SinkConfig::ClickHouse(_) => "clickhouse",
-        }
-    }
 }
 
-pub fn build_sink(
-    config: SinkConfig,
-    columns: &[ColumnCatalog],
-    pk_indices: Vec<usize>,
-    sink_type: SinkType,
-    sink_id: SinkId,
-) -> Result<SinkImpl> {
-    // The downstream sink can only see the visible columns.
-    let schema: Schema = columns
-        .iter()
-        .filter_map(|column| (!column.is_hidden).then(|| column.column_desc.clone().into()))
-        .collect();
-    SinkImpl::new(config, schema, pk_indices, sink_type, sink_id)
+pub fn build_sink(param: SinkParam) -> Result<SinkImpl> {
+    let config = SinkConfig::from_hashmap(param.properties.clone())?;
+    SinkImpl::new(config, param)
 }
 
 #[derive(Debug)]
@@ -298,6 +342,19 @@ pub enum SinkImpl {
     BlackHole(BlackHoleSink),
     Kinesis(KinesisSink),
     ClickHouse(ClickHouseSink),
+}
+
+impl SinkImpl {
+    pub fn get_connector(&self) -> &'static str {
+        match self {
+            SinkImpl::Kafka(_) => "kafka",
+            SinkImpl::Redis(_) => "redis",
+            SinkImpl::Remote(_) => "remote",
+            SinkImpl::BlackHole(_) => "blackhole",
+            SinkImpl::Kinesis(_) => "kinesis",
+            SinkImpl::ClickHouse(_) => "clickhouse",
+        }
+    }
 }
 
 #[macro_export]
@@ -317,36 +374,28 @@ macro_rules! dispatch_sink {
 }
 
 impl SinkImpl {
-    pub fn new(
-        cfg: SinkConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        sink_type: SinkType,
-        sink_id: SinkId,
-    ) -> Result<Self> {
+    pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, schema)?),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, param.schema())?),
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
                 *cfg,
-                schema,
-                pk_indices,
-                sink_type.is_append_only(),
+                param.schema(),
+                param.pk_indices,
+                param.sink_type.is_append_only(),
             )),
             SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(
                 *cfg,
-                schema,
-                pk_indices,
-                sink_type.is_append_only(),
+                param.schema(),
+                param.pk_indices,
+                param.sink_type.is_append_only(),
             )),
-            SinkConfig::Remote(cfg) => {
-                SinkImpl::Remote(RemoteSink::new(cfg, schema, pk_indices, sink_id, sink_type))
-            }
+            SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
             SinkConfig::ClickHouse(cfg) => SinkImpl::ClickHouse(ClickHouseSink::new(
                 *cfg,
-                schema,
-                pk_indices,
-                sink_type.is_append_only(),
+                param.schema(),
+                param.pk_indices,
+                param.sink_type.is_append_only(),
             )?),
         })
     }

@@ -60,6 +60,13 @@ public class MySqlDialect implements JdbcDialect {
     public void bindUpsertStatement(
             PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
             throws SQLException {
+        bindInsertIntoStatement(stmt, conn, tableSchema, row);
+    }
+
+    @Override
+    public void bindInsertIntoStatement(
+            PreparedStatement stmt, Connection conn, TableSchema tableSchema, SinkRow row)
+            throws SQLException {
         var columnDescs = tableSchema.getColumnDescs();
         int placeholderIdx = 1;
         for (int i = 0; i < row.size(); i++) {

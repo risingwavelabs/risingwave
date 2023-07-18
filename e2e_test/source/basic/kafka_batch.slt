@@ -199,3 +199,6 @@ select * from s9 order by id
 
 statement ok
 drop table s8
+
+statement ok
+drop source s9
