@@ -23,11 +23,22 @@ use crate::optimizer::property::Order;
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::PlanRef;
 
-/// Transforms the following pattern to group `TopN`
+/// Transforms the following pattern to group `TopN` (No Ranking Output).
 ///
 /// ```sql
-/// SELECT .. from
-///   (SELECT .., ROW_NUMBER() OVER(PARTITION BY .. ORDER BY ..) rank from ..)
+/// -- project - filter - over window
+/// SELECT .. FROM
+///   (SELECT .., ROW_NUMBER() OVER(PARTITION BY .. ORDER BY ..) rank FROM ..)
+/// WHERE rank [ < | <= | > | >= | = ] ..;
+/// ```
+///
+/// Transforms the following pattern to `OverWindow` + group `TopN` (Ranking Output).
+/// The `TopN` decreases the number of rows to be processed by the `OverWindow`.
+///
+/// ```sql
+/// -- filter - over window
+/// SELECT .., ROW_NUMBER() OVER(PARTITION BY .. ORDER BY ..) rank
+/// FROM ..
 /// WHERE rank [ < | <= | > | >= | = ] ..;
 /// ```
 pub struct OverWindowToTopNRule;
@@ -59,8 +70,8 @@ impl Rule for OverWindowToTopNRule {
             // Queries with multiple window function calls are not supported yet.
             return None;
         }
-        let f = &over_window.window_functions()[0];
-        if !f.kind.is_rank() {
+        let window_func = &over_window.window_functions()[0];
+        if !window_func.kind.is_rank() {
             // Only rank functions can be converted to TopN.
             return None;
         }
@@ -68,7 +79,7 @@ impl Rule for OverWindowToTopNRule {
         let output_len = over_window.schema().len();
         let window_func_pos = output_len - 1;
 
-        let with_ties = match f.kind {
+        let with_ties = match window_func.kind {
             // Only `ROW_NUMBER` and `RANK` can be optimized to TopN now.
             WindowFuncKind::RowNumber => false,
             WindowFuncKind::Rank => true,
@@ -91,27 +102,36 @@ impl Rule for OverWindowToTopNRule {
             return None;
         }
 
-        // TODO(st1page): refine this with if_chain
-        if let Some(project) = project {
+        let topn: PlanRef = LogicalTopN::new(
+            over_window.input(),
+            limit,
+            offset,
+            with_ties,
+            Order {
+                column_orders: window_func.order_by.to_vec(),
+            },
+            window_func.partition_by.iter().map(|i| i.index).collect(),
+        )
+        .into();
+        let filter = LogicalFilter::create(topn, other_pred);
+
+        let plan = if let Some(project) = project {
             let referred_cols = collect_input_refs(output_len, project.exprs());
             if !referred_cols.contains(window_func_pos) {
-                let topn: PlanRef = LogicalTopN::new(
-                    over_window.input(),
-                    limit,
-                    offset,
-                    with_ties,
-                    Order {
-                        column_orders: f.order_by.to_vec(),
-                    },
-                    f.partition_by.iter().map(|i| i.index).collect(),
-                )
-                .into();
-                let filter = LogicalFilter::create(topn, other_pred);
-                return Some(project.clone_with_input(filter).into());
+                // No Ranking Output
+                project.clone_with_input(filter).into()
+            } else {
+                // Ranking Output, with project
+                project
+                    .clone_with_input(over_window.clone_with_input(filter).into())
+                    .into()
             }
-        }
-        ctx.warn_to_user("fail to transform overAgg to groupTopN: the rank cannot be included in the outer select_list, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
-        None
+        } else {
+            // Ranking Output, without project
+            ctx.warn_to_user("It can be inefficient to output ranking number in Top-N, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
+            over_window.clone_with_input(filter).into()
+        };
+        Some(plan)
     }
 }
 

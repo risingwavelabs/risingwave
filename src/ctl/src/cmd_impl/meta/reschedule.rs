@@ -118,6 +118,7 @@ pub async fn reschedule(
     revision: Option<u64>,
     from: Option<String>,
     dry_run: bool,
+    resolve_no_shuffle: bool,
 ) -> Result<()> {
     let meta_client = context.meta_client().await?;
 
@@ -157,7 +158,9 @@ pub async fn reschedule(
 
     if !dry_run {
         println!("---------------------------");
-        let (success, revision) = meta_client.reschedule(reschedules, revision).await?;
+        let (success, revision) = meta_client
+            .reschedule(reschedules, revision, resolve_no_shuffle)
+            .await?;
 
         if !success {
             println!(

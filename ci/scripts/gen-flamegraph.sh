@@ -27,7 +27,7 @@ get_nexmark_queries_to_run() {
       https://api.github.com/repos/risingwavelabs/risingwave/issues/"$PULL_REQUEST"/labels \
     | parse_labels)
   elif [[ "$NEXMARK_QUERIES" == "all" ]]; then
-    export NEXMARK_QUERIES="$(ls $QUERY_DIR | sed -n 's/^q\([0-9]*\)\.sql/\1/p' | sort -n | sed 's/\(.*\)/nexmark-q\1/')"
+    export NEXMARK_QUERIES="$(ls $QUERY_DIR | grep -v "\.drop\.sql" | grep -v "ddl.sql" | sed 's/\(.*\)\.sql/nexmark-\1/' | sort)"
   else
     echo "NEXMARK_QUERIES already set."
   fi
