@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::is_system_schema;
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
 use risingwave_pb::user::grant_privilege::{PbAction, PbObject};
@@ -187,6 +188,13 @@ impl SessionImpl {
         schema_name: &str,
         relation: &impl OwnedByUserCatalog,
     ) -> Result<()> {
+        if is_system_schema(schema_name) {
+            return Err(PermissionDenied(format!(
+                "cannot drop relations under {} because they are required by the database system",
+                schema_name
+            ))
+            .into());
+        }
         let schema_owner = self
             .env()
             .catalog_reader()
