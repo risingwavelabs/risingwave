@@ -239,9 +239,9 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    /// Clear all senders and collect rx in barrier manager.
-    pub fn clear_all_senders_and_collect_rx(&self) {
-        self.context.lock_barrier_manager().clear();
+    /// Reset the state of the barrier manager.
+    pub fn reset_barrier_manager(&self) {
+        self.context.lock_barrier_manager().reset();
     }
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
@@ -323,9 +323,9 @@ impl LocalStreamManager {
     /// Force stop all actors on this worker, and then drop their resources.
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
         self.core.lock().await.stop_all_actors().await;
+        self.reset_barrier_manager();
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
-        self.clear_all_senders_and_collect_rx();
 
         Ok(())
     }

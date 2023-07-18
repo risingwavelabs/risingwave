@@ -200,8 +200,8 @@ impl LocalBarrierManager {
             })
     }
 
-    /// Clear all internal states.
-    pub fn clear(&mut self) {
+    /// Reset all internal states.
+    pub fn reset(&mut self) {
         self.senders.clear();
         self.collect_complete_receiver.clear();
 
