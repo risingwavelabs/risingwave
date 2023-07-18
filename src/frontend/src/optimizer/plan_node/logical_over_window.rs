@@ -454,13 +454,11 @@ impl LogicalOverWindow {
         let mut args = window_function.args;
         let (kind, frame) = match window_function.kind {
             WindowFuncKind::RowNumber | WindowFuncKind::Rank | WindowFuncKind::DenseRank => {
-                // ignore user-defined frame for rank functions
+                // ignore user-defined frame for rank functions, also, rank functions only care
+                // about the rows before current row
                 (
                     window_function.kind,
-                    Frame::rows(
-                        FrameBound::UnboundedPreceding,
-                        FrameBound::UnboundedFollowing,
-                    ),
+                    Frame::rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow),
                 )
             }
             WindowFuncKind::Lag | WindowFuncKind::Lead => {
