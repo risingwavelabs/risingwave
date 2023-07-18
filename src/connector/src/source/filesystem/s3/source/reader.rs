@@ -84,6 +84,7 @@ impl S3FileReader {
             let bytes = read?;
             let len = bytes.len();
             let msg = SourceMessage {
+                key: None,
                 payload: Some(bytes.as_ref().to_vec()),
                 offset: offset.to_string(),
                 split_id: split.id(),
@@ -201,7 +202,7 @@ impl S3FileReader {
             );
 
             let parser =
-                ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)?;
+                ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
             let msg_stream = if matches!(
                 parser,
                 ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
