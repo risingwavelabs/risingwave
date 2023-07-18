@@ -184,6 +184,7 @@ message ListFragmentDistributionResponse {
     TableFragments.Fragment.FragmentDistributionType distribution_type = 3;
     repeated uint32 state_table_ids = 4;
     repeated uint32 upstream_fragment_ids = 5;
+    uint32 fragment_type_mask = 6;
   }
   repeated FragmentDistribution distributions = 1;
 }
@@ -403,6 +404,7 @@ message RescheduleRequest {
   // reschedule plan for each fragment
   map<uint32, Reschedule> reschedules = 1;
   uint64 revision = 2;
+  bool resolve_no_shuffle_upstream = 3;
 }
 
 message RescheduleResponse {

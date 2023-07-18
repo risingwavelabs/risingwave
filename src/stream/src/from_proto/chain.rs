@@ -166,6 +166,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     schema,
                     params.pk_indices,
                     stream.streaming_metrics.clone(),
+                    params.env.config().developer.chunk_size,
                 )
                 .boxed()
             }

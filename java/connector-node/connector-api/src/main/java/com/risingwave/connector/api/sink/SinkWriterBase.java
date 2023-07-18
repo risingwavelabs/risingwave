@@ -14,12 +14,16 @@
 
 package com.risingwave.connector.api.sink;
 
-import java.util.Iterator;
+import com.risingwave.connector.api.TableSchema;
 
-public interface Sink {
-    void write(Iterator<SinkRow> rows);
+public abstract class SinkWriterBase implements SinkWriterV1 {
+    TableSchema tableSchema;
 
-    void sync();
+    public SinkWriterBase(TableSchema tableSchema) {
+        this.tableSchema = tableSchema;
+    }
 
-    void drop();
+    public TableSchema getTableSchema() {
+        return tableSchema;
+    }
 }

@@ -17,8 +17,9 @@ package com.risingwave.connector;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.connector.api.sink.SinkWriter;
+import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
 import java.sql.*;
@@ -36,10 +37,10 @@ public class JDBCSinkFactory implements SinkFactory {
     public static final String TABLE_NAME_PROP = "table.name";
 
     @Override
-    public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
         JDBCSinkConfig config = mapper.convertValue(tableProperties, JDBCSinkConfig.class);
-        return new JDBCSink(config, tableSchema);
+        return new SinkWriterV1.Adapter(new JDBCSink(config, tableSchema));
     }
 
     @Override

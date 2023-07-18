@@ -1874,6 +1874,8 @@ impl Parser {
             self.parse_create_connection()
         } else if self.parse_keyword(Keyword::FUNCTION) {
             self.parse_create_function(or_replace, temporary)
+        } else if self.parse_keyword(Keyword::AGGREGATE) {
+            self.parse_create_aggregate(or_replace)
         } else if or_replace {
             self.expected(
                 "[EXTERNAL] TABLE or [MATERIALIZED] VIEW or [MATERIALIZED] SOURCE or SINK or FUNCTION after CREATE OR REPLACE",
@@ -2027,6 +2029,31 @@ impl Parser {
             name,
             args,
             returns: return_type,
+            params,
+        })
+    }
+
+    fn parse_create_aggregate(&mut self, or_replace: bool) -> Result<Statement, ParserError> {
+        let name = self.parse_object_name()?;
+        self.expect_token(&Token::LParen)?;
+        let args = self.parse_comma_separated(Parser::parse_function_arg)?;
+        self.expect_token(&Token::RParen)?;
+
+        let return_type = if self.parse_keyword(Keyword::RETURNS) {
+            Some(self.parse_data_type()?)
+        } else {
+            None
+        };
+
+        let append_only = self.parse_keywords(&[Keyword::APPEND, Keyword::ONLY]);
+        let params = self.parse_create_function_body()?;
+
+        Ok(Statement::CreateAggregate {
+            or_replace,
+            name,
+            args,
+            returns: return_type,
+            append_only,
             params,
         })
     }
@@ -3800,7 +3827,7 @@ impl Parser {
                         return self.expected("from after indexes", self.peek_token());
                     }
                 }
-                Keyword::CLUSTERS => {
+                Keyword::CLUSTER => {
                     return Ok(Statement::ShowObjects(ShowObject::Cluster));
                 }
                 _ => {}

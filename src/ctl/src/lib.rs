@@ -366,6 +366,9 @@ enum MetaCommands {
         /// Show the plan only, no actual operation
         #[clap(long, default_value = "false")]
         dry_run: bool,
+        /// Resolve NO_SHUFFLE upstream
+        #[clap(long, default_value = "false")]
+        resolve_no_shuffle: bool,
     },
     /// backup meta by taking a meta snapshot
     BackupMeta,
@@ -533,7 +536,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             dry_run,
             plan,
             revision,
-        }) => cmd_impl::meta::reschedule(context, plan, revision, from, dry_run).await?,
+            resolve_no_shuffle,
+        }) => {
+            cmd_impl::meta::reschedule(context, plan, revision, from, dry_run, resolve_no_shuffle)
+                .await?
+        }
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?

@@ -744,6 +744,7 @@ mod tests {
             let hummock_manager = HummockManager::new(
                 env.clone(),
                 cluster_manager.clone(),
+                fragment_manager.clone(),
                 meta_metrics.clone(),
                 compactor_manager.clone(),
                 catalog_manager.clone(),

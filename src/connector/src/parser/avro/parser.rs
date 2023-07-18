@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -26,16 +25,78 @@ use url::Url;
 
 use super::schema_resolver::*;
 use super::util::avro_schema_to_column_descs;
-use crate::common::UpsertMessage;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
+use crate::parser::unified::AccessImpl;
 use crate::parser::{
-    ByteStreamSourceParser, EncodingProperties, ParserProperties, SourceStreamChunkRowWriter,
-    WriteGuard,
+    AccessBuilder, ByteStreamSourceParser, EncodingProperties, EncodingType,
+    SourceStreamChunkRowWriter, WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+
+// Default avro access builder
+#[derive(Debug)]
+pub struct AvroAccessBuilder {
+    schema: Arc<Schema>,
+    pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+    value: Option<Value>,
+}
+
+impl AccessBuilder for AvroAccessBuilder {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        self.value = self.parse_avro_value(&payload, Some(&*self.schema)).await?;
+        Ok(AccessImpl::Avro(AvroAccess::new(
+            self.value.as_ref().unwrap(),
+            AvroParseOptions::default().with_schema(&self.schema),
+        )))
+    }
+}
+
+impl AvroAccessBuilder {
+    pub fn new(config: AvroParserConfig, _encoding_type: EncodingType) -> Result<Self> {
+        let AvroParserConfig {
+            schema,
+            schema_resolver,
+            ..
+        } = config;
+        Ok(Self {
+            schema,
+            schema_resolver,
+            value: None,
+        })
+    }
+
+    async fn parse_avro_value(
+        &self,
+        payload: &[u8],
+        reader_schema: Option<&Schema>,
+    ) -> anyhow::Result<Option<Value>> {
+        // parse payload to avro value
+        // if use confluent schema, get writer schema from confluent schema registry
+        if let Some(resolver) = &self.schema_resolver {
+            let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
+            let writer_schema = resolver.get(schema_id).await?;
+            Ok(Some(from_avro_datum(
+                writer_schema.as_ref(),
+                &mut raw_payload,
+                reader_schema,
+            )?))
+        } else if let Some(schema) = reader_schema {
+            let mut reader = Reader::with_schema(schema, payload)?;
+            match reader.next() {
+                Some(Ok(v)) => Ok(Some(v)),
+                Some(Err(e)) => Err(e)?,
+                None => {
+                    anyhow::bail!("avro parse unexpected eof")
+                }
+            }
+        } else {
+            unreachable!("both schema_resolver and reader_schema not exist");
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct AvroParser {
@@ -56,9 +117,8 @@ pub struct AvroParserConfig {
 }
 
 impl AvroParserConfig {
-    pub async fn new(parser_properties: ParserProperties) -> Result<Self> {
-        let avro_config =
-            try_match_expand!(parser_properties.encoding_config, EncodingProperties::Avro)?;
+    pub async fn new(encoding_properties: EncodingProperties) -> Result<Self> {
+        let avro_config = try_match_expand!(encoding_properties, EncodingProperties::Avro)?;
         let schema_location = &avro_config.row_schema_location;
         let enable_upsert = avro_config.enable_upsert;
         let url = Url::parse(schema_location).map_err(|e| {
@@ -192,32 +252,17 @@ impl AvroParser {
 
     pub(crate) async fn parse_inner(
         &self,
-        payload: Vec<u8>,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let (raw_key, raw_value) = if self.is_enable_upsert() {
-            let msg: UpsertMessage<'_> = bincode::deserialize(&payload).map_err(|e| {
-                RwError::from(ProtocolError(format!(
-                    "extract payload err {:?}, you may need to check the 'upsert' parameter",
-                    e
-                )))
-            })?;
-            if !msg.record.is_empty() {
-                (Some(msg.primary_key), Some(msg.record))
-            } else {
-                (Some(msg.primary_key), None)
-            }
-        } else {
-            (None, Some(Cow::from(&payload)))
-        };
-
-        let avro_value = if let Some(payload) = raw_value {
+        let avro_value = if let Some(payload) = payload {
             self.parse_avro_value(payload.as_ref(), Some(&*self.schema))
                 .await?
         } else {
             None
         };
-        let avro_key = if let Some(payload) = raw_key {
+        let avro_key = if let Some(payload) = key {
             self.parse_avro_value(payload.as_ref(), self.key_schema.as_deref())
                 .await?
         } else {
@@ -262,10 +307,11 @@ impl ByteStreamSourceParser for AvroParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        self.parse_inner(key, payload, writer).await
     }
 }
 
@@ -371,7 +417,7 @@ mod test {
             ..Default::default()
         };
         let parser_config = ParserProperties::new(SourceFormat::Avro, &HashMap::new(), &info)?;
-        AvroParserConfig::new(parser_config).await
+        AvroParserConfig::new(parser_config.encoding_config).await
     }
 
     async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {
@@ -391,12 +437,15 @@ mod test {
         writer.append(record.clone()).unwrap();
         let flush = writer.flush().unwrap();
         assert!(flush > 0);
-        let input_data = writer.into_inner().unwrap();
+        let input_data = Some(writer.into_inner().unwrap());
         let columns = build_rw_columns();
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
         {
             let writer = builder.row_writer();
-            avro_parser.parse_inner(input_data, writer).await.unwrap();
+            avro_parser
+                .parse_inner(None, input_data, writer)
+                .await
+                .unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
@@ -512,7 +561,7 @@ mod test {
                 let inner_schema = union_schema
                     .variants()
                     .iter()
-                    .find_or_first(|s| s != &&Schema::Null)
+                    .find_or_first(|s| !matches!(s, &&Schema::Null))
                     .unwrap();
 
                 match build_field(inner_schema) {
