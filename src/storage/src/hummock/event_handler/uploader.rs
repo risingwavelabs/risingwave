@@ -837,14 +837,6 @@ impl HummockUploader {
             self.max_syncing_epoch = max_committed_epoch;
             // there must not be any sealed data below MCE
             if let Some(&epoch) = self.sealed_data.epochs.back() {
-                if epoch < max_committed_epoch {
-                    tracing::error!(
-                        "epoch {} < max_committed_epoch {}",
-                        epoch,
-                        max_committed_epoch
-                    );
-                    std::process::abort();
-                }
                 assert_gt!(epoch, max_committed_epoch);
             }
         }

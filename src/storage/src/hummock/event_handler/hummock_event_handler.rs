@@ -514,8 +514,6 @@ impl HummockEventHandler {
                     }
                 },
                 Either::Right(event) => {
-                    tracing::info!(?event, "handle event");
-
                     match event {
                         HummockEvent::BufferMayFlush => {
                             self.uploader.may_flush();

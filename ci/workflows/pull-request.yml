@@ -287,7 +287,7 @@ steps:
     cancel_on_build_failing: true
 
   - label: "recovery test (deterministic simulation)"
-    command: "TEST_NUM=1 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=8 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
       # - seek-oss/aws-sm#v2.3.1:
