@@ -5,7 +5,7 @@
     select x + y, y, 2, 1+row_number() over(PARTITION BY y + y ORDER BY x-1), sum(x) over(partition by x * x ORDER BY x-1) from t;
   logical_plan: |-
     LogicalProject { exprs: [(t.x + t.y) as $expr4, t.y, 2:Int32, (1:Int32 + row_number) as $expr5, sum] }
-    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr1 ORDER BY $expr2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), sum(t.x) OVER(PARTITION BY $expr3 ORDER BY $expr2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr1 ORDER BY $expr2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum(t.x) OVER(PARTITION BY $expr3 ORDER BY $expr2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─LogicalProject { exprs: [t.x, t.y, t._row_id, (t.y + t.y) as $expr1, (t.x - 1:Int32) as $expr2, (t.x * t.x) as $expr3] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
 - id: window function call in ORDER BY
@@ -15,7 +15,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.x] }
     └─LogicalProject { exprs: [t.x, row_number] }
-      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─LogicalProject { exprs: [t.x, t._row_id] }
           └─LogicalScan { table: t, columns: [t.x, t._row_id] }
 - id: window function call in GROUP BY
@@ -375,7 +375,7 @@
     select row_number() over(PARTITION BY x ORDER BY x), rank() over(ORDER BY x) from t;
   logical_plan: |-
     LogicalProject { exprs: [row_number, rank] }
-    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), rank() OVER(ORDER BY t.x ASCROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(ORDER BY t.x ASCROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─LogicalProject { exprs: [t.x, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
@@ -390,20 +390,20 @@
     select row_number() over (PARTITION BY x ORDER BY y) from t;
   logical_plan: |-
     LogicalProject { exprs: [row_number] }
-    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [row_number] }
-      └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─BatchExchange { order: [t.x ASC, t.y ASC], dist: HashShard(t.x) }
           └─BatchSort { order: [t.x ASC, t.y ASC] }
             └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [row_number, t._row_id(hidden), t.x(hidden)], stream_key: [t._row_id, t.x], pk_columns: [t._row_id, t.x], pk_conflict: NoCheck }
     └─StreamProject { exprs: [row_number, t._row_id, t.x] }
-      └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard(t.x) }
           └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN by row_number with rank output
@@ -416,19 +416,19 @@
     LogicalProject { exprs: [t.x, row_number] }
     └─LogicalFilter { predicate: (row_number < 3:Int32) }
       └─LogicalProject { exprs: [t.x, row_number] }
-        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [t.x, t._row_id] }
             └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─BatchSort { order: [t.x ASC, t.x ASC] }
         └─BatchGroupTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [0] }
           └─BatchExchange { order: [], dist: HashShard(t.x) }
             └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, t._row_id(hidden), rank], stream_key: [t._row_id, x], pk_columns: [t._row_id, x], pk_conflict: NoCheck }
-    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─StreamGroupTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [0] }
         └─StreamExchange { dist: HashShard(t.x) }
           └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
@@ -442,7 +442,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (row_number <= 3:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, row_number] }
-        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan_for_batch: |-
@@ -469,7 +469,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (row_number < 3:Int32) AND (t.x > t.y) }
       └─LogicalProject { exprs: [t.x, t.y, row_number] }
-        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan_for_batch: |-
@@ -498,7 +498,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (rank <= 3:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, rank] }
-        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan_for_batch: |-
@@ -526,7 +526,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (rank <= 3:Int32) AND (rank > 1:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, rank] }
-        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_error: |-
@@ -616,14 +616,14 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (3:Int32 < row_number) AND (row_number = 6:Int32) AND (row_number <= 5:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, row_number] }
-        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.x, t.y] }
       └─BatchFilter { predicate: (3:Int32 < row_number) AND (row_number = 6:Int32) AND (row_number <= 5:Int32) }
-        └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
             └─BatchSort { order: [t.y ASC, t.x ASC] }
               └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
@@ -631,7 +631,7 @@
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.y, t._row_id] }
       └─StreamFilter { predicate: (3:Int32 < row_number) AND (row_number = 6:Int32) AND (row_number <= 5:Int32) }
-        └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─StreamExchange { dist: HashShard(t.y) }
             └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - id: Deduplication (Top1) by row_number
@@ -644,7 +644,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (row_number = 1:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, row_number] }
-        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan_for_batch: |-
@@ -671,7 +671,7 @@
     LogicalProject { exprs: [t.z] }
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, t.z, row_number] }
-        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x, t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x, t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id] }
   optimized_logical_plan_for_batch: |-
@@ -810,7 +810,7 @@
       └─LogicalProject { exprs: [t.x, t.y, t.z] }
         └─LogicalFilter { predicate: (row_number <= 3:Int32) }
           └─LogicalProject { exprs: [t.x, t.y, t.z, row_number] }
-            └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+            └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
               └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id] }
                 └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id] }
   batch_plan: |-
@@ -845,7 +845,7 @@
       │ └─LogicalProject { exprs: [t.x, t.z] }
       │   └─LogicalFilter { predicate: (row_number = 1:Int32) }
       │     └─LogicalProject { exprs: [t.x, t.y, t.z, row_number] }
-      │       └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+      │       └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       │         └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id] }
       │           └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id] }
@@ -871,20 +871,20 @@
     select *, rank() over(PARTITION BY x ORDER BY y) w0, sum(x) over(PARTITION BY z ORDER BY y) w1, row_number() over(PARTITION BY x ORDER BY y) w2, rank() over(PARTITION BY y ORDER BY x) w3 from t;
   logical_plan: |-
     LogicalProject { exprs: [t.x, t.y, t.z, rank, sum, row_number, rank] }
-    └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), sum(t.x) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum(t.x) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.x, t.y, t.z, rank, sum, row_number, rank] }
-    └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.x, t.y, t.z, rank, sum, row_number, rank] }
-    └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
   batch_error: |-
     Feature is not yet implemented: `rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet
