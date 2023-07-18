@@ -320,12 +320,12 @@ impl ConnectorProperties {
     }
 
     pub fn is_cdc_connector(&self) -> bool {
-        match self {
+        matches!(
+            self,
             ConnectorProperties::MySqlCdc(_)
-            | ConnectorProperties::PostgresCdc(_)
-            | ConnectorProperties::CitusCdc(_) => true,
-            _ => false,
-        }
+                | ConnectorProperties::PostgresCdc(_)
+                | ConnectorProperties::CitusCdc(_)
+        )
     }
 }
 
