@@ -204,7 +204,7 @@ impl Compactor {
             Err(e) => {
                 tracing::error!("Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error {:?}", compact_task.existing_table_ids, e);
                 let task_status = TaskStatus::ExecuteFailed;
-                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status);
+                return Self::compact_done(compact_task, context.clone(), vec![], task_status);
             }
             Ok(extractor) => extractor,
         };
@@ -218,7 +218,7 @@ impl Compactor {
             if !removed_tables.is_empty() {
                 tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
                 let task_status = TaskStatus::ExecuteFailed;
-                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status);
+                return Self::compact_done(compact_task, context.clone(), vec![], task_status);
             }
         }
 
@@ -252,7 +252,7 @@ impl Compactor {
             Err(e) => {
                 tracing::warn!("Failed to generate_splits {:#?}", e);
                 task_status = TaskStatus::ExecuteFailed;
-                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status);
+                return Self::compact_done(compact_task, context.clone(), vec![], task_status);
             }
         }
         // Number of splits (key ranges) is equal to number of compaction tasks
@@ -275,7 +275,7 @@ impl Compactor {
             Err(err) => {
                 tracing::warn!("Failed to build delete range aggregator {:#?}", err);
                 task_status = TaskStatus::ExecuteFailed;
-                return Self::compact_done(&mut compact_task, context.clone(), vec![], task_status);
+                return Self::compact_done(compact_task, context.clone(), vec![], task_status);
             }
         };
 
@@ -308,12 +308,7 @@ impl Compactor {
                 context.output_memory_limiter.quota()
             );
             task_status = TaskStatus::NoAvailResourceCanceled;
-            return Self::compact_done(
-                &mut compact_task,
-                context.clone(),
-                output_ssts,
-                task_status,
-            );
+            return Self::compact_done(compact_task, context.clone(), output_ssts, task_status);
         }
 
         drop(memory_detector);
@@ -399,7 +394,7 @@ impl Compactor {
 
         // After a compaction is done, mutate the compaction task.
         let (compact_task, table_stats) =
-            Self::compact_done(&mut compact_task, context.clone(), output_ssts, task_status);
+            Self::compact_done(compact_task, context.clone(), output_ssts, task_status);
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
             "Finished compaction task in {:?}ms: {}",
@@ -417,7 +412,7 @@ impl Compactor {
 
     /// Fills in the compact task and tries to report the task result to meta node.
     fn compact_done(
-        compact_task: &mut CompactTask,
+        mut compact_task: CompactTask,
         context: Arc<CompactorContext>,
         output_ssts: Vec<CompactOutput>,
         task_status: TaskStatus,
@@ -456,7 +451,7 @@ impl Compactor {
             .with_label_values(&[&group_label, level_label.as_str()])
             .inc_by(compact_task.sorted_output_ssts.len() as u64);
 
-        (compact_task.clone(), table_stats_map)
+        (compact_task, table_stats_map)
     }
 
     /// The background compaction thread that receives compaction tasks from hummock compaction
@@ -545,6 +540,8 @@ impl Compactor {
                                 )),
                             }) {
                                 tracing::warn!("Failed to report task progress. {e:?}");
+                                // re subscribe stream
+                                continue 'start_stream;
                             }
 
                             tracing::info!("TRACE workload {:?} running_task_count {:?} pull_task_ack {}", last_workload, running_task_count.load(Ordering::Relaxed), pull_task_ack.load(Ordering::Relaxed));
@@ -563,6 +560,9 @@ impl Compactor {
                                         )),
                                     }) {
                                         tracing::warn!("Failed to report task progress. {e:?}");
+
+                                        // re subscribe stream
+                                        continue 'start_stream;
                                     } else {
                                         pull_task_ack.store(false, Ordering::SeqCst)
                                     }

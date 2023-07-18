@@ -917,12 +917,6 @@ where
 
             let mut compact_task_assignment =
                 BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
-            if let Some(assignment) = compact_task_assignment.get(&compact_task.task_id) {
-                return Err(Error::CompactionTaskAlreadyAssigned(
-                    compact_task.task_id,
-                    assignment.context_id,
-                ));
-            }
             compact_task_assignment.insert(
                 compact_task.task_id,
                 CompactTaskAssignment {
@@ -2183,7 +2177,7 @@ where
                                     }
 
                                     hummock_manager
-                                        .on_handle_trigger_multi_grouop(
+                                        .on_handle_trigger_multi_group(
                                             compact_task::TaskType::Dynamic,
                                         )
                                         .await;
@@ -2196,7 +2190,7 @@ where
                                     }
 
                                     hummock_manager
-                                        .on_handle_trigger_multi_grouop(
+                                        .on_handle_trigger_multi_group(
                                             compact_task::TaskType::SpaceReclaim,
                                         )
                                         .await;
@@ -2209,7 +2203,7 @@ where
                                     }
 
                                     hummock_manager
-                                        .on_handle_trigger_multi_grouop(compact_task::TaskType::Ttl)
+                                        .on_handle_trigger_multi_group(compact_task::TaskType::Ttl)
                                         .await;
                                 }
                             }
@@ -2628,7 +2622,7 @@ where
             .unwrap();
     }
 
-    async fn on_handle_trigger_multi_grouop(&self, task_type: compact_task::TaskType) {
+    async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
         for cg_id in self.compaction_group_ids().await {
             if let Err(e) = self.compaction_state.try_sched_compaction(cg_id, task_type) {
                 tracing::warn!(
