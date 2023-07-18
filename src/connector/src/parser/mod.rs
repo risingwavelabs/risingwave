@@ -438,9 +438,7 @@ impl AccessBuilderImpl {
                 AccessBuilderImpl::Protobuf(ProtobufAccessBuilder::new(config)?)
             }
             EncodingProperties::Bytes => AccessBuilderImpl::Bytes(BytesAccessBuilder::new()?),
-            EncodingProperties::Json(config) => {
-                AccessBuilderImpl::Json(JsonAccessBuilder::new()?)
-            }
+            EncodingProperties::Json(_) => AccessBuilderImpl::Json(JsonAccessBuilder::new()?),
             EncodingProperties::Csv(_) => unreachable!(),
             EncodingProperties::None => unreachable!(),
         };
@@ -609,7 +607,7 @@ pub struct CsvProperties {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct JsonProperties { }
+pub struct JsonProperties {}
 
 #[derive(Debug, Default, Clone)]
 pub enum EncodingProperties {
@@ -711,14 +709,14 @@ impl ParserProperties {
                 ProtocolProperties::Debezium,
             ),
             SourceFormat::DebeziumJson => (
-                EncodingProperties::Json(JsonProperties { }),
+                EncodingProperties::Json(JsonProperties {}),
                 ProtocolProperties::Debezium,
             ),
             SourceFormat::DebeziumMongoJson => {
                 (EncodingProperties::None, ProtocolProperties::Debezium)
             }
             SourceFormat::Maxwell => (
-                EncodingProperties::Json(JsonProperties { }),
+                EncodingProperties::Json(JsonProperties {}),
                 ProtocolProperties::Maxwell,
             ),
             SourceFormat::CanalJson => (EncodingProperties::None, ProtocolProperties::Canal),

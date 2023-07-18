@@ -80,7 +80,7 @@ impl ByteStreamSourceParser for MaxwellParser {
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        // restrict the behavious since there is no corresponding
+        // restrict the behaviours since there is no corresponding
         // key/value test for maxwell yet.
         only_parse_payload!(self, payload, writer)
     }

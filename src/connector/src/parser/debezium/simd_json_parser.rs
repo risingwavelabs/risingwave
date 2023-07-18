@@ -70,7 +70,7 @@ mod tests {
         DebeziumParser, EncodingProperties, JsonProperties, ParserProperties, ProtocolProperties,
         SourceColumnDesc, SourceStreamChunkBuilder,
     };
-    use crate::source::{SourceContextRef, SourceFormat};
+    use crate::source::SourceContextRef;
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
         if let Some(ScalarImpl::Jsonb(json_val)) = parse_result {
             let mut json_string = String::new();
@@ -90,9 +90,7 @@ mod tests {
     ) -> DebeziumParser {
         let props = ParserProperties {
             key_encoding_config: None,
-            encoding_config: EncodingProperties::Json(JsonProperties {
-                format: SourceFormat::DebeziumJson,
-            }),
+            encoding_config: EncodingProperties::Json(JsonProperties {}),
             protocol_config: ProtocolProperties::Debezium,
         };
         DebeziumParser::new(props, rw_columns, source_ctx)

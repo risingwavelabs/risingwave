@@ -17,7 +17,7 @@ use risingwave_common::error::{Result, RwError};
 
 use super::unified::json::JsonParseOptions;
 use super::unified::AccessImpl;
-use super::{AccessBuilder, ByteStreamSourceParser, JsonProperties};
+use super::{AccessBuilder, ByteStreamSourceParser};
 use crate::parser::unified::json::JsonAccess;
 use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
