@@ -23,7 +23,8 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 use crate::user::user_authentication::encrypted_raw_password;
 
-/// `rw_user_secret` stores all user encrypted passwords in the database, which is only readable by super users.
+/// `rw_user_secret` stores all user encrypted passwords in the database, which is only readable by
+/// super users.
 pub static RW_USER_SECRETS: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
     name: "rw_user_secrets",
     schema: RW_CATALOG_SCHEMA_NAME,

@@ -52,7 +52,7 @@ pub fn get_columns_from_table(
     Ok(catalogs
         .into_iter()
         .filter(|c| !c.is_hidden)
-        .map(|c| c.column_desc.clone())
+        .map(|c| c.column_desc)
         .collect())
 }
 

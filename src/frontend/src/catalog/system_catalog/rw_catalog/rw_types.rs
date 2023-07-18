@@ -23,7 +23,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 // TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.
-pub const PG_TYPE_DATA: &[(i32, &str)] = &[
+pub const RW_TYPE_DATA: &[(i32, &str)] = &[
     (16, "bool"),
     (20, "int8"),
     (21, "int2"),
@@ -52,7 +52,7 @@ pub static RW_TYPES: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
 
 impl SysCatalogReaderImpl {
     pub fn read_rw_types(&self) -> Result<Vec<OwnedRow>> {
-        Ok(PG_TYPE_DATA
+        Ok(RW_TYPE_DATA
             .iter()
             .map(|(id, name)| {
                 OwnedRow::new(vec![

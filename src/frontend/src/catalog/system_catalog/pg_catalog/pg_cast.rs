@@ -33,7 +33,7 @@ pub static PG_CAST_DATA: LazyLock<Vec<String>> = LazyLock::new(|| {
                 idx,
                 DataType::from(*src).to_oid(),
                 DataType::from(*target).to_oid(),
-                ctx.to_string()
+                ctx
             )
         })
         .collect_vec()
