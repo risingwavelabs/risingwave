@@ -254,13 +254,13 @@ impl LocalSelectorStatistic {
     pub fn report_to_metrics(&self, group_id: u64, metrics: &MetaMetrics) {
         for (start_level, target_level, stats) in &self.skip_picker {
             let level_label = format!("cg{}-{}-to-{}", group_id, start_level, target_level);
-            if stats.skip_by_count_limit > 0 {
+            if stats.skip_by_write_amp_limit > 0 {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "write-amp"])
                     .inc_by(stats.skip_by_write_amp_limit);
             }
-            if stats.skip_by_write_amp_limit > 0 {
+            if stats.skip_by_count_limit > 0 {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "count"])
