@@ -162,17 +162,6 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
-
-                panels.timeseries_count(
-                    "Compactor Core Count To Scale",
-                    "The number of CPUs needed to meet the demand of compaction.",
-                    [
-                        panels.target(
-                            f"sum({metric('storage_compactor_suggest_core_count')})",
-                            "suggest-core-count"
-                        ),
-                    ],
-                ),
                 panels.timeseries_count(
                     "Compaction Success & Failure Count",
                     "The number of compactions from one level to another level that have completed or failed",
