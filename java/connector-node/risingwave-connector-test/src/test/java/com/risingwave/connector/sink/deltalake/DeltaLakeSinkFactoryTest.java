@@ -72,7 +72,7 @@ public class DeltaLakeSinkFactoryTest {
     public void testCreate() throws IOException {
         createMockTable(location);
         DeltaLakeSinkFactory sinkFactory = new DeltaLakeSinkFactory();
-        sinkFactory.create(
+        sinkFactory.createWriter(
                 TestUtils.getMockTableSchema(),
                 new HashMap<>() {
                     {
