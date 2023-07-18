@@ -15,8 +15,8 @@
 package com.risingwave.connector;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.grpc.Status;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -55,7 +55,7 @@ import org.slf4j.LoggerFactory;
  *
  * 4. bulkprocessor and high-level-client are deprecated in es 8 java api.
  */
-public class EsSink7 extends SinkBase {
+public class EsSink7 extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink7.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 

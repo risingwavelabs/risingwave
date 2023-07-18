@@ -21,8 +21,9 @@ pub(crate) fn json_object_smart_get_value<'a, 'b>(
     key: Cow<'b, str>,
 ) -> Option<&'b BorrowedValue<'a>> {
     let obj = v.as_object()?;
-    if obj.contains_key(key.as_ref()) {
-        return obj.get(key.as_ref());
+    let value = obj.get(key.as_ref());
+    if value.is_some() {
+        return value;
     }
     for (k, v) in obj {
         if k.eq_ignore_ascii_case(key.as_ref()) {
