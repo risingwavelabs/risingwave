@@ -6557,6 +6557,7 @@ dependencies = [
  "itertools 0.10.5",
  "madsim-tokio",
  "parking_lot 0.12.1",
+ "paste",
  "rand",
  "risingwave_common",
  "risingwave_connector",
