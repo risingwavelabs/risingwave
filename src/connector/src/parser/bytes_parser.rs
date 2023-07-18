@@ -12,12 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::{self};
+use risingwave_common::error::{Result, RwError};
 
 use super::unified::bytes::{BytesAccess, BytesChangeEvent};
-use super::unified::ChangeEvent;
-use super::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use super::unified::{AccessImpl, ChangeEvent};
+use super::{AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::only_parse_payload;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+
+#[derive(Debug)]
+pub struct BytesAccessBuilder {}
+
+impl AccessBuilder for BytesAccessBuilder {
+    #[allow(clippy::unused_async)]
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        Ok(AccessImpl::Bytes(BytesAccess::new(payload)))
+    }
+}
+
+impl BytesAccessBuilder {
+    pub fn new() -> Result<Self> {
+        Ok(Self {})
+    }
+}
 
 /// Parser for BYTES format
 #[derive(Debug)]
@@ -72,10 +90,11 @@ impl ByteStreamSourceParser for BytesParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        _key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        only_parse_payload!(self, payload, writer)
     }
 }
 

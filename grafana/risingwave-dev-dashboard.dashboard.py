@@ -162,17 +162,6 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
-
-                panels.timeseries_count(
-                    "Compactor Core Count To Scale",
-                    "The number of CPUs needed to meet the demand of compaction.",
-                    [
-                        panels.target(
-                            f"sum({metric('storage_compactor_suggest_core_count')})",
-                            "suggest-core-count"
-                        ),
-                    ],
-                ),
                 panels.timeseries_count(
                     "Compaction Success & Failure Count",
                     "The number of compactions from one level to another level that have completed or failed",
@@ -1108,6 +1097,23 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(f"{metric('stream_join_cached_estimated_size')}",
                                       "{{actor_id}} {{side}}"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Join Executor Matched Rows",
+                    "The number of matched rows on the opposite side",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_matched_join_keys_bucket')}[$__rate_interval])) by (le, actor_id, table_id, job, instance))",
+                                f"p{legend} - actor_id {{{{actor_id}}}} table_id {{{{table_id}}}} - {{{{job}}}} @ {{{{instance}}}}",
+                            ),
+                            [90, 99, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, job, instance, actor_id, table_id) (rate({metric('stream_join_matched_join_keys_sum')}[$__rate_interval])) / sum by(le, job, instance, actor_id, table_id) (rate({table_metric('stream_join_matched_join_keys_count')}[$__rate_interval]))",
+                            "avg - actor_id {{actor_id}} table_id {{table_id}} - {{job}} @ {{instance}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_actor_ops(
@@ -2095,7 +2101,7 @@ def section_hummock(panels):
             "The times of move_state_table occurs",
             [
                 panels.target(
-                    f"sum({table_metric('storage_move_state_table_count')}[$__rate_interval]) by (group)",
+                    f"sum({table_metric('storage_move_state_table_count')}) by (group)",
                     "move table cg{{group}}",
                 ),
             ],

@@ -58,6 +58,7 @@ pub struct StreamingMetrics {
     pub join_cached_entries: GenericGaugeVec<AtomicI64>,
     pub join_cached_rows: GenericGaugeVec<AtomicI64>,
     pub join_cached_estimated_size: GenericGaugeVec<AtomicI64>,
+    pub join_matched_join_keys: HistogramVec,
 
     // Streaming Aggregation
     pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -372,6 +373,19 @@ impl StreamingMetrics {
             "stream_join_cached_estimated_size",
             "Estimated size of all cached entries in streaming join operators",
             &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let join_matched_join_keys_opts = histogram_opts!(
+            "stream_join_matched_join_keys",
+            "The number of keys matched in the opposite side",
+            exponential_buckets(16.0, 2.0, 28).unwrap() // max 2^31
+        );
+
+        let join_matched_join_keys = register_histogram_vec_with_registry!(
+            join_matched_join_keys_opts,
+            &["actor_id", "table_id"],
             registry
         )
         .unwrap();
@@ -706,6 +720,7 @@ impl StreamingMetrics {
             join_cached_entries,
             join_cached_rows,
             join_cached_estimated_size,
+            join_matched_join_keys,
             agg_lookup_miss_count,
             agg_total_lookup_count,
             agg_cached_keys,

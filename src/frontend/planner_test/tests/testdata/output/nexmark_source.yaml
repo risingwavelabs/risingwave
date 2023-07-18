@@ -801,7 +801,7 @@
     LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, date_time] }
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, auction, bidder, price, date_time, row_number] }
-        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY id ORDER BY price DESC, date_time ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY id ORDER BY price DESC, date_time ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id, auction, bidder, price, channel, url, date_time, extra, _row_id] }
             └─LogicalFilter { predicate: (id = auction) AND (date_time >= date_time) AND (date_time <= expires) }
               └─LogicalJoin { type: Inner, on: true, output: all }
@@ -1348,7 +1348,7 @@
     LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
-        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
             └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: (Unbounded, Unbounded) }
   batch_plan: |-
@@ -1404,7 +1404,7 @@
     LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
     └─LogicalFilter { predicate: (rank <= 1:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, rank] }
-        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
             └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: (Unbounded, Unbounded) }
   batch_plan: |-
@@ -1463,21 +1463,21 @@
     LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
     └─LogicalFilter { predicate: (row_number <= 10:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
-        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
             └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: (Unbounded, Unbounded) }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (row_number <= 10:Int32) }
-      └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-        └─BatchExchange { order: [auction ASC, price DESC], dist: HashShard(auction) }
-          └─BatchSort { order: [auction ASC, price DESC] }
+    └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─BatchSort { order: [auction ASC, price DESC] }
+        └─BatchGroupTopN { order: [price DESC], limit: 10, offset: 0, group_key: [0] }
+          └─BatchExchange { order: [], dist: HashShard(auction) }
             └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
               └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden), rank_number], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
-    └─StreamFilter { predicate: (row_number <= 10:Int32) }
-      └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─StreamGroupTopN [append_only] { order: [price DESC], limit: 10, offset: 0, group_key: [0] }
         └─StreamExchange { dist: HashShard(auction) }
           └─StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
             └─StreamRowIdGen { row_id_index: 7 }
@@ -1486,14 +1486,14 @@
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden), rank_number], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamFilter { predicate: (row_number <= 10:Int32) }
-        └── StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] } { state table: 0 }
+    └── StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] } { state table: 0 }
+        └── StreamGroupTopN [append_only] { order: [price DESC], limit: 10, offset: 0, group_key: [0] } { state table: 1 }
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
     StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
     └── StreamRowIdGen { row_id_index: 7 }
-        └── StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] } { source state table: 1 }
+        └── StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] } { source state table: 2 }
 
     Table 0
     ├── columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id, row_number ]
@@ -1502,7 +1502,14 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 1 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 1
+    ├── columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id ]
+    ├── primary key: [ $0 ASC, $2 DESC, $7 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 2 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294
     ├── columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id, rank_number ]
@@ -1525,16 +1532,16 @@
     WHERE Q.rank_number <= 10;
   logical_plan: |-
     LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
-    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
         └─LogicalFilter { predicate: (row_number <= 10:Int32) }
           └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
-            └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+            └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
               └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
                 └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: (Unbounded, Unbounded) }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─BatchSort { order: [auction ASC, price DESC] }
         └─BatchGroupTopN { order: [price DESC], limit: 10, offset: 0, group_key: [0] }
           └─BatchExchange { order: [], dist: HashShard(auction) }
@@ -1542,7 +1549,7 @@
               └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden), rank_number], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
-    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─StreamGroupTopN [append_only] { order: [price DESC], limit: 10, offset: 0, group_key: [0] }
         └─StreamExchange { dist: HashShard(auction) }
           └─StreamProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
@@ -1552,7 +1559,7 @@
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden), rank_number], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] } { state table: 0 }
+    └── StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] } { state table: 0 }
         └── StreamGroupTopN [append_only] { order: [price DESC], limit: 10, offset: 0, group_key: [0] } { state table: 1 }
             └── StreamExchange Hash([0]) from 1
 
@@ -1600,7 +1607,7 @@
     LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
     └─LogicalFilter { predicate: (row_number <= 10:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
-        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
             └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: (Unbounded, Unbounded) }
   batch_plan: |-
