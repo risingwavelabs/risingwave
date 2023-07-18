@@ -93,3 +93,14 @@ select
     , lead(v2, 1) over (partition by p1, p2 order by time, id) as out8
     , lead(v2, 2) over (partition by p1, p2 order by v1, v2) as out9
 from t;
+
+statement ok
+create materialized view v_expr as
+select
+    *
+    , t.v2 as out1
+    , 0 as out2
+    , first_value(v1) over (partition by p1, p2 order by time, id rows 3 preceding) as out3
+    , lag(v1 + 2, 0 + 1) over (partition by p1 - 1 order by id) as out4
+    , min(v1 * 2) over (partition by p1, p2 order by time + 1, id rows between current row and unbounded following) as out5
+from t;
