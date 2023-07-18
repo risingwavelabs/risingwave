@@ -156,6 +156,9 @@ pub fn set_panic_hook() {
 /// ```bash
 /// RUST_LOG="pgwire_query_log=info"
 /// ```
+///
+/// `RW_QUERY_LOG_TRUNCATE_LEN` configures the max length of the SQLs logged in the query log,
+/// to avoid the log file growing too large. The default value is 1024 in production.
 pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Registry) {
     let deployment = Deployment::current();
 
