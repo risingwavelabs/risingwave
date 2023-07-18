@@ -15,6 +15,7 @@
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
+use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
@@ -43,7 +44,10 @@ async fn build_accessor_builder(
                 DebeziumAvroAccessBuilder::new(config, encoding_type)?,
             ))
         }
-        EncodingProperties::Json(_) | EncodingProperties::Protobuf(_) => {
+        EncodingProperties::Json(_) => Ok(AccessBuilderImpl::DebeziumJson(
+            DebeziumJsonAccessBuilder::new()?,
+        )),
+        EncodingProperties::Protobuf(_) => {
             Ok(AccessBuilderImpl::new_default(config, encoding_type).await?)
         }
         _ => Err(RwError::from(ProtocolError(

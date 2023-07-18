@@ -35,6 +35,7 @@ use risingwave_pb::catalog::StreamSourceInfo;
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::{BytesAccessBuilder, BytesParser};
 pub use self::csv_parser::CsvParserConfig;
+use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::AccessImpl;
 use self::util::get_kafka_topic;
 use crate::aws_auth::AwsAuthProps;
@@ -422,6 +423,7 @@ pub enum AccessBuilderImpl {
     Json(JsonAccessBuilder),
     Bytes(BytesAccessBuilder),
     DebeziumAvro(DebeziumAvroAccessBuilder),
+    DebeziumJson(DebeziumJsonAccessBuilder),
 }
 
 impl AccessBuilderImpl {
@@ -452,6 +454,7 @@ impl AccessBuilderImpl {
             Self::Json(builder) => builder.generate_accessor(payload).await?,
             Self::Bytes(builder) => builder.generate_accessor(payload).await?,
             Self::DebeziumAvro(builder) => builder.generate_accessor(payload).await?,
+            Self::DebeziumJson(builder) => builder.generate_accessor(payload).await?,
         };
         Ok(accessor)
     }

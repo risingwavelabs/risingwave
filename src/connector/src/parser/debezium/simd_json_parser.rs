@@ -14,15 +14,50 @@
 
 use std::fmt::Debug;
 
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use simd_json::{BorrowedValue, Mutable};
 
+use crate::only_parse_payload;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::unified::AccessImpl;
+use crate::parser::{
+    AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard,
+};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+
+#[derive(Debug)]
+pub struct DebeziumJsonAccessBuilder {
+    value: Option<Vec<u8>>,
+}
+
+impl DebeziumJsonAccessBuilder {
+    pub fn new() -> Result<Self> {
+        Ok(Self { value: None })
+    }
+}
+
+impl AccessBuilder for DebeziumJsonAccessBuilder {
+    #[allow(clippy::unused_async)]
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        self.value = Some(payload);
+        let mut event: BorrowedValue<'_> =
+            simd_json::to_borrowed_value(self.value.as_mut().unwrap())
+                .map_err(|e| RwError::from(ErrorCode::ProtocolError(e.to_string())))?;
+
+        let payload = if let Some(payload) = event.get_mut("payload") {
+            std::mem::take(payload)
+        } else {
+            event
+        };
+
+        Ok(AccessImpl::Json(JsonAccess::new_with_options(
+            payload,
+            &JsonParseOptions::DEBEZIUM,
+        )))
+    }
+}
 
 #[derive(Debug)]
 pub struct DebeziumJsonParser {
@@ -45,7 +80,7 @@ impl DebeziumJsonParser {
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+            .map_err(|e| RwError::from(ErrorCode::ProtocolError(e.to_string())))?;
 
         let payload = if let Some(payload) = event.get_mut("payload") {
             std::mem::take(payload)
@@ -72,10 +107,11 @@ impl ByteStreamSourceParser for DebeziumJsonParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        _key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        only_parse_payload!(self, payload, writer)
     }
 }
 
