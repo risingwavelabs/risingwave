@@ -27,7 +27,6 @@ use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 #[derive(Debug)]
 pub struct JsonAccessBuilder {
     value: Option<Vec<u8>>,
-    option: JsonParseOptions,
 }
 
 impl AccessBuilder for JsonAccessBuilder {
@@ -38,23 +37,16 @@ impl AccessBuilder for JsonAccessBuilder {
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         Ok(AccessImpl::Json(JsonAccess::new_with_options(
             value,
-            &self.option,
+            // Debezium and Canal have their special json access builder and will not
+            // use this
+            &JsonParseOptions::DEFAULT,
         )))
     }
 }
 
 impl JsonAccessBuilder {
-    pub fn new(config: JsonProperties) -> Result<Self> {
-        Ok(Self {
-            value: None,
-            option: match config.format {
-                crate::source::SourceFormat::Json => JsonParseOptions::DEFAULT,
-                crate::source::SourceFormat::UpsertJson => JsonParseOptions::DEFAULT,
-                crate::source::SourceFormat::DebeziumJson => JsonParseOptions::DEBEZIUM,
-                crate::source::SourceFormat::Maxwell => JsonParseOptions::DEFAULT,
-                _ => unreachable!(),
-            },
-        })
+    pub fn new() -> Result<Self> {
+        Ok(Self { value: None })
     }
 }
 

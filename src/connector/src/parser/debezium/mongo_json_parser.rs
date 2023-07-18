@@ -19,6 +19,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use simd_json::{BorrowedValue, Mutable};
 
+use crate::only_parse_payload;
 use crate::parser::unified::debezium::{DebeziumChangeEvent, MongoProjeciton};
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
@@ -117,13 +118,7 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        if payload.is_some() {
-            self.parse_inner(payload.unwrap(), writer).await
-        } else {
-            Err(RwError::from(ErrorCode::InternalError(
-                "Empty payload with nonempty key".into(),
-            )))
-        }
+        only_parse_payload!(self, payload, writer)
     }
 }
 

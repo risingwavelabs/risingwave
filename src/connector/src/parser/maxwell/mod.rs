@@ -16,4 +16,3 @@ mod maxwell_parser;
 mod operators;
 pub use maxwell_parser::*;
 mod simd_json_parser;
-// pub use simd_json_parser::*;
