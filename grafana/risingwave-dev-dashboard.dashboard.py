@@ -1110,6 +1110,23 @@ def section_streaming_actors(outer_panels):
                                       "{{actor_id}} {{side}}"),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Join Executor Matched Rows",
+                    "The number of matched rows on the opposite side",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_matched_join_keys_bucket')}[$__rate_interval])) by (le, actor_id, table_id, job, instance))",
+                                f"p{legend} - actor_id {{{{actor_id}}}} table_id {{{{table_id}}}} - {{{{job}}}} @ {{{{instance}}}}",
+                            ),
+                            [90, 99, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, job, instance, actor_id, table_id) (rate({metric('stream_join_matched_join_keys_sum')}[$__rate_interval])) / sum by(le, job, instance, actor_id, table_id) (rate({table_metric('stream_join_matched_join_keys_count')}[$__rate_interval]))",
+                            "avg - actor_id {{actor_id}} table_id {{table_id}} - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_actor_ops(
                     "Aggregation Executor Cache Statistics For Each Key/State",
                     "Lookup miss count counts the number of aggregation key's cache miss per second."

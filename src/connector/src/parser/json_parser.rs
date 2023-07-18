@@ -15,8 +15,9 @@
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 
-use super::ByteStreamSourceParser;
-use crate::common::UpsertMessage;
+use super::unified::json::JsonParseOptions;
+use super::unified::AccessImpl;
+use super::{AccessBuilder, ByteStreamSourceParser};
 use crate::parser::unified::json::JsonAccess;
 use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::{
@@ -25,6 +26,32 @@ use crate::parser::unified::util::{
 use crate::parser::unified::ChangeEventOperation;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+
+#[derive(Debug)]
+pub struct JsonAccessBuilder {
+    value: Option<Vec<u8>>,
+}
+
+impl AccessBuilder for JsonAccessBuilder {
+    #[allow(clippy::unused_async)]
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
+        self.value = Some(payload);
+        let value = simd_json::to_borrowed_value(self.value.as_mut().unwrap())
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        Ok(AccessImpl::Json(JsonAccess::new_with_options(
+            value,
+            // Debezium and Canal have their special json access builder and will not
+            // use this
+            &JsonParseOptions::DEFAULT,
+        )))
+    }
+}
+
+impl JsonAccessBuilder {
+    pub fn new() -> Result<Self> {
+        Ok(Self { value: None })
+    }
+}
 
 /// Parser for JSON format
 #[derive(Debug)]
@@ -65,15 +92,14 @@ impl JsonParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        mut payload: Vec<u8>,
+        key: Option<Vec<u8>>,
+        mut payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         if self.enable_upsert {
-            let msg: UpsertMessage<'_> = bincode::deserialize(&payload)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+            let mut primary_key = key.unwrap_or(vec![]);
+            let mut record = payload.unwrap_or(vec![]);
 
-            let mut primary_key = msg.primary_key.to_vec();
-            let mut record = msg.record.to_vec();
             let change_event_op = if record.is_empty() {
                 ChangeEventOperation::Delete
             } else {
@@ -102,7 +128,12 @@ impl JsonParser {
                 change_event_op,
             )
         } else {
-            let value = simd_json::to_borrowed_value(&mut payload)
+            if payload.is_none() {
+                return Err(RwError::from(ErrorCode::InternalError(
+                    "Empty payload with nonempty key for non-upsert".into(),
+                )));
+            }
+            let value = simd_json::to_borrowed_value(payload.as_mut().unwrap())
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
             let values = if let simd_json::BorrowedValue::Array(arr) = value {
                 arr
@@ -147,10 +178,11 @@ impl ByteStreamSourceParser for JsonParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        self.parse_inner(key, payload, writer).await
     }
 }
 
@@ -167,7 +199,6 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
 
-    use crate::common::UpsertMessage;
     use crate::parser::{JsonParser, SourceColumnDesc, SourceStreamChunkBuilder};
 
     fn get_payload() -> Vec<Vec<u8>> {
@@ -203,7 +234,10 @@ mod tests {
 
         for payload in get_payload() {
             let writer = builder.row_writer();
-            parser.parse_inner(payload, writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(payload), writer)
+                .await
+                .unwrap();
         }
 
         let chunk = builder.finish();
@@ -303,7 +337,10 @@ mod tests {
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
-            parser.parse_inner(payload, writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(payload), writer)
+                .await
+                .unwrap();
         }
 
         // Parse an incorrect record.
@@ -311,14 +348,20 @@ mod tests {
             let writer = builder.row_writer();
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#.to_vec();
-            parser.parse_inner(payload, writer).await.unwrap_err();
+            assert!(parser
+                .parse_inner(None, Some(payload), writer)
+                .await
+                .is_err());
         }
 
         // Parse a correct record.
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
-            parser.parse_inner(payload, writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(payload), writer)
+                .await
+                .unwrap();
         }
 
         let chunk = builder.finish();
@@ -377,7 +420,10 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
-            parser.parse_inner(payload, writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(payload), writer)
+                .await
+                .unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
@@ -412,13 +458,6 @@ mod tests {
             (r#"{"a":2}"#, r#"{"a":2,"b":2}"#),
             (r#"{"a":2}"#, r#""#),
         ]
-        .map(|(k, v)| {
-            bincode::serialize(&UpsertMessage {
-                primary_key: k.as_bytes().into(),
-                record: v.as_bytes().into(),
-            })
-            .unwrap()
-        })
         .to_vec();
         let descs = vec![
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
@@ -428,10 +467,15 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         for item in items {
             parser
-                .parse_inner(item, builder.row_writer())
+                .parse_inner(
+                    Some(item.0.as_bytes().to_vec()),
+                    Some(item.1.as_bytes().to_vec()),
+                    builder.row_writer(),
+                )
                 .await
                 .unwrap();
         }
+
         let chunk = builder.finish();
         let mut rows = chunk.rows();
 
