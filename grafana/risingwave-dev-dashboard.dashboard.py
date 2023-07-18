@@ -2059,7 +2059,7 @@ def section_hummock(panels):
             "The times of move_state_table occurs",
             [
                 panels.target(
-                    f"sum({table_metric('storage_move_state_table_count')}[$__rate_interval]) by (group)",
+                    f"sum({table_metric('storage_move_state_table_count')}) by (group)",
                     "move table cg{{group}}",
                 ),
             ],
