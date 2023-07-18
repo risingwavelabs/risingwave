@@ -156,8 +156,8 @@ impl<B: Bucket> EstimateSize for Registers<B> {
     }
 }
 
-/// Serialize the state into a Datum.
-impl From<Registers> for Datum {
+/// Serialize the state into a scalar.
+impl From<Registers> for ScalarImpl {
     fn from(reg: Registers) -> Self {
         let buckets = &reg.registers[..];
         let result_len = (buckets.len() * LOG_COUNT_BITS as usize - 1) / (i64::BITS as usize) + 1;
@@ -169,19 +169,19 @@ impl From<Registers> for Datum {
                 result[start_idx + 1] |= (bucket_val.0 as u64) >> (i64::BITS - begin_bit as u32);
             }
         }
-        Some(ScalarImpl::List(ListValue::new(
+        ScalarImpl::List(ListValue::new(
             result
                 .into_iter()
                 .map(|x| Some(ScalarImpl::Int64(x as i64)))
                 .collect(),
-        )))
+        ))
     }
 }
 
-/// Deserialize the state from a Datum.
-impl From<Datum> for Registers {
-    fn from(state: Datum) -> Self {
-        let list = state.as_ref().unwrap().as_list().values();
+/// Deserialize the state from a scalar.
+impl From<ScalarImpl> for Registers {
+    fn from(state: ScalarImpl) -> Self {
+        let list = state.as_list().values();
         let bucket_num = list.len() * i64::BITS as usize / LOG_COUNT_BITS as usize;
         let registers = (0..bucket_num)
             .map(|i| {

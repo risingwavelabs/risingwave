@@ -14,7 +14,7 @@
 
 use risingwave_common::array::ListValue;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::types::{Datum, ScalarRef};
+use risingwave_common::types::{Datum, ScalarImpl, ScalarRef};
 use risingwave_expr_macro::aggregate;
 
 #[aggregate("array_agg(*) -> list", state = "State")]
@@ -36,6 +36,20 @@ impl EstimateSize for State {
 impl From<State> for ListValue {
     fn from(state: State) -> Self {
         ListValue::new(state.0)
+    }
+}
+
+impl TryFrom<ScalarImpl> for State {
+    type Error = ();
+
+    fn try_from(state: ScalarImpl) -> Result<Self, Self::Error> {
+        state.try_into().map_err(|_| ())
+    }
+}
+
+impl From<State> for ScalarImpl {
+    fn from(state: State) -> Self {
+        ListValue::new(state.0).into()
     }
 }
 

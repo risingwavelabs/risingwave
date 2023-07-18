@@ -770,6 +770,19 @@ impl From<&String> for ScalarImpl {
         Self::Utf8(s.as_str().into())
     }
 }
+impl TryFrom<ScalarImpl> for String {
+    type Error = ArrayError;
+
+    fn try_from(val: ScalarImpl) -> ArrayResult<Self> {
+        match val {
+            ScalarImpl::Utf8(s) => Ok(s.into()),
+            other_scalar => bail!(
+                "cannot convert ScalarImpl::{} to concrete type",
+                other_scalar.get_ident()
+            ),
+        }
+    }
+}
 
 impl ScalarImpl {
     pub fn from_binary(bytes: &Bytes, data_type: &DataType) -> RwResult<Self> {

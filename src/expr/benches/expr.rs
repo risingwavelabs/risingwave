@@ -150,7 +150,7 @@ fn bench_expr(c: &mut Criterion) {
             SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into_ref(),
             // 26: jsonb array
             JsonbArray::from_iter(
-                (1..=CHUNK_SIZE).map(|i| JsonbVal::from_serde(serde_json::Value::Number(i.into()))),
+                (1..=CHUNK_SIZE).map(|i| JsonbVal::from(serde_json::Value::Number(i.into()))),
             )
             .into_ref(),
         ],
