@@ -81,7 +81,10 @@ async fn parse(parser: JsonParser, column_desc: Vec<SourceColumnDesc>, input: Ve
             SourceStreamChunkBuilder::with_capacity(column_desc.clone(), input_inner.len());
         for payload in input_inner {
             let row_writer = builder.row_writer();
-            parser.parse_inner(payload, row_writer).await.unwrap();
+            parser
+                .parse_inner(None, Some(payload), row_writer)
+                .await
+                .unwrap();
         }
         builder.finish();
     }

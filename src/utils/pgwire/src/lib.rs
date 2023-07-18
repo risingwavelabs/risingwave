@@ -20,6 +20,7 @@
 #![feature(trusted_len)]
 #![feature(async_fn_in_trait)]
 #![feature(return_position_impl_trait_in_trait)]
+#![feature(lazy_cell)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;

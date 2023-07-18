@@ -81,7 +81,10 @@ fn bench_json_parser(c: &mut Criterion) {
                     SourceStreamChunkBuilder::with_capacity(descs.clone(), NUM_RECORDS);
                 for record in records {
                     let writer = builder.row_writer();
-                    parser.parse_inner(record, writer).await.unwrap();
+                    parser
+                        .parse_inner(None, Some(record), writer)
+                        .await
+                        .unwrap();
                 }
             },
             BatchSize::SmallInput,
