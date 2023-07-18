@@ -82,6 +82,7 @@ impl DebeziumParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
+        // tombetone messages are handled implicitly by these accessors
         let key_accessor = match key {
             None => None,
             Some(data) => Some(self.key_builder.generate_accessor(data).await?),

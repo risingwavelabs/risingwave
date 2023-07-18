@@ -17,15 +17,9 @@ use std::fmt::Debug;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use simd_json::{BorrowedValue, Mutable};
 
-use crate::only_parse_payload;
-use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
-use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
-use crate::parser::{
-    AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard,
-};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::parser::AccessBuilder;
 
 #[derive(Debug)]
 pub struct DebeziumJsonAccessBuilder {
@@ -59,62 +53,6 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
     }
 }
 
-#[derive(Debug)]
-pub struct DebeziumJsonParser {
-    pub(crate) rw_columns: Vec<SourceColumnDesc>,
-    source_ctx: SourceContextRef,
-}
-
-impl DebeziumJsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
-        Ok(Self {
-            rw_columns,
-            source_ctx,
-        })
-    }
-
-    #[allow(clippy::unused_async)]
-    pub async fn parse_inner(
-        &self,
-        mut payload: Vec<u8>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
-            .map_err(|e| RwError::from(ErrorCode::ProtocolError(e.to_string())))?;
-
-        let payload = if let Some(payload) = event.get_mut("payload") {
-            std::mem::take(payload)
-        } else {
-            event
-        };
-
-        let accessor = JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM);
-
-        let row_op = DebeziumChangeEvent::with_value(accessor);
-
-        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
-    }
-}
-
-impl ByteStreamSourceParser for DebeziumJsonParser {
-    fn columns(&self) -> &[SourceColumnDesc] {
-        &self.rw_columns
-    }
-
-    fn source_ctx(&self) -> &SourceContext {
-        &self.source_ctx
-    }
-
-    async fn parse_one<'a>(
-        &'a mut self,
-        _key: Option<Vec<u8>>,
-        payload: Option<Vec<u8>>,
-        writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
-        only_parse_payload!(self, payload, writer)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::convert::TryInto;
@@ -128,12 +66,11 @@ mod tests {
     };
     use serde_json::Value;
 
-    use super::*;
     use crate::parser::{
         DebeziumParser, EncodingProperties, JsonProperties, ParserProperties, ProtocolProperties,
         SourceColumnDesc, SourceStreamChunkBuilder,
     };
-    use crate::source::SourceFormat;
+    use crate::source::{SourceContextRef, SourceFormat};
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
         if let Some(ScalarImpl::Jsonb(json_val)) = parse_result {
             let mut json_string = String::new();

@@ -29,14 +29,8 @@ use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::avro::{
     avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
 };
-use crate::parser::unified::debezium::DebeziumChangeEvent;
-use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
-use crate::parser::{
-    AccessBuilder, ByteStreamSourceParser, EncodingProperties, EncodingType,
-    SourceStreamChunkRowWriter, WriteGuard,
-};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -146,104 +140,6 @@ impl DebeziumAvroParserConfig {
     }
 }
 
-// DebeziumAvroParser is deprecated now
-#[derive(Debug)]
-pub struct DebeziumAvroParser {
-    schema: Schema,
-    schema_resolver: Arc<ConfluentSchemaResolver>,
-    rw_columns: Vec<SourceColumnDesc>,
-    source_ctx: SourceContextRef,
-}
-
-impl DebeziumAvroParser {
-    pub fn new(
-        rw_columns: Vec<SourceColumnDesc>,
-        config: DebeziumAvroParserConfig,
-        source_ctx: SourceContextRef,
-    ) -> Result<Self> {
-        let DebeziumAvroParserConfig {
-            outer_schema,
-            schema_resolver,
-            ..
-        } = config;
-        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-        // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-        let schema = resolver
-            .to_resolved(&outer_schema)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-        Ok(Self {
-            schema,
-            schema_resolver,
-            rw_columns,
-            source_ctx,
-        })
-    }
-
-    pub(crate) async fn parse_inner(
-        &self,
-        key: Vec<u8>,
-        payload: Vec<u8>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        // https://debezium.io/documentation/reference/stable/transformations/event-flattening.html#event-flattening-behavior:
-        //
-        // A database DELETE operation causes Debezium to generate two Kafka records:
-        // - A record that contains "op": "d", the before row data, and some other fields.
-        // - A tombstone record that has the same key as the deleted row and a value of null. This
-        // record is a marker for Apache Kafka. It indicates that log compaction can remove
-        // all records that have this key.
-
-        // If message value == null, it must be a tombstone message. Emit DELETE to downstream using
-        // message key as the DELETE row. Throw an error if message key is empty.
-        if payload.is_empty() {
-            let (schema_id, mut raw_payload) = extract_schema_id(&key)?;
-            let key_schema = self.schema_resolver.get(schema_id).await?;
-            let key = from_avro_datum(key_schema.as_ref(), &mut raw_payload, None)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-            let row_op = DebeziumChangeEvent::with_key(AvroAccess::new(
-                &key,
-                AvroParseOptions::default().with_schema(&key_schema),
-            ));
-
-            apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
-        } else {
-            let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
-            let writer_schema = self.schema_resolver.get(schema_id).await?;
-            let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-            let row_op = DebeziumChangeEvent::with_value(AvroAccess::new(
-                &avro_value,
-                AvroParseOptions::default().with_schema(&self.schema),
-            ));
-
-            apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
-        }
-    }
-}
-
-impl ByteStreamSourceParser for DebeziumAvroParser {
-    fn columns(&self) -> &[SourceColumnDesc] {
-        &self.rw_columns
-    }
-
-    fn source_ctx(&self) -> &SourceContext {
-        &self.source_ctx
-    }
-
-    async fn parse_one<'a>(
-        &'a mut self,
-        key: Option<Vec<u8>>,
-        payload: Option<Vec<u8>>,
-        writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
-        self.parse_inner(key.unwrap_or(vec![]), payload.unwrap_or(vec![]), writer)
-            .await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::Read;
@@ -262,7 +158,7 @@ mod tests {
     use crate::parser::{
         DebeziumAvroParserConfig, DebeziumParser, ParserProperties, SourceStreamChunkBuilder,
     };
-    use crate::source::SourceFormat;
+    use crate::source::{SourceColumnDesc, SourceFormat};
 
     const DEBEZIUM_AVRO_DATA: &[u8] = b"\x00\x00\x00\x00\x06\x00\x02\xd2\x0f\x0a\x53\x61\x6c\x6c\x79\x0c\x54\x68\x6f\x6d\x61\x73\x2a\x73\x61\x6c\x6c\x79\x2e\x74\x68\x6f\x6d\x61\x73\x40\x61\x63\x6d\x65\x2e\x63\x6f\x6d\x16\x32\x2e\x31\x2e\x32\x2e\x46\x69\x6e\x61\x6c\x0a\x6d\x79\x73\x71\x6c\x12\x64\x62\x73\x65\x72\x76\x65\x72\x31\xc0\xb4\xe8\xb7\xc9\x61\x00\x30\x66\x69\x72\x73\x74\x5f\x69\x6e\x5f\x64\x61\x74\x61\x5f\x63\x6f\x6c\x6c\x65\x63\x74\x69\x6f\x6e\x12\x69\x6e\x76\x65\x6e\x74\x6f\x72\x79\x00\x02\x12\x63\x75\x73\x74\x6f\x6d\x65\x72\x73\x00\x00\x20\x6d\x79\x73\x71\x6c\x2d\x62\x69\x6e\x2e\x30\x30\x30\x30\x30\x33\x8c\x06\x00\x00\x00\x02\x72\x02\x92\xc3\xe8\xb7\xc9\x61\x00";
 
