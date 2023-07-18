@@ -137,3 +137,7 @@ func (p *KafkaSink) WriteRecord(ctx context.Context, format string, record sink.
 	}
 	return nil
 }
+
+func (p *KafkaSink) Flush(ctx context.Context) error {
+	return nil
+}

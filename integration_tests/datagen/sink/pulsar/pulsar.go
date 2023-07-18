@@ -58,3 +58,7 @@ func (p *PulsarSink) WriteRecord(ctx context.Context, format string, record sink
 	})
 	return err
 }
+
+func (p *PulsarSink) Flush(ctx context.Context) error {
+	return nil
+}

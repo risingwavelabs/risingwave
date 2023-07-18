@@ -59,5 +59,7 @@ type Sink interface {
 
 	WriteRecord(ctx context.Context, format string, record SinkRecord) error
 
+	Flush(ctx context.Context) error
+
 	Close() error
 }

@@ -50,3 +50,7 @@ func (p *KinesisSink) WriteRecord(ctx context.Context, format string, record sin
 		return nil
 	}
 }
+
+func (p *KinesisSink) Flush(ctx context.Context) error {
+	return nil
+}

@@ -113,6 +113,11 @@ func generateLoad(ctx context.Context, cfg gen.GeneratorConfig) error {
 			if time.Since(prevTime) >= 10*time.Second {
 				log.Printf("Sent %d records in total (Elapsed: %s)", count, time.Since(initTime).String())
 				prevTime = time.Now()
+
+				// Flush the sink every 10 seconds.
+				if err := sinkImpl.Flush(ctx); err != nil {
+					return err
+				}
 			}
 		case record := <-outCh:
 			if cfg.PrintInsert {
