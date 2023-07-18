@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 26] = [
+const CONFIG_KEYS: [&str; 27] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -61,6 +61,7 @@ const CONFIG_KEYS: [&str; 26] = [
     "SERVER_VERSION",
     "SERVER_VERSION_NUM",
     "RW_FORCE_SPLIT_DISTINCT_AGG",
+    "SINK_DECOUPLE",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -91,6 +92,7 @@ const RW_ENABLE_JOIN_ORDERING: usize = 22;
 const SERVER_VERSION: usize = 23;
 const SERVER_VERSION_NUM: usize = 24;
 const FORCE_SPLIT_DISTINCT_AGG: usize = 25;
+const SINK_DECOUPLE: usize = 26;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -297,6 +299,7 @@ type EnableJoinOrdering = ConfigBool<RW_ENABLE_JOIN_ORDERING, true>;
 type ServerVersion = ConfigString<SERVER_VERSION>;
 type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 80_300>;
 type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
+type SinkDecouple = ConfigBool<SINK_DECOUPLE, false>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -390,6 +393,9 @@ pub struct ConfigMap {
 
     batch_parallelism: BatchParallelism,
 
+    /// Enable decoupling sink and internal streaming graph or not
+    sink_decouple: SinkDecouple,
+
     /// The version of PostgreSQL that Risingwave claims to be.
     #[educe(Default(expression = "ConfigString::<SERVER_VERSION>(String::from(\"8.3.0\"))"))]
     server_version: ServerVersion,
@@ -467,6 +473,8 @@ impl ConfigMap {
             self.interval_style = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
             self.batch_parallelism = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(SinkDecouple::entry_name()) {
+            self.sink_decouple = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -529,6 +537,8 @@ impl ConfigMap {
             Ok(self.application_name.to_string())
         } else if key.eq_ignore_ascii_case(ForceSplitDistinctAgg::entry_name()) {
             Ok(self.force_split_distinct_agg.to_string())
+        } else if key.eq_ignore_ascii_case(SinkDecouple::entry_name()) {
+            Ok(self.sink_decouple.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -661,6 +671,11 @@ impl ConfigMap {
                 setting : self.force_split_distinct_agg.to_string(),
                 description : String::from("Enable split the distinct aggregation.")
             },
+            VariableInfo{
+                name: SinkDecouple::entry_name().to_lowercase(),
+                setting: self.sink_decouple.to_string(),
+                description: String::from("Enable decoupling sink and internal streaming graph or not")
+            }
         ]
     }
 
@@ -767,5 +782,9 @@ impl ConfigMap {
             return Some(NonZeroU64::new(self.batch_parallelism.0).unwrap());
         }
         None
+    }
+
+    pub fn get_sink_decouple(&self) -> bool {
+        self.sink_decouple.0
     }
 }
