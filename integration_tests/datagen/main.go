@@ -205,6 +205,12 @@ func main() {
 				Required:    false,
 				Destination: &cfg.HeavyTail,
 			},
+			cli.StringFlag{
+				Name:        "topics",
+				Usage:       "The topic to filter. If not specified, all topics will be used.",
+				Required:    false,
+				Destination: &cfg.Topic,
+			},
 		},
 	}
 	err := app.Run(os.Args)

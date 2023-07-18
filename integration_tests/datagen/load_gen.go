@@ -120,6 +120,10 @@ func generateLoad(ctx context.Context, cfg gen.GeneratorConfig) error {
 				}
 			}
 		case record := <-outCh:
+			// Filter records if topic is specified
+			if cfg.Topic != "" && record.Topic() != cfg.Topic {
+				continue
+			}
 			if cfg.PrintInsert {
 				fmt.Println(record.ToPostgresSql())
 			}

@@ -38,10 +38,10 @@ func (p *KinesisSink) Close() error {
 }
 
 func (p *KinesisSink) WriteRecord(ctx context.Context, format string, record sink.SinkRecord) error {
-	_, key, data := sink.RecordToKafka(record, format)
+	data := sink.RecordToKafka(record, format)
 	_, err := p.client.PutRecordWithContext(ctx, &kinesis.PutRecordInput{
 		Data:         data,
-		PartitionKey: aws.String(key),
+		PartitionKey: aws.String(record.Key()),
 		StreamName:   aws.String(p.cfg.StreamName),
 	})
 	if err != nil {

@@ -34,6 +34,9 @@ type GeneratorConfig struct {
 
 	// The record format, used when the sink is a message queue.
 	Format string
+
+	// The topic to filter. If not specified, all topics will be used.
+	Topic string
 }
 
 type LoadGenerator interface {
