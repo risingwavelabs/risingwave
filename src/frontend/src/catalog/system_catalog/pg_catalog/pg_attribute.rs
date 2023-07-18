@@ -37,6 +37,7 @@ pub static PG_ATTRIBUTE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
         (DataType::Int16, "attnum"),
         (DataType::Boolean, "attnotnull"),
         (DataType::Boolean, "attisdropped"),
+        (DataType::Varchar, "attidentity"),
         // From https://www.postgresql.org/docs/current/catalog-pg-attribute.html
         // The value will generally be -1 for types that do not need
         (DataType::Int32, "atttypmod"),
@@ -48,6 +49,7 @@ pub static PG_ATTRIBUTE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
                  c.position AS attnum, \
                  false AS attnotnull, \
                  false AS attisdropped, \
+                 ''::varchar AS attidentity, \
                  -1 AS atttypmod \
            FROM rw_catalog.rw_columns c\
     "

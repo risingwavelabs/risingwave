@@ -19,6 +19,7 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::BuiltinView;
 
+/// `rw_relations` is a view that shows all relations in the database.
 pub static RW_RELATIONS: LazyLock<BuiltinView> = LazyLock::new(|| {
     BuiltinView {
         name: "rw_relations",

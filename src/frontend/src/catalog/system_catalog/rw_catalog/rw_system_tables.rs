@@ -23,6 +23,7 @@ use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{get_acl_items, BuiltinTable, SysCatalogReaderImpl};
 
+/// `rw_system_tables` stores all system tables in the database.
 pub static RW_SYSTEM_TABLES: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
     name: "rw_system_tables",
     schema: RW_CATALOG_SCHEMA_NAME,

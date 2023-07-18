@@ -42,6 +42,7 @@ pub const PG_TYPE_DATA: &[(i32, &str)] = &[
     (1700, "numeric"),
 ];
 
+/// `rw_types` stores all supported types in the database.
 pub static RW_TYPES: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
     name: "rw_types",
     schema: RW_CATALOG_SCHEMA_NAME,
