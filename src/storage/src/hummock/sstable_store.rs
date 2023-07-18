@@ -568,6 +568,7 @@ impl SstableStore {
                     sst_id: object_id,
                     block_idx: block_index as u64,
                 };
+
                 if file_cache
                     .exists(&key)
                     .await
@@ -587,15 +588,13 @@ impl SstableStore {
             filter.insert(object_id);
         }
 
+        let key = SstableBlockIndex {
+            sst_id: object_id,
+            block_idx: block_index as u64,
+        };
+
         self.data_file_cache
-            .insert_with(
-                SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: block_index as u64,
-                },
-                fetch_block(),
-                uncompressed_capacity,
-            )
+            .insert_with(key, fetch_block(), uncompressed_capacity)
             .await
             .map_err(HummockError::file_cache)
     }

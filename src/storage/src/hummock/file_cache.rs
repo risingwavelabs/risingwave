@@ -357,13 +357,16 @@ where
                     while let Some(task) = task_rx.recv().await {
                         match task {
                             FoyerRuntimeTask::Insert { key, value, tx } => {
-                                let res = store
-                                    .insert(key, value)
-                                    .await
-                                    .map_err(FileCacheError::foyer);
-                                if let Some(tx) = tx {
-                                    tx.send(res).unwrap();
-                                }
+                                let store = store.clone();
+                                tokio::spawn(async move {
+                                    let res = store
+                                        .insert(key, value)
+                                        .await
+                                        .map_err(FileCacheError::foyer);
+                                    if let Some(tx) = tx {
+                                        tx.send(res).unwrap();
+                                    }
+                                });
                             }
                             FoyerRuntimeTask::InsertWith {
                                 key,
@@ -371,46 +374,63 @@ where
                                 value_serialized_len,
                                 tx,
                             } => {
-                                let mut writer =
-                                    store.writer(key, key.serialized_len() + value_serialized_len);
-                                let res = if !writer.judge().await {
-                                    Ok(false)
-                                } else {
-                                    match fetch_value
-                                        .await
-                                        .map_err(|e| FileCacheError::Other(e.into()))
-                                    {
-                                        Ok(Some(value)) => writer
-                                            .finish(value)
+                                let store = store.clone();
+                                tokio::spawn(async move {
+                                    let mut writer = store
+                                        .writer(key, key.serialized_len() + value_serialized_len);
+                                    let res = if !writer.judge().await {
+                                        Ok(false)
+                                    } else {
+                                        match fetch_value
                                             .await
-                                            .map_err(FileCacheError::foyer),
-                                        Ok(None) => Ok(false),
-                                        Err(e) => Err(e),
+                                            .map_err(|e| FileCacheError::Other(e.into()))
+                                        {
+                                            Ok(Some(value)) => writer
+                                                .finish(value)
+                                                .await
+                                                .map_err(FileCacheError::foyer),
+                                            Ok(None) => Ok(false),
+                                            Err(e) => Err(e),
+                                        }
+                                    };
+                                    if let Some(tx) = tx {
+                                        tx.send(res).unwrap();
                                     }
-                                };
-                                if let Some(tx) = tx {
-                                    tx.send(res).unwrap();
-                                }
+                                });
                             }
                             FoyerRuntimeTask::Remove { key, tx } => {
-                                let res = store.remove(&key).await.map_err(FileCacheError::foyer);
-                                if let Some(tx) = tx {
-                                    tx.send(res).unwrap();
-                                }
+                                let store = store.clone();
+                                tokio::spawn(async move {
+                                    let res =
+                                        store.remove(&key).await.map_err(FileCacheError::foyer);
+                                    if let Some(tx) = tx {
+                                        tx.send(res).unwrap();
+                                    }
+                                });
                             }
                             FoyerRuntimeTask::Clear { tx } => {
-                                let res = store.clear().await.map_err(FileCacheError::foyer);
-                                if let Some(tx) = tx {
-                                    tx.send(res).unwrap();
-                                }
+                                let store = store.clone();
+                                tokio::spawn(async move {
+                                    let res = store.clear().await.map_err(FileCacheError::foyer);
+                                    if let Some(tx) = tx {
+                                        tx.send(res).unwrap();
+                                    }
+                                });
                             }
                             FoyerRuntimeTask::Lookup { key, tx } => {
-                                let res = store.lookup(&key).await.map_err(FileCacheError::foyer);
-                                tx.send(res).unwrap();
+                                let store = store.clone();
+                                tokio::spawn(async move {
+                                    let res =
+                                        store.lookup(&key).await.map_err(FileCacheError::foyer);
+                                    tx.send(res).unwrap();
+                                });
                             }
                             FoyerRuntimeTask::Exists { key, tx } => {
-                                let res = store.exists(&key).map_err(FileCacheError::foyer);
-                                tx.send(res).unwrap();
+                                let store = store.clone();
+                                tokio::spawn(async move {
+                                    let res = store.exists(&key).map_err(FileCacheError::foyer);
+                                    tx.send(res).unwrap();
+                                });
                             }
                         }
                     }
@@ -418,6 +438,7 @@ where
             };
         });
 
+        // wait foyer store open
         rx.await.unwrap()?;
 
         Ok(Self::FoyerRuntime {

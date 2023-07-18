@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, VecDeque};
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -21,6 +22,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::hummock::{group_delta, HummockVersionDelta};
+use tokio::sync::mpsc;
 
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockResult, TableHolder};
@@ -52,12 +54,11 @@ impl CacheRefillPolicy {
                 let timer = policy.metrics.refill_cache_duration.start_timer();
                 let mut preload_count = 0;
                 let stats = StoreLocalStatistic::default();
-                let mut flatten_reqs = Vec::new();
+                let mut reqs = vec![];
                 let mut levels = vec![];
                 let mut removed_sst_object_ids = vec![];
                 for group_delta in delta.group_deltas.values() {
                     let mut is_bottommost_level = false;
-                    let last_pos = flatten_reqs.len();
                     for d in &group_delta.group_deltas {
                         if let Some(group_delta::DeltaType::IntraLevel(level_delta)) =
                             d.delta_type.as_ref()
@@ -66,32 +67,36 @@ impl CacheRefillPolicy {
                                 is_bottommost_level = true;
                                 break;
                             }
-                            for sst in &level_delta.inserted_table_infos {
-                                flatten_reqs
-                                    .push(policy.sstable_store.sstable_syncable(sst, &stats));
-                                levels.push(level_delta.level_idx as usize);
-                                removed_sst_object_ids
-                                    .push(level_delta.removed_table_object_ids.clone());
+                            if level_delta.inserted_table_infos.is_empty() {
+                                continue;
                             }
+                            let mut level_reqs = vec![];
+                            for sst in &level_delta.inserted_table_infos {
+                                level_reqs.push(policy.sstable_store.sstable_syncable(sst, &stats));
+                            }
+                            levels.push(level_delta.level_idx as usize);
+                            removed_sst_object_ids
+                                .push(level_delta.removed_table_object_ids.clone());
                             preload_count += level_delta.inserted_table_infos.len();
+                            reqs.push(level_reqs);
                         }
                     }
                     if is_bottommost_level {
-                        while flatten_reqs.len() > last_pos {
-                            flatten_reqs.pop();
-                        }
+                        reqs.pop();
+                        levels.pop();
+                        removed_sst_object_ids.pop();
                     }
                 }
                 policy.metrics.preload_io_count.inc_by(preload_count as u64);
-                let res = try_join_all(flatten_reqs).await;
+                let insert_ssts = try_join_all(reqs.into_iter().map(try_join_all)).await;
 
-                if policy.sstable_store.cache_refill_filter().is_some() {
+                if !levels.is_empty() && policy.sstable_store.cache_refill_filter().is_some() {
                     tokio::spawn({
                         async move {
                             if let Err(e) = Self::refill_data_file_cache(
                                 policy,
-                                res,
                                 levels,
+                                insert_ssts,
                                 removed_sst_object_ids,
                             )
                             .await
@@ -113,71 +118,100 @@ impl CacheRefillPolicy {
 
     async fn refill_data_file_cache(
         self: Arc<Self>,
-        fetch_meta_results: HummockResult<Vec<(TableHolder, u64, u64)>>,
         sstable_levels: Vec<usize>,
+        fetch_meta_results: HummockResult<Vec<Vec<(TableHolder, u64, u64)>>>,
         removed_sst_object_ids: Vec<Vec<u64>>,
     ) -> HummockResult<()> {
         let metas = fetch_meta_results?
             .into_iter()
-            .map(|(meta, _, _)| meta)
+            .map(|results| results.into_iter().map(|(meta, _, _)| meta).collect_vec())
             .collect_vec();
-        let args = metas
+
+        let levels = sstable_levels
             .into_iter()
-            .zip_eq_fast(sstable_levels)
+            .zip_eq_fast(metas)
             .zip_eq_fast(removed_sst_object_ids)
             .map(|((t0, t1), t2)| (t0, t1, t2))
             .collect_vec();
 
-        let mut futures = vec![];
+        let mut handles = vec![];
         let cache_refill_filter = self.sstable_store.cache_refill_filter().as_ref().unwrap();
 
-        for (meta, _level, removed_sst_object_ids) in &args {
-            let mut in_data_file_cache = false;
-            for id in removed_sst_object_ids {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        for (_level, metas, removed_ssts) in &levels {
+            tracing::info!(
+                "insert: {:?}, remove: {:?}",
+                metas.iter().map(|meta| meta.value().id).collect_vec(),
+                removed_ssts
+            );
+
+            let blocks = metas
+                .iter()
+                .map(|meta| meta.value().block_count())
+                .sum::<usize>();
+
+            if blocks == 0 {
+                continue;
+            }
+
+            let mut refill = false;
+            for id in removed_ssts {
                 if cache_refill_filter.contains(id) {
-                    in_data_file_cache = true;
+                    refill = true;
                     break;
                 }
             }
 
-            if in_data_file_cache {
-                for block_index in 0..meta.value().block_count() {
-                    let meta = meta.value().clone();
-                    let mut stat = StoreLocalStatistic::default();
-                    let sstable_store = self.sstable_store.clone();
-                    let metrics = self.metrics.clone();
-                    let future = async move {
-                        let now = Instant::now();
-                        let res = sstable_store
-                            .may_fill_data_file_cache(&meta, block_index, &mut stat)
-                            .await;
-                        match res {
-                            Ok(true) => metrics
-                                .refill_data_file_cache_duration
-                                .with_label_values(&["admitted"])
-                                .observe(now.elapsed().as_secs_f64()),
-                            Ok(false) => metrics
-                                .refill_data_file_cache_duration
-                                .with_label_values(&["rejected"])
-                                .observe(now.elapsed().as_secs_f64()),
+            if refill {
+                for _ in 0..100 {
+                    tx.send(()).unwrap()
+                }
+                for meta in metas {
+                    for block_index in 0..meta.value().block_count() {
+                        rx.recv().await.unwrap();
 
-                            _ => {}
-                        }
-                        res
-                    };
-                    futures.push(future);
+                        let tx = tx.clone();
+                        let meta = meta.value().clone();
+                        let mut stat = StoreLocalStatistic::default();
+                        let sstable_store = self.sstable_store.clone();
+                        let metrics = self.metrics.clone();
+                        let future = async move {
+                            let res = sstable_store
+                                .may_fill_data_file_cache(&meta, block_index, &mut stat)
+                                .await;
+                            match res {
+                                Ok(true) => {
+                                    metrics
+                                        .refill_data_file_cache_count
+                                        .with_label_values(&["admitted"])
+                                        .inc();
+                                }
+                                Ok(false) => {
+                                    metrics
+                                        .refill_data_file_cache_count
+                                        .with_label_values(&["rejected"])
+                                        .inc();
+                                }
+                                _ => {}
+                            }
+                            tx.send(()).unwrap();
+                            res
+                        };
+                        let handle = tokio::spawn(future);
+                        handles.push(handle);
+                    }
                 }
             } else {
-                for _ in 0..meta.value().block_count() {
-                    self.metrics
-                        .refill_data_file_cache_duration
-                        .with_label_values(&["filtered"])
-                        .observe(0.0);
-                }
+                self.metrics
+                    .refill_data_file_cache_count
+                    .with_label_values(&["filtered"])
+                    .inc_by(blocks as f64);
             }
         }
-        let _ = try_join_all(futures).await;
 
+        let _ = try_join_all(handles).await;
+        drop(rx);
         // TODO(MrCroxx): set timeout
 
         Ok(())
@@ -186,7 +220,7 @@ impl CacheRefillPolicy {
 
 pub struct CacheRefillFilter<K>
 where
-    K: Eq + Ord,
+    K: Eq + Ord + Debug,
 {
     refresh_interval: Duration,
     inner: RwLock<CacheRefillFilterInner<K>>,
@@ -194,7 +228,7 @@ where
 
 struct CacheRefillFilterInner<K>
 where
-    K: Eq + Ord,
+    K: Eq + Ord + Debug,
 {
     last_refresh: Instant,
     layers: VecDeque<RwLock<BTreeSet<K>>>,
@@ -202,7 +236,7 @@ where
 
 impl<K> CacheRefillFilter<K>
 where
-    K: Eq + Ord,
+    K: Eq + Ord + Debug,
 {
     pub fn new(layers: usize, refresh_interval: Duration) -> Self {
         assert!(layers > 0);
