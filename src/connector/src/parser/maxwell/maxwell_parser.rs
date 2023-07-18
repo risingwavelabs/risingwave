@@ -14,6 +14,7 @@
 
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
+use crate::only_parse_payload;
 use crate::parser::unified::maxwell::MaxwellChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
@@ -79,12 +80,6 @@ impl ByteStreamSourceParser for MaxwellParser {
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        if payload.is_some() {
-            self.parse_inner(payload.unwrap(), writer).await
-        } else {
-            Err(RwError::from(ErrorCode::InternalError(
-                "Empty payload with nonempty key".into(),
-            )))
-        }
+        only_parse_payload!(self, payload, writer)
     }
 }
