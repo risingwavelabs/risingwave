@@ -128,32 +128,30 @@ where
         let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<(TracedEpoch, Vec<BarrierCompleteResponse>)> = try {
+                    // Resolve actor info for recovery. If there's no actor to recover, most of the
+                    // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = self.resolve_actor_info_for_recovery().await;
 
-                    // If there is no actor to recover, skip the migration and build phase and
-                    // directly inject the `Initial` barrier.
-                    if !info.is_empty() {
-                        // Migrate actors in expired CN to newly joined one.
-                        let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
-                            warn!(err = ?err, "migrate actors failed");
-                        })?;
-                        if migrated {
-                            info = self.resolve_actor_info_for_recovery().await;
-                        }
-
-                        // Reset all compute nodes, stop and drop existing actors.
-                        self.reset_compute_nodes(&info).await.inspect_err(|err| {
-                            warn!(err = ?err, "reset compute nodes failed");
-                        })?;
-
-                        // update and build all actors.
-                        self.update_actors(&info).await.inspect_err(|err| {
-                            warn!(err = ?err, "update actors failed");
-                        })?;
-                        self.build_actors(&info).await.inspect_err(|err| {
-                            warn!(err = ?err, "build_actors failed");
-                        })?;
+                    // Migrate actors in expired CN to newly joined one.
+                    let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
+                        warn!(err = ?err, "migrate actors failed");
+                    })?;
+                    if migrated {
+                        info = self.resolve_actor_info_for_recovery().await;
                     }
+
+                    // Reset all compute nodes, stop and drop existing actors.
+                    self.reset_compute_nodes(&info).await.inspect_err(|err| {
+                        warn!(err = ?err, "reset compute nodes failed");
+                    })?;
+
+                    // update and build all actors.
+                    self.update_actors(&info).await.inspect_err(|err| {
+                        warn!(err = ?err, "update actors failed");
+                    })?;
+                    self.build_actors(&info).await.inspect_err(|err| {
+                        warn!(err = ?err, "build_actors failed");
+                    })?;
 
                     // get split assignments for all actors
                     let source_split_assignments = self.source_manager.list_assignments().await;
@@ -167,7 +165,7 @@ where
                     // Use a different `curr_epoch` for each recovery attempt.
                     let new_epoch = prev_epoch.next();
 
-                    // checkpoint, used as init barrier to initialize all executors.
+                    // Inject the `Initial` barrier to initialize all executors.
                     let command_ctx = Arc::new(CommandContext::new(
                         self.fragment_manager.clone(),
                         self.env.stream_client_pool_ref(),
@@ -370,6 +368,11 @@ where
 
     /// Update all actors in compute nodes.
     async fn update_actors(&self, info: &BarrierActorInfo) -> MetaResult<()> {
+        if info.actor_map.is_empty() {
+            tracing::debug!("no actor to update, skipping.");
+            return Ok(());
+        }
+
         let mut actor_infos = vec![];
         for (node_id, actors) in &info.actor_map {
             let host = info
@@ -410,6 +413,11 @@ where
 
     /// Build all actors in compute nodes.
     async fn build_actors(&self, info: &BarrierActorInfo) -> MetaResult<()> {
+        if info.actor_map.is_empty() {
+            tracing::debug!("no actor to build, skipping.");
+            return Ok(());
+        }
+
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
