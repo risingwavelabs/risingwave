@@ -14,11 +14,12 @@
 
 use std::fmt::Debug;
 
-use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use simd_json::{BorrowedValue, Mutable};
 
+use crate::only_parse_payload;
 use crate::parser::unified::debezium::{DebeziumChangeEvent, MongoProjeciton};
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
@@ -113,10 +114,11 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
 
     async fn parse_one<'a>(
         &'a mut self,
-        payload: Vec<u8>,
+        _key: Option<Vec<u8>>,
+        payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        only_parse_payload!(self, payload, writer)
     }
 }
 
