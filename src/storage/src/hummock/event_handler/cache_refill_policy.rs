@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -28,22 +28,33 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockResult, TableHolder};
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
+pub struct CacheRefillPolicyConfig {
+    pub sstable_store: SstableStoreRef,
+    pub metrics: Arc<CompactorMetrics>,
+
+    pub max_preload_wait_time_mill: u64,
+
+    pub refill_data_file_cache_levels: HashSet<u32>,
+}
+
 pub struct CacheRefillPolicy {
     sstable_store: SstableStoreRef,
     metrics: Arc<CompactorMetrics>,
+
     max_preload_wait_time_mill: u64,
+
+    refill_data_file_cache_levels: HashSet<u32>,
 }
 
 impl CacheRefillPolicy {
-    pub fn new(
-        sstable_store: SstableStoreRef,
-        metrics: Arc<CompactorMetrics>,
-        max_preload_wait_time_mill: u64,
-    ) -> Self {
+    pub fn new(config: CacheRefillPolicyConfig) -> Self {
         Self {
-            sstable_store,
-            metrics,
-            max_preload_wait_time_mill,
+            sstable_store: config.sstable_store,
+            metrics: config.metrics,
+
+            max_preload_wait_time_mill: config.max_preload_wait_time_mill,
+
+            refill_data_file_cache_levels: config.refill_data_file_cache_levels,
         }
     }
 
@@ -74,7 +85,7 @@ impl CacheRefillPolicy {
                             for sst in &level_delta.inserted_table_infos {
                                 level_reqs.push(policy.sstable_store.sstable_syncable(sst, &stats));
                             }
-                            levels.push(level_delta.level_idx as usize);
+                            levels.push(level_delta.level_idx);
                             removed_sst_object_ids
                                 .push(level_delta.removed_table_object_ids.clone());
                             preload_count += level_delta.inserted_table_infos.len();
@@ -118,7 +129,7 @@ impl CacheRefillPolicy {
 
     async fn refill_data_file_cache(
         self: Arc<Self>,
-        sstable_levels: Vec<usize>,
+        sstable_levels: Vec<u32>,
         fetch_meta_results: HummockResult<Vec<Vec<(TableHolder, u64, u64)>>>,
         removed_sst_object_ids: Vec<Vec<u64>>,
     ) -> HummockResult<()> {
@@ -139,19 +150,21 @@ impl CacheRefillPolicy {
 
         let (tx, mut rx) = mpsc::unbounded_channel();
 
-        for (_level, metas, removed_ssts) in &levels {
-            tracing::info!(
-                "insert: {:?}, remove: {:?}",
-                metas.iter().map(|meta| meta.value().id).collect_vec(),
-                removed_ssts
-            );
+        for (level, metas, removed_ssts) in &levels {
+            if !self.refill_data_file_cache_levels.contains(level) {
+                continue;
+            }
 
             let blocks = metas
                 .iter()
                 .map(|meta| meta.value().block_count())
                 .sum::<usize>();
 
-            if blocks == 0 {
+            if removed_ssts.is_empty() {
+                self.metrics
+                    .refill_data_file_cache_count
+                    .with_label_values(&["skip"])
+                    .inc_by(blocks as f64);
                 continue;
             }
 
@@ -164,9 +177,6 @@ impl CacheRefillPolicy {
             }
 
             if refill {
-                for _ in 0..100 {
-                    tx.send(()).unwrap()
-                }
                 for meta in metas {
                     for block_index in 0..meta.value().block_count() {
                         rx.recv().await.unwrap();
@@ -220,7 +230,7 @@ impl CacheRefillPolicy {
 
 pub struct CacheRefillFilter<K>
 where
-    K: Eq + Ord + Debug,
+    K: Eq + Ord + Debug + Clone,
 {
     refresh_interval: Duration,
     inner: RwLock<CacheRefillFilterInner<K>>,
@@ -228,7 +238,7 @@ where
 
 struct CacheRefillFilterInner<K>
 where
-    K: Eq + Ord + Debug,
+    K: Eq + Ord + Debug + Clone,
 {
     last_refresh: Instant,
     layers: VecDeque<RwLock<BTreeSet<K>>>,
@@ -236,7 +246,7 @@ where
 
 impl<K> CacheRefillFilter<K>
 where
-    K: Eq + Ord + Debug,
+    K: Eq + Ord + Debug + Clone,
 {
     pub fn new(layers: usize, refresh_interval: Duration) -> Self {
         assert!(layers > 0);
@@ -260,6 +270,7 @@ where
             if inner.last_refresh.elapsed() > self.refresh_interval {
                 inner.layers.pop_front();
                 inner.layers.push_back(RwLock::new(BTreeSet::new()));
+                inner.last_refresh = Instant::now();
             }
         }
 

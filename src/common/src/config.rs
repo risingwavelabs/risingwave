@@ -536,6 +536,9 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
     pub reclaim_rate_limit_mb: usize,
 
+    #[serde(default = "default::file_cache::refill_levels")]
+    pub refill_levels: Vec<u32>,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -953,6 +956,10 @@ mod default {
 
         pub fn reclaim_rate_limit_mb() -> usize {
             0
+        }
+
+        pub fn refill_levels() -> Vec<u32> {
+            vec![]
         }
     }
 

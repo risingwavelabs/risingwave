@@ -331,63 +331,63 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
     };
 
     // Tracing layer
-    // #[cfg(not(madsim))]
-    // if let Ok(endpoint) = std::env::var("RW_TRACING_ENDPOINT") {
-    //     println!("tracing enabled, exported to `{endpoint}`");
+    #[cfg(not(madsim))]
+    if let Ok(endpoint) = std::env::var("RW_TRACING_ENDPOINT") {
+        println!("tracing enabled, exported to `{endpoint}`");
 
-    //     use opentelemetry::{sdk, KeyValue};
-    //     use opentelemetry_otlp::WithExportConfig;
-    //     use opentelemetry_semantic_conventions::resource;
+        use opentelemetry::{sdk, KeyValue};
+        use opentelemetry_otlp::WithExportConfig;
+        use opentelemetry_semantic_conventions::resource;
 
-    //     let id = format!(
-    //         "{}-{}",
-    //         hostname::get()
-    //             .ok()
-    //             .and_then(|o| o.into_string().ok())
-    //             .unwrap_or_default(),
-    //         std::process::id()
-    //     );
+        let id = format!(
+            "{}-{}",
+            hostname::get()
+                .ok()
+                .and_then(|o| o.into_string().ok())
+                .unwrap_or_default(),
+            std::process::id()
+        );
 
-    //     let otel_tracer = {
-    //         let runtime = tokio::runtime::Builder::new_multi_thread()
-    //             .enable_all()
-    //             .thread_name("risingwave-otel")
-    //             .worker_threads(2)
-    //             .build()
-    //             .unwrap();
-    //         let runtime = Box::leak(Box::new(runtime));
+        let otel_tracer = {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("risingwave-otel")
+                .worker_threads(2)
+                .build()
+                .unwrap();
+            let runtime = Box::leak(Box::new(runtime));
 
-    //         // Installing the exporter requires a tokio runtime.
-    //         let _entered = runtime.enter();
+            // Installing the exporter requires a tokio runtime.
+            let _entered = runtime.enter();
 
-    //         opentelemetry_otlp::new_pipeline()
-    //             .tracing()
-    //             .with_exporter(
-    //                 opentelemetry_otlp::new_exporter()
-    //                     .tonic()
-    //                     .with_endpoint(endpoint),
-    //             )
-    //             .with_trace_config(sdk::trace::config().with_resource(sdk::Resource::new([
-    //                 KeyValue::new(
-    //                     resource::SERVICE_NAME,
-    //                     // TODO(bugen): better service name
-    //                     // https://github.com/jaegertracing/jaeger-ui/issues/336
-    //                     format!("{}-{}", settings.name, id),
-    //                 ),
-    //                 KeyValue::new(resource::SERVICE_INSTANCE_ID, id),
-    //                 KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-    //                 KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
-    //             ])))
-    //             .install_batch(opentelemetry::runtime::Tokio)
-    //             .unwrap()
-    //     };
+            opentelemetry_otlp::new_pipeline()
+                .tracing()
+                .with_exporter(
+                    opentelemetry_otlp::new_exporter()
+                        .tonic()
+                        .with_endpoint(endpoint),
+                )
+                .with_trace_config(sdk::trace::config().with_resource(sdk::Resource::new([
+                    KeyValue::new(
+                        resource::SERVICE_NAME,
+                        // TODO(bugen): better service name
+                        // https://github.com/jaegertracing/jaeger-ui/issues/336
+                        format!("{}-{}", settings.name, id),
+                    ),
+                    KeyValue::new(resource::SERVICE_INSTANCE_ID, id),
+                    KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
+                    KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
+                ])))
+                .install_batch(opentelemetry::runtime::Tokio)
+                .unwrap()
+        };
 
-    //     let layer = tracing_opentelemetry::layer()
-    //         .with_tracer(otel_tracer)
-    //         .with_filter(default_filter);
+        let layer = tracing_opentelemetry::layer()
+            .with_tracer(otel_tracer)
+            .with_filter(default_filter);
 
-    //     layers.push(layer.boxed());
-    // }
+        layers.push(layer.boxed());
+    }
 
     // Metrics layer
     {

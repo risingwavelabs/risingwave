@@ -194,6 +194,11 @@ impl HummockStorage {
             pinned_version,
             compactor_context.clone(),
             state_store_metrics.clone(),
+            options
+                .data_file_cache_refill_levels
+                .iter()
+                .copied()
+                .collect(),
         );
 
         let instance = Self {

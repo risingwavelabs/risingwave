@@ -2091,6 +2091,8 @@ def section_hummock(panels):
 
 def section_hummock_tiered_cache(outer_panels):
     panels = outer_panels.sub_panel()
+    file_cache_hit_filter = 'op="lookup",extra="hit"'
+    file_cache_miss_filter = 'op="lookup",extra="miss"'
     return [
         outer_panels.row_collapsed(
             "Hummock Tiered Cache",
@@ -2154,6 +2156,30 @@ def section_hummock_tiered_cache(outer_panels):
                         ),
                             panels.target(
                             f"{metric('meta_foyer_storage_size')}", "size @ {{instance}}"
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Cache Hit Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('data_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) / (sum(rate({metric('data_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) + sum(rate({metric('data_foyer_storage_latency_count', file_cache_miss_filter)}[$__rate_interval])) by (instance))",
+                            "data file cache hit ratio @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('meta_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) / (sum(rate({metric('meta_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) + sum(rate({metric('meta_foyer_storage_latency_count', file_cache_miss_filter)}[$__rate_interval])) by (instance))",
+                            "meta file cache hit ratio @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Refill",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('compute_refill_data_file_cache_count')}[$__rate_interval])) by (extra, instance)",
+                            "refill data file cache - {{extra}} @ {{instance}}",
                         ),
                     ],
                 ),

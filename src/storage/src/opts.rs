@@ -104,6 +104,8 @@ pub struct StorageOpts {
     pub object_store_upload_timeout_ms: u64,
     /// object store read timeout.
     pub object_store_read_timeout_ms: u64,
+
+    pub data_file_cache_refill_levels: Vec<u32>,
 }
 
 impl Default for StorageOpts {
@@ -160,6 +162,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_rated_random_rate_mb: c.storage.data_file_cache.rated_random_rate_mb,
             data_file_cache_flush_rate_limit_mb: c.storage.data_file_cache.flush_rate_limit_mb,
             data_file_cache_reclaim_rate_limit_mb: c.storage.data_file_cache.reclaim_rate_limit_mb,
+            data_file_cache_refill_levels: c.storage.data_file_cache.refill_levels.clone(),
+
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
