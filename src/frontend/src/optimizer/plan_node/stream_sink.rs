@@ -79,7 +79,7 @@ impl StreamSink {
     ) -> Result<Self> {
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (input, sink) = Self::derive_sink_desc(
-            input.clone(),
+            input,
             user_distributed_by,
             name,
             user_order_by,
