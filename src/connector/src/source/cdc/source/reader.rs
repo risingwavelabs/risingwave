@@ -97,9 +97,9 @@ impl SplitReader for CdcSplitReader {
 impl CdcSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
-        let cdc_client = self.source_ctx.connector_client.clone().ok_or(anyhow!(
-            "connector node endpoint not specified or unable to connect to connector node"
-        ))?;
+        let cdc_client = self.source_ctx.connector_client.clone().ok_or_else(|| {
+            anyhow!("connector node endpoint not specified or unable to connect to connector node")
+        })?;
 
         // rewrite the hostname and port for the split
         let mut properties = self.conn_props.props.clone();
@@ -114,7 +114,7 @@ impl CdcSplitReader {
             // rewrite table name with suffix to capture all shards in the split
             let mut table_name = properties
                 .remove("table.name")
-                .ok_or_else(|| anyhow!("missing field 'table.name'".to_string()))?;
+                .ok_or_else(|| anyhow!("missing field 'table.name'"))?;
             table_name.push_str("_[0-9]+");
             properties.insert("table.name".into(), table_name);
         }
