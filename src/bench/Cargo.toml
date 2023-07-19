@@ -22,7 +22,7 @@ isahc = { version = "1", default-features = false }
 itertools = "0.10"
 libc = "0.2"
 opentelemetry = { version = "0.17", optional = true, features = ["rt-tokio"] }
-opentelemetry-jaeger = { version = "0.16", optional = true, features = [
+opentelemetry-jaeger = { version = "0.18", optional = true, features = [
     "rt-tokio",
     "collector_client",
     "isahc",
