@@ -93,10 +93,7 @@ impl LevelCompactionPicker {
         let base_level_size = target_level.total_file_size
             - level_handlers[target_level.level_idx as usize].get_pending_file_size();
 
-        if l0_size < base_level_size
-            && l0.total_file_size < self.config.max_bytes_for_level_base * 2
-        {
-            // just quick fix: loosen this constraint when L0 sst piles up
+        if l0_size < base_level_size {
             stats.skip_by_write_amp_limit += 1;
             return None;
         }
@@ -153,11 +150,12 @@ impl LevelCompactionPicker {
                 continue;
             }
 
+            // FIXME
             // The size of target level may be too large, we shall skip this compact task and wait
             //  the data in base level compact to lower level.
-            if target_level_size > self.config.max_compaction_bytes {
-                continue;
-            }
+            // if target_level_size > self.config.max_compaction_bytes {
+            //     continue;
+            // }
 
             if input.total_file_size >= target_level_size {
                 min_write_amp_meet = true;
