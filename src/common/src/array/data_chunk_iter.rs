@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hash;
 use std::iter::{FusedIterator, TrustedLen};
 
 use super::ArrayRef;
@@ -153,6 +154,15 @@ impl PartialEq for RowRef<'_> {
 }
 impl Eq for RowRef<'_> {}
 
+impl Hash for RowRef<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let len = self.chunk.columns().len();
+        for i in 0..len {
+            self.datum_at(i).hash(state);
+        }
+    }
+}
+
 impl Row for RowRef<'_> {
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         debug_assert!(self.idx < self.chunk.capacity());
@@ -207,3 +217,44 @@ impl<'a> Iterator for RowRefIter<'a> {
 
 impl ExactSizeIterator for RowRefIter<'_> {}
 unsafe impl TrustedLen for RowRefIter<'_> {}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use crate::array::StreamChunk;
+    use crate::test_prelude::StreamChunkTestExt;
+
+    #[test]
+    fn test_row_ref_hash() {
+        let mut set = HashSet::new();
+        let chunk1 = StreamChunk::from_pretty(
+            " I I I
+            + 2 5 1
+            + 4 9 2
+            - 2 5 1",
+        );
+        for (_, row) in chunk1.rows() {
+            set.insert(row);
+        }
+        assert_eq!(set.len(), 2);
+
+        let chunk2 = StreamChunk::from_pretty(
+            " I I I
+            - 4 9 2",
+        );
+        for (_, row) in chunk2.rows() {
+            set.insert(row);
+        }
+        assert_eq!(set.len(), 2);
+
+        let chunk3 = StreamChunk::from_pretty(
+            " I I I
+            + 1 2 3",
+        );
+        for (_, row) in chunk3.rows() {
+            set.insert(row);
+        }
+        assert_eq!(set.len(), 3);
+    }
+}

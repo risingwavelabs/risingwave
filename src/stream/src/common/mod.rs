@@ -14,11 +14,12 @@
 
 pub use builder::*;
 pub use column_mapping::*;
+pub use compact_chunk::*;
 
-// t
 mod builder;
 pub mod cache;
 mod column_mapping;
+pub mod compact_chunk;
 pub mod log_store;
 pub mod metrics;
 pub mod table;

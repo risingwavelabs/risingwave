@@ -34,6 +34,7 @@ use risingwave_connector::sink::{
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
+use crate::common::compact_chunk;
 use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
@@ -177,6 +178,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             match msg? {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
+                    // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
+                    // K->K).
+                    let chunk = compact_chunk(chunk);
                     let visible_chunk = if sink_type == SinkType::ForceAppendOnly {
                         // Force append-only by dropping UPDATE/DELETE messages. We do this when the
                         // user forces the sink to be append-only while it is actually not based on

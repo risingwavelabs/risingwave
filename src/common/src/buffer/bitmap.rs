@@ -73,6 +73,15 @@ impl BitmapBuilder {
         }
     }
 
+    /// Creates a new bitmap from an existing bitmap.
+    pub fn from_bitmap(bitmap: &Bitmap) -> BitmapBuilder {
+        BitmapBuilder {
+            len: bitmap.len(),
+            data: Vec::from(bitmap.bits.clone()),
+            count_ones: bitmap.count_ones,
+        }
+    }
+
     /// Writes a new value into a single bit.
     pub fn set(&mut self, n: usize, val: bool) {
         assert!(n < self.len);

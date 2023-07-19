@@ -21,6 +21,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
 use super::*;
+use crate::common::compact_chunk;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
@@ -133,7 +134,7 @@ impl Inner {
         }
         let (_, vis) = data_chunk.into_parts();
         let vis = vis.into_visibility();
-        let new_chunk = StreamChunk::new(ops, projected_columns, vis);
+        let new_chunk = compact_chunk(StreamChunk::new(ops, projected_columns, vis));
         Ok(Some(new_chunk))
     }
 
