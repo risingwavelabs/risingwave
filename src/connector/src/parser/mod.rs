@@ -457,7 +457,6 @@ impl AccessBuilderImpl {
 pub enum ByteStreamSourceParserImpl {
     Csv(CsvParser),
     Json(JsonParser),
-    Protobuf(ProtobufParser),
     Debezium(DebeziumParser),
     Plain(PlainParser),
     Upsert(UpsertParser),
@@ -475,7 +474,6 @@ impl ByteStreamSourceParserImpl {
         let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
             Self::Json(parser) => parser.into_stream(msg_stream),
-            Self::Protobuf(parser) => parser.into_stream(msg_stream),
             Self::Debezium(parser) => parser.into_stream(msg_stream),
             Self::DebeziumMongoJson(parser) => parser.into_stream(msg_stream),
             Self::Maxwell(parser) => parser.into_stream(msg_stream),

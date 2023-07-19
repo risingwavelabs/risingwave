@@ -20,7 +20,7 @@ use prost_reflect::{
     ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::ErrorCode::{self, InternalError, NotImplemented, ProtocolError};
+use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, F32, F64};
@@ -29,15 +29,10 @@ use url::Url;
 
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
-use crate::only_parse_payload;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::AccessImpl;
-use crate::parser::{
-    AccessBuilder, ByteStreamSourceParser, EncodingProperties, SourceStreamChunkRowWriter,
-    WriteGuard,
-};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
+use crate::parser::{AccessBuilder, EncodingProperties};
 
 #[derive(Debug)]
 pub struct ProtobufAccessBuilder {
