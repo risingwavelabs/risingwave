@@ -13,19 +13,24 @@ import (
 )
 
 type S3Config struct {
-	Bucket string
-	Region string
+	Bucket   string
+	Region   string
+	Endpoint string
 }
 
 type S3Sink struct {
-	buffer *bytes.Buffer
+	buffer bytes.Buffer
 	client *s3.S3
 	cfg    S3Config
 }
 
 func OpenS3Sink(cfg S3Config) (*S3Sink, error) {
 	ss := session.Must(session.NewSession())
-	client := s3.New(ss, aws.NewConfig().WithRegion(cfg.Region))
+	config := aws.NewConfig().WithRegion(cfg.Region)
+	if cfg.Endpoint != "" {
+		config = config.WithEndpoint(cfg.Endpoint)
+	}
+	client := s3.New(ss, config)
 	return &S3Sink{
 		client: client,
 		cfg:    cfg,
@@ -37,15 +42,11 @@ func (p *S3Sink) Prepare(topics []string) error {
 }
 
 func (p *S3Sink) Close() error {
-	return p.Flush()
+	return p.Flush(context.Background())
 }
 
 func (p *S3Sink) WriteRecord(ctx context.Context, format string, record sink.SinkRecord) error {
-	topic, _, data := sink.RecordToKafka(record, format)
-	fmt.Printf("%s\n", data)
-	if topic == "ad_click" {
-		return nil
-	}
+	data := sink.RecordToKafka(record, format)
 
 	_, err := p.buffer.Write(data)
 	if err != nil {
@@ -60,18 +61,19 @@ func (p *S3Sink) WriteRecord(ctx context.Context, format string, record sink.Sin
 	return nil
 }
 
-func (p *S3Sink) Flush() error {
-	// FIXME: hard-coded JSON format
-	name := fmt.Sprintf("data-%d.ndjson", time.Now().UnixMilli())
+func (p *S3Sink) Flush(ctx context.Context) error {
+	name := fmt.Sprintf("data-%d", time.Now().UnixMilli())
 
-	_, err := p.client.PutObject(&s3.PutObjectInput{
+	_, err := p.client.PutObjectWithContext(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(p.cfg.Bucket),
 		Key:    aws.String(name),
 		Body:   bytes.NewReader(p.buffer.Bytes()),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to put object to s3: %s", err)
-	} else {
-		return nil
 	}
+	p.buffer.Reset()
+
+	fmt.Printf("S3 Sink: uploaded object '%s' (%d bytes)\n", name, p.buffer.Len())
+	return nil
 }

@@ -171,6 +171,34 @@ func main() {
 				},
 				HelpName: "datagen kinesis",
 			},
+			{
+				Name: "s3",
+				Flags: []cli.Flag{
+					cli.StringFlag{
+						Name:        "region",
+						Usage:       "The region where the S3 bucket resides",
+						Required:    true,
+						Destination: &cfg.S3.Region,
+					},
+					cli.StringFlag{
+						Name:        "bucket",
+						Usage:       "The S3 bucket name",
+						Required:    true,
+						Destination: &cfg.S3.Bucket,
+					},
+					cli.StringFlag{
+						Name:        "endpoint",
+						Usage:       "The endpoint of this S3 bucket",
+						Required:    false,
+						Destination: &cfg.S3.Endpoint,
+					},
+				},
+				Action: func(c *cli.Context) error {
+					cfg.Sink = "s3"
+					return runCommand()
+				},
+				HelpName: "datagen s3",
+			},
 		},
 		Flags: []cli.Flag{
 			cli.BoolFlag{
@@ -206,7 +234,7 @@ func main() {
 				Destination: &cfg.HeavyTail,
 			},
 			cli.StringFlag{
-				Name:        "topics",
+				Name:        "topic",
 				Usage:       "The topic to filter. If not specified, all topics will be used.",
 				Required:    false,
 				Destination: &cfg.Topic,

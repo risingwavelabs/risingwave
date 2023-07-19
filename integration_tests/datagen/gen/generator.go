@@ -8,6 +8,7 @@ import (
 	"datagen/sink/mysql"
 	"datagen/sink/postgres"
 	"datagen/sink/pulsar"
+	"datagen/sink/s3"
 
 	"gonum.org/v1/gonum/stat/distuv"
 )
@@ -18,6 +19,7 @@ type GeneratorConfig struct {
 	Kafka    kafka.KafkaConfig
 	Pulsar   pulsar.PulsarConfig
 	Kinesis  kinesis.KinesisConfig
+	S3       s3.S3Config
 
 	// Whether to print the content of every event.
 	PrintInsert bool
