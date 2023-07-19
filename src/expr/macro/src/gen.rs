@@ -325,11 +325,13 @@ impl FunctionAttr {
                 };
             }
         });
-        let let_values = (0..self.args.len()).map(|i| {
-            let v = format_ident!("v{i}");
-            let a = format_ident!("a{i}");
-            quote! { let #v = #a.value_at(row_id); }
-        });
+        let let_values = (0..self.args.len())
+            .map(|i| {
+                let v = format_ident!("v{i}");
+                let a = format_ident!("a{i}");
+                quote! { let #v = #a.value_at(row_id); }
+            })
+            .collect_vec();
         let let_state = match &self.state {
             Some(s) if s == "ref" => quote! { self.state.as_ref().map(|x| x.as_scalar_ref()) },
             _ => quote! { self.state.take() },
@@ -420,13 +422,26 @@ impl FunctionAttr {
                     ) -> Result<()> {
                         #(#let_arrays)*
                         let mut state = #let_state;
-                        for row_id in start_row_id..end_row_id {
-                            if !input.vis().is_set(row_id) {
-                                continue;
+                        match input.vis() {
+                            Vis::Bitmap(bitmap) => {
+                                for row_id in bitmap.iter_ones() {
+                                    if row_id < start_row_id {
+                                        continue;
+                                    } else if row_id >= end_row_id {
+                                        break;
+                                    }
+                                    #check_retract
+                                    #(#let_values)*
+                                    state = #next_state;
+                                }
                             }
-                            #check_retract
-                            #(#let_values)*
-                            state = #next_state;
+                            Vis::Compact(_) => {
+                                for row_id in start_row_id..end_row_id {
+                                    #check_retract
+                                    #(#let_values)*
+                                    state = #next_state;
+                                }
+                            }
                         }
                         self.state = #assign_state;
                         Ok(())
