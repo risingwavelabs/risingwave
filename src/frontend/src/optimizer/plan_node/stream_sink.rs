@@ -102,8 +102,7 @@ impl StreamSink {
     ) -> Result<(PlanRef, SinkDesc)> {
         let sink_type = Self::derive_sink_type(input.append_only(), &properties)?;
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
-        let downstream_pk =
-            Self::parse_downstream_pk(&columns, &sink_type, properties.get(DOWNSTREAM_PK_KEY))?;
+        let downstream_pk = Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
 
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -117,6 +116,16 @@ impl StreamSink {
                         RequiredDist::single()
                     }
                     Some(s) if s == "jdbc" && sink_type == SinkType::Upsert => {
+                        if sink_type == SinkType::Upsert && downstream_pk.is_empty() {
+                            return Err(ErrorCode::SinkError(Box::new(Error::new(
+                                ErrorKind::InvalidInput,
+                                format!(
+                                    "Primary key must be defined for upsert JDBC sink. Please specify the \"{key}='pk1,pk2,...'\" in WITH options.",
+                                    key = DOWNSTREAM_PK_KEY
+                                ),
+                            )))
+                                .into());
+                        }
                         // for upsert jdbc sink we align distribution to downstream to avoid
                         // lock contentions
                         RequiredDist::hash_shard(downstream_pk.as_slice())
@@ -216,20 +225,8 @@ impl StreamSink {
     /// get parsed.
     fn parse_downstream_pk(
         columns: &[ColumnCatalog],
-        sink_type: &SinkType,
         downstream_pk_str: Option<&String>,
     ) -> Result<Vec<usize>> {
-        if *sink_type == SinkType::Upsert && downstream_pk_str.is_none() {
-            return Err(ErrorCode::SinkError(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!(
-                    "Primary key must be defined for upsert sink. Please specify the \"{key}='pk1,pk2,...'\" in WITH options.",
-                    key = DOWNSTREAM_PK_KEY
-                ),
-            )))
-            .into());
-        }
-
         match downstream_pk_str {
             Some(downstream_pk_str) => {
                 // If the user defines the downstream primary key, we find out their indices.
