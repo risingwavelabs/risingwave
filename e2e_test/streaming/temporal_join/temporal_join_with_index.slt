@@ -11,7 +11,7 @@ statement ok
 create index idx on version (a2);
 
 statement ok
-create materialized view v as select id1, a1, id2, a2 from stream left join idx FOR SYSTEM_TIME AS OF PROCTIME() on b1 = b2 and a1 = a2;
+create materialized view v as select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on b1 = b2 and a1 = a2;
 
 statement ok
 insert into stream values(1, 11, 111);
