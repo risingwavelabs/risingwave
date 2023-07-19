@@ -464,8 +464,7 @@ mod test {
         };
         let parser_config = ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info)?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
-        let parser = ProtobufParser::new(Vec::default(), conf, Default::default())?;
-        let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
+        let value = DynamicMessage::decode(conf.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
         assert_eq!(
             value.get_field_by_name("id").unwrap().into_owned(),
