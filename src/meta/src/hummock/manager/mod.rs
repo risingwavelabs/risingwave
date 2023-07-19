@@ -688,9 +688,9 @@ where
         Ok(HummockSnapshot::clone(&snapshot))
     }
 
-    pub fn get_last_epoch(&self) -> Result<HummockSnapshot> {
+    pub fn latest_snapshot(&self) -> HummockSnapshot {
         let snapshot = self.latest_snapshot.load();
-        Ok(HummockSnapshot::clone(&snapshot))
+        HummockSnapshot::clone(&snapshot)
     }
 
     #[named]
@@ -1236,7 +1236,6 @@ where
                     &mut branched_ssts,
                     current_version,
                     compact_task,
-                    is_trivial_move,
                     deterministic_mode,
                 );
                 let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
@@ -2664,9 +2663,10 @@ fn gen_version_delta<'a>(
     branched_ssts: &mut BTreeMapTransaction<'a, HummockSstableObjectId, BranchedSstInfo>,
     old_version: &HummockVersion,
     compact_task: &CompactTask,
-    trivial_move: bool,
     deterministic_mode: bool,
 ) -> HummockVersionDelta {
+    let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
+
     let mut version_delta = HummockVersionDelta {
         id: old_version.id + 1,
         prev_id: old_version.id,

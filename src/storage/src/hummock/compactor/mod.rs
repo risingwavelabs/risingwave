@@ -568,7 +568,7 @@ impl Compactor {
                                     }
                                 }
                             }
-                            
+
                             tracing::info!(
                                 cpu = %last_workload.cpu,
                                 running_task_count = %running_task_count.load(Ordering::Relaxed),

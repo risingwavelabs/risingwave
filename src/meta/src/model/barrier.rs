@@ -12,60 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::epoch::INVALID_EPOCH;
-
 use crate::barrier::TracedEpoch;
-use crate::storage::{MetaStore, MetaStoreError, MetaStoreResult, DEFAULT_COLUMN_FAMILY};
 
-/// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`, this will be stored
-/// persistently to meta store. Add more states when needed.
+/// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
 pub struct BarrierManagerState {
     /// The last sent `prev_epoch`
+    ///
+    /// There's no need to persist this field. On recovery, we will restore this from the latest
+    /// committed snapshot in `HummockManager`.
     in_flight_prev_epoch: TracedEpoch,
 }
 
-const BARRIER_MANAGER_STATE_KEY: &[u8] = b"barrier_manager_state";
-
 impl BarrierManagerState {
-    pub async fn create<S>(store: &S) -> Self
-    where
-        S: MetaStore,
-    {
-        let in_flight_prev_epoch = match store
-            .get_cf(DEFAULT_COLUMN_FAMILY, BARRIER_MANAGER_STATE_KEY)
-            .await
-        {
-            Ok(byte_vec) => memcomparable::from_slice::<u64>(&byte_vec).unwrap().into(),
-            Err(MetaStoreError::ItemNotFound(_)) => INVALID_EPOCH.into(),
-            Err(e) => panic!("{:?}", e),
-        };
+    pub fn new(in_flight_prev_epoch: TracedEpoch) -> Self {
         Self {
-            in_flight_prev_epoch: TracedEpoch::new(in_flight_prev_epoch),
+            in_flight_prev_epoch,
         }
     }
 
-    pub async fn update_inflight_prev_epoch<S>(
-        &mut self,
-        store: &S,
-        new_epoch: TracedEpoch,
-    ) -> MetaStoreResult<()>
-    where
-        S: MetaStore,
-    {
-        store
-            .put_cf(
-                DEFAULT_COLUMN_FAMILY,
-                BARRIER_MANAGER_STATE_KEY.to_vec(),
-                memcomparable::to_vec(&new_epoch.value().0).unwrap(),
-            )
-            .await?;
-
-        self.in_flight_prev_epoch = new_epoch;
-
-        Ok(())
-    }
-
-    pub fn in_flight_prev_epoch(&self) -> TracedEpoch {
-        self.in_flight_prev_epoch.clone()
+    /// Returns the epoch pair for the next barrier, and updates the state.
+    pub fn next_epoch_pair(&mut self) -> (TracedEpoch, TracedEpoch) {
+        let prev_epoch = self.in_flight_prev_epoch.clone();
+        let next_epoch = prev_epoch.next();
+        self.in_flight_prev_epoch = next_epoch.clone();
+        (prev_epoch, next_epoch)
     }
 }

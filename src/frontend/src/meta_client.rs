@@ -35,7 +35,7 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 pub trait FrontendMetaClient: Send + Sync {
     async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
 
-    async fn get_epoch(&self) -> Result<HummockSnapshot>;
+    async fn get_snapshot(&self) -> Result<HummockSnapshot>;
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
 
@@ -77,8 +77,8 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.pin_snapshot().await
     }
 
-    async fn get_epoch(&self) -> Result<HummockSnapshot> {
-        self.0.get_epoch().await
+    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
+        self.0.get_snapshot().await
     }
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {

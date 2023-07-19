@@ -34,7 +34,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
     async fn unpin_snapshot(&self) -> Result<()>;
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;
-    async fn get_epoch(&self) -> Result<HummockSnapshot>;
+    async fn get_snapshot(&self) -> Result<HummockSnapshot>;
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange>;
     // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch(

@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::str;
 use std::str::Utf8Error;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
@@ -43,6 +43,20 @@ use crate::pg_message::{
 };
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
+
+/// Truncates query log if it's longer than `RW_QUERY_LOG_TRUNCATE_LEN`, to avoid log file being too
+/// large.
+static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
+    LazyLock::new(|| match std::env::var("RW_QUERY_LOG_TRUNCATE_LEN") {
+        Ok(len) if len.parse::<usize>().is_ok() => len.parse::<usize>().unwrap(),
+        _ => {
+            if cfg!(debug_assertions) {
+                usize::MAX
+            } else {
+                1024
+            }
+        }
+    });
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -378,7 +392,7 @@ where
             session = %session_id,
             status = %if result.is_ok() { "ok" } else { "err" },
             time = %format_args!("{}ms", mills),
-            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
+            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
         );
 
         result
@@ -393,13 +407,19 @@ where
         let stmts = Parser::parse_sql(sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
             .map_err(|err| PsqlError::QueryError(err.into()))?;
+        if stmts.is_empty() {
+            self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
+        }
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
             let span = tracing::info_span!(
                 "process_query_msg_one_stmt",
                 session_id = session.id().0,
-                stmt = format_args!("{}", truncated_fmt::TruncatedFmt(&stmt, 1024)),
+                stmt = format_args!(
+                    "{}",
+                    truncated_fmt::TruncatedFmt(&stmt, *RW_QUERY_LOG_TRUNCATE_LEN)
+                ),
             );
 
             self.inner_process_query_msg_one_stmt(stmt, session.clone())
@@ -497,7 +517,7 @@ where
             session = %session_id,
             status = %if result.is_ok() { "ok" } else { "err" },
             time = %format_args!("{}ms", mills),
-            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
+            sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
         );
 
         result
@@ -633,7 +653,7 @@ where
                 session = %session_id,
                 status = %if result.is_ok() { "ok" } else { "err" },
                 time = %format_args!("{}ms", mills),
-                sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)),
+                sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
             );
 
             let pg_response = result.map_err(PsqlError::ExecuteError)?;

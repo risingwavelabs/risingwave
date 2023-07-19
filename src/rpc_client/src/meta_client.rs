@@ -1060,7 +1060,7 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
-    async fn get_epoch(&self) -> Result<HummockSnapshot> {
+    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
         let req = GetEpochRequest {};
         let resp = self.inner.get_epoch(req).await?;
         Ok(resp.snapshot.unwrap())
