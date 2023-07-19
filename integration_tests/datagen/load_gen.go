@@ -125,10 +125,8 @@ func generateLoad(ctx context.Context, cfg gen.GeneratorConfig) error {
 		case record := <-outCh:
 			// Filter records if topic is specified
 			if cfg.Topic != "" && record.Topic() != cfg.Topic {
-				//fmt.Printf("skipped record. topic: %s message: %s\n", record.Topic(), record.ToJson())
 				continue
 			}
-			// fmt.Printf("sent record. topic: %s message: %s\n", record.Topic(), record.ToJson())
 			if cfg.PrintInsert {
 				fmt.Println(record.ToPostgresSql())
 			}
