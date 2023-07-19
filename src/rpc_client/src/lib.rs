@@ -35,7 +35,6 @@ use std::future::Future;
 use std::iter::repeat;
 use std::sync::Arc;
 
-#[cfg(not(madsim))]
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::future::try_join_all;
