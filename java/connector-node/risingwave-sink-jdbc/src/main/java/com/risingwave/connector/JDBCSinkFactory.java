@@ -23,9 +23,11 @@ import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
 import java.sql.*;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,7 +56,7 @@ public class JDBCSinkFactory implements SinkFactory {
         String tableName = config.getTableName();
         String schemaName = config.getSchemaName();
         Set<String> jdbcColumns = new HashSet<>();
-        Set<String> jdbcPk = new HashSet<>();
+        Set<String> jdbcPks = new HashSet<>();
         Set<String> jdbcTableNames = new HashSet<>();
 
         try (Connection conn = DriverManager.getConnection(jdbcUrl);
@@ -71,7 +73,7 @@ public class JDBCSinkFactory implements SinkFactory {
                 jdbcColumns.add(columnResultSet.getString("COLUMN_NAME"));
             }
             while (pkResultSet.next()) {
-                jdbcPk.add(pkResultSet.getString("COLUMN_NAME"));
+                jdbcPks.add(pkResultSet.getString("COLUMN_NAME"));
             }
         } catch (SQLException e) {
             LOG.error("failed to connect to target database. jdbcUrl: {}", jdbcUrl, e);
@@ -98,12 +100,17 @@ public class JDBCSinkFactory implements SinkFactory {
         }
 
         if (sinkType == SinkType.UPSERT) {
-            // For JDBC sink, we enforce the primary key as that of the JDBC table's. The JDBC table
-            // must have primary key.
-            if (jdbcPk.isEmpty()) {
+            // For upsert JDBC sink, the primary key defined on the table must match the one in
+            // config and cannot be empty
+            var pkInWith =
+                    Arrays.stream(config.getPrimaryKey().split(","))
+                            .map(String::trim)
+                            .collect(Collectors.toSet());
+
+            if (jdbcPks.isEmpty() || !jdbcPks.equals(pkInWith)) {
                 throw Status.INVALID_ARGUMENT
                         .withDescription(
-                                "JDBC table has no primary key, consider making the sink append-only or defining primary key on the JDBC table")
+                                "JDBC table has no primary key or the primary key doesn't match the 'primary_key' option in the WITH clause")
                         .asRuntimeException();
             }
             if (tableSchema.getPrimaryKeys().isEmpty()) {

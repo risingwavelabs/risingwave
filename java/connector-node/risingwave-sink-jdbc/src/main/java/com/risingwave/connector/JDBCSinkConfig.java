@@ -65,6 +65,10 @@ public class JDBCSinkConfig extends CommonSinkConfig {
         return sinkType;
     }
 
+    public String getPrimaryKey() {
+        return primaryKey;
+    }
+
     public boolean isUpsertSink() {
         return this.isUpsertSink;
     }
