@@ -277,7 +277,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         let source_desc = source_desc_builder
             .build_fs_source_desc()
-            .await
             .map_err(StreamExecutorError::connector_error)?;
 
         // If the first barrier is configuration change, then the source executor must be newly

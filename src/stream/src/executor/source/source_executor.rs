@@ -353,7 +353,6 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
         let source_desc = source_desc_builder
             .build()
-            .await
             .map_err(StreamExecutorError::connector_error)?;
 
         let mut boot_state = Vec::default();

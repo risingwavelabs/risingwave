@@ -102,3 +102,19 @@ macro_rules! only_parse_payload {
         }
     };
 }
+
+// Extract encoding config and encoding type from ParserProperties
+// for message key.
+//
+// Suppose (A, B) is the combination of key/payload combination:
+// For (None, B), key should be the the key setting from B
+// For (A, B), key should be the value setting from A
+#[macro_export]
+macro_rules! extract_key_config {
+    ($props:ident) => {
+        match $props.key_encoding_config {
+            Some(config) => (config, EncodingType::Value),
+            None => ($props.encoding_config.clone(), EncodingType::Key),
+        }
+    };
+}
