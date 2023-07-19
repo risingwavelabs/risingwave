@@ -132,7 +132,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     );
 
     // Ensure the source exists.
-    let source_desc = source_builder.build().await.unwrap();
+    let source_desc = source_builder.build().unwrap();
     let get_schema = |column_ids: &[ColumnId]| {
         let mut fields = Vec::with_capacity(column_ids.len());
         for &column_id in column_ids {

@@ -231,7 +231,10 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::parser::{CommonParserConfig, CsvParserConfig, SpecificParserConfig};
+    use crate::parser::{
+        CommonParserConfig, CsvProperties, EncodingProperties, ParserProperties,
+        ProtocolProperties, SpecificParserConfig,
+    };
     use crate::source::filesystem::{S3Properties, S3SplitEnumerator};
     use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
 
@@ -261,14 +264,18 @@ mod tests {
             SourceColumnDesc::simple("age", DataType::Int32, 3.into()),
         ];
 
-        let csv_config = CsvParserConfig {
+        let csv_config = CsvProperties {
             delimiter: b',',
             has_header: true,
         };
 
         let config = ParserConfig {
             common: CommonParserConfig { rw_columns: descs },
-            specific: SpecificParserConfig::Csv(csv_config),
+            specific: SpecificParserConfig::Plain(ParserProperties {
+                key_encoding_config: None,
+                encoding_config: EncodingProperties::Csv(csv_config),
+                protocol_config: ProtocolProperties::Plain,
+            }),
         };
 
         let reader = S3FileReader::new(props, splits, config, Default::default(), None)
