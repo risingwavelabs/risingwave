@@ -36,11 +36,9 @@ impl PlainParser {
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
         let payload_builder = match props.encoding_config {
-            EncodingProperties::Json(_)
-            | EncodingProperties::Protobuf(_)
+            EncodingProperties::Protobuf(_)
             | EncodingProperties::Avro(_)
-            | EncodingProperties::Bytes
-            | EncodingProperties::Csv(_) => {
+            | EncodingProperties::Bytes => {
                 AccessBuilderImpl::new_default(props.encoding_config, EncodingType::Value).await?
             }
             _ => {
