@@ -544,10 +544,10 @@ impl Compactor {
                                 continue 'start_stream;
                             }
 
-                            tracing::info!("TRACE workload {:?} running_task_count {:?} pull_task_ack {}", last_workload, running_task_count.load(Ordering::Relaxed), pull_task_ack.load(Ordering::Relaxed));
+                            let mut pending_pull_task_count = 0;
                             if pull_task_ack.load(Ordering::SeqCst) {
                                 // reset pending_pull_task_count when all pending task had been refill
-                                let pending_pull_task_count = {
+                                pending_pull_task_count = {
                                    (cpu_core_num as f32 * max_compactor_task_multiplier) as u32 - running_task_count.load(Ordering::Relaxed)
                                 };
 
@@ -568,6 +568,14 @@ impl Compactor {
                                     }
                                 }
                             }
+                            
+                            tracing::info!(
+                                cpu = %last_workload.cpu,
+                                running_task_count = %running_task_count.load(Ordering::Relaxed),
+                                pull_task_ack = %pull_task_ack.load(Ordering::Relaxed),
+                                pending_pull_task_count = %pending_pull_task_count
+                            );
+
                             continue;
                         }
 

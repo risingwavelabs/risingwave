@@ -100,20 +100,15 @@ impl Compactor {
 /// `CompactTaskAssignment`.
 ///
 /// A compact task can be in one of these states:
-/// - 1. Pending: a compact task is picked but not assigned to a compactor.
-///   Pending-->Success/Failed/Canceled.
-/// - 2. Success: an assigned task is reported as success via `CompactStatus::report_compact_task`.
+/// - 1. Success: an assigned task is reported as success via `CompactStatus::report_compact_task`.
 ///   It's the final state.
-/// - 3. Failed: an Failed task is reported as success via `CompactStatus::report_compact_task`.
+/// - 2. Failed: an Failed task is reported as success via `CompactStatus::report_compact_task`.
 ///   It's the final state.
-/// - 4. Cancelled: a task is reported as cancelled via `CompactStatus::report_compact_task`. It's
+/// - 3. Cancelled: a task is reported as cancelled via `CompactStatus::report_compact_task`. It's
 ///   the final state.
 pub struct CompactorManagerInner {
     pub task_expiry_seconds: u64,
     task_heartbeats: HashMap<HummockCompactionTaskId, TaskHeartbeat>,
-
-    /// The context ids of compactors.
-    pub compactors: Vec<HummockContextId>,
 
     /// The outer lock is a RwLock, so we should still be able to modify each compactor
     pub compactor_map: HashMap<HummockContextId, Arc<Compactor>>,
@@ -126,7 +121,6 @@ impl CompactorManagerInner {
         let mut manager = Self {
             task_expiry_seconds: env.opts.compaction_task_max_heartbeat_interval_secs,
             task_heartbeats: Default::default(),
-            compactors: Default::default(),
             compactor_map: Default::default(),
         };
         // Initialize heartbeat for existing tasks.
@@ -141,7 +135,6 @@ impl CompactorManagerInner {
         Self {
             task_expiry_seconds: 1,
             task_heartbeats: Default::default(),
-            compactors: Default::default(),
             compactor_map: Default::default(),
         }
     }
@@ -149,14 +142,12 @@ impl CompactorManagerInner {
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
         use rand::Rng;
 
-        if self.compactors.is_empty() {
+        if self.compactor_map.is_empty() {
             return None;
         }
 
-        let rand_index = rand::thread_rng().gen_range(0..self.compactors.len());
-        let context_id = self.compactors[rand_index];
-
-        let compactor = self.compactor_map.get(&context_id).unwrap().clone();
+        let rand_index = rand::thread_rng().gen_range(0..self.compactor_map.len());
+        let compactor = self.compactor_map.values().nth(rand_index).unwrap().clone();
 
         Some(compactor)
     }
@@ -172,8 +163,6 @@ impl CompactorManagerInner {
         context_id: HummockContextId,
     ) -> UnboundedReceiver<MetaResult<SubscribeCompactionEventResponse>> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        self.compactors.retain(|c| *c != context_id);
-        self.compactors.push(context_id);
         self.compactor_map
             .insert(context_id, Arc::new(Compactor::new(context_id, tx)));
 
@@ -189,7 +178,6 @@ impl CompactorManagerInner {
     }
 
     pub fn remove_compactor(&mut self, context_id: HummockContextId) {
-        self.compactors.retain(|c| *c != context_id);
         self.compactor_map.remove(&context_id);
 
         // To remove the heartbeats, they need to be forcefully purged,
@@ -354,7 +342,7 @@ impl CompactorManagerInner {
     }
 
     pub fn compactor_num(&self) -> usize {
-        self.compactors.len()
+        self.compactor_map.len()
     }
 
     pub fn get_progress(&self) -> Vec<CompactTaskProgress> {
