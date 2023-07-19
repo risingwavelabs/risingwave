@@ -6600,6 +6600,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_expr",
  "risingwave_frontend",
+ "risingwave_pb",
  "risingwave_sqlparser",
  "similar",
  "tokio-postgres",
