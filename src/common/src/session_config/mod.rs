@@ -295,7 +295,7 @@ type IntervalStyle = ConfigString<INTERVAL_STYLE>;
 type BatchParallelism = ConfigU64<BATCH_PARALLELISM, 0>;
 type EnableJoinOrdering = ConfigBool<RW_ENABLE_JOIN_ORDERING, true>;
 type ServerVersion = ConfigString<SERVER_VERSION>;
-type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 80_300>;
+type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 130_900>;
 type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
 
 /// Report status or notice to caller.
@@ -391,7 +391,7 @@ pub struct ConfigMap {
     batch_parallelism: BatchParallelism,
 
     /// The version of PostgreSQL that Risingwave claims to be.
-    #[educe(Default(expression = "ConfigString::<SERVER_VERSION>(String::from(\"8.3.0\"))"))]
+    #[educe(Default(expression = "ConfigString::<SERVER_VERSION>(String::from(\"13.9.0\"))"))]
     server_version: ServerVersion,
     server_version_num: ServerVersionNum,
 }
