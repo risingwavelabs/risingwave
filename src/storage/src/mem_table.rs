@@ -85,7 +85,7 @@ impl MemTable {
     /// write methods
     pub fn insert(&mut self, pk: Bytes, value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
-            let key_len = pk.len();
+            let key_len = std::mem::size_of::<Bytes>() + pk.len();
             let insert_value = KeyOp::Insert(value);
             self.kv_size.add(&pk, &insert_value);
             let origin_value = self.buffer.insert(pk, insert_value);
@@ -126,7 +126,7 @@ impl MemTable {
     }
 
     pub fn delete(&mut self, pk: Bytes, old_value: Bytes) -> Result<()> {
-        let key_len = pk.len();
+        let key_len = std::mem::size_of::<Bytes>() + pk.len();
         if !self.is_consistent_op {
             let delete_value = KeyOp::Delete(old_value);
             self.kv_size.add(&pk, &delete_value);
@@ -187,7 +187,7 @@ impl MemTable {
 
     pub fn update(&mut self, pk: Bytes, old_value: Bytes, new_value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
-            let key_len = pk.len();
+            let key_len = std::mem::size_of::<Bytes>() + pk.len();
 
             let update_value = KeyOp::Update((old_value, new_value));
             self.kv_size.add(&pk, &update_value);
@@ -558,6 +558,159 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             "new epoch {} should be greater than current epoch: {}",
             next_epoch,
             prev_epoch
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+
+    use crate::mem_table::{KeyOp, MemTable};
+
+    #[tokio::test]
+    async fn test_mem_table_memory_size() {
+        let mut mem_table = MemTable::new(true);
+        assert_eq!(mem_table.kv_size.size(), 0);
+
+        mem_table.insert("key1".into(), "value1".into()).unwrap();
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key1").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value1").len()
+        );
+
+        // delete
+        mem_table.drain();
+        assert_eq!(mem_table.kv_size.size(), 0);
+        mem_table.delete("key2".into(), "value2".into()).unwrap();
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key2").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value2").len()
+        );
+        mem_table.insert("key2".into(), "value22".into()).unwrap();
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key2").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value22").len()
+                + Bytes::from("value2").len()
+        );
+
+        mem_table.delete("key2".into(), "value22".into()).unwrap();
+
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key2").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value2").len()
+        );
+
+        // update
+        mem_table.drain();
+        assert_eq!(mem_table.kv_size.size(), 0);
+        mem_table.insert("key3".into(), "value3".into()).unwrap();
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key3").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value3").len()
+        );
+
+        // update-> insert
+        mem_table
+            .update("key3".into(), "value3".into(), "value333".into())
+            .unwrap();
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key3").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value333").len()
+        );
+
+        mem_table.drain();
+        mem_table
+            .update("key4".into(), "value4".into(), "value44".into())
+            .unwrap();
+
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key4").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value4").len()
+                + Bytes::from("value44").len()
+        );
+        mem_table
+            .update("key4".into(), "value44".into(), "value4444".into())
+            .unwrap();
+
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key4").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value4").len()
+                + Bytes::from("value4444").len()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mem_table_memory_size_not_consistent_op() {
+        let mut mem_table = MemTable::new(false);
+        assert_eq!(mem_table.kv_size.size(), 0);
+
+        mem_table.insert("key1".into(), "value1".into()).unwrap();
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key1").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value1").len()
+        );
+
+        mem_table.insert("key1".into(), "value111".into()).unwrap();
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key1").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value111").len()
+        );
+        mem_table.drain();
+
+        mem_table
+            .update("key4".into(), "value4".into(), "value44".into())
+            .unwrap();
+
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key4").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value4").len()
+                + Bytes::from("value44").len()
+        );
+        mem_table
+            .update("key4".into(), "value44".into(), "value4444".into())
+            .unwrap();
+
+        assert_eq!(
+            mem_table.kv_size.size(),
+            std::mem::size_of::<Bytes>()
+                + Bytes::from("key4").len()
+                + std::mem::size_of::<KeyOp>()
+                + Bytes::from("value44").len()
+                + Bytes::from("value4444").len()
         );
     }
 }
