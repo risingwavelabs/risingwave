@@ -20,7 +20,7 @@ use prost_reflect::{
     ReflectMessage, Value,
 };
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
+use risingwave_common::error::ErrorCode::{self, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, F32, F64};
@@ -268,6 +268,7 @@ pub fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Resul
                 .collect::<Result<Vec<_>>>()?;
             ScalarImpl::List(ListValue::new(rw_values))
         }
+        Value::Bytes(value) => ScalarImpl::Bytea(value.to_vec().into_boxed_slice()),
         _ => {
             let err_msg = format!(
                 "protobuf parse error.unsupported type {:?}, value {:?}",
@@ -305,13 +306,7 @@ fn protobuf_type_mapping(
             DataType::new_struct(fields, field_names)
         }
         Kind::Enum(_) => DataType::Varchar,
-        actual_type => {
-            return Err(NotImplemented(
-                format!("unsupported field type: {:?}", actual_type),
-                None.into(),
-            )
-            .into());
-        }
+        Kind::Bytes => DataType::Bytea,
     };
     if field_descriptor.cardinality() == Cardinality::Repeated {
         t = DataType::List(Box::new(t))
@@ -342,6 +337,7 @@ mod test {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
+    use bytes::Bytes;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
 
@@ -479,5 +475,34 @@ mod test {
         // parent(recursive.ComplexRecursiveMessage.parent), kind
         // recursive.ComplexRecursiveMessage.Parent"
         assert!(columns.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_all_types() {
+        let location = schema_dir() + "/proto_recursive/recursive.pb";
+        let message_name = "recursive.AllTypes";
+
+        let info = StreamSourceInfo {
+            proto_message_name: message_name.to_string(),
+            row_schema_location: location.to_string(),
+            use_schema_registry: false,
+            ..Default::default()
+        };
+        let parser_config =
+            ParserProperties::new(SourceFormat::Protobuf, &HashMap::new(), &info).unwrap();
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config)
+            .await
+            .unwrap();
+        // Ensure that the parser can recognize the schema.
+        conf.map_to_columns().unwrap();
+
+        let field_desc = conf
+            .message_descriptor
+            .get_field_by_name("bytes_field")
+            .unwrap();
+        let d = from_protobuf_value(&field_desc, &Value::Bytes(Bytes::from(vec![1, 2, 3])))
+            .unwrap()
+            .unwrap();
+        assert_eq!(d, ScalarImpl::Bytea(vec![1, 2, 3].into_boxed_slice()));
     }
 }

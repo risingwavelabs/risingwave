@@ -2004,6 +2004,38 @@ def section_hummock(panels):
                 ),
             ],
         ),
+        panels.timeseries_bytes(
+            "Mem Table Size",
+            "This metric shows the memory usage of mem_table.",
+            [
+                panels.target(
+                    f"sum({metric('state_store_mem_table_memory_size')}) by (job,instance)",
+                    "mem_table size total - {{job}} @ {{instance}}",
+                ),
+
+                panels.target(
+                    f"{metric('state_store_mem_table_memory_size')}",
+                    "mem_table size - table id {{table_id}} instance id {{instance_id}} {{job}} @ {{instance}}",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Mem Table Count",
+            "This metric shows the item counts in mem_table.",
+            [
+                panels.target(
+                    f"sum({metric('state_store_mem_table_item_count')}) by (job,instance)",
+                    "mem_table counts total - {{job}} @ {{instance}}",
+                ),
+
+                panels.target(
+                    f"{metric('state_store_mem_table_item_count')}",
+                    "mem_table count - table id {{table_id}} instance id {{instance_id}} {{job}} @ {{instance}}",
+                ),
+            ],
+        ),
+
         panels.timeseries_latency(
             "Row SeqScan Next Duration",
             "",
