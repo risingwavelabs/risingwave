@@ -23,7 +23,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
-use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, Dispatcher, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
@@ -217,7 +217,7 @@ pub struct CommandContext<S: MetaStore> {
 
     pub command: Command,
 
-    pub checkpoint: bool,
+    pub kind: BarrierKind,
 
     source_manager: SourceManagerRef<S>,
 
@@ -238,7 +238,7 @@ impl<S: MetaStore> CommandContext<S> {
         prev_epoch: TracedEpoch,
         curr_epoch: TracedEpoch,
         command: Command,
-        checkpoint: bool,
+        kind: BarrierKind,
         source_manager: SourceManagerRef<S>,
         span: tracing::Span,
     ) -> Self {
@@ -249,7 +249,7 @@ impl<S: MetaStore> CommandContext<S> {
             prev_epoch,
             curr_epoch,
             command,
-            checkpoint,
+            kind,
             source_manager,
             span,
         }
