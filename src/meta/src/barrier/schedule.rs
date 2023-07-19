@@ -262,7 +262,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
         let elapsed = Instant::now().duration_since(start);
         tracing::debug!("barrier flushed in {:?}", elapsed);
 
-        let snapshot = self.hummock_manager.get_last_epoch()?;
+        let snapshot = self.hummock_manager.latest_snapshot();
         Ok(snapshot)
     }
 }

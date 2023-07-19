@@ -215,6 +215,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<AggFuncSig>>> =
                     .iter()
                     .all(|t| *t != DataTypeName::Timestamptz)
                     && ![
+                        AggKind::Sum0,
                         AggKind::BitAnd,
                         AggKind::BitOr,
                         AggKind::BoolAnd,

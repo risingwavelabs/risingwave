@@ -20,8 +20,8 @@ use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserProperties,
-    SourceStreamChunkRowWriter, WriteGuard,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, JsonProperties,
+    ParserProperties, ProtocolProperties, SourceStreamChunkRowWriter, WriteGuard,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -74,6 +74,15 @@ impl DebeziumParser {
             rw_columns,
             source_ctx,
         })
+    }
+
+    pub async fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
+        let props = ParserProperties {
+            key_encoding_config: None,
+            encoding_config: EncodingProperties::Json(JsonProperties {}),
+            protocol_config: ProtocolProperties::Debezium,
+        };
+        Self::new(props, rw_columns, Default::default()).await
     }
 
     pub async fn parse_inner(
