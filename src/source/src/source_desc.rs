@@ -129,11 +129,6 @@ impl SourceDescBuilder {
         let source = ConnectorSource::new(
             self.properties,
             columns.clone(),
-            // TODO: may reuse the connector client
-            self.connector_params
-                .connector_client
-                .as_ref()
-                .map(|client| client.endpoint().clone()),
             self.connector_message_buffer_size,
             psrser_config,
         )?;
@@ -165,7 +160,6 @@ impl SourceDescBuilder {
         let source = FsConnectorSource::new(
             self.properties.clone(),
             columns.clone(),
-            // TODO: may reuse connector client
             self.connector_params
                 .connector_client
                 .as_ref()

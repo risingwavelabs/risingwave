@@ -735,10 +735,12 @@ impl MetaClient {
         &self,
         reschedules: HashMap<u32, PbReschedule>,
         revision: u64,
+        resolve_no_shuffle_upstream: bool,
     ) -> Result<(bool, u64)> {
         let request = RescheduleRequest {
             reschedules,
             revision,
+            resolve_no_shuffle_upstream,
         };
         let resp = self.inner.reschedule(request).await?;
         Ok((resp.success, resp.revision))
@@ -1057,7 +1059,7 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
-    async fn get_epoch(&self) -> Result<HummockSnapshot> {
+    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
         let req = GetEpochRequest {};
         let resp = self.inner.get_epoch(req).await?;
         Ok(resp.snapshot.unwrap())

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem::take;
 use std::ops::Deref;
@@ -24,12 +25,12 @@ use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
+use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::Barrier;
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
@@ -202,7 +203,7 @@ where
     async fn finish_commands(&mut self, checkpoint: bool) -> MetaResult<bool> {
         for command in self
             .finished_commands
-            .drain_filter(|c| checkpoint || !c.context.checkpoint)
+            .drain_filter(|c| checkpoint || c.context.kind.is_barrier())
         {
             // The command is ready to finish. We can now call `pre_finish`.
             command.context.pre_finish().await?;
@@ -552,27 +553,32 @@ where
             self.in_flight_barrier_nums,
         );
 
-        let mut state = BarrierManagerState::create(self.env.meta_store()).await;
-        if self.enable_recovery {
-            // handle init, here we simply trigger a recovery process to achieve the consistency. We
-            // may need to avoid this when we have more state persisted in meta store.
-
-            // XXX(bugen): why we need this?
-            let new_epoch = state.in_flight_prev_epoch().next();
-
-            self.set_status(BarrierManagerStatus::Recovering).await;
-            let span = tracing::info_span!("bootstrap_recovery", new_epoch = new_epoch.value().0);
-            let new_epoch = self.recovery(new_epoch).instrument(span).await;
-            state
-                .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)
-                .await
-                .unwrap();
-        } else if self.fragment_manager.has_any_table_fragments().await {
+        if !self.enable_recovery && self.fragment_manager.has_any_table_fragments().await {
             panic!(
                 "Some streaming jobs already exist in meta, please start with recovery enabled \
-            or clean up the metadata using `./risedev clean-data`"
+                or clean up the metadata using `./risedev clean-data`"
             );
         }
+
+        let mut state = {
+            let latest_snapshot = self.hummock_manager.latest_snapshot();
+            assert_eq!(
+                latest_snapshot.committed_epoch, latest_snapshot.current_epoch,
+                "persisted snapshot must be from a checkpoint barrier"
+            );
+            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into());
+
+            // Bootstrap recovery. Here we simply trigger a recovery process to achieve the
+            // consistency.
+            // Even if there's no actor to recover, we still go through the recovery process to
+            // inject the first `Initial` barrier.
+            self.set_status(BarrierManagerStatus::Recovering).await;
+            let span = tracing::info_span!("bootstrap_recovery", prev_epoch = prev_epoch.value().0);
+            let new_epoch = self.recovery(prev_epoch).instrument(span).await;
+
+            BarrierManagerState::new(new_epoch)
+        };
+
         self.set_status(BarrierManagerStatus::Running).await;
 
         let mut min_interval = tokio::time::interval(interval);
@@ -652,28 +658,27 @@ where
         } = self.scheduled_barriers.pop_or_default().await;
         let info = self.resolve_actor_info(checkpoint_control, &command).await;
 
-        let prev_epoch = state.in_flight_prev_epoch();
-
-        let new_epoch = prev_epoch.next();
-        state
-            .update_inflight_prev_epoch(self.env.meta_store(), new_epoch.clone())
-            .await
-            .unwrap();
+        let (prev_epoch, curr_epoch) = state.next_epoch_pair();
+        let kind = if checkpoint {
+            BarrierKind::Checkpoint
+        } else {
+            BarrierKind::Barrier
+        };
 
         // Tracing related stuff
         prev_epoch.span().in_scope(|| {
-            tracing::info!(target: "rw_tracing", epoch = new_epoch.value().0, "new barrier enqueued");
+            tracing::info!(target: "rw_tracing", epoch = curr_epoch.value().0, "new barrier enqueued");
         });
-        span.record("epoch", new_epoch.value().0);
+        span.record("epoch", curr_epoch.value().0);
 
         let command_ctx = Arc::new(CommandContext::new(
             self.fragment_manager.clone(),
             self.env.stream_client_pool_ref(),
             info,
             prev_epoch,
-            new_epoch,
+            curr_epoch,
             command,
-            checkpoint,
+            kind,
             self.source_manager.clone(),
             span.clone(),
         ));
@@ -743,7 +748,7 @@ where
                     mutation,
                     tracing_context: TracingContext::from_span(command_context.curr_epoch.span())
                         .to_protobuf(),
-                    checkpoint: command_context.checkpoint,
+                    kind: command_context.kind as i32,
                     passed_actors: vec![],
                 };
                 async move {
@@ -843,7 +848,7 @@ where
             fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.barrier_failed();
             tracing::warn!("Failed to complete epoch {}: {:?}", prev_epoch, err);
-            self.do_recovery(err, fail_node, state, checkpoint_control)
+            self.failure_recovery(err, fail_node, state, checkpoint_control)
                 .await;
             return;
         }
@@ -869,12 +874,12 @@ where
             let fail_nodes = complete_nodes
                 .drain(index..)
                 .chain(checkpoint_control.barrier_failed().into_iter());
-            self.do_recovery(err, fail_nodes, state, checkpoint_control)
+            self.failure_recovery(err, fail_nodes, state, checkpoint_control)
                 .await;
         }
     }
 
-    async fn do_recovery(
+    async fn failure_recovery(
         &self,
         err: MetaError,
         fail_nodes: impl IntoIterator<Item = EpochNode<S>>,
@@ -882,6 +887,7 @@ where
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
         checkpoint_control.clear_changes();
+
         for node in fail_nodes {
             if let Some(timer) = node.timer {
                 timer.observe_duration();
@@ -893,22 +899,23 @@ where
                 .into_iter()
                 .for_each(|notifier| notifier.notify_collection_failed(err.clone()));
         }
+
         if self.enable_recovery {
             // If failed, enter recovery mode.
             self.set_status(BarrierManagerStatus::Recovering).await;
             let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::new();
-            let prev_epoch = state.in_flight_prev_epoch();
+
+            let latest_snapshot = self.hummock_manager.latest_snapshot();
+            let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
                 "failure_recovery",
                 %err,
                 prev_epoch = prev_epoch.value().0
             );
             let new_epoch = self.recovery(prev_epoch).instrument(span).await;
-            state
-                .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)
-                .await
-                .unwrap();
+
+            *state = BarrierManagerState::new(new_epoch);
             self.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);
@@ -928,30 +935,34 @@ where
                 // because the storage engine will query from new to old in the order in which
                 // the L0 layer files are generated.
                 // See https://github.com/risingwave-labs/risingwave/issues/1251
-                let checkpoint = node.command_ctx.checkpoint;
+                let kind = node.command_ctx.kind;
                 let (sst_to_worker, synced_ssts) = collect_synced_ssts(resps);
                 // hummock_manager commit epoch.
                 let mut new_snapshot = None;
-                if prev_epoch == INVALID_EPOCH {
-                    assert!(
+
+                match kind {
+                    BarrierKind::Unspecified => unreachable!(),
+                    BarrierKind::Initial => assert!(
                         synced_ssts.is_empty(),
                         "no sstables should be produced in the first epoch"
-                    );
-                } else if checkpoint {
-                    new_snapshot = self
-                        .hummock_manager
-                        .commit_epoch(
-                            node.command_ctx.prev_epoch.value().0,
-                            synced_ssts,
-                            sst_to_worker,
-                        )
-                        .await?;
-                } else {
-                    new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));
-                    // if we collect a barrier(checkpoint = false),
-                    // we need to ensure that command is Plain and the notifier's checkpoint is
-                    // false
-                    assert!(!node.command_ctx.command.need_checkpoint());
+                    ),
+                    BarrierKind::Checkpoint => {
+                        new_snapshot = self
+                            .hummock_manager
+                            .commit_epoch(
+                                node.command_ctx.prev_epoch.value().0,
+                                synced_ssts,
+                                sst_to_worker,
+                            )
+                            .await?;
+                    }
+                    BarrierKind::Barrier => {
+                        new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));
+                        // if we collect a barrier(checkpoint = false),
+                        // we need to ensure that command is Plain and the notifier's checkpoint is
+                        // false
+                        assert!(!node.command_ctx.command.need_checkpoint());
+                    }
                 }
 
                 node.command_ctx.post_collect().await?;
@@ -1015,11 +1026,13 @@ where
                     checkpoint_control.cancel_stashed_command(table_id);
                 }
 
-                let remaining = checkpoint_control.finish_commands(checkpoint).await?;
+                let remaining = checkpoint_control
+                    .finish_commands(kind.is_checkpoint())
+                    .await?;
                 // If there are remaining commands (that requires checkpoint to finish), we force
                 // the next barrier to be a checkpoint.
                 if remaining {
-                    assert!(!checkpoint);
+                    assert_matches!(kind, BarrierKind::Barrier);
                     self.scheduled_barriers.force_checkpoint_in_next_barrier();
                 }
 

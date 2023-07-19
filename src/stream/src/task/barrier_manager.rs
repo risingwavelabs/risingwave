@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use prometheus::HistogramTimer;
+use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -42,7 +43,11 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
 pub struct CollectResult {
+    /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
+
+    /// The kind of barrier.
+    pub kind: BarrierKind,
 }
 
 enum BarrierState {
@@ -63,10 +68,6 @@ pub struct LocalBarrierManager {
     /// Stores all streaming job source sender.
     senders: HashMap<ActorId, Vec<UnboundedSender<Barrier>>>,
 
-    /// Span of the current epoch.
-    #[expect(dead_code)]
-    span: tracing::Span,
-
     /// Current barrier collection state.
     state: BarrierState,
 
@@ -80,15 +81,14 @@ pub struct CompleteReceiver {
     pub complete_receiver: Option<Receiver<StreamResult<CollectResult>>>,
     /// `barrier_inflight_timer`'s metrics.
     pub barrier_inflight_timer: Option<HistogramTimer>,
-    /// Mark whether this is a checkpoint barrier.
-    pub checkpoint: bool,
+    /// The kind of barrier.
+    pub kind: BarrierKind,
 }
 
 impl LocalBarrierManager {
     fn with_state(state: BarrierState) -> Self {
         Self {
             senders: HashMap::new(),
-            span: tracing::Span::none(),
             state,
             collect_complete_receiver: HashMap::default(),
         }
@@ -178,7 +178,7 @@ impl LocalBarrierManager {
             CompleteReceiver {
                 complete_receiver: rx,
                 barrier_inflight_timer: timer,
-                checkpoint: barrier.checkpoint,
+                kind: barrier.kind,
             },
         );
         Ok(())
@@ -200,14 +200,11 @@ impl LocalBarrierManager {
             })
     }
 
-    // remove all senders
-    pub fn clear_senders(&mut self) {
+    /// Reset all internal states.
+    pub fn reset(&mut self) {
         self.senders.clear();
-    }
-
-    /// remove all collect rx
-    pub fn clear_collect_rx(&mut self) {
         self.collect_complete_receiver.clear();
+
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
