@@ -63,12 +63,13 @@ impl fmt::Debug for InputRefDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}",
+            "{}(#{})",
             self.input_schema
                 .fields
                 .get(self.input_ref.index)
                 .unwrap()
-                .name
+                .name,
+            self.input_ref.index
         )
     }
 }

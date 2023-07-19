@@ -39,6 +39,8 @@ pub struct BoundInsert {
     /// Name of the table to perform inserting.
     pub table_name: String,
 
+    pub table_all_columns: Vec<ColumnCatalog>,
+
     /// Owner of the table to perform inserting.
     pub owner: UserId,
 
@@ -106,6 +108,12 @@ impl Binder {
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
+        let table_all_columns = table_catalog
+            .columns()
+            .iter()
+            .filter(|c| !c.is_hidden())
+            .cloned()
+            .collect_vec();
         let cols_to_insert_in_table = table_catalog.columns_to_insert().cloned().collect_vec();
 
         let generated_column_names = table_catalog
@@ -119,6 +127,11 @@ impl Binder {
                     &query_col_name
                 ))));
             }
+        }
+        if !generated_column_names.is_empty() && !returning_items.is_empty() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "`RETURNING` clause is not supported for tables with generated columns".to_string(),
+            )));
         }
 
         // TODO(yuhao): refine this if row_id is always the last column.
@@ -267,6 +280,7 @@ impl Binder {
             table_id,
             table_version_id,
             table_name,
+            table_all_columns,
             owner,
             row_id_index,
             column_indices: col_indices_to_insert,

@@ -33,6 +33,7 @@ impl Planner {
             insert.table_name.clone(),
             insert.table_id,
             insert.table_version_id,
+            insert.table_all_columns,
             insert.column_indices,
             insert.default_columns,
             insert.row_id_index,
@@ -41,6 +42,7 @@ impl Planner {
         .into();
         // If containing RETURNING, add one logicalproject node
         if returning {
+            dbg!(&insert.returning_list);
             plan = LogicalProject::create(plan, insert.returning_list);
         }
         // For insert, frontend will only schedule one task so do not need this to be single.
