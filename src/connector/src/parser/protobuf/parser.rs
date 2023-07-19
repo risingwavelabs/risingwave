@@ -75,14 +75,6 @@ impl ProtobufAccessBuilder {
 }
 
 #[derive(Debug, Clone)]
-pub struct ProtobufParser {
-    message_descriptor: MessageDescriptor,
-    confluent_wire_type: bool,
-    rw_columns: Vec<SourceColumnDesc>,
-    source_ctx: SourceContextRef,
-}
-
-#[derive(Debug, Clone)]
 pub struct ProtobufParserConfig {
     confluent_wire_type: bool,
     message_descriptor: MessageDescriptor,
@@ -214,60 +206,6 @@ impl ProtobufParserConfig {
     }
 }
 
-impl ProtobufParser {
-    pub fn new(
-        rw_columns: Vec<SourceColumnDesc>,
-        config: ProtobufParserConfig,
-        source_ctx: SourceContextRef,
-    ) -> Result<Self> {
-        let ProtobufParserConfig {
-            confluent_wire_type,
-            message_descriptor,
-        } = config;
-        Ok(Self {
-            message_descriptor,
-            confluent_wire_type,
-            rw_columns,
-            source_ctx,
-        })
-    }
-
-    #[allow(clippy::unused_async)]
-    pub async fn parse_inner(
-        &self,
-        payload: Vec<u8>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        let payload = if self.confluent_wire_type {
-            resolve_pb_header(&payload)?
-        } else {
-            &payload
-        };
-
-        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
-            .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
-        writer.insert(|column_desc| {
-            let field_desc = message
-                .descriptor()
-                .get_field_by_name(&column_desc.name)
-                .ok_or_else(|| {
-                    let err_msg = format!("protobuf schema don't have field {}", column_desc.name);
-                    tracing::error!(err_msg);
-                    RwError::from(ProtocolError(err_msg))
-                })?;
-            let value = message.get_field(&field_desc);
-            from_protobuf_value(&field_desc, &value).map_err(|e| {
-                tracing::error!(
-                    "failed to process value ({}): {}",
-                    String::from_utf8_lossy(payload),
-                    e
-                );
-                e
-            })
-        })
-    }
-}
-
 fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> Result<()> {
     let identifier = format!("{}({})", fd.name(), fd.full_name());
     if trace.iter().any(|s| s == identifier.as_str()) {
@@ -280,25 +218,6 @@ fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> Result
     }
     trace.push(identifier);
     Ok(())
-}
-
-impl ByteStreamSourceParser for ProtobufParser {
-    fn columns(&self) -> &[SourceColumnDesc] {
-        &self.rw_columns
-    }
-
-    fn source_ctx(&self) -> &SourceContext {
-        &self.source_ctx
-    }
-
-    async fn parse_one<'a>(
-        &'a mut self,
-        _key: Option<Vec<u8>>,
-        payload: Option<Vec<u8>>,
-        writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
-        only_parse_payload!(self, payload, writer)
-    }
 }
 
 pub fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Datum> {
