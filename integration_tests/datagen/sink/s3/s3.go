@@ -46,7 +46,7 @@ func (p *S3Sink) Close() error {
 }
 
 func (p *S3Sink) WriteRecord(ctx context.Context, format string, record sink.SinkRecord) error {
-	data := sink.RecordToKafka(record, format)
+	data := sink.Encode(record, format)
 
 	_, err := p.buffer.Write(data)
 	if err != nil {

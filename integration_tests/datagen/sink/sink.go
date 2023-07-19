@@ -54,9 +54,8 @@ func (r BaseSinkRecord) ToAvro() []byte {
 	panic("not implemented")
 }
 
-// Convert the event to a Kafka message in the given format.
-// This interface will also be used for Pulsar and Kinesis.
-func RecordToKafka(r SinkRecord, format string) []byte {
+// Convert the event to a message in the given format.
+func Encode(r SinkRecord, format string) []byte {
 	if format == "json" {
 		return r.ToJson()
 	} else if format == "protobuf" {
