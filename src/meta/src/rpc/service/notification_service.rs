@@ -154,7 +154,7 @@ where
         let serving_parallel_unit_mappings = self.get_serving_vnode_mappings();
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await;
 
-        let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
+        let hummock_snapshot = Some(self.hummock_manager.latest_snapshot());
 
         MetaSnapshot {
             databases,

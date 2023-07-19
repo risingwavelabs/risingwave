@@ -169,6 +169,7 @@ impl SourceExecutor {
             u32::MAX,
             self.metrics,
             self.source_ctrl_opts.clone(),
+            None,
         ));
         let stream = self
             .connector_source

@@ -40,6 +40,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::SourceCtrlOpts;
+use risingwave_connector::ConnectorParams;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
@@ -177,6 +178,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         system_params_manager.get_params(),
         1,
         SourceCtrlOpts::default(),
+        ConnectorParams::default(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
