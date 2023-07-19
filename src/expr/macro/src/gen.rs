@@ -329,7 +329,7 @@ impl FunctionAttr {
             .map(|i| {
                 let v = format_ident!("v{i}");
                 let a = format_ident!("a{i}");
-                quote! { let #v = #a.value_at(row_id); }
+                quote! { let #v = unsafe { #a.value_at_unchecked(row_id) }; }
             })
             .collect_vec();
         let let_state = match &self.state {
