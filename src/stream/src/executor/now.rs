@@ -91,13 +91,11 @@ impl<S: StateStore> NowExecutor<S> {
                 };
                 last_timestamp = state_row.and_then(|row| row[0].clone());
                 initialized = true;
+            } else if paused {
+                // Assert that no data is updated.
+                state_table.commit_no_data_expected(barrier.epoch);
             } else {
-                if paused {
-                    // Assert that no data is updated.
-                    state_table.commit_no_data_expected(barrier.epoch);
-                } else {
-                    state_table.commit(barrier.epoch).await?;
-                }
+                state_table.commit(barrier.epoch).await?;
             }
 
             // Extract timestamp from the current epoch.
