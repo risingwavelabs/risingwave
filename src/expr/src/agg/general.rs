@@ -518,102 +518,102 @@ mod tests {
     }
 
     #[bench]
-    fn bench_foldable_sum_agg_without_vis(b: &mut Bencher) {
+    fn sum_agg_without_vis(b: &mut Bencher) {
         bench_i64(b, "sum", 1024, 1.0, false);
     }
 
     #[bench]
-    fn bench_foldable_sum_agg_vis_rate_0_75(b: &mut Bencher) {
+    fn sum_agg_vis_rate_0_75(b: &mut Bencher) {
         bench_i64(b, "sum", 1024, 0.75, false);
     }
 
     #[bench]
-    fn bench_foldable_sum_agg_vis_rate_0_5(b: &mut Bencher) {
+    fn sum_agg_vis_rate_0_5(b: &mut Bencher) {
         bench_i64(b, "sum", 1024, 0.5, false);
     }
 
     #[bench]
-    fn bench_foldable_sum_agg_vis_rate_0_25(b: &mut Bencher) {
+    fn sum_agg_vis_rate_0_25(b: &mut Bencher) {
         bench_i64(b, "sum", 1024, 0.25, false);
     }
 
     #[bench]
-    fn bench_foldable_sum_agg_vis_rate_0_05(b: &mut Bencher) {
+    fn sum_agg_vis_rate_0_05(b: &mut Bencher) {
         bench_i64(b, "sum", 1024, 0.05, false);
     }
 
     #[bench]
-    fn bench_foldable_count_agg_without_vis(b: &mut Bencher) {
+    fn count_agg_without_vis(b: &mut Bencher) {
         bench_i64(b, "count", 1024, 1.0, false);
     }
 
     #[bench]
-    fn bench_foldable_count_agg_vis_rate_0_75(b: &mut Bencher) {
+    fn count_agg_vis_rate_0_75(b: &mut Bencher) {
         bench_i64(b, "count", 1024, 0.75, false);
     }
 
     #[bench]
-    fn bench_foldable_count_agg_vis_rate_0_5(b: &mut Bencher) {
+    fn count_agg_vis_rate_0_5(b: &mut Bencher) {
         bench_i64(b, "count", 1024, 0.5, false);
     }
 
     #[bench]
-    fn bench_foldable_count_agg_vis_rate_0_25(b: &mut Bencher) {
+    fn count_agg_vis_rate_0_25(b: &mut Bencher) {
         bench_i64(b, "count", 1024, 0.25, false);
     }
 
     #[bench]
-    fn bench_foldable_count_agg_vis_rate_0_05(b: &mut Bencher) {
+    fn count_agg_vis_rate_0_05(b: &mut Bencher) {
         bench_i64(b, "count", 1024, 0.05, false);
     }
 
     #[bench]
-    fn bench_foldable_min_agg_without_vis(b: &mut Bencher) {
+    fn min_agg_without_vis(b: &mut Bencher) {
         bench_i64(b, "min", 1024, 1.0, true);
     }
 
     #[bench]
-    fn bench_foldable_min_agg_vis_rate_0_75(b: &mut Bencher) {
+    fn min_agg_vis_rate_0_75(b: &mut Bencher) {
         bench_i64(b, "min", 1024, 0.75, true);
     }
 
     #[bench]
-    fn bench_foldable_min_agg_vis_rate_0_5(b: &mut Bencher) {
+    fn min_agg_vis_rate_0_5(b: &mut Bencher) {
         bench_i64(b, "min", 1024, 0.5, true);
     }
 
     #[bench]
-    fn bench_foldable_min_agg_vis_rate_0_25(b: &mut Bencher) {
+    fn min_agg_vis_rate_0_25(b: &mut Bencher) {
         bench_i64(b, "min", 1024, 0.25, true);
     }
 
     #[bench]
-    fn bench_foldable_min_agg_vis_rate_0_05(b: &mut Bencher) {
+    fn min_agg_vis_rate_0_05(b: &mut Bencher) {
         bench_i64(b, "min", 1024, 0.05, true);
     }
 
     #[bench]
-    fn bench_foldable_max_agg_without_vis(b: &mut Bencher) {
+    fn max_agg_without_vis(b: &mut Bencher) {
         bench_i64(b, "max", 1024, 1.0, true);
     }
 
     #[bench]
-    fn bench_foldable_max_agg_vis_rate_0_75(b: &mut Bencher) {
+    fn max_agg_vis_rate_0_75(b: &mut Bencher) {
         bench_i64(b, "max", 1024, 0.75, true);
     }
 
     #[bench]
-    fn bench_foldable_max_agg_vis_rate_0_5(b: &mut Bencher) {
+    fn max_agg_vis_rate_0_5(b: &mut Bencher) {
         bench_i64(b, "max", 1024, 0.5, true);
     }
 
     #[bench]
-    fn bench_foldable_max_agg_vis_rate_0_25(b: &mut Bencher) {
+    fn max_agg_vis_rate_0_25(b: &mut Bencher) {
         bench_i64(b, "max", 1024, 0.25, true);
     }
 
     #[bench]
-    fn bench_foldable_max_agg_vis_rate_0_05(b: &mut Bencher) {
+    fn max_agg_vis_rate_0_05(b: &mut Bencher) {
         bench_i64(b, "max", 1024, 0.05, true);
     }
 }
