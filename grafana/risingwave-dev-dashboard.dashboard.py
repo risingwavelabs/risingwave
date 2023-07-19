@@ -1592,9 +1592,12 @@ def section_hummock(panels):
     job = '$job'
     instance = '$node'
     table = '$table'
-    id= '{{id}}'
+    mv_id = '{{id}}'
     mv_remote_read_query = f'sum(histogram_quantile(0.9, sum(rate(state_store_iter_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(id) materialized_info) by (id) + sum((histogram_quantile(0.9, sum(rate(state_store_get_key_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id)) + histogram_quantile(0.9, sum(rate(state_store_get_value_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id))) * on(table_id) group_left(id) materialized_info) by (id)'
-    mv_remote_read_query_legend = f'p90 - materialized view {id}'
+    mv_remote_read_query_legend = f'p90 - materialized view {mv_id}'
+
+    mv_remote_read_query_pmax = f'sum(histogram_quantile(1.0, sum(rate(state_store_iter_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id)) * on(table_id) group_left(id) materialized_info) by (id) + sum((histogram_quantile(0.9, sum(rate(state_store_get_key_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id)) + histogram_quantile(1.0, sum(rate(state_store_get_value_size_bucket{{table_id=~"{table}",job=~"{job}",instance=~"{instance}"}}[$__rate_interval])) by (le, job, instance, table_id))) * on(table_id) group_left(id) materialized_info) by (id)'
+    mv_remote_read_query_legend_pmax = f'pmax - materialized view {mv_id}'
     return [
         panels.row("Hummock"),
         panels.timeseries_latency(
@@ -1745,9 +1748,14 @@ def section_hummock(panels):
             "Materialized View Read Size",
             "",
             [
+                
                 panels.target(
                         mv_remote_read_query,
                         mv_remote_read_query_legend,
+                    ),
+                panels.target(
+                        mv_remote_read_query_pmax,
+                        mv_remote_read_query_legend_pmax,
                     ),
             ],
         ),
