@@ -71,7 +71,7 @@ type adCtrGen struct {
 func NewAdCtrGen() gen.LoadGenerator {
 	return &adCtrGen{
 		ctr:   make(map[int64]float64),
-		faker: gofakeit.New(0),
+		faker: gofakeit.New(1), // Use seed=1 to make it determinstic
 	}
 }
 

@@ -72,8 +72,9 @@ func (p *S3Sink) Flush(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to put object to s3: %s", err)
 	}
-	p.buffer.Reset()
 
 	fmt.Printf("S3 Sink: uploaded object '%s' (%d bytes)\n", name, p.buffer.Len())
+
+	p.buffer.Reset()
 	return nil
 }
