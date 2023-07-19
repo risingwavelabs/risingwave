@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -21,61 +22,38 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prometheus::Histogram;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{ColumnCatalog, Schema};
+use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
-use risingwave_connector::{dispatch_sink, ConnectorParams};
+use risingwave_connector::dispatch_sink;
+use risingwave_connector::sink::catalog::{SinkId, SinkType};
+use risingwave_connector::sink::{
+    build_sink, Sink, SinkImpl, SinkParam, SinkWriter, SinkWriterParam,
+};
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
 use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream, PkIndices};
+use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     input: BoxedExecutor,
     metrics: Arc<StreamingMetrics>,
     sink: SinkImpl,
-    config: SinkConfig,
     identity: String,
-    columns: Vec<ColumnCatalog>,
-    schema: Schema,
-    pk_indices: Vec<usize>,
-    sink_type: SinkType,
+    input_columns: Vec<ColumnCatalog>,
+    input_schema: Schema,
+    sink_param: SinkParam,
     actor_context: ActorContextRef,
     log_reader: F::Reader,
     log_writer: F::Writer,
+    sink_writer_param: SinkWriterParam,
 }
 
 struct SinkMetrics {
     sink_commit_duration_metrics: Histogram,
-}
-
-async fn build_sink(
-    config: SinkConfig,
-    columns: &[ColumnCatalog],
-    pk_indices: PkIndices,
-    connector_params: ConnectorParams,
-    sink_type: SinkType,
-    sink_id: u64,
-) -> StreamExecutorResult<SinkImpl> {
-    // The downstream sink can only see the visible columns.
-    let schema: Schema = columns
-        .iter()
-        .filter_map(|column| (!column.is_hidden).then(|| column.column_desc.clone().into()))
-        .collect();
-    Ok(SinkImpl::new(
-        config,
-        schema,
-        pk_indices,
-        connector_params,
-        sink_type,
-        sink_id,
-    )
-    .await?)
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -98,43 +76,45 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     pub async fn new(
         input: BoxedExecutor,
         metrics: Arc<StreamingMetrics>,
-        config: SinkConfig,
-        executor_id: u64,
-        connector_params: ConnectorParams,
+        sink_writer_param: SinkWriterParam,
         columns: Vec<ColumnCatalog>,
+        properties: HashMap<String, String>,
         pk_indices: Vec<usize>,
         sink_type: SinkType,
-        sink_id: u64,
+        sink_id: SinkId,
         actor_context: ActorContextRef,
         log_store_factory: F,
     ) -> StreamExecutorResult<Self> {
         let (log_reader, log_writer) = log_store_factory.build().await;
-        let sink = build_sink(
-            config.clone(),
-            &columns,
-            pk_indices.clone(),
-            connector_params,
-            sink_type,
+
+        let sink_param = SinkParam {
             sink_id,
-        )
-        .await?;
-        let schema: Schema = columns
+            properties,
+            columns: columns
+                .iter()
+                .filter(|col| !col.is_hidden)
+                .map(|col| col.column_desc.clone())
+                .collect(),
+            pk_indices,
+            sink_type,
+        };
+        let sink = build_sink(sink_param.clone())?;
+        let input_schema = columns
             .iter()
-            .map(|column| column.column_desc.clone().into())
+            .map(|column| Field::from(&column.column_desc))
             .collect();
         Ok(Self {
             input,
             metrics,
             sink,
-            config,
-            identity: format!("SinkExecutor {:X?}", executor_id),
-            columns,
-            schema,
-            sink_type,
-            pk_indices,
+            identity: format!("SinkExecutor {:X?}", sink_writer_param.executor_id),
+            input_columns: columns,
+            input_schema,
+            sink_param,
             actor_context,
             log_reader,
             log_writer,
+            sink_writer_param,
         })
     }
 
@@ -142,7 +122,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let sink_commit_duration_metrics = self
             .metrics
             .sink_commit_duration
-            .with_label_values(&[self.identity.as_str(), self.config.get_connector()]);
+            .with_label_values(&[self.identity.as_str(), self.sink.get_connector()]);
 
         let sink_metrics = SinkMetrics {
             sink_commit_duration_metrics,
@@ -151,14 +131,19 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let write_log_stream = Self::execute_write_log(
             self.input,
             self.log_writer,
-            self.schema,
-            self.columns,
-            self.sink_type,
+            self.input_columns.clone(),
+            self.sink_param.sink_type,
             self.actor_context,
         );
 
         dispatch_sink!(self.sink, sink, {
-            let consume_log_stream = Self::execute_consume_log(sink, self.log_reader, sink_metrics);
+            let consume_log_stream = Self::execute_consume_log(
+                sink,
+                self.log_reader,
+                self.input_columns,
+                sink_metrics,
+                self.sink_writer_param,
+            );
             select(consume_log_stream.into_stream(), write_log_stream).boxed()
         })
     }
@@ -167,13 +152,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     async fn execute_write_log(
         input: BoxedExecutor,
         mut log_writer: impl LogWriter,
-        schema: Schema,
         columns: Vec<ColumnCatalog>,
         sink_type: SinkType,
         actor_context: ActorContextRef,
     ) {
-        let data_types = schema.data_types();
         let mut input = input.execute();
+
+        let data_types = columns
+            .iter()
+            .map(|col| col.column_desc.data_type.clone())
+            .collect_vec();
 
         let barrier = expect_first_barrier(&mut input).await?;
 
@@ -183,12 +171,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         // Propagate the first barrier
         yield Message::Barrier(barrier);
-
-        let visible_columns = columns
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
-            .collect_vec();
 
         #[for_await]
         for msg in input {
@@ -205,15 +187,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     };
 
                     if let Some(chunk) = visible_chunk {
-                        let chunk_to_connector = if visible_columns.len() != columns.len() {
-                            // Do projection here because we may have columns that aren't visible to
-                            // the downstream.
-                            chunk.clone().reorder_columns(&visible_columns)
-                        } else {
-                            chunk.clone()
-                        };
-
-                        log_writer.write_chunk(chunk_to_connector).await?;
+                        log_writer.write_chunk(chunk.clone()).await?;
 
                         // Use original chunk instead of the reordered one as the executor output.
                         yield Message::Chunk(chunk);
@@ -221,7 +195,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
                 Message::Barrier(barrier) => {
                     log_writer
-                        .flush_current_epoch(barrier.epoch.curr, barrier.checkpoint)
+                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
                         .await?;
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_context.id) {
                         log_writer.update_vnode_bitmap(vnode_bitmap);
@@ -233,97 +207,92 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     }
 
     async fn execute_consume_log<S: Sink, R: LogReader>(
-        mut sink: S,
+        sink: S,
         mut log_reader: R,
+        columns: Vec<ColumnCatalog>,
         sink_metrics: SinkMetrics,
+        sink_writer_param: SinkWriterParam,
     ) -> StreamExecutorResult<Message> {
         log_reader.init().await?;
+        let mut sink_writer = sink.new_writer(sink_writer_param).await?;
+
+        let visible_columns = columns
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
+            .collect_vec();
 
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
             Uninitialized,
 
-            /// Mark that there is some data written in this checkpoint.
-            Writing { curr_epoch: u64 },
+            /// Mark that a new epoch has begun.
+            EpochBegun { curr_epoch: u64 },
 
-            /// Mark that the consumer has been checkpointed and there is no new data written after
-            /// the checkpoint
-            Checkpointed { prev_epoch: u64 },
+            /// Mark that the consumer has just received a barrier
+            BarrierReceived { prev_epoch: u64 },
         }
 
         let mut state = LogConsumerState::Uninitialized;
 
         loop {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
+            // begin_epoch when not previously began
+            state = match state {
+                LogConsumerState::Uninitialized => {
+                    sink_writer.begin_epoch(epoch).await?;
+                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                }
+                LogConsumerState::EpochBegun { curr_epoch } => {
+                    assert!(
+                        epoch >= curr_epoch,
+                        "new epoch {} should not be below the current epoch {}",
+                        epoch,
+                        curr_epoch
+                    );
+                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                }
+                LogConsumerState::BarrierReceived { prev_epoch } => {
+                    assert!(
+                        epoch > prev_epoch,
+                        "new epoch {} should be greater than prev epoch {}",
+                        epoch,
+                        prev_epoch
+                    );
+                    sink_writer.begin_epoch(epoch).await?;
+                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                }
+            };
             match item {
                 LogStoreReadItem::StreamChunk(chunk) => {
-                    state = match state {
-                        LogConsumerState::Uninitialized => {
-                            sink.begin_epoch(epoch).await?;
-                            LogConsumerState::Writing { curr_epoch: epoch }
-                        }
-                        LogConsumerState::Writing { curr_epoch } => {
-                            assert!(
-                                epoch >= curr_epoch,
-                                "new epoch {} should not be below the current epoch {}",
-                                epoch,
-                                curr_epoch
-                            );
-                            LogConsumerState::Writing { curr_epoch: epoch }
-                        }
-                        LogConsumerState::Checkpointed { prev_epoch } => {
-                            assert!(
-                                epoch > prev_epoch,
-                                "new epoch {} should be greater than prev epoch {}",
-                                epoch,
-                                prev_epoch
-                            );
-                            sink.begin_epoch(epoch).await?;
-                            LogConsumerState::Writing { curr_epoch: epoch }
-                        }
+                    let chunk = if visible_columns.len() != columns.len() {
+                        // Do projection here because we may have columns that aren't visible to
+                        // the downstream.
+                        chunk.reorder_columns(&visible_columns)
+                    } else {
+                        chunk
                     };
-
-                    if let Err(e) = sink.write_batch(chunk.clone()).await {
-                        sink.abort().await?;
+                    if let Err(e) = sink_writer.write_batch(chunk).await {
+                        sink_writer.abort().await?;
                         return Err(e.into());
                     }
                 }
                 LogStoreReadItem::Barrier { is_checkpoint } => {
-                    state = match state {
-                        LogConsumerState::Uninitialized => {
-                            LogConsumerState::Checkpointed { prev_epoch: epoch }
-                        }
-                        LogConsumerState::Writing { curr_epoch } => {
-                            assert!(
-                                epoch >= curr_epoch,
-                                "barrier epoch {} should not be below current epoch {}",
-                                epoch,
-                                curr_epoch
-                            );
-                            if is_checkpoint {
-                                let start_time = Instant::now();
-                                sink.commit().await?;
-                                sink_metrics
-                                    .sink_commit_duration_metrics
-                                    .observe(start_time.elapsed().as_millis() as f64);
-                                LogConsumerState::Checkpointed { prev_epoch: epoch }
-                            } else {
-                                LogConsumerState::Writing { curr_epoch: epoch }
-                            }
-                        }
-                        LogConsumerState::Checkpointed { prev_epoch } => {
-                            assert!(
-                                epoch > prev_epoch,
-                                "checkpoint epoch {} should be greater than prev checkpoint epoch: {}",
-                                epoch,
-                                prev_epoch
-                            );
-                            LogConsumerState::Checkpointed { prev_epoch: epoch }
-                        }
-                    };
                     if is_checkpoint {
+                        let start_time = Instant::now();
+                        sink_writer.barrier(true).await?;
+                        sink_metrics
+                            .sink_commit_duration_metrics
+                            .observe(start_time.elapsed().as_millis() as f64);
                         log_reader.truncate().await?;
+                    } else {
+                        sink_writer.barrier(false).await?;
                     }
+                    let prev_epoch = match state {
+                        LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
+                        _ => unreachable!("epoch must have begun before handling barrier"),
+                    };
+                    state = LogConsumerState::BarrierReceived { prev_epoch }
                 }
             }
         }
@@ -336,11 +305,11 @@ impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.input_schema
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.sink_param.pk_indices
     }
 
     fn identity(&self) -> &str {
@@ -389,7 +358,7 @@ mod test {
         ];
         let schema: Schema = columns
             .iter()
-            .map(|column| column.column_desc.clone().into())
+            .map(|column| Field::from(column.column_desc.clone()))
             .collect();
         let pk = vec![0];
 
@@ -416,17 +385,19 @@ mod test {
             ],
         );
 
-        let config = SinkConfig::from_hashmap(properties).unwrap();
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
-            config,
-            0,
-            Default::default(),
+            SinkWriterParam {
+                connector_params: Default::default(),
+                executor_id: 0,
+                vnode_bitmap: None,
+            },
             columns.clone(),
+            properties,
             pk.clone(),
             SinkType::ForceAppendOnly,
-            0,
+            0.into(),
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )
@@ -490,7 +461,7 @@ mod test {
         ];
         let schema: Schema = columns
             .iter()
-            .map(|column| column.column_desc.clone().into())
+            .map(|column| Field::from(column.column_desc.clone()))
             .collect();
         let pk = vec![0];
 
@@ -504,17 +475,19 @@ mod test {
             ],
         );
 
-        let config = SinkConfig::from_hashmap(properties).unwrap();
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
-            config,
-            0,
-            Default::default(),
+            SinkWriterParam {
+                connector_params: Default::default(),
+                executor_id: 0,
+                vnode_bitmap: None,
+            },
             columns,
+            properties,
             pk.clone(),
             SinkType::ForceAppendOnly,
-            0,
+            0.into(),
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
         )

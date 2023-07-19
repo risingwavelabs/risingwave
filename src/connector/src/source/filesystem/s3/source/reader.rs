@@ -84,6 +84,7 @@ impl S3FileReader {
             let bytes = read?;
             let len = bytes.len();
             let msg = SourceMessage {
+                key: None,
                 payload: Some(bytes.as_ref().to_vec()),
                 offset: offset.to_string(),
                 split_id: split.id(),
@@ -201,7 +202,7 @@ impl S3FileReader {
             );
 
             let parser =
-                ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)?;
+                ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
             let msg_stream = if matches!(
                 parser,
                 ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
@@ -232,7 +233,7 @@ mod tests {
     use super::*;
     use crate::parser::{CommonParserConfig, CsvParserConfig, SpecificParserConfig};
     use crate::source::filesystem::{S3Properties, S3SplitEnumerator};
-    use crate::source::{SourceColumnDesc, SplitEnumerator};
+    use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
     #[ignore]
@@ -245,7 +246,10 @@ mod tests {
             secret: None,
             endpoint_url: None,
         };
-        let mut enumerator = S3SplitEnumerator::new(props.clone()).await.unwrap();
+        let mut enumerator =
+            S3SplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+                .await
+                .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
         println!("splits {:?}", splits);
 

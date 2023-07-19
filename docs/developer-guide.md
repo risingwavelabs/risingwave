@@ -46,7 +46,7 @@ http://ecotrust-canada.github.io/markdown-toc/
 - [Add new files](#add-new-files)
 - [Add new dependencies](#add-new-dependencies)
 - [Submit PRs](#submit-prs)
-- [Profiling](#profiling)
+- [Profiling](#benchmarking-and-profiling)
 
 ## Read the design docs
 
@@ -83,7 +83,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld
+sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld pkg-config libssl-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -485,7 +485,8 @@ after deps get updated.
 
 Instructions about submitting PRs are included in the [contribution guidelines](../CONTRIBUTING.md).
 
-## Profiling
+## Benchmarking and Profiling
 
 - [CPU Profiling Guide](./cpu-profiling.md)
 - [Memory (Heap) Profiling Guide](./memory-profiling.md)
+- [Microbench Guide](./microbenchmarks.md)

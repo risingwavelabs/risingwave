@@ -21,11 +21,11 @@ use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::agg::{agg_kinds, AggKind};
 use risingwave_expr::function::window::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
@@ -142,83 +142,19 @@ impl Binder {
         self.bind_builtin_scalar_function(function_name.as_str(), inputs)
     }
 
-    pub(super) fn bind_agg(&mut self, mut f: Function, kind: AggKind) -> Result<ExprImpl> {
-        if matches!(
-            kind,
-            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
-        ) {
-            if f.within_group.is_none() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "within group is expected for the {}",
-                    kind
-                ))
-                .into());
-            }
-        } else if f.within_group.is_some() {
-            return Err(ErrorCode::InvalidInputSyntax(format!(
-                "within group is disallowed for the {}",
-                kind
-            ))
-            .into());
-        }
-        if kind == AggKind::Mode && !f.args.is_empty() {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "no arguments are expected in mode agg".to_string(),
-            )
-            .into());
-        }
+    pub(super) fn bind_agg(&mut self, f: Function, kind: AggKind) -> Result<ExprImpl> {
         self.ensure_aggregate_allowed()?;
-        let mut inputs: Vec<ExprImpl> = if f.within_group.is_some() {
-            f.within_group
-                .iter()
-                .map(|x| self.bind_function_expr_arg(FunctionArgExpr::Expr(x.expr.clone())))
-                .flatten_ok()
-                .try_collect()?
+
+        let distinct = f.distinct;
+        let filter_expr = f.filter.clone();
+
+        let (direct_args, args, order_by) = if matches!(kind, agg_kinds::ordered_set!()) {
+            self.bind_ordered_set_agg(f, kind)?
         } else {
-            f.args
-                .iter()
-                .map(|arg| self.bind_function_arg(arg.clone()))
-                .flatten_ok()
-                .try_collect()?
+            self.bind_normal_agg(f, kind)?
         };
-        if kind == AggKind::PercentileCont {
-            inputs[0] = inputs
-                .iter()
-                .exactly_one()
-                .unwrap()
-                .clone()
-                .cast_implicit(DataType::Float64)?;
-        }
 
-        if f.distinct {
-            match &kind {
-                AggKind::Count if inputs.is_empty() => {
-                    // count(distinct *) is disallowed because of unclear semantics.
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "count(distinct *) is disallowed".to_string(),
-                    )
-                    .into());
-                }
-                AggKind::ApproxCountDistinct => {
-                    // approx_count_distinct(distinct ..) is disallowed because this defeats
-                    // its purpose of trading accuracy for
-                    // speed.
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "approx_count_distinct(distinct) is disallowed.\n\
-                        Remove distinct for speed or just use count(distinct) for accuracy"
-                            .into(),
-                    )
-                    .into());
-                }
-                AggKind::Max | AggKind::Min => {
-                    // distinct max or min returns the same result as non-distinct max or min.
-                    f.distinct = false;
-                }
-                _ => (),
-            };
-        }
-
-        let filter = match f.filter {
+        let filter = match filter_expr {
             Some(filter) => {
                 let mut clause = Some(Clause::Filter);
                 std::mem::swap(&mut self.context.clause, &mut clause);
@@ -252,80 +188,197 @@ impl Binder {
             None => Condition::true_cond(),
         };
 
-        if f.distinct && !f.order_by.is_empty() {
-            // <https://www.postgresql.org/docs/current/sql-expressions.html#SYNTAX-AGGREGATES:~:text=the%20DISTINCT%20list.-,Note,-The%20ability%20to>
-            return Err(ErrorCode::InvalidInputSyntax(
-                "DISTINCT and ORDER BY are not supported to appear at the same time now"
-                    .to_string(),
-            )
-            .into());
-        }
-        let order_by = if f.within_group.is_some() {
-            if !f.order_by.is_empty() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "order_by clause outside of within group is disallowed in {}",
-                    kind
-                ))
-                .into());
-            }
-            OrderBy::new(
-                f.within_group
-                    .iter()
-                    .map(|x| self.bind_order_by_expr(*x.clone()))
-                    .try_collect()?,
-            )
-        } else {
-            OrderBy::new(
-                f.order_by
-                    .into_iter()
-                    .map(|e| self.bind_order_by_expr(e))
-                    .try_collect()?,
-            )
-        };
-        let direct_args = if matches!(kind, AggKind::PercentileCont | AggKind::PercentileDisc) {
-            let args =
-                self.bind_function_arg(f.args.into_iter().exactly_one().map_err(|_| {
-                    ErrorCode::InvalidInputSyntax(format!("only one arg is expected in {}", kind))
-                })?)?;
-            if args.len() != 1 || args[0].clone().as_literal().is_none() {
-                Err(
-                    ErrorCode::InvalidInputSyntax(format!("arg in {} must be constant", kind))
-                        .into(),
-                )
-            } else if let Ok(casted) = args[0]
-                .clone()
-                .cast_implicit(DataType::Float64)?
-                .fold_const()
-            {
-                if casted
-                    .clone()
-                    .is_some_and(|x| !(0.0..=1.0).contains(&Into::<f64>::into(*x.as_float64())))
-                {
-                    Err(ErrorCode::InvalidInputSyntax(format!(
-                        "arg in {} must between 0 and 1",
-                        kind
-                    ))
-                    .into())
-                } else {
-                    Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
-                }
-            } else {
-                Err(
-                    ErrorCode::InvalidInputSyntax(format!("arg in {} must be float64", kind))
-                        .into(),
-                )
-            }
-        } else {
-            Ok(vec![])
-        }?;
         Ok(ExprImpl::AggCall(Box::new(AggCall::new(
             kind,
-            inputs,
-            f.distinct,
+            args,
+            distinct,
             order_by,
             filter,
             direct_args,
         )?)))
+    }
+
+    fn bind_ordered_set_agg(
+        &mut self,
+        f: Function,
+        kind: AggKind,
+    ) -> Result<(Vec<Literal>, Vec<ExprImpl>, OrderBy)> {
+        // Syntax:
+        // aggregate_name ( [ expression [ , ... ] ] ) WITHIN GROUP ( order_by_clause ) [ FILTER
+        // ( WHERE filter_clause ) ]
+
+        assert!(matches!(kind, agg_kinds::ordered_set!()));
+
+        if !f.order_by.is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "ORDER BY is not allowed for ordered-set aggregation `{}`",
+                kind
+            ))
+            .into());
+        }
+        if f.distinct {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "DISTINCT is not allowed for ordered-set aggregation `{}`",
+                kind
+            ))
+            .into());
+        }
+
+        let within_group = *f.within_group.ok_or_else(|| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "WITHIN GROUP is expected for ordered-set aggregation `{}`",
+                kind
+            ))
+        })?;
+
+        let mut direct_args = {
+            let args: Vec<_> = f
+                .args
+                .into_iter()
+                .map(|arg| self.bind_function_arg(arg))
+                .flatten_ok()
+                .try_collect()?;
+            if args.iter().any(|arg| arg.as_literal().is_none()) {
+                return Err(ErrorCode::NotImplemented(
+                    "non-constant direct arguments for ordered-set aggregation is not supported now".to_string(),
+                    None.into()
+                )
+                .into());
+            }
+            args
+        };
+        let mut args =
+            self.bind_function_expr_arg(FunctionArgExpr::Expr(within_group.expr.clone()))?;
+        let order_by = OrderBy::new(vec![self.bind_order_by_expr(within_group)?]);
+
+        // check signature and do implicit cast
+        match (kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
+            (AggKind::PercentileCont | AggKind::PercentileDisc, [fraction], [arg]) => {
+                if fraction.cast_implicit_mut(DataType::Float64).is_ok() && let Ok(casted) = fraction.fold_const() {
+                    if let Some(ref casted) = casted && !(0.0..=1.0).contains(&casted.as_float64().0) {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "direct arg in `{}` must between 0.0 and 1.0",
+                            kind
+                        ))
+                        .into());
+                    }
+                    *fraction = Literal::new(casted, DataType::Float64).into();
+                } else {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "direct arg in `{}` must be castable to float64",
+                        kind
+                    ))
+                    .into());
+                }
+
+                if kind == AggKind::PercentileCont {
+                    arg.cast_implicit_mut(DataType::Float64).map_err(|_| {
+                        ErrorCode::InvalidInputSyntax(format!(
+                            "arg in `{}` must be castable to float64",
+                            kind
+                        ))
+                    })?;
+                }
+            }
+            (AggKind::Mode, [], [_arg]) => {}
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "invalid direct args or within group argument for `{}` aggregation",
+                    kind
+                ))
+                .into())
+            }
+        }
+
+        Ok((
+            direct_args
+                .into_iter()
+                .map(|arg| *arg.into_literal().unwrap())
+                .collect(),
+            args,
+            order_by,
+        ))
+    }
+
+    fn bind_normal_agg(
+        &mut self,
+        f: Function,
+        kind: AggKind,
+    ) -> Result<(Vec<Literal>, Vec<ExprImpl>, OrderBy)> {
+        // Syntax:
+        // aggregate_name (expression [ , ... ] [ order_by_clause ] ) [ FILTER ( WHERE
+        //   filter_clause ) ]
+        // aggregate_name (ALL expression [ , ... ] [ order_by_clause ] ) [ FILTER ( WHERE
+        //   filter_clause ) ]
+        // aggregate_name (DISTINCT expression [ , ... ] [ order_by_clause ] ) [ FILTER ( WHERE
+        //   filter_clause ) ]
+        // aggregate_name ( * ) [ FILTER ( WHERE filter_clause ) ]
+
+        assert!(!matches!(kind, agg_kinds::ordered_set!()));
+
+        if f.within_group.is_some() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "WITHIN GROUP is not allowed for non-ordered-set aggregation `{}`",
+                kind
+            ))
+            .into());
+        }
+
+        let args: Vec<_> = f
+            .args
+            .iter()
+            .map(|arg| self.bind_function_arg(arg.clone()))
+            .flatten_ok()
+            .try_collect()?;
+        let order_by = OrderBy::new(
+            f.order_by
+                .into_iter()
+                .map(|e| self.bind_order_by_expr(e))
+                .try_collect()?,
+        );
+
+        if f.distinct {
+            if kind == AggKind::ApproxCountDistinct {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "DISTINCT is not allowed for approximate aggregation `{}`",
+                    kind
+                ))
+                .into());
+            }
+
+            if args.is_empty() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "DISTINCT is not allowed for aggregate function `{}` without args",
+                    kind
+                ))
+                .into());
+            }
+
+            // restrict arguments[1..] to be constant because we don't support multiple distinct key
+            // indices for now
+            if args.iter().skip(1).any(|arg| arg.as_literal().is_none()) {
+                return Err(ErrorCode::NotImplemented(
+                    "non-constant arguments other than the first one for DISTINCT aggregation is not supported now"
+                        .to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+
+            // restrict ORDER BY to align with PG, which says:
+            // > If DISTINCT is specified in addition to an order_by_clause, then all the ORDER BY
+            // > expressions must match regular arguments of the aggregate; that is, you cannot sort
+            // > on an expression that is not included in the DISTINCT list.
+            if !order_by.sort_exprs.iter().all(|e| args.contains(&e.expr)) {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "ORDER BY expressions must match regular arguments of the aggregate for `{}` when DISTINCT is provided",
+                    kind
+                ))
+                .into());
+            }
+        }
+
+        Ok((vec![], args, order_by))
     }
 
     pub(super) fn bind_window_function(
@@ -561,17 +614,18 @@ impl Binder {
                 ("cotd", raw_call(ExprType::Cotd)),
                 ("tand", raw_call(ExprType::Tand)),
                 ("sinh", raw_call(ExprType::Sinh)),
-                ("cosh", raw_call(ExprType::Cosh)), 
-                ("tanh", raw_call(ExprType::Tanh)), 
-                ("coth", raw_call(ExprType::Coth)), 
-                ("asinh", raw_call(ExprType::Asinh)), 
-                ("acosh", raw_call(ExprType::Acosh)), 
-                ("atanh", raw_call(ExprType::Atanh)), 
+                ("cosh", raw_call(ExprType::Cosh)),
+                ("tanh", raw_call(ExprType::Tanh)),
+                ("coth", raw_call(ExprType::Coth)),
+                ("asinh", raw_call(ExprType::Asinh)),
+                ("acosh", raw_call(ExprType::Acosh)),
+                ("atanh", raw_call(ExprType::Atanh)),
                 ("asind", raw_call(ExprType::Asind)),
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),
                 ("cbrt", raw_call(ExprType::Cbrt)),
+                ("sign", raw_call(ExprType::Sign)),
 
                 (
                     "to_timestamp",
@@ -627,6 +681,8 @@ impl Binder {
                 ("sha256", raw_call(ExprType::Sha256)),
                 ("sha384", raw_call(ExprType::Sha384)),
                 ("sha512", raw_call(ExprType::Sha512)),
+                ("left", raw_call(ExprType::Left)),
+                ("right", raw_call(ExprType::Right)),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),

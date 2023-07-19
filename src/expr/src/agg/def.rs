@@ -228,6 +228,7 @@ pub enum AggKind {
     JsonbAgg,
     JsonbObjectAgg,
     FirstValue,
+    LastValue,
     VarPop,
     VarSamp,
     StddevPop,
@@ -257,6 +258,7 @@ impl AggKind {
             PbType::JsonbAgg => Ok(AggKind::JsonbAgg),
             PbType::JsonbObjectAgg => Ok(AggKind::JsonbObjectAgg),
             PbType::FirstValue => Ok(AggKind::FirstValue),
+            PbType::LastValue => Ok(AggKind::LastValue),
             PbType::StddevPop => Ok(AggKind::StddevPop),
             PbType::StddevSamp => Ok(AggKind::StddevSamp),
             PbType::VarPop => Ok(AggKind::VarPop),
@@ -287,6 +289,7 @@ impl AggKind {
             Self::JsonbAgg => PbType::JsonbAgg,
             Self::JsonbObjectAgg => PbType::JsonbObjectAgg,
             Self::FirstValue => PbType::FirstValue,
+            Self::LastValue => PbType::LastValue,
             Self::StddevPop => PbType::StddevPop,
             Self::StddevSamp => PbType::StddevSamp,
             Self::VarPop => PbType::VarPop,
@@ -294,6 +297,163 @@ impl AggKind {
             Self::PercentileCont => PbType::PercentileCont,
             Self::PercentileDisc => PbType::PercentileDisc,
             Self::Mode => PbType::Mode,
+        }
+    }
+}
+
+/// Macros to generate match arms for [`AggKind`].
+/// IMPORTANT: These macros must be carefully maintained especially when adding new [`AggKind`]
+/// variants.
+pub mod agg_kinds {
+    /// [`AggKind`]s that are currently not supported in streaming mode.
+    #[macro_export]
+    macro_rules! unimplemented_in_stream {
+        () => {
+            AggKind::BitAnd
+                | AggKind::BitOr
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::JsonbAgg
+                | AggKind::JsonbObjectAgg
+                | AggKind::PercentileCont
+                | AggKind::PercentileDisc
+                | AggKind::Mode
+        };
+    }
+    pub use unimplemented_in_stream;
+
+    /// [`AggKind`]s that should've been rewritten to other kinds. These kinds should not appear
+    /// when generating physical plan nodes.
+    #[macro_export]
+    macro_rules! rewritten {
+        () => {
+            AggKind::Avg
+                | AggKind::StddevPop
+                | AggKind::StddevSamp
+                | AggKind::VarPop
+                | AggKind::VarSamp
+        };
+    }
+    pub use rewritten;
+
+    /// [`AggKind`]s of which the aggregate results are not affected by the user given ORDER BY
+    /// clause.
+    #[macro_export]
+    macro_rules! result_unaffected_by_order_by {
+        () => {
+            AggKind::BitAnd
+                | AggKind::BitOr
+                | AggKind::BitXor // XOR is commutative and associative
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::Min
+                | AggKind::Max
+                | AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::Avg
+                | AggKind::ApproxCountDistinct
+                | AggKind::VarPop
+                | AggKind::VarSamp
+                | AggKind::StddevPop
+                | AggKind::StddevSamp
+        };
+    }
+    pub use result_unaffected_by_order_by;
+
+    /// [`AggKind`]s that must be called with ORDER BY clause. These are slightly different from
+    /// variants not in [`result_unaffected_by_order_by`], in that variants returned by this macro
+    /// should be banned while the others should just be warned.
+    #[macro_export]
+    macro_rules! must_have_order_by {
+        () => {
+            AggKind::FirstValue
+                | AggKind::LastValue
+                | AggKind::PercentileCont
+                | AggKind::PercentileDisc
+                | AggKind::Mode
+        };
+    }
+    pub use must_have_order_by;
+
+    /// [`AggKind`]s of which the aggregate results are not affected by the user given DISTINCT
+    /// keyword.
+    #[macro_export]
+    macro_rules! result_unaffected_by_distinct {
+        () => {
+            AggKind::BitAnd
+                | AggKind::BitOr
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::Min
+                | AggKind::Max
+                | AggKind::ApproxCountDistinct
+        };
+    }
+    pub use result_unaffected_by_distinct;
+
+    /// [`AggKind`]s that are simply cannot 2-phased.
+    #[macro_export]
+    macro_rules! simply_cannot_two_phase {
+        () => {
+            AggKind::StringAgg
+                | AggKind::ApproxCountDistinct
+                | AggKind::ArrayAgg
+                | AggKind::JsonbAgg
+                | AggKind::JsonbObjectAgg
+                | AggKind::FirstValue
+                | AggKind::LastValue
+                | AggKind::PercentileCont
+                | AggKind::PercentileDisc
+                | AggKind::Mode
+        };
+    }
+    pub use simply_cannot_two_phase;
+
+    /// [`AggKind`]s that are implemented with a single value state (so-called stateless).
+    #[macro_export]
+    macro_rules! single_value_state {
+        () => {
+            AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::BitXor
+        };
+    }
+    pub use single_value_state;
+
+    /// [`AggKind`]s that are implemented with a single value state (so-called stateless) iff the
+    /// input is append-only.
+    #[macro_export]
+    macro_rules! single_value_state_iff_in_append_only {
+        () => {
+            AggKind::Max | AggKind::Min
+        };
+    }
+    pub use single_value_state_iff_in_append_only;
+
+    /// Ordered-set aggregate functions.
+    #[macro_export]
+    macro_rules! ordered_set {
+        () => {
+            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
+        };
+    }
+    pub use ordered_set;
+}
+
+impl AggKind {
+    /// Get the total phase agg kind from the partial phase agg kind.
+    pub fn partial_to_total(self) -> Option<Self> {
+        match self {
+            AggKind::BitAnd
+            | AggKind::BitOr
+            | AggKind::BitXor
+            | AggKind::BoolAnd
+            | AggKind::BoolOr
+            | AggKind::Min
+            | AggKind::Max
+            | AggKind::Sum => Some(self),
+            AggKind::Sum0 | AggKind::Count => Some(AggKind::Sum0),
+            agg_kinds::simply_cannot_two_phase!() => None,
+            agg_kinds::rewritten!() => None,
         }
     }
 }

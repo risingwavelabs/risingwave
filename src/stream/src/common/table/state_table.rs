@@ -31,7 +31,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
+use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
@@ -42,10 +42,11 @@ use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
-use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
+use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, get_second, Distribution};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
 
@@ -62,6 +63,7 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 pub struct StateTableInner<
     S,
     SD = BasicSerde,
+    const IS_REPLICATED: bool = false,
     W = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>,
 > where
     S: StateStore,
@@ -120,9 +122,10 @@ pub struct StateTableInner<
 
 /// `StateTable` will use `BasicSerde` as default
 pub type StateTable<S> = StateTableInner<S, BasicSerde>;
+pub type ReplicatedStateTable<S> = StateTableInner<S, BasicSerde, true>;
 
 // initialize
-impl<S, SD, W> StateTableInner<S, SD, W>
+impl<S, SD, const IS_REPLICATED: bool, W> StateTableInner<S, SD, IS_REPLICATED, W>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -188,13 +191,12 @@ where
         };
 
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
-        let local_state_store = store
-            .new_local(NewLocalOptions::new(
-                table_id,
-                is_consistent_op,
-                table_option,
-            ))
-            .await;
+        let new_local_options = if IS_REPLICATED {
+            NewLocalOptions::new_replicated(table_id, is_consistent_op, table_option)
+        } else {
+            NewLocalOptions::new(table_id, is_consistent_op, table_option)
+        };
+        let local_state_store = store.new_local(new_local_options).await;
 
         let pk_data_types = pk_indices
             .iter()
@@ -217,16 +219,6 @@ where
             .map(|val| *val as usize)
             .collect_vec();
 
-        let data_types = input_value_indices
-            .iter()
-            .map(|idx| table_columns[*idx].data_type.clone())
-            .collect_vec();
-
-        let column_ids = input_value_indices
-            .iter()
-            .map(|idx| table_columns[*idx].column_id)
-            .collect_vec();
-
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
 
         // if value_indices is the no shuffle full columns.
@@ -238,7 +230,10 @@ where
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
 
-        let row_serde = SD::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let row_serde = SD::new(
+            Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
+            Arc::from(table_columns.into_boxed_slice()),
+        );
         assert_eq!(
             row_serde.kind().is_column_aware(),
             table_catalog.version.is_some()
@@ -397,29 +392,19 @@ where
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
-        let data_types = match &value_indices {
-            Some(value_indices) => value_indices
-                .iter()
-                .map(|idx| table_columns[*idx].data_type.clone())
-                .collect_vec(),
-            None => table_columns
-                .iter()
-                .map(|c| c.data_type.clone())
-                .collect_vec(),
-        };
-
-        let column_ids = match &value_indices {
-            Some(value_indices) => value_indices
-                .iter()
-                .map(|idx| table_columns[*idx].column_id)
-                .collect_vec(),
-            None => table_columns.iter().map(|c| c.column_id).collect_vec(),
-        };
         Self {
             table_id,
             local_store: local_state_store,
             pk_serde,
-            row_serde: SD::new(&column_ids, Arc::from(data_types.into_boxed_slice())),
+            row_serde: SD::new(
+                Arc::from(
+                    value_indices
+                        .clone()
+                        .unwrap_or_else(|| (0..table_columns.len()).collect_vec())
+                        .into_boxed_slice(),
+                ),
+                Arc::from(table_columns.into_boxed_slice()),
+            ),
             pk_indices,
             dist_key_in_pk_indices,
             prefix_hint_len: 0,
@@ -511,7 +496,7 @@ where
 }
 
 // point get
-impl<S, SD> StateTableInner<S, SD>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -609,7 +594,7 @@ where
 }
 
 // write
-impl<S, SD> StateTableInner<S, SD>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -870,12 +855,8 @@ where
     }
 }
 
-fn get_second<T, U>(arg: StreamExecutorResult<(T, U)>) -> StreamExecutorResult<U> {
-    arg.map(|x| x.1)
-}
-
 // Iterator functions
-impl<S, SD, W> StateTableInner<S, SD, W>
+impl<S, SD, const IS_REPLICATED: bool, W> StateTableInner<S, SD, IS_REPLICATED, W>
 where
     S: StateStore,
     SD: ValueRowSerde,

@@ -140,6 +140,7 @@ message ExprNode {
     LN = 272;
     LOG10 = 273;
     CBRT = 274;
+    SIGN = 275;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -159,6 +160,8 @@ message ExprNode {
     SHA256 = 314;
     SHA384 = 315;
     SHA512 = 316;
+    LEFT = 317;
+    RIGHT = 318;
 
     // Unary operators
     NEG = 401;
@@ -315,6 +318,7 @@ message AggCall {
     PERCENTILE_CONT = 22;
     PERCENTILE_DISC = 23;
     MODE = 24;
+    LAST_VALUE = 25;
   }
   Type type = 1;
   repeated InputRef args = 2;

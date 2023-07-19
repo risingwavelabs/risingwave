@@ -19,7 +19,7 @@ import com.risingwave.proto.Catalog.SinkType;
 import java.util.Map;
 
 public interface SinkFactory {
-    SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties);
+    SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties);
 
     void validate(TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType);
 }

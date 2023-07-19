@@ -137,6 +137,25 @@
   - logical_plan
   - batch_plan
   - stream_dist_plan
+- id: nexmark_q6_group_top1
+  before:
+  - create_tables
+  sql: |
+    SELECT
+        Q.seller,
+        AVG(Q.final) OVER
+            (PARTITION BY Q.seller ORDER BY Q.date_time ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)
+        as avg
+    FROM (
+        SELECT ROW_NUMBER() OVER (PARTITION BY A.id, A.seller ORDER BY B.price) as rank, A.seller, B.price as final,  B.date_time
+        FROM auction AS A, bid AS B
+        WHERE A.id = B.auction and B.date_time between A.date_time and A.expires
+    ) AS Q
+    WHERE Q.rank <= 1;
+  expected_outputs:
+  - stream_dist_plan
+  # - batch_plan
+  - stream_plan
 - id: nexmark_q6
   before:
   - create_tables
@@ -348,6 +367,31 @@
   - batch_plan
   - stream_plan
   - stream_dist_plan
+- id: nexmark_q15_split_distinct_agg
+  before:
+  - create_tables
+  sql: |
+    SELECT
+        TO_CHAR(date_time, 'yyyy-MM-dd') as day,
+        count(*) AS total_bids,
+        count(*) filter (where price < 10000) AS rank1_bids,
+        count(*) filter (where price >= 10000 and price < 1000000) AS rank2_bids,
+        count(*) filter (where price >= 1000000) AS rank3_bids,
+        count(distinct bidder) AS total_bidders,
+        count(distinct bidder) filter (where price < 10000) AS rank1_bidders,
+        count(distinct bidder) filter (where price >= 10000 and price < 1000000) AS rank2_bidders,
+        count(distinct bidder) filter (where price >= 1000000) AS rank3_bidders,
+        count(distinct auction) AS total_auctions,
+        count(distinct auction) filter (where price < 10000) AS rank1_auctions,
+        count(distinct auction) filter (where price >= 10000 and price < 1000000) AS rank2_auctions,
+        count(distinct auction) filter (where price >= 1000000) AS rank3_auctions
+    FROM bid
+    GROUP BY to_char(date_time, 'yyyy-MM-dd');
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - id: nexmark_q16
   before:
   - create_tables
@@ -374,6 +418,33 @@
   - stream_dist_plan
   - batch_plan
   - stream_plan
+- id: nexmark_q16_split_distinct_agg
+  before:
+  - create_tables
+  sql: |
+    SELECT
+      channel,
+      to_char(date_time, 'yyyy-MM-dd') AS day,
+      max(to_char(date_time, 'HH:mm')) AS minute,
+      count(*) AS total_bids,
+      count(*) filter (where price < 10000) AS rank1_bids,
+      count(*) filter (where price >= 10000 and price < 1000000) AS rank2_bids,
+      count(*) filter (where price >= 1000000) AS rank3_bids,
+      count(distinct bidder) AS total_bidders,
+      count(distinct bidder) filter (where price < 10000) AS rank1_bidders,
+      count(distinct bidder) filter (where price >= 10000 and price < 1000000) AS rank2_bidders,
+      count(distinct bidder) filter (where price >= 1000000) AS rank3_bidders,
+      count(distinct auction) AS total_auctions,
+      count(distinct auction) filter (where price < 10000) AS rank1_auctions,
+      count(distinct auction) filter (where price >= 10000 and price < 1000000) AS rank2_auctions,
+      count(distinct auction) filter (where price >= 1000000) AS rank3_auctions
+    FROM bid
+    GROUP BY channel, to_char(date_time, 'yyyy-MM-dd');
+  expected_outputs:
+  - stream_dist_plan
+  - stream_plan
+  with_config_map:
+    RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - id: nexmark_q17
   before:
   - create_tables
@@ -430,6 +501,43 @@
     WHERE rank_number <= 10;
   expected_outputs:
   - logical_plan
+  - stream_plan
+  - stream_dist_plan
+  - batch_plan
+- id: nexmark_q19_rewrite
+  before:
+  - create_tables
+  sql: |
+    SELECT auction, bidder, price, channel, url, date_time, extra, ROW_NUMBER() over (PARTITION BY auction ORDER BY price DESC) as rank_number
+    FROM (
+        SELECT
+            *,
+            ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number
+        FROM bid
+    ) Q
+    WHERE Q.rank_number <= 10;
+  expected_outputs:
+  - logical_plan
+  - stream_plan
+  - stream_dist_plan
+  - batch_plan
+- id: nexmark_q19_no_output
+  before:
+  - create_tables
+  sql: |
+    SELECT auction, bidder, price, channel, url, date_time, extra
+    FROM (
+        SELECT
+            *,
+            ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number
+        FROM bid
+    )
+    WHERE rank_number <= 10;
+  expected_outputs:
+  - logical_plan
+  - stream_plan
+  - stream_dist_plan
+  - batch_plan
 - id: nexmark_q20
   before:
   - create_tables

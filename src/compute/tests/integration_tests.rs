@@ -33,12 +33,14 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::OwnedRow;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::SourceCtrlOpts;
+use risingwave_connector::ConnectorParams;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
@@ -163,6 +165,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
     let actor_ctx = ActorContext::create(0x3f3f3f);
+    let system_params_manager = LocalSystemParamsManager::for_test();
 
     // Create a `SourceExecutor` to read the changes.
     let source_executor = SourceExecutor::<PanicStateStore>::new(
@@ -172,9 +175,10 @@ async fn test_table_materialize() -> StreamResult<()> {
         None, // There is no external stream source.
         Arc::new(StreamingMetrics::unused()),
         barrier_rx,
-        u64::MAX,
+        system_params_manager.get_params(),
         1,
         SourceCtrlOpts::default(),
+        ConnectorParams::default(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.

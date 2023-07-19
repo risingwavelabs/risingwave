@@ -122,9 +122,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.71"
+version = "1.0.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c7d0618f0e0b7e8ff11427422b64564d5fb0be1940354bfe2e0529b18a9d9b8"
+checksum = "3b13c32d80ecc7ab747b80c3784bce54ee8a7a0cc4fbda9bf4cda2cf6fe90854"
 dependencies = [
  "backtrace",
 ]
@@ -344,7 +344,7 @@ checksum = "0e97ce7de6cf12de5d7226c73f5ba9811622f4db3a5b91b55c53e987e5f91cba"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -366,7 +366,7 @@ checksum = "16e62a023e7c117e27523144c5d2459f4397fcc3cab0085af8e2224f643a0193"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -383,7 +383,7 @@ checksum = "b9ccdd8f2a161be9bd5c023df56f1b2a0bd1d83872ae53b71a84a12c9bf6e842"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -432,7 +432,7 @@ dependencies = [
  "derive_builder",
  "flexstr",
  "indextree",
- "itertools",
+ "itertools 0.10.5",
  "parking_lot 0.12.1",
  "pin-project",
  "tokio",
@@ -1332,7 +1332,7 @@ dependencies = [
  "heck 0.4.1",
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -1569,7 +1569,7 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -1585,7 +1585,7 @@ dependencies = [
  "criterion-plot",
  "futures",
  "is-terminal",
- "itertools",
+ "itertools 0.10.5",
  "num-traits",
  "once_cell",
  "oorandom",
@@ -1607,7 +1607,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
 dependencies = [
  "cast",
- "itertools",
+ "itertools 0.10.5",
 ]
 
 [[package]]
@@ -1670,9 +1670,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-utils"
-version = "0.8.15"
+version = "0.8.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c063cd8cc95f5c377ed0d4b49a4b21f632396ff690e8470c29b3359b346984b"
+checksum = "5a22b2d63d4d1dc0b7f1b6b2747dd0088008a9be28b6ddf0b1e7d335e3037294"
 dependencies = [
  "cfg-if",
 ]
@@ -1720,9 +1720,9 @@ dependencies = [
 
 [[package]]
 name = "csv"
-version = "1.2.1"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b015497079b9a9d69c02ad25de6c0a6edef051ea6360a327d0bd05802ef64ad"
+checksum = "626ae34994d3d8d668f4269922248239db4ae42d538b14c398b74a52208e8086"
 dependencies = [
  "csv-core",
  "itoa",
@@ -1803,7 +1803,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "scratch",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -1820,7 +1820,7 @@ checksum = "2345488264226bf682893e25de0769f3360aac9957980ec49361b083ddaa5bc5"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -1892,7 +1892,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "strsim",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -1925,7 +1925,7 @@ checksum = "29a358ff9f12ec09c3e61fef9b5a9902623a695a46a917b07f269bff1445611a"
 dependencies = [
  "darling_core 0.20.1",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -2050,9 +2050,9 @@ checksum = "6184e33543162437515c2e2b48714794e37845ec9851711914eec9d308f6ebe8"
 
 [[package]]
 name = "digest"
-version = "0.10.6"
+version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8168378f4e5023e7218c89c891c0fd8ecdb5e5e4f18cb78f38cf245dd021e76f"
+checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "const-oid",
@@ -2115,9 +2115,9 @@ dependencies = [
 
 [[package]]
 name = "dyn-clone"
-version = "1.0.11"
+version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68b0cf012f1230e43cd00ebb729c6bb58707ecfa8ad08b52ef3a4ccd2697fc30"
+checksum = "304e6508efa593091e97a9abbc10f90aa7ca635b6d2784feff3c89d41dd12272"
 
 [[package]]
 name = "easy-ext"
@@ -2187,7 +2187,7 @@ checksum = "eecf8589574ce9b895052fa12d69af7a233f99e6107f5cb8dd1044f2a17bfdcb"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -2532,7 +2532,7 @@ checksum = "89ca545a94061b6365f2c7355b4b32bd20df3ff95f02da9329b34ccc3bd6ee72"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -3147,6 +3147,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3623,7 +3632,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8263075bb86c5a1b1427b5ae862e8889656f126e9f77c484496e8b47cf5c5558"
 dependencies = [
- "regex-automata",
+ "regex-automata 0.1.10",
 ]
 
 [[package]]
@@ -4156,7 +4165,7 @@ dependencies = [
  "base64 0.13.1",
  "chrono",
  "http",
- "itertools",
+ "itertools 0.10.5",
  "log",
  "num-bigint",
  "oauth2",
@@ -4197,7 +4206,7 @@ checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -4416,15 +4425,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "output_vt100"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "628223faebab4e3e40667ee0b2336d34a5b960ff60ea743ddfdbcf7770bcfb66"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "outref"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4542,9 +4542,9 @@ dependencies = [
 
 [[package]]
 name = "paste"
-version = "1.0.12"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f746c4065a8fa3fe23974dd82f15431cc8d40779821001404d10d2e79ca7d79"
+checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
 
 [[package]]
 name = "path-absolutize"
@@ -4581,7 +4581,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bdbb7b706f2afc610f3853550cdbbf6372fd324824a087806bd4480ea4996e24"
 dependencies = [
  "heck 0.4.1",
- "itertools",
+ "itertools 0.10.5",
  "prost",
  "prost-types",
 ]
@@ -4639,7 +4639,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "futures",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "openssl",
  "panic-message",
@@ -4693,22 +4693,22 @@ dependencies = [
 
 [[package]]
 name = "pin-project"
-version = "1.0.12"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad29a609b6bcd67fee905812e544992d216af9d755757c05ed2d0e15a74c6ecc"
+checksum = "030ad2bc4db10a8944cb0d837f158bdfec4d4a4873ab701a95046770d11f8842"
 dependencies = [
  "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "1.0.12"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "069bdb1e05adc7a8990dce9cc75370895fbe4e3d58b9b73bf1aee56359344a55"
+checksum = "ec2e072ecce94ec471b13398d5402c188e76ac03cf74dd1a975161b23a3f6d9c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -4831,7 +4831,7 @@ checksum = "070ffaa78859c779b19f9358ce035480479cf2619e968593ffbe72abcb6e0fcf"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -4902,7 +4902,7 @@ checksum = "59230a63c37f3e18569bdb90e4a89cbf5bf8b06fea0b84e65ea10cc4df47addd"
 dependencies = [
  "difflib",
  "float-cmp",
- "itertools",
+ "itertools 0.10.5",
  "normalize-line-endings",
  "predicates-core",
  "regex",
@@ -4942,13 +4942,11 @@ checksum = "96b8aab53732b7a9c5c39bb0e130f85671b48b188ef258c3b9f7f5da1877382a"
 
 [[package]]
 name = "pretty_assertions"
-version = "1.3.0"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a25e9bcb20aa780fd0bb16b72403a9064d6b3f22f026946029acb941a50af755"
+checksum = "af7cee1a6c8a5b9208b3cb1061f10c0cb689087b3d8ce85fb9d2dd7a29b6ba66"
 dependencies = [
- "ctor",
  "diff",
- "output_vt100",
  "yansi",
 ]
 
@@ -5013,9 +5011,9 @@ checksum = "dc375e1527247fe1a97d8b7156678dfe7c1af2fc075c9a4db3690ecd2a148068"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.56"
+version = "1.0.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b63bdb0cd06f1f4dedf69b254734f9b45af66e4a031e42a7480257d9898b435"
+checksum = "18fb31db3f9bddb2ea821cde30a9f70117e3f119938b5ee630b7403aa6e2ead9"
 dependencies = [
  "unicode-ident",
 ]
@@ -5081,7 +5079,7 @@ checksum = "119533552c9a7ffacc21e099c24a0ac8bb19c2a2a3f363de84cd9b844feab270"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools",
+ "itertools 0.10.5",
  "lazy_static",
  "log",
  "multimap",
@@ -5102,7 +5100,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5d2d8d10f3c6ded6da8b05b5fb3b8a5082514344d56c9f871412d29b4e075b4"
 dependencies = [
  "anyhow",
- "itertools",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -5292,9 +5290,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.27"
+version = "1.0.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f4f29d145265ec1c483c7c654450edde0bfe043d3938d6972630663356d9500"
+checksum = "5fe8a65d69dd0808184ebb5f836ab526bb259db23c657efa38711b1072ee47f0"
 dependencies = [
  "proc-macro2",
 ]
@@ -5418,13 +5416,14 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.8.1"
+version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af83e617f331cc6ae2da5443c602dfa5af81e517212d9d611a5b3ba1777b5370"
+checksum = "b2eae68fc220f7cf2532e4494aded17545fce192d59cd996e0fe7887f4ceb575"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-syntax 0.7.1",
+ "regex-automata 0.3.2",
+ "regex-syntax 0.7.4",
 ]
 
 [[package]]
@@ -5437,6 +5436,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-automata"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83d3daa6976cffb758ec878f108ba0e062a45b2d6ca3a2cca965338855476caf"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-syntax 0.7.4",
+]
+
+[[package]]
 name = "regex-syntax"
 version = "0.6.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5444,9 +5454,9 @@ checksum = "f162c6dd7b008981e4d40210aca20b4bd0f9b60ca9271061b07f78537722f2e1"
 
 [[package]]
 name = "regex-syntax"
-version = "0.7.1"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5996294f19bd3aae0453a862ad728f60e6600695733dd5df01da90c54363a3c"
+checksum = "e5ea92a5b6195c6ef2a0295ea818b312502c6fc94dde986c5553242e18fd4ce2"
 
 [[package]]
 name = "rend"
@@ -5569,7 +5579,7 @@ dependencies = [
  "glob",
  "google-cloud-pubsub",
  "indicatif",
- "itertools",
+ "itertools 0.10.5",
  "madsim-rdkafka",
  "madsim-tokio",
  "redis",
@@ -5596,7 +5606,7 @@ dependencies = [
  "dialoguer",
  "enum-iterator",
  "fs-err",
- "itertools",
+ "itertools 0.10.5",
 ]
 
 [[package]]
@@ -5606,7 +5616,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
- "itertools",
+ "itertools 0.10.5",
  "parking_lot 0.12.1",
  "prost",
  "risingwave_common",
@@ -5646,7 +5656,7 @@ dependencies = [
  "futures-async-stream",
  "hashbrown 0.13.2",
  "hytra",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
@@ -5689,7 +5699,7 @@ dependencies = [
  "futures",
  "hdrhistogram",
  "isahc",
- "itertools",
+ "itertools 0.10.5",
  "libc",
  "madsim-tokio",
  "nix 0.25.1",
@@ -5790,7 +5800,7 @@ dependencies = [
  "http",
  "humantime",
  "hytra",
- "itertools",
+ "itertools 0.10.5",
  "itoa",
  "libc",
  "lru 0.7.6",
@@ -5936,7 +5946,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "hyper",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -5990,7 +6000,7 @@ dependencies = [
  "futures-async-stream",
  "glob",
  "google-cloud-pubsub",
- "itertools",
+ "itertools 0.10.5",
  "madsim-rdkafka",
  "madsim-tokio",
  "madsim-tonic",
@@ -6037,13 +6047,15 @@ dependencies = [
  "comfy-table",
  "futures",
  "inquire",
- "itertools",
+ "itertools 0.10.5",
+ "madsim-etcd-client",
  "madsim-tokio",
  "regex",
  "risingwave_common",
  "risingwave_connector",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
+ "risingwave_meta",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -6092,10 +6104,11 @@ dependencies = [
  "easy-ext",
  "either",
  "expect-test",
+ "futures",
  "futures-async-stream",
  "futures-util",
  "hex",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "md5",
  "num-traits",
@@ -6111,6 +6124,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "smallvec",
  "static_assertions",
  "thiserror",
  "tracing",
@@ -6121,7 +6135,7 @@ dependencies = [
 name = "risingwave_expr_macro"
 version = "0.1.0"
 dependencies = [
- "itertools",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -6137,6 +6151,7 @@ dependencies = [
  "assert_matches",
  "async-recursion",
  "async-trait",
+ "auto_enums",
  "bk-tree",
  "bytes",
  "clap",
@@ -6149,11 +6164,12 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "iana-time-zone",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
  "md5",
+ "more-asserts",
  "num-integer",
  "parking_lot 0.12.1",
  "parse-display",
@@ -6196,7 +6212,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "bytes",
  "hex",
- "itertools",
+ "itertools 0.10.5",
  "parse-display",
  "risingwave_common",
  "risingwave_pb",
@@ -6216,7 +6232,7 @@ dependencies = [
  "fail",
  "futures",
  "futures-async-stream",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "rand",
@@ -6246,7 +6262,7 @@ dependencies = [
  "bytes",
  "futures",
  "futures-async-stream",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.1",
@@ -6264,7 +6280,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "futures",
- "itertools",
+ "itertools 0.10.5",
  "jni",
  "madsim-tokio",
  "prost",
@@ -6302,7 +6318,7 @@ dependencies = [
  "futures",
  "hex",
  "hyper",
- "itertools",
+ "itertools 0.10.5",
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
@@ -6361,7 +6377,7 @@ dependencies = [
  "futures",
  "hyper",
  "hyper-tls",
- "itertools",
+ "itertools 0.10.5",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
@@ -6394,7 +6410,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
  "expect-test",
- "itertools",
+ "itertools 0.10.5",
  "libtest-mimic",
  "madsim-tokio",
  "paste",
@@ -6432,7 +6448,7 @@ dependencies = [
  "either",
  "futures",
  "hyper",
- "itertools",
+ "itertools 0.10.5",
  "lru 0.10.0",
  "madsim-tokio",
  "madsim-tonic",
@@ -6457,6 +6473,7 @@ dependencies = [
  "await-tree",
  "console",
  "console-subscriber",
+ "either",
  "futures",
  "hostname",
  "madsim-tokio",
@@ -6484,7 +6501,7 @@ dependencies = [
  "console",
  "futures",
  "glob",
- "itertools",
+ "itertools 0.10.5",
  "lru 0.7.6",
  "madsim",
  "madsim-aws-sdk-s3",
@@ -6526,9 +6543,10 @@ dependencies = [
  "easy-ext",
  "futures",
  "futures-async-stream",
- "itertools",
+ "itertools 0.10.5",
  "madsim-tokio",
  "parking_lot 0.12.1",
+ "paste",
  "rand",
  "risingwave_common",
  "risingwave_connector",
@@ -6542,7 +6560,7 @@ dependencies = [
 name = "risingwave_sqlparser"
 version = "1.0.0-alpha"
 dependencies = [
- "itertools",
+ "itertools 0.10.5",
  "matches",
  "serde",
  "tracing",
@@ -6573,7 +6591,7 @@ dependencies = [
  "chrono",
  "clap",
  "expect-test",
- "itertools",
+ "itertools 0.10.5",
  "libtest-mimic",
  "madsim-tokio",
  "rand",
@@ -6624,19 +6642,21 @@ dependencies = [
  "darwin-libproc",
  "dashmap",
  "dyn-clone",
+ "either",
  "enum-as-inner",
  "fail",
  "fiemap",
  "futures",
  "futures-async-stream",
  "hex",
- "itertools",
+ "itertools 0.10.5",
  "libc",
  "lz4",
  "mach2",
  "madsim-tokio",
  "memcomparable",
  "moka",
+ "more-asserts",
  "nix 0.25.1",
  "num-integer",
  "parking_lot 0.12.1",
@@ -6647,6 +6667,7 @@ dependencies = [
  "risingwave_backup",
  "risingwave_common",
  "risingwave_common_service",
+ "risingwave_expr",
  "risingwave_hummock_sdk",
  "risingwave_hummock_trace",
  "risingwave_object_store",
@@ -6691,7 +6712,7 @@ dependencies = [
  "futures-async-stream",
  "hytra",
  "iter-chunks",
- "itertools",
+ "itertools 0.10.5",
  "local_stats_alloc",
  "lru 0.7.6",
  "madsim-tokio",
@@ -6708,6 +6729,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
+ "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_hummock_test",
  "risingwave_pb",
@@ -7116,7 +7138,7 @@ checksum = "a2a0814352fd64b58489904a44ea8d90cb1a91dcb6b4f5ebabc32c8318e93cb6"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -7216,7 +7238,7 @@ dependencies = [
  "darling 0.20.1",
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -7277,9 +7299,9 @@ checksum = "ae1a47186c03a32177042e55dbc5fd5aee900b8e0069a8d70fba96a9375cd012"
 
 [[package]]
 name = "sha2"
-version = "0.10.6"
+version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82e6b795fe2e3b1e845bafcb27aa35405c4d47cdfc92af5fc8d3002f76cebdc0"
+checksum = "479fb9d862239e610720565ca91403019f2f00410f1864c5aa7479b950a76ed8"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -7534,9 +7556,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.11.2"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71378f7ef90bc4d448f2d84c11898adca45ced916d95df16d233a0e6da39f118"
+checksum = "43c4e6422d7c801de4897553c0a9be42d28dfe5c3deec7387855f258d16eb9dd"
 dependencies = [
  "async-trait",
  "educe",
@@ -7544,7 +7566,7 @@ dependencies = [
  "futures",
  "glob",
  "humantime",
- "itertools",
+ "itertools 0.11.0",
  "libtest-mimic",
  "md-5",
  "owo-colors",
@@ -7636,9 +7658,9 @@ dependencies = [
 
 [[package]]
 name = "subtle"
-version = "2.4.1"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
+checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "symbolic-common"
@@ -7676,9 +7698,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.15"
+version = "2.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a34fcf3e8b60f57e6a14301a2e916d323af98b0ea63c599441eec8558660c822"
+checksum = "45c3457aacde3c65315de5031ec191ce46604304d2446e803d71ade03308d970"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7759,22 +7781,22 @@ checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
 
 [[package]]
 name = "thiserror"
-version = "1.0.40"
+version = "1.0.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "978c9a314bd8dc99be594bc3c175faaa9794be04a5a5e153caba6915336cebac"
+checksum = "a35fc5b8971143ca348fa6df4f024d4d55264f3468c71ad1c2f365b0a4d58c42"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.40"
+version = "1.0.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9456a42c5b0d803c8cd86e73dd7cc9edd429499f37a3550d286d5e86720569f"
+checksum = "463fe12d7993d3b327787537ce8dd4dfa058de32fc2b195ef3cde03dc4771e8f"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -7962,7 +7984,7 @@ checksum = "630bdcf245f78637c13ec01ffae6187cca34625e8c63150d424b59e55af2675e"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -8245,7 +8267,7 @@ checksum = "0f57e3ca2a01450b1a921183a9c9cbfda207fd822cef4ccb00a65402cbba7a74"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.26",
 ]
 
 [[package]]
@@ -8978,7 +9000,7 @@ dependencies = [
  "hashbrown 0.12.3",
  "hashbrown 0.13.2",
  "hyper",
- "itertools",
+ "itertools 0.10.5",
  "lexical-core",
  "lexical-parse-float",
  "lexical-parse-integer",
@@ -9009,7 +9031,8 @@ dependencies = [
  "rand_chacha",
  "rand_core",
  "regex",
- "regex-syntax 0.7.1",
+ "regex-automata 0.3.2",
+ "regex-syntax 0.7.4",
  "reqwest",
  "rust_decimal",
  "rustls 0.20.8",
@@ -9020,7 +9043,7 @@ dependencies = [
  "smallvec",
  "subtle",
  "syn 1.0.109",
- "syn 2.0.15",
+ "syn 2.0.26",
  "time 0.3.21",
  "time-macros",
  "tinyvec",

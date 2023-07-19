@@ -9,7 +9,8 @@
     StreamMaterialize { columns: [country, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamTableScan { table: t, columns: [t.country, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -37,7 +38,8 @@
     LogicalProject { exprs: [Field(t.country, 1:Int32) as $expr1, t.country, Field(Field(t.country, 1:Int32), 0:Int32) as $expr2] }
     └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -80,7 +82,8 @@
     LogicalProject { exprs: [Field(Field(t.country1, 1:Int32), 0:Int32) as $expr1, Field(Field(t.country1, 1:Int32), 1:Int32) as $expr2, Field(t.country2, 0:Int32) as $expr3, Field(t.country2, 1:Int32) as $expr4, Field(t.country2, 2:Int32) as $expr5, Field(Field(t.country3, 1:Int32), 0:Int32) as $expr6, Field(Field(t.country3, 1:Int32), 1:Int32) as $expr7] }
     └─LogicalScan { table: t, columns: [t.id, t.country1, t.country2, t.country3, t.zipcode, t.rate, t._row_id] }
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -111,7 +114,8 @@
     └─LogicalProject { exprs: [Field(t.country, 1:Int32) as $expr1] }
       └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -142,7 +146,8 @@
         └─LogicalProject { exprs: [Field(t.country, 1:Int32) as $expr1] }
           └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -172,7 +177,8 @@
       │ └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
       └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -201,7 +207,8 @@
       └─LogicalProject { exprs: [Field(Field(t.country, 1:Int32), 0:Int32) as $expr1, t.zipcode] }
         └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -231,7 +238,8 @@
         └─LogicalFilter { predicate: (Field(Field(t.country, 1:Int32), 0:Int32) > 1:Int32) }
           └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -269,7 +277,8 @@
       Feature is not yet implemented: Add[Struct, Struct]
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -293,7 +302,8 @@
     Caused by:
       Invalid input syntax: Invalid aggregation: avg(struct<address varchar,zipcode varchar>)
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -317,7 +327,8 @@
     Caused by:
       Bind error: column "city" not found in struct type
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -337,7 +348,8 @@
     select (country).address.* from t;
   binder_error: 'Bind error: type "varchar" is not composite'
   create_source:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -358,7 +370,8 @@
     LogicalInsert { table: s, mapping: [0:0, 1:1, 2:2] }
     └─LogicalValues { rows: [[1:Int32, 2:Int32, Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, null:Int32))]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Struct(StructType { field_names: ["v1", "v2", "v3"], field_types: [Int32, Int32, Struct(StructType { field_names: ["v1", "v2", "v3"], field_types: [Int32, Int32, Int32] })] })] } }
   create_table_with_connector:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |
       syntax = "proto3";
@@ -385,7 +398,8 @@
     └─LogicalFilter { predicate: (s.v3 = Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, 3:Int32))) }
       └─LogicalScan { table: s, columns: [s.v1, s.v2, s.v3, s._row_id] }
   create_table_with_connector:
-    row_format: protobuf
+    format: plain
+    encode: protobuf
     name: s
     file: |-
       syntax = "proto3";

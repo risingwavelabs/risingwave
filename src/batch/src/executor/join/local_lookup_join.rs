@@ -39,13 +39,12 @@ use risingwave_pb::batch_plan::{
 };
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;
-use tokio::sync::watch::Receiver;
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
     ExecutorBuilder, JoinType, LookupJoinBase,
 };
-use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
+use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
 /// Inner side executor builder for the `LocalLookupJoinExecutor`
 struct InnerSideExecutorBuilder<C> {
@@ -62,7 +61,7 @@ struct InnerSideExecutorBuilder<C> {
     pu_to_worker_mapping: HashMap<ParallelUnitId, WorkerNode>,
     pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>,
     chunk_size: usize,
-    shutdown_rx: Receiver<ShutdownMsg>,
+    shutdown_rx: ShutdownToken,
     next_stage_id: usize,
 }
 
@@ -412,7 +411,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             output_indices,
             chunk_size,
             identity: identity.clone(),
-            shutdown_rx: Some(source.shutdown_rx.clone()),
+            shutdown_rx: source.shutdown_rx.clone(),
             mem_ctx: source.context.create_executor_mem_context(&identity),
         }
         .dispatch())
@@ -435,7 +434,7 @@ struct LocalLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
-    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    shutdown_rx: ShutdownToken,
     mem_ctx: MemoryContext,
 }
 
@@ -487,6 +486,7 @@ mod tests {
         diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
     };
     use crate::executor::{BoxedExecutor, SortExecutor};
+    use crate::task::ShutdownToken;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -562,7 +562,7 @@ mod tests {
             output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
             identity: "TestLookupJoinExecutor".to_string(),
-            shutdown_rx: None,
+            shutdown_rx: ShutdownToken::empty(),
             mem_ctx: MemoryContext::none(),
         }
         .dispatch()

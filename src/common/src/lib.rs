@@ -39,6 +39,7 @@
 #![feature(exclusive_range_pattern)]
 #![feature(binary_heap_into_iter_sorted)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(result_option_inspect)]
 
 #[macro_use]
 pub mod jemalloc;

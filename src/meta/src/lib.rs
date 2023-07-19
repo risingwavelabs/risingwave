@@ -34,6 +34,7 @@
 #![feature(is_sorted)]
 #![feature(string_leak)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(type_name_of_val)]
 
 pub mod backup_restore;
 mod barrier;
@@ -42,19 +43,19 @@ mod dashboard;
 mod error;
 pub mod hummock;
 pub mod manager;
-mod model;
+pub mod model;
 mod rpc;
 pub(crate) mod serving;
 pub mod storage;
 mod stream;
 pub(crate) mod telemetry;
-
 use std::time::Duration;
 
 use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use risingwave_common::config::OverrideConfig;
 use risingwave_common::{GIT_SHA, RW_VERSION};
+pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};

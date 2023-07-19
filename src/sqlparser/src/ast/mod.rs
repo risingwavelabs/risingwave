@@ -833,7 +833,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Function { schema } => write!(f, "FUNCTIONS{}", fmt_schema(schema)),
             ShowObject::Indexes { table } => write!(f, "INDEXES FROM {}", table),
             ShowObject::Cluster => {
-                write!(f, "CLUSTERS")
+                write!(f, "CLUSTER")
             }
         }
     }
@@ -1013,7 +1013,7 @@ pub enum Statement {
         constraints: Vec<TableConstraint>,
         with_options: Vec<SqlOption>,
         /// Optional schema of the external source with which the table is created
-        source_schema: Option<SourceSchema>,
+        source_schema: Option<CompatibleSourceSchema>,
         /// The watermark defined on source.
         source_watermarks: Vec<SourceWatermark>,
         /// Append only table.
@@ -1048,6 +1048,18 @@ pub enum Statement {
         args: Option<Vec<OperateFunctionArg>>,
         returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
+        params: CreateFunctionBody,
+    },
+    /// CREATE AGGREGATE
+    ///
+    /// Postgres: <https://www.postgresql.org/docs/15/sql-createaggregate.html>
+    CreateAggregate {
+        or_replace: bool,
+        name: ObjectName,
+        args: Vec<OperateFunctionArg>,
+        /// Optional parameters.
+        returns: Option<DataType>,
+        append_only: bool,
         params: CreateFunctionBody,
     },
     /// ALTER TABLE
@@ -1122,7 +1134,7 @@ pub enum Statement {
     /// `START TRANSACTION ...`
     StartTransaction { modes: Vec<TransactionMode> },
     /// `BEGIN [ TRANSACTION | WORK ]`
-    BEGIN { modes: Vec<TransactionMode> },
+    Begin { modes: Vec<TransactionMode> },
     /// ABORT
     Abort,
     /// `SET TRANSACTION ...`
@@ -1363,6 +1375,29 @@ impl fmt::Display for Statement {
                 write!(f, "{params}")?;
                 Ok(())
             }
+            Statement::CreateAggregate {
+                or_replace,
+                name,
+                args,
+                returns,
+                append_only,
+                params,
+            } => {
+                write!(
+                    f,
+                    "CREATE {or_replace}AGGREGATE {name}",
+                    or_replace = if *or_replace { "OR REPLACE " } else { "" },
+                )?;
+                write!(f, "({})", display_comma_separated(args))?;
+                if let Some(return_type) = returns {
+                    write!(f, " RETURNS {}", return_type)?;
+                }
+                if *append_only {
+                    write!(f, " APPEND ONLY")?;
+                }
+                write!(f, "{params}")?;
+                Ok(())
+            }
             Statement::CreateView {
                 name,
                 or_replace,
@@ -1433,7 +1468,7 @@ impl fmt::Display for Statement {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
                 if let Some(source_schema) = source_schema {
-                    write!(f, " ROW FORMAT {}", source_schema)?;
+                    write!(f, " {}", source_schema)?;
                 }
                 if let Some(query) = query {
                     write!(f, " AS {}", query)?;
@@ -1679,7 +1714,7 @@ impl fmt::Display for Statement {
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
-            Statement::BEGIN { modes } => {
+            Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;
                 if !modes.is_empty() {
                     write!(f, " {}", display_comma_separated(modes))?;

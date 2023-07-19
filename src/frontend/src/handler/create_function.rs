@@ -125,12 +125,17 @@ pub async fn handle_create_function(
     fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
         arrow_schema::Field::new("", data_type, true)
     }
-    let args = arrow_schema::Schema::new(arg_types.iter().map(|t| to_field(t.into())).collect());
+    let args = arrow_schema::Schema::new(
+        arg_types
+            .iter()
+            .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
+            .try_collect()?,
+    );
     let returns = arrow_schema::Schema::new(match kind {
-        Kind::Scalar(_) => vec![to_field(return_type.clone().into())],
+        Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
         Kind::Table(_) => vec![
             arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
-            to_field(return_type.clone().into()),
+            to_field(return_type.clone().try_into()?),
         ],
         _ => unreachable!(),
     });
@@ -153,7 +158,7 @@ pub async fn handle_create_function(
         owner: session.user_id(),
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_function(function).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))

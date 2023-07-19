@@ -19,8 +19,10 @@ import static io.grpc.Status.UNIMPLEMENTED;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.connector.api.sink.SinkWriter;
+import com.risingwave.connector.api.sink.SinkWriterBase;
+import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.connector.common.S3Utils;
 import com.risingwave.java.utils.UrlParser;
 import com.risingwave.proto.Catalog.SinkType;
@@ -46,7 +48,7 @@ public class IcebergSinkFactory implements SinkFactory {
     private static final String s3FileIOImpl = "org.apache.iceberg.aws.s3.S3FileIO";
 
     @Override
-    public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
         IcebergSinkConfig config = mapper.convertValue(tableProperties, IcebergSinkConfig.class);
         String warehousePath = getWarehousePath(config);
@@ -56,7 +58,7 @@ public class IcebergSinkFactory implements SinkFactory {
         TableIdentifier tableIdentifier =
                 TableIdentifier.of(config.getDatabaseName(), config.getTableName());
         Configuration hadoopConf = createHadoopConf(scheme, config);
-        SinkBase sink = null;
+        SinkWriterBase sink = null;
 
         try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
             Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
@@ -82,7 +84,7 @@ public class IcebergSinkFactory implements SinkFactory {
                     .withDescription("unsupported mode: " + config.getSinkType())
                     .asRuntimeException();
         }
-        return sink;
+        return new SinkWriterV1.Adapter(sink);
     }
 
     @Override

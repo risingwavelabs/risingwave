@@ -56,6 +56,9 @@ use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
@@ -686,6 +689,30 @@ impl MetaClient {
         Ok(resp.table_fragments)
     }
 
+    pub async fn list_table_fragment_states(&self) -> Result<Vec<TableFragmentState>> {
+        let resp = self
+            .inner
+            .list_table_fragment_states(ListTableFragmentStatesRequest {})
+            .await?;
+        Ok(resp.states)
+    }
+
+    pub async fn list_fragment_distributions(&self) -> Result<Vec<FragmentDistribution>> {
+        let resp = self
+            .inner
+            .list_fragment_distribution(ListFragmentDistributionRequest {})
+            .await?;
+        Ok(resp.distributions)
+    }
+
+    pub async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
+        let resp = self
+            .inner
+            .list_actor_states(ListActorStatesRequest {})
+            .await?;
+        Ok(resp.states)
+    }
+
     pub async fn pause(&self) -> Result<()> {
         let request = PauseRequest {};
         let _resp = self.inner.pause(request).await?;
@@ -708,10 +735,12 @@ impl MetaClient {
         &self,
         reschedules: HashMap<u32, PbReschedule>,
         revision: u64,
+        resolve_no_shuffle_upstream: bool,
     ) -> Result<(bool, u64)> {
         let request = RescheduleRequest {
             reschedules,
             revision,
+            resolve_no_shuffle_upstream,
         };
         let resp = self.inner.reschedule(request).await?;
         Ok((resp.success, resp.revision))
@@ -914,10 +943,14 @@ impl MetaClient {
         Ok(resp.params.unwrap().into())
     }
 
-    pub async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()> {
+    pub async fn set_system_param(
+        &self,
+        param: String,
+        value: Option<String>,
+    ) -> Result<Option<SystemParamsReader>> {
         let req = SetSystemParamRequest { param, value };
-        self.inner.set_system_param(req).await?;
-        Ok(())
+        let resp = self.inner.set_system_param(req).await?;
+        Ok(resp.params.map(SystemParamsReader::from))
     }
 
     pub async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
@@ -1026,7 +1059,7 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
-    async fn get_epoch(&self) -> Result<HummockSnapshot> {
+    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
         let req = GetEpochRequest {};
         let resp = self.inner.get_epoch(req).await?;
         Ok(resp.snapshot.unwrap())
@@ -1159,8 +1192,8 @@ impl HummockMetaClient for MetaClient {
 
 #[async_trait]
 impl TelemetryInfoFetcher for MetaClient {
-    async fn fetch_telemetry_info(&self) -> anyhow::Result<Option<String>> {
-        let resp = self.get_telemetry_info().await?;
+    async fn fetch_telemetry_info(&self) -> std::result::Result<Option<String>, String> {
+        let resp = self.get_telemetry_info().await.map_err(|e| e.to_string())?;
         let tracking_id = resp.get_tracking_id().ok();
         Ok(tracking_id.map(|id| id.to_owned()))
     }
@@ -1563,6 +1596,9 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
+            ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
+            ,{ stream_client, list_fragment_distribution, ListFragmentDistributionRequest, ListFragmentDistributionResponse }
+            ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }

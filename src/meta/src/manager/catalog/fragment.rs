@@ -155,6 +155,18 @@ where
         map.values().cloned().collect()
     }
 
+    pub fn get_mv_id_to_internal_table_ids_mapping(&self) -> Option<Vec<(u32, Vec<u32>)>> {
+        match self.core.try_read() {
+            Ok(core) => Some(
+                core.table_fragments
+                    .values()
+                    .map(|tf| (tf.table_id().table_id(), tf.all_table_ids().collect_vec()))
+                    .collect_vec(),
+            ),
+            Err(_) => None,
+        }
+    }
+
     pub async fn get_revision(&self) -> TableRevision {
         self.core.read().await.table_revision
     }
@@ -696,10 +708,10 @@ where
                 if let Some(fragment_create_actors) = applied_reschedules.get(fragment_id) {
                     table_fragments
                         .actor_status
-                        .drain_filter(|actor_id, _| fragment_create_actors.contains(actor_id));
+                        .retain(|actor_id, _| !fragment_create_actors.contains(actor_id));
                     fragment
                         .actors
-                        .drain_filter(|actor| fragment_create_actors.contains(&actor.actor_id));
+                        .retain(|actor| !fragment_create_actors.contains(&actor.actor_id));
                 }
             }
         }

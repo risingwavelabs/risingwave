@@ -179,7 +179,7 @@ pub async fn handle_create_sink(
                 sink.name.clone(),
             ));
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_sink(sink.to_proto(), graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
@@ -198,7 +198,7 @@ pub mod tests {
         let sql = format!(
             r#"CREATE SOURCE t1
     WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
+    FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;

@@ -14,7 +14,7 @@
 
 use apache_avro::Schema;
 use itertools::Itertools;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Decimal};
 use risingwave_pb::plan_common::ColumnDesc;
 
 pub fn avro_schema_to_column_descs(schema: &Schema) -> anyhow::Result<Vec<ColumnDesc>> {
@@ -30,7 +30,6 @@ pub fn avro_schema_to_column_descs(schema: &Schema) -> anyhow::Result<Vec<Column
     }
 }
 
-const RW_DECIMAL_MAX_PRECISION: usize = 28;
 const DBZ_VARIABLE_SCALE_DECIMAL_NAME: &str = "VariableScaleDecimal";
 const DBZ_VARIABLE_SCALE_DECIMAL_NAMESPACE: &str = "io.debezium.data";
 
@@ -81,10 +80,10 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
         Schema::Float => DataType::Float32,
         Schema::Double => DataType::Float64,
         Schema::Decimal { precision, .. } => {
-            if precision > &RW_DECIMAL_MAX_PRECISION {
+            if *precision > Decimal::MAX_PRECISION.into() {
                 tracing::warn!(
                     "RisingWave supports decimal precision up to {}, but got {}. Will truncate.",
-                    RW_DECIMAL_MAX_PRECISION,
+                    Decimal::MAX_PRECISION,
                     precision
                 );
             }
@@ -118,7 +117,7 @@ fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {
             let nested_schema = union_schema
                 .variants()
                 .iter()
-                .find_or_first(|s| **s != Schema::Null)
+                .find_or_first(|s| !matches!(s, Schema::Null))
                 .ok_or_else(|| {
                     anyhow::format_err!("unsupported type in Avro: {:?}", union_schema)
                 })?;

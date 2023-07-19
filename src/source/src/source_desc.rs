@@ -129,7 +129,6 @@ impl SourceDescBuilder {
         let source = ConnectorSource::new(
             self.properties,
             columns.clone(),
-            self.connector_params.connector_rpc_endpoint,
             self.connector_message_buffer_size,
             psrser_config,
         )?;
@@ -161,7 +160,10 @@ impl SourceDescBuilder {
         let source = FsConnectorSource::new(
             self.properties.clone(),
             columns.clone(),
-            self.connector_params.connector_rpc_endpoint.clone(),
+            self.connector_params
+                .connector_client
+                .as_ref()
+                .map(|client| client.endpoint().clone()),
             parser_config,
         )?;
 

@@ -451,7 +451,7 @@ pub async fn handle_create_index(
                 index.name.clone(),
             ));
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_index(index, index_table, graph)
         .await?;

@@ -25,6 +25,8 @@ RUN apt-get update && \
     apt-get install -y curl && \
     apt-get clean;
 
+USER 1001
+
 RUN rm -r /opt/bitnami/spark/jars && \
     curl https://archive.apache.org/dist/spark/spark-3.3.1/spark-3.3.1-bin-hadoop3.tgz | \
     tar --extract --gzip --strip=1 --directory /opt/bitnami/spark/ spark-3.3.1-bin-hadoop3/jars/

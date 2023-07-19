@@ -17,9 +17,9 @@ macro_rules! impl_split_enumerator {
     ($({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
         impl SplitEnumeratorImpl {
 
-             pub async fn create(properties: ConnectorProperties) -> Result<Self> {
+             pub async fn create(properties: ConnectorProperties, context: SourceEnumeratorContextRef) -> Result<Self> {
                 match properties {
-                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(*props).await.map(Self::$variant_name), )*
+                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(*props, context).await.map(Self::$variant_name), )*
                     other => Err(anyhow!(
                         "split enumerator type for config {:?} is not supported",
                         other
@@ -215,7 +215,7 @@ macro_rules! impl_common_split_reader_logic {
                     })
                     .boxed();
                 let parser =
-                    $crate::parser::ByteStreamSourceParserImpl::create(parser_config, source_ctx)?;
+                    $crate::parser::ByteStreamSourceParserImpl::create(parser_config, source_ctx).await?;
                 #[for_await]
                 for msg_batch in parser.into_stream(data_stream) {
                     yield msg_batch?;

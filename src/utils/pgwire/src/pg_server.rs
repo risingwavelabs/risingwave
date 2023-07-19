@@ -26,6 +26,7 @@ use tokio::net::TcpListener;
 use tracing::debug;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_message::TransactionStatus;
 use crate::pg_protocol::{PgProtocol, TlsConfig};
 use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Format;
@@ -64,7 +65,7 @@ pub trait Session: Send + Sync {
 
     fn parse(
         self: Arc<Self>,
-        sql: Statement,
+        sql: Option<Statement>,
         params_types: Vec<DataType>,
     ) -> Result<Self::PreparedStatement, BoxedError>;
 
@@ -100,6 +101,8 @@ pub trait Session: Send + Sync {
     fn id(&self) -> SessionId;
 
     fn set_config(&self, key: &str, value: Vec<String>) -> Result<(), BoxedError>;
+
+    fn transaction_status(&self) -> TransactionStatus;
 }
 
 #[derive(Debug, Clone)]
@@ -191,6 +194,7 @@ mod tests {
     use tokio_postgres::NoTls;
 
     use crate::pg_field_descriptor::PgFieldDescriptor;
+    use crate::pg_message::TransactionStatus;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
         pg_serve, BoxedError, Session, SessionId, SessionManager, UserAuthenticator,
@@ -250,7 +254,7 @@ mod tests {
 
         fn parse(
             self: Arc<Self>,
-            _sql: Statement,
+            _sql: Option<Statement>,
             _params_types: Vec<DataType>,
         ) -> Result<String, BoxedError> {
             Ok(String::new())
@@ -316,6 +320,10 @@ mod tests {
 
         fn take_notices(self: Arc<Self>) -> Vec<String> {
             vec![]
+        }
+
+        fn transaction_status(&self) -> TransactionStatus {
+            TransactionStatus::Idle
         }
     }
 

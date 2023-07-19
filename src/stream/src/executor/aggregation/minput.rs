@@ -93,7 +93,16 @@ impl<S: StateStore> MaterializedInputState<S> {
                 agg_call
                     .column_orders
                     .iter()
-                    .map(|p| (p.column_index, p.order_type))
+                    .map(|p| {
+                        (
+                            p.column_index,
+                            if agg_call.kind == AggKind::LastValue {
+                                p.order_type.reverse()
+                            } else {
+                                p.order_type
+                            },
+                        )
+                    })
                     .unzip()
             };
 
@@ -128,7 +137,7 @@ impl<S: StateStore> MaterializedInputState<S> {
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
         let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.kind {
-            AggKind::Min | AggKind::Max | AggKind::FirstValue => Box::new(
+            AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue => Box::new(
                 GenericAggStateCache::new(TopNStateCache::new(extreme_cache_size), ExtremeAgg),
             ),
             AggKind::StringAgg => Box::new(GenericAggStateCache::new(

@@ -262,6 +262,21 @@ impl ObjectStoreImpl {
         }
     }
 
+    pub fn support_streaming_upload(&self) -> bool {
+        match self {
+            ObjectStoreImpl::InMem(_) => true,
+            ObjectStoreImpl::Opendal(store) => {
+                store
+                    .inner
+                    .op
+                    .info()
+                    .capability()
+                    .write_without_content_length
+            }
+            ObjectStoreImpl::S3(_) => true,
+        }
+    }
+
     pub fn set_opts(
         &mut self,
         streaming_read_timeout_ms: u64,
@@ -366,7 +381,12 @@ impl MonitoredStreamingUploader {
             .start_timer();
         self.operation_size += data_len;
 
-        let future = async { self.inner.write_bytes(data).await };
+        let future = async {
+            self.inner
+                .write_bytes(data)
+                .verbose_instrument_await("object_store_streaming_upload_write_bytes")
+                .await
+        };
         let res = match self.streaming_upload_timeout.as_ref() {
             None => future.await,
             Some(timeout) => tokio::time::timeout(*timeout, future)
@@ -394,7 +414,12 @@ impl MonitoredStreamingUploader {
             .with_label_values(&[self.media_type, operation_type])
             .start_timer();
 
-        let future = async { self.inner.finish().await };
+        let future = async {
+            self.inner
+                .finish()
+                .verbose_instrument_await("object_store_streaming_upload_finish")
+                .await
+        };
         let res = match self.streaming_upload_timeout.as_ref() {
             None => future.await,
             Some(timeout) => tokio::time::timeout(*timeout, future)
@@ -458,9 +483,13 @@ impl MonitoredStreamingReader {
             .start_timer();
         self.operation_size += data_len;
         let future = async {
-            self.inner.read_exact(buf).await.map_err(|err| {
-                ObjectError::internal(format!("read_bytes failed, error: {:?}", err))
-            })
+            self.inner
+                .read_exact(buf)
+                .verbose_instrument_await("object_store_streaming_read_read_bytes")
+                .await
+                .map_err(|err| {
+                    ObjectError::internal(format!("read_bytes failed, error: {:?}", err))
+                })
         };
         let res = match self.streaming_read_timeout.as_ref() {
             None => future.await,
@@ -571,7 +600,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
-        let future = async { self.inner.streaming_upload(path).await };
+        let future = async {
+            self.inner
+                .streaming_upload(path)
+                .verbose_instrument_await("object_store_streaming_upload")
+                .await
+        };
         let res = match self.streaming_upload_timeout.as_ref() {
             None => future.await,
             Some(timeout) => tokio::time::timeout(*timeout, future)
@@ -679,7 +713,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&[media_type, operation_type])
             .start_timer();
-        let future = async { self.inner.streaming_read(path, start_pos).await };
+        let future = async {
+            self.inner
+                .streaming_read(path, start_pos)
+                .verbose_instrument_await("object_store_streaming_read")
+                .await
+        };
         let res = match self.streaming_read_timeout.as_ref() {
             None => future.await,
             Some(timeout) => tokio::time::timeout(*timeout, future)

@@ -15,14 +15,17 @@
 use risingwave_common::types::{Decimal, F64};
 use risingwave_expr_macro::function;
 
+use crate::{ExprError, Result};
+
 #[function("round_digit(decimal, int32) -> decimal")]
-pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
-    let digits = digits.into();
+pub fn round_digits(input: Decimal, digits: i32) -> Result<Decimal> {
     if digits < 0 {
-        Decimal::zero()
+        input
+            .round_left_ties_away(digits.unsigned_abs())
+            .ok_or(ExprError::NumericOverflow)
     } else {
         // rust_decimal can only handle up to 28 digits of scale
-        input.round_dp_ties_away(std::cmp::min(digits as u32, 28))
+        Ok(input.round_dp_ties_away((digits as u32).min(Decimal::MAX_PRECISION.into())))
     }
 }
 
@@ -77,22 +80,41 @@ mod tests {
     use super::ceil_f64;
     use crate::vector_op::round::*;
 
-    fn do_test(input: &str, digits: i32, expected_output: &str) {
+    fn do_test(input: &str, digits: i32, expected_output: Option<&str>) {
         let v = Decimal::from_str(input).unwrap();
-        let rounded_value = round_digits(v, digits);
-        assert_eq!(expected_output, rounded_value.to_string().as_str());
+        let rounded_value = round_digits(v, digits).ok();
+        assert_eq!(
+            expected_output,
+            rounded_value.as_ref().map(ToString::to_string).as_deref()
+        );
     }
 
     #[test]
     fn test_round_digits() {
-        do_test("21.666666666666666666666666667", 4, "21.6667");
-        do_test("84818.33333333333333333333333", 4, "84818.3333");
-        do_test("84818.15", 1, "84818.2");
-        do_test("21.372736", -1, "0");
+        do_test("21.666666666666666666666666667", 4, Some("21.6667"));
+        do_test("84818.33333333333333333333333", 4, Some("84818.3333"));
+        do_test("84818.15", 1, Some("84818.2"));
+        do_test("21.372736", -1, Some("20"));
+        do_test("-79228162514264337593543950335", -30, Some("0"));
+        do_test("-79228162514264337593543950335", -29, None);
+        do_test("-79228162514264337593543950335", -28, None);
+        do_test(
+            "-79228162514264337593543950335",
+            -27,
+            Some("-79000000000000000000000000000"),
+        );
+        do_test("-792.28162514264337593543950335", -4, Some("0"));
+        do_test("-792.28162514264337593543950335", -3, Some("-1000"));
+        do_test("-792.28162514264337593543950335", -2, Some("-800"));
+        do_test("-792.28162514264337593543950335", -1, Some("-790"));
+        do_test("-50000000000000000000000000000", -29, None);
+        do_test("-49999999999999999999999999999", -29, Some("0"));
+        do_test("-500.00000000000000000000000000", -3, Some("-1000"));
+        do_test("-499.99999999999999999999999999", -3, Some("0"));
         // When digit extends past original scale, it should just return original scale.
         // Intuitively, it does not make sense after rounding `0` it becomes `0.000`. Precision
         // should always be less or equal, not more.
-        do_test("0", 340, "0");
+        do_test("0", 340, Some("0"));
     }
 
     #[test]

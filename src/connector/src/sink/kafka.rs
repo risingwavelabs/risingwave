@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -26,6 +26,7 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_json::Value;
 
@@ -37,7 +38,9 @@ use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
-use crate::sink::Result;
+use crate::sink::{
+    DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
+};
 use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
@@ -83,8 +86,6 @@ pub struct KafkaConfig {
         deserialize_with = "deserialize_bool_from_string"
     )]
     pub force_append_only: bool,
-
-    pub identifier: String,
 
     #[serde(
         rename = "properties.timeout",
@@ -140,6 +141,65 @@ impl KafkaConfig {
     }
 }
 
+#[derive(Debug)]
+pub struct KafkaSink {
+    pub config: KafkaConfig,
+    schema: Schema,
+    pk_indices: Vec<usize>,
+    is_append_only: bool,
+}
+
+impl KafkaSink {
+    pub fn new(
+        config: KafkaConfig,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+    ) -> Self {
+        Self {
+            config,
+            schema,
+            pk_indices,
+            is_append_only,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Sink for KafkaSink {
+    type Coordinator = DummySinkCommitCoordinator;
+    type Writer = SinkWriterV1Adapter<KafkaSinkWriter>;
+
+    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
+        Ok(SinkWriterV1Adapter::new(
+            KafkaSinkWriter::new(
+                self.config.clone(),
+                self.schema.clone(),
+                self.pk_indices.clone(),
+                self.is_append_only,
+                format!("sink-{:?}", writer_param.executor_id),
+            )
+            .await?,
+        ))
+    }
+
+    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+        // For upsert Kafka sink, the primary key must be defined.
+        if !self.is_append_only && self.pk_indices.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "primary key not defined for {} kafka sink (please define in `primary_key` field)",
+                self.config.r#type
+            )));
+        }
+
+        // Try Kafka connection.
+        // TODO: Reuse the conductor instance we create during validation.
+        KafkaTransactionConductor::new(self.config.clone(), &"validation".to_string()).await?;
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
 enum KafkaSinkState {
     Init,
@@ -147,41 +207,35 @@ enum KafkaSinkState {
     Running(u64),
 }
 
-pub struct KafkaSink<const APPEND_ONLY: bool> {
+pub struct KafkaSinkWriter {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
+    identifier: String,
     state: KafkaSinkState,
     schema: Schema,
     pk_indices: Vec<usize>,
     in_transaction_epoch: Option<u64>,
+    is_append_only: bool,
 }
 
-impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
-    pub async fn new(config: KafkaConfig, schema: Schema, pk_indices: Vec<usize>) -> Result<Self> {
-        Ok(KafkaSink {
+impl KafkaSinkWriter {
+    pub async fn new(
+        config: KafkaConfig,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+        identifier: String,
+    ) -> Result<Self> {
+        Ok(KafkaSinkWriter {
             config: config.clone(),
-            conductor: KafkaTransactionConductor::new(config).await?,
+            conductor: KafkaTransactionConductor::new(config, &identifier).await?,
+            identifier,
             in_transaction_epoch: None,
             state: KafkaSinkState::Init,
             schema,
             pk_indices,
+            is_append_only,
         })
-    }
-
-    pub async fn validate(config: KafkaConfig, pk_indices: Vec<usize>) -> Result<()> {
-        // For upsert Kafka sink, the primary key must be defined.
-        if !APPEND_ONLY && pk_indices.is_empty() {
-            return Err(SinkError::Config(anyhow!(
-                "primary key not defined for {} kafka sink (please define in `primary_key` field)",
-                config.r#type
-            )));
-        }
-
-        // Try Kafka connection.
-        // TODO: Reuse the conductor instance we create during validation.
-        KafkaTransactionConductor::new(config).await?;
-
-        Ok(())
     }
 
     // any error should report to upper level and requires revert to previous epoch.
@@ -229,11 +283,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     }
 
     fn gen_message_key(&self) -> String {
-        format!(
-            "{}-{}",
-            self.config.identifier,
-            self.in_transaction_epoch.unwrap()
-        )
+        format!("{}-{}", self.identifier, self.in_transaction_epoch.unwrap())
     }
 
     async fn write_json_objects(
@@ -309,9 +359,9 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
 }
 
 #[async_trait::async_trait]
-impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
+impl SinkWriterV1 for KafkaSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if APPEND_ONLY {
+        if self.is_append_only {
             // Append-only
             self.append_only(chunk).await
         } else {
@@ -370,12 +420,6 @@ impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
     }
 }
 
-impl<const APPEND_ONLY: bool> Debug for KafkaSink<APPEND_ONLY> {
-    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
-        unimplemented!();
-    }
-}
-
 /// the struct conducts all transactions with Kafka
 pub struct KafkaTransactionConductor {
     properties: KafkaConfig,
@@ -383,7 +427,7 @@ pub struct KafkaTransactionConductor {
 }
 
 impl KafkaTransactionConductor {
-    async fn new(mut config: KafkaConfig) -> Result<Self> {
+    async fn new(mut config: KafkaConfig, identifier: &String) -> Result<Self> {
         let inner: ThreadedProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
             config.common.set_security_properties(&mut c);
@@ -391,7 +435,7 @@ impl KafkaTransactionConductor {
                 .set("message.timeout.ms", "5000");
             config.use_transaction = false;
             if config.use_transaction {
-                c.set("transactional.id", &config.identifier); // required by kafka transaction
+                c.set("transactional.id", identifier); // required by kafka transaction
             }
             let client_ctx =
                 PrivateLinkProducerContext::new(config.common.broker_rewrite_map.clone())?;
@@ -473,7 +517,6 @@ mod test {
             "properties.sasl.mechanism".to_string() => "SASL".to_string(),
             "properties.sasl.username".to_string() => "test".to_string(),
             "properties.sasl.password".to_string() => "test".to_string(),
-            "identifier".to_string() => "test_sink_1".to_string(),
             "properties.timeout".to_string() => "10s".to_string(),
             "properties.retry.max".to_string() => "20".to_string(),
             "properties.retry.interval".to_string() => "500ms".to_string(),
@@ -494,7 +537,6 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
-            "identifier".to_string() => "test_sink_2".to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
         assert!(!config.force_append_only);
@@ -509,7 +551,6 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
-            "identifier".to_string() => "test_sink_3".to_string(),
             "properties.retry.max".to_string() => "-20".to_string(),  // error!
         };
         assert!(KafkaConfig::from_hashmap(properties).is_err());
@@ -520,7 +561,6 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
-            "identifier".to_string() => "test_sink_4".to_string(),
             "force_append_only".to_string() => "yes".to_string(),  // error!
         };
         assert!(KafkaConfig::from_hashmap(properties).is_err());
@@ -531,7 +571,6 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
-            "identifier".to_string() => "test_sink_5".to_string(),
             "properties.retry.interval".to_string() => "500minutes".to_string(),  // error!
         };
         assert!(KafkaConfig::from_hashmap(properties).is_err());
@@ -542,7 +581,6 @@ mod test {
     async fn test_kafka_producer() -> Result<()> {
         let properties = hashmap! {
             "properties.bootstrap.server".to_string() => "localhost:29092".to_string(),
-            "identifier".to_string() => "test_sink_1".to_string(),
             "type".to_string() => "append-only".to_string(),
             "topic".to_string() => "test_topic".to_string(),
         };
@@ -562,9 +600,15 @@ mod test {
         ]);
         let pk_indices = vec![];
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::<true>::new(kafka_config.clone(), schema, pk_indices)
-            .await
-            .unwrap();
+        let mut sink = KafkaSinkWriter::new(
+            kafka_config.clone(),
+            schema,
+            pk_indices,
+            true,
+            "test_sink_1".to_string(),
+        )
+        .await
+        .unwrap();
 
         for i in 0..10 {
             let mut fail_flag = false;

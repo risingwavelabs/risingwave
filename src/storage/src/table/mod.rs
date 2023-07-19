@@ -13,9 +13,11 @@
 // limitations under the License.
 
 pub mod batch_table;
+pub mod merge_sort;
 
 use std::sync::{Arc, LazyLock};
 
+use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -81,41 +83,50 @@ impl Distribution {
 #[async_trait::async_trait]
 pub trait TableIter: Send {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
+}
 
-    async fn collect_data_chunk(
-        &mut self,
-        schema: &Schema,
-        chunk_size: Option<usize>,
-    ) -> StorageResult<Option<DataChunk>> {
-        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
+/// Collects data chunks from stream of rows.
+pub async fn collect_data_chunk<E, S>(
+    stream: &mut S,
+    schema: &Schema,
+    chunk_size: Option<usize>,
+) -> Result<Option<DataChunk>, E>
+where
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
+{
+    let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
 
-        let mut row_count = 0;
-        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
-            match self.next_row().await? {
-                Some(row) => {
-                    for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
-                        builder.append(datum);
-                    }
-                    row_count += 1;
+    let mut row_count = 0;
+    for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+        match stream.next().await.transpose()? {
+            Some(row) => {
+                for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
+                    builder.append(datum);
                 }
-                None => break,
             }
+            None => break,
         }
 
-        let chunk = {
-            let columns: Vec<_> = builders
-                .into_iter()
-                .map(|builder| builder.finish().into())
-                .collect();
-            DataChunk::new(columns, row_count)
-        };
-
-        if chunk.cardinality() == 0 {
-            Ok(None)
-        } else {
-            Ok(Some(chunk))
-        }
+        row_count += 1;
     }
+
+    let chunk = {
+        let columns: Vec<_> = builders
+            .into_iter()
+            .map(|builder| builder.finish().into())
+            .collect();
+        DataChunk::new(columns, row_count)
+    };
+
+    if chunk.cardinality() == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(chunk))
+    }
+}
+
+pub fn get_second<T, U, E>(arg: Result<(T, U), E>) -> Result<U, E> {
+    arg.map(|x| x.1)
 }
 
 /// Get vnode value with `indices` on the given `row`.

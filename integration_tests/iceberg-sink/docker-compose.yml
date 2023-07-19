@@ -1,37 +1,38 @@
 ---
 version: "3"
 x-airflow-common:
-    &airflow-common
-    image: apache/airflow:2.6.2-python3.10
-    build: 
-      context: .
-      target: airflow
-    environment:
-      &airflow-common-env
-      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
-      AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-      AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    volumes:
-      - ./airflow_dags:/opt/airflow/dags
-      - ./iceberg-compaction-sql:/opt/airflow/iceberg-compaction-sql
-    depends_on:
-      &airflow-common-depends-on
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    
+  &airflow-common
+  image: apache/airflow:2.6.2-python3.10
+  build: 
+    context: .
+    target: airflow
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+  volumes:
+    - ./airflow_dags:/opt/airflow/dags
+    - ./iceberg-compaction-sql:/opt/airflow/iceberg-compaction-sql
+  depends_on:
+    &airflow-common-depends-on
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+x-spark-common:
+  &spark-air
+  build: 
+    context: .
+    target: spark   
 
 services:
   spark:
-    image: bitnami/spark:3.3
-    build: 
-      context: .
-      target: spark
+    <<: *spark-air
     environment:
       - SPARK_MODE=master
     ports:
@@ -39,7 +40,7 @@ services:
     volumes:
       - './spark-script:/spark-script'
   spark-worker:
-    image: spark-air:latest
+    <<: *spark-air
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark:7077
