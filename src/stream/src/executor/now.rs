@@ -68,12 +68,16 @@ impl<S: StateStore> NowExecutor<S> {
             ..
         } = self;
 
+        // Whether the executor is paused.
         let mut paused = false;
-        let mut initialized = false;
+        // The last timestamp **sent** to the downstream.
         let mut last_timestamp: Datum = None;
+        // Whether the first barrier is handled and `last_timestamp` is initialized.
+        let mut initialized = false;
 
         while let Some(barrier) = barrier_receiver.recv().await {
             if !initialized {
+                // Handle the first barrier.
                 state_table.init_epoch(barrier.epoch);
 
                 let state_row = {
@@ -89,13 +93,17 @@ impl<S: StateStore> NowExecutor<S> {
                 initialized = true;
             } else {
                 if paused {
-                    assert!(!state_table.is_dirty());
+                    // Assert that no data is updated.
+                    state_table.commit_no_data_expected(barrier.epoch);
+                } else {
+                    state_table.commit(barrier.epoch).await?;
                 }
-                state_table.commit(barrier.epoch).await?;
             }
 
+            // Extract timestamp from the current epoch.
             let timestamp = Some(barrier.get_curr_epoch().as_scalar());
 
+            // Update paused state.
             if let Some(mutation) = barrier.mutation.as_deref() {
                 match mutation {
                     Mutation::Pause | Mutation::Update { .. } => paused = true,
@@ -106,6 +114,7 @@ impl<S: StateStore> NowExecutor<S> {
 
             yield Message::Barrier(barrier.clone());
 
+            // Do not yield any messages if paused.
             if paused {
                 continue;
             }
