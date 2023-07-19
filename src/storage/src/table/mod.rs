@@ -19,7 +19,7 @@ use std::sync::{Arc, LazyLock};
 
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
@@ -85,7 +85,6 @@ pub trait TableIter: Send {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 }
 
-/// Collects data chunks from stream of rows.
 pub async fn collect_data_chunk<E, S>(
     stream: &mut S,
     schema: &Schema,
@@ -94,8 +93,19 @@ pub async fn collect_data_chunk<E, S>(
 where
     S: Stream<Item = Result<OwnedRow, E>> + Unpin,
 {
-    let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
+    let builders = schema.create_array_builders(chunk_size.unwrap_or(0));
+    collect_data_chunk_with_builders(stream, chunk_size, builders).await
+}
 
+/// Collects data chunks from stream of rows.
+pub async fn collect_data_chunk_with_builders<E, S>(
+    stream: &mut S,
+    chunk_size: Option<usize>,
+    mut builders: Vec<ArrayBuilderImpl>,
+) -> Result<Option<DataChunk>, E>
+where
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
+{
     let mut row_count = 0;
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
