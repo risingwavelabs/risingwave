@@ -5714,7 +5714,7 @@ dependencies = [
  "tokio-stream",
  "toml 0.7.3",
  "tracing",
- "tracing-opentelemetry 0.17.4",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "workspace-hack",
 ]
@@ -5845,7 +5845,7 @@ dependencies = [
  "tinyvec",
  "toml 0.7.3",
  "tracing",
- "tracing-opentelemetry 0.19.0",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "twox-hash",
  "url",
@@ -6486,7 +6486,7 @@ dependencies = [
  "risingwave_common",
  "time 0.3.21",
  "tracing",
- "tracing-opentelemetry 0.19.0",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "workspace-hack",
 ]
@@ -8301,20 +8301,6 @@ dependencies = [
  "lazy_static",
  "log",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-opentelemetry"
-version = "0.17.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbbe89715c1dbbb790059e2565353978564924ee85017b5fff365c872ff6721f"
-dependencies = [
- "once_cell",
- "opentelemetry 0.17.0",
- "tracing",
- "tracing-core",
- "tracing-log",
- "tracing-subscriber",
 ]
 
 [[package]]
