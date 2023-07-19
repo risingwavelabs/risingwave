@@ -182,7 +182,9 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
             pin_mut!(iter);
             while let Some(row) = iter.next_row().await? {
                 entry.insert(
-                    row.as_ref().project(&self.table_stream_key_indices).into_owned_row(),
+                    row.as_ref()
+                        .project(&self.table_stream_key_indices)
+                        .into_owned_row(),
                     row.project(&self.table_output_indices).into_owned_row(),
                 );
             }
@@ -209,7 +211,9 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
                     let mut entry = self.cache.get_mut(&key).unwrap();
                     let stream_key = row.project(right_stream_key_indices).into_owned_row();
                     match op {
-                        Op::Insert | Op::UpdateInsert => entry.insert(stream_key, row.into_owned_row()),
+                        Op::Insert | Op::UpdateInsert => {
+                            entry.insert(stream_key, row.into_owned_row())
+                        }
                         Op::Delete | Op::UpdateDelete => entry.remove(&stream_key),
                     };
                 }
@@ -445,7 +449,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         }
                     }
                     self.right_table.cache.update_epoch(barrier.epoch.curr);
-                    self.right_table.update(updates, &self.right_join_keys, &right_stream_key_indices)?;
+                    self.right_table.update(
+                        updates,
+                        &self.right_join_keys,
+                        &right_stream_key_indices,
+                    )?;
                     prev_epoch = Some(barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
