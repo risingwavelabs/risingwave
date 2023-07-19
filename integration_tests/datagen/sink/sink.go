@@ -34,6 +34,10 @@ func (r BaseSinkRecord) Topic() string {
 	panic("not implemented")
 }
 
+func (r BaseSinkRecord) Key() string {
+	panic("not implemented")
+}
+
 func (r BaseSinkRecord) ToPostgresSql() string {
 	panic("not implemented")
 }
