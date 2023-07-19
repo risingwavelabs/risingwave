@@ -985,7 +985,7 @@ impl LogicalJoin {
                     match &result_plan {
                         Err(_) => result_plan = Ok(temporal_join),
                         Ok(prev_temporal_join) => {
-                            // Prefer to choose temporal join with longer lookup prefix len.
+                            // Prefer to the temporal join with a longer lookup prefix len.
                             if prev_temporal_join.eq_join_predicate().eq_indexes().len()
                                 < temporal_join.eq_join_predicate().eq_indexes().len()
                             {
