@@ -144,15 +144,15 @@ impl From<&arrow_schema::DataType> for DataType {
             Binary => Self::Bytea,
             Utf8 => Self::Varchar,
             LargeUtf8 => Self::Jsonb,
-            Struct(field) => Self::Struct(field.as_slice().into()),
+            Struct(fields) => Self::Struct(fields.into()),
             List(field) => Self::List(Box::new(field.data_type().into())),
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
     }
 }
 
-impl From<&[arrow_schema::Field]> for StructType {
-    fn from(fields: &[arrow_schema::Field]) -> Self {
+impl From<&arrow_schema::Fields> for StructType {
+    fn from(fields: &arrow_schema::Fields) -> Self {
         Self::new(
             fields
                 .iter()
@@ -198,7 +198,7 @@ impl TryFrom<&DataType> for arrow_schema::DataType {
                     .map(|(name, ty)| Ok(Field::new(name, ty.try_into()?, true)))
                     .try_collect::<_, _, String>()?,
             )),
-            DataType::List(datatype) => Ok(Self::List(Box::new(Field::new(
+            DataType::List(datatype) => Ok(Self::List(Arc::new(Field::new(
                 "item",
                 datatype.as_ref().try_into()?,
                 true,
@@ -651,12 +651,12 @@ impl TryFrom<&StructArray> for arrow_array::StructArray {
     type Error = ArrayError;
 
     fn try_from(array: &StructArray) -> Result<Self, Self::Error> {
-        let struct_data_vector: Vec<(arrow_schema::Field, arrow_array::ArrayRef)> = array
+        let struct_data_vector: Vec<(arrow_schema::FieldRef, arrow_array::ArrayRef)> = array
             .fields()
             .zip_eq_debug(array.data_type().as_struct().iter())
             .map(|(arr, (name, ty))| {
                 Ok((
-                    Field::new(name, ty.try_into().map_err(ArrayError::ToArrow)?, true),
+                    Field::new(name, ty.try_into().map_err(ArrayError::ToArrow)?, true).into(),
                     arr.as_ref().try_into()?,
                 ))
             })
@@ -674,7 +674,7 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
             panic!("nested field types cannot be determined.");
         };
         Ok(StructArray::new(
-            fields.as_slice().into(),
+            fields.into(),
             array
                 .columns()
                 .iter()
