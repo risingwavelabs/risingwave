@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 
-# These tests are introduced because they require async execution
+# Runs backfill tests.
+# The following scenario can be reproduced in madsim's integration tests as well.
+# But it seems easier (less INSERTs required, more reliable) to reproduce it via this script.
+# Hence keeping it in case we ever need to debug backfill again.
+# NOTE(kwannoel): For now this DOES NOT run in CI.
+# You can run it locally simply with: ./ci/scripts/run-backfill-tests.sh
 
 set -euo pipefail
-
 
 PARENT_PATH=$(dirname "${BASH_SOURCE[0]}")
 
